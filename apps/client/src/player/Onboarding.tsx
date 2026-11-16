@@ -1,16 +1,36 @@
 import type { PlayerView } from "@wkwa/shared";
-import { useRef, useState } from "react";
+import { type ReactNode, useRef, useState } from "react";
 import { Markdown } from "../common/Markdown";
+import { Button, Callout, Check, Icon, type IconName, Panel, StatusTag } from "../ui";
+import { Centered, OnboardingStepper } from "./chrome";
 import type { PlayerConnection } from "./connection";
 
-function Page({ title, children, step }: { title: string; step: string; children: React.ReactNode }) {
+function Page({
+  view,
+  step,
+  title,
+  icon,
+  children,
+  footer,
+}: {
+  view: PlayerView;
+  step: string;
+  title: string;
+  icon: IconName;
+  children: ReactNode;
+  footer: ReactNode;
+}) {
   return (
-    <div style={{ maxWidth: 820, margin: "0 auto", padding: "2rem 1.2rem 4rem" }}>
-      <p className="muted small" style={{ marginBottom: 4 }}>
-        {step}
-      </p>
-      <h1>{title}</h1>
-      <div className="panel">{children}</div>
+    <div style={{ maxWidth: 860, margin: "0 auto", padding: "var(--s5) var(--s4)" }} className="col">
+      <OnboardingStepper v={view} current={step} />
+      <Panel title={title} icon={icon}>
+        <div className="col" style={{ gap: "var(--s3)" }}>
+          {children}
+          <div className="row" style={{ borderTop: "1px dashed var(--frame)", paddingTop: "var(--s3)" }}>
+            {footer}
+          </div>
+        </div>
+      </Panel>
     </div>
   );
 }
@@ -47,73 +67,79 @@ export function ConsentScreen({ conn, view }: { conn: PlayerConnection; view: Pl
   };
 
   return (
-    <Page title="Consent" step="Step 1 of 3">
-      <Markdown text={c.markdown} />
-      <div className="panel" style={{ background: "var(--panel-2)", boxShadow: "none", margin: "1rem 0" }}>
-        <strong>{study.title}</strong>
-        <div className="small">
-          {study.researcher}
-          {study.institution && ` · ${study.institution}`}
-          {study.supervisor && ` · supervisor: ${study.supervisor}`}
-        </div>
-        <div className="small">Contact: {study.contactEmail}</div>
-        <div className="small muted">{study.retention}</div>
-      </div>
-      <div className="col" style={{ gap: "0.7rem" }}>
-        {c.items.map((item) => (
-          <label key={item.id} className="row" style={{ alignItems: "flex-start", flexWrap: "nowrap" }}>
-            <input
-              type="checkbox"
-              style={{ marginTop: 4, width: 18, height: 18 }}
-              checked={answers[item.id] === true}
-              onChange={(e) => setAnswers((a) => ({ ...a, [item.id]: e.target.checked }))}
-            />
-            <span>
-              {item.text} {item.required && <span style={{ color: "var(--danger)" }}>*</span>}
+    <Page
+      view={view}
+      step="consent"
+      title="Information and consent"
+      icon="consent"
+      footer={
+        <>
+          {!confirmDecline ? (
+            <Button icon="close" disabled={busy} onClick={() => setConfirmDecline(true)}>
+              I do not want to take part
+            </Button>
+          ) : (
+            <span className="row">
+              <span className="small t-danger">Are you sure?</span>
+              <Button variant="danger" icon="warning" disabled={busy} onClick={() => submit(true)}>
+                Yes, I decline
+              </Button>
+              <Button disabled={busy} onClick={() => setConfirmDecline(false)}>
+                Back
+              </Button>
             </span>
-          </label>
+          )}
+          <span className="spacer" />
+          <Button
+            variant="primary"
+            size="lg"
+            icon="ok"
+            disabled={!allRequired || busy}
+            onClick={() => submit(false)}
+          >
+            I agree — continue
+          </Button>
+        </>
+      }
+    >
+      <Markdown text={c.markdown} />
+      <Callout icon="info">
+        <strong>{study.title}</strong>
+        <br />
+        {study.researcher}
+        {study.institution && ` · ${study.institution}`}
+        {study.supervisor && ` · supervisor: ${study.supervisor}`}
+        <br />
+        Contact: {study.contactEmail}
+        <br />
+        <span className="muted">{study.retention}</span>
+      </Callout>
+      <div className="col" style={{ gap: "var(--s2)" }}>
+        {c.items.map((item) => (
+          <Check
+            key={item.id}
+            label={
+              <>
+                {item.text} {item.required && <span className="t-danger">*</span>}
+              </>
+            }
+            checked={answers[item.id] === true}
+            onChange={(v) => setAnswers((a) => ({ ...a, [item.id]: v }))}
+          />
         ))}
       </div>
-      <p className="small muted">* required to take part · consent form version {c.version}</p>
-      <div className="row" style={{ marginTop: "1rem" }}>
-        <button
-          type="button"
-          className="primary big"
-          disabled={!allRequired || busy}
-          onClick={() => submit(false)}
-        >
-          I agree — continue
-        </button>
-        <span className="spacer" />
-        {!confirmDecline ? (
-          <button type="button" disabled={busy} onClick={() => setConfirmDecline(true)}>
-            I do not want to take part
-          </button>
-        ) : (
-          <span className="row">
-            <span className="small">Are you sure?</span>
-            <button type="button" className="danger" disabled={busy} onClick={() => submit(true)}>
-              Yes, I decline
-            </button>
-            <button type="button" onClick={() => setConfirmDecline(false)}>
-              Back
-            </button>
-          </span>
-        )}
-      </div>
+      <span className="hint">* required to take part · consent form version {c.version}</span>
     </Page>
   );
 }
 
 export function DeclinedScreen() {
   return (
-    <div style={{ minHeight: "100%", display: "grid", placeItems: "center", padding: "2rem" }}>
-      <div className="panel" style={{ maxWidth: 560, textAlign: "center" }}>
-        <h1>Thank you</h1>
-        <p>You chose not to take part. No game data will be collected from you.</p>
-        <p className="muted">Please let the facilitator know.</p>
-      </div>
-    </div>
+    <Centered title="Thank you" icon="info">
+      <h1>You chose not to take part</h1>
+      <p>No game or interaction data will be collected from you.</p>
+      <p className="muted cursor">Please let the facilitator know</p>
+    </Centered>
   );
 }
 
@@ -123,6 +149,7 @@ export function DemographicsScreen({ conn, view }: { conn: PlayerConnection; vie
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const complete = form.questions.every((q) => answers[q.id]);
+  const answered = form.questions.filter((q) => answers[q.id]).length;
 
   const submit = async () => {
     setBusy(true);
@@ -141,15 +168,34 @@ export function DemographicsScreen({ conn, view }: { conn: PlayerConnection; vie
   };
 
   return (
-    <Page title="About you" step="Step 2 of 3">
+    <Page
+      view={view}
+      step="demographics"
+      title="About you"
+      icon="demographics"
+      footer={
+        <>
+          <StatusTag tone={complete ? "live" : "neutral"}>
+            {answered}/{form.questions.length} answered
+          </StatusTag>
+          <span className="spacer" />
+          <Button variant="primary" size="lg" icon="next" disabled={!complete || busy} onClick={submit}>
+            Continue
+          </Button>
+        </>
+      }
+    >
       {form.intro && <p className="muted">{form.intro}</p>}
-      <div className="col" style={{ gap: "1.2rem" }}>
-        {form.questions.map((q) => (
+      <div className="col" style={{ gap: "var(--s4)" }}>
+        {form.questions.map((q, qi) => (
           <fieldset key={q.id} style={{ border: "none", padding: 0, margin: 0 }}>
-            <legend style={{ fontWeight: 600, marginBottom: 6 }}>{q.text}</legend>
-            <div className="row" style={{ gap: "0.4rem 1.2rem" }}>
+            <legend className="strong" style={{ marginBottom: "var(--s2)" }}>
+              <span className="faint">{String(qi + 1).padStart(2, "0")} </span>
+              {q.text}
+            </legend>
+            <div className="row" style={{ gap: "var(--s1) var(--s4)" }}>
               {q.options.map((o) => (
-                <label key={o.value} className="row" style={{ gap: 6 }}>
+                <label key={o.value} className="check" style={{ alignItems: "center" }}>
                   <input
                     type="radio"
                     name={q.id}
@@ -162,11 +208,6 @@ export function DemographicsScreen({ conn, view }: { conn: PlayerConnection; vie
             </div>
           </fieldset>
         ))}
-      </div>
-      <div className="row" style={{ marginTop: "1.5rem" }}>
-        <button type="button" className="primary big" disabled={!complete || busy} onClick={submit}>
-          Continue
-        </button>
       </div>
     </Page>
   );
@@ -191,19 +232,36 @@ export function BriefingScreen({ conn, view }: { conn: PlayerConnection; view: P
     }
   };
   return (
-    <Page title="Briefing" step="Step 3 of 3">
+    <Page
+      view={view}
+      step="briefing"
+      title="Briefing"
+      icon="onboarding"
+      footer={
+        <>
+          <span className="spacer" />
+          <Button variant="primary" size="lg" icon="ok" disabled={busy} onClick={submit}>
+            I'm ready
+          </Button>
+        </>
+      }
+    >
       <Markdown text={b.markdown} />
       {(view.me.k || view.me.p) && (
-        <p>
-          Your roles: <span className="pill">{view.me.k}</span> <span className="pill">{view.me.p}</span>
-          {view.me.viewName && <span className="muted"> · your information source: {view.me.viewName}</span>}
-        </p>
+        <Callout icon="labels">
+          Your roles: <strong>{view.me.k}</strong> · <strong>{view.me.p}</strong>
+          {view.me.viewName && (
+            <>
+              {" "}
+              · your information source: <strong>{view.me.viewName}</strong>
+            </>
+          )}
+        </Callout>
       )}
-      <div className="row" style={{ marginTop: "1rem" }}>
-        <button type="button" className="primary big" disabled={busy} onClick={submit}>
-          I'm ready
-        </button>
-      </div>
+      <p className="hint">
+        <Icon name="propose" /> Propose highlights an area for everyone · <Icon name="decide" /> Decide marks
+        it as decided · keys <kbd>P</kbd> <kbd>D</kbd> <kbd>Enter</kbd> <kbd>Esc</kbd>
+      </p>
     </Page>
   );
 }

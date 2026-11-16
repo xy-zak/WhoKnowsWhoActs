@@ -1,7 +1,8 @@
-import { type ActionKind, type PlayerView, SEAT_COLOURS } from "@wkwa/shared";
+import type { ActionKind, PlayerView } from "@wkwa/shared";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { fmtDuration, quotaText, remaining } from "../common/format";
-import { DECIDE_COLOUR, MapLegend, MapView, PROPOSE_COLOUR } from "../map/MapView";
+import { MapLegend, MapView } from "../map/MapView";
+import { AsciiProgress, Button, Icon, Panel, Popup, SeatDot, StatusTag } from "../ui";
 import type { PlayerConnection } from "./connection";
 
 const HOVER_MIN_MS = 150;
@@ -26,16 +27,48 @@ export function Game({ conn, view }: { conn: PlayerConnection; view: PlayerView 
     [conn],
   );
 
-  // keyboard shortcuts: P / D / Escape
+  const openDraft = (kind: ActionKind, regionId: string) => {
+    if (!canDo(kind)) return;
+    setDraft({ kind, regionId });
+    conn.track("action_draft", { kind, regionId, outcome: "opened" });
+  };
+  const cancelDraft = () => {
+    if (draft) conn.track("action_draft", { ...draft, outcome: "cancelled" });
+    setDraft(null);
+  };
+  const confirmDraft = async () => {
+    if (!draft || busy) return;
+    const d = draft;
+    conn.track("action_draft", { ...d, outcome: "confirmed" });
+    setBusy(true);
+    try {
+      const ack = await conn.request<{ ok: boolean; detail?: string }>("intent", {
+        clientSeq: conn.nextClientSeq(),
+        kind: d.kind,
+        regionId: d.regionId,
+        clientTs: conn.clock.now(),
+      });
+      if (!ack.ok) conn.showToast(ack.detail ?? "Action not possible");
+    } catch (e) {
+      conn.showToast((e as Error).message);
+    } finally {
+      setBusy(false);
+      setDraft(null);
+    }
+  };
+
+  // keyboard: P / D tools, Enter confirms, Esc cancels
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement) return;
-      if (e.key === "p" || e.key === "P") setTool(tool === "propose" ? null : "propose");
-      else if (e.key === "d" || e.key === "D") setTool(tool === "decide" ? null : "decide");
-      else if (e.key === "Escape") {
+      if (e.target instanceof HTMLInputElement || e.ctrlKey || e.metaKey || e.altKey) return;
+      if (e.key === "Enter" && draft) {
+        e.preventDefault();
+        void confirmDraft();
+      } else if (e.key === "Escape") {
         if (draft) cancelDraft();
-        else setTool(null);
-      }
+        else if (tool) setTool(null);
+      } else if (e.key === "p" || e.key === "P") setTool(tool === "propose" ? null : "propose");
+      else if (e.key === "d" || e.key === "D") setTool(tool === "decide" ? null : "decide");
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -64,36 +97,6 @@ export function Game({ conn, view }: { conn: PlayerConnection; view: PlayerView 
     if (id) {
       inspectOpenedAt.current = performance.now();
       conn.track("region_inspect", { regionId: id, action: "open", durationMs: null });
-    }
-  };
-
-  const openDraft = (kind: ActionKind, regionId: string) => {
-    if (!canDo(kind)) return;
-    setDraft({ kind, regionId });
-    conn.track("action_draft", { kind, regionId, outcome: "opened" });
-  };
-  const cancelDraft = () => {
-    if (draft) conn.track("action_draft", { ...draft, outcome: "cancelled" });
-    setDraft(null);
-  };
-  const confirmDraft = async () => {
-    if (!draft) return;
-    const d = draft;
-    conn.track("action_draft", { ...d, outcome: "confirmed" });
-    setBusy(true);
-    try {
-      const ack = await conn.request<{ ok: boolean; detail?: string }>("intent", {
-        clientSeq: conn.nextClientSeq(),
-        kind: d.kind,
-        regionId: d.regionId,
-        clientTs: conn.clock.now(),
-      });
-      if (!ack.ok) conn.showToast(ack.detail ?? "Action not possible");
-    } catch (e) {
-      conn.showToast((e as Error).message);
-    } finally {
-      setBusy(false);
-      setDraft(null);
     }
   };
 
@@ -134,33 +137,54 @@ export function Game({ conn, view }: { conn: PlayerConnection; view: PlayerView 
   const onRegion = view.highlights.filter((h) => h.regionId === selected);
 
   return (
-    <div style={{ display: "grid", gridTemplateRows: "auto auto 1fr", height: "100%", gap: 8, padding: 8 }}>
-      <Header view={view} conn={conn} />
-      <div className="row panel" style={{ padding: "0.5rem 0.8rem" }}>
-        <strong>Tool:</strong>
-        <ToolButton
-          kind="propose"
-          tool={tool}
-          setTool={setTool}
-          enabled={canDo("propose")}
-          q={quotaText(q.propose)}
-        />
-        <ToolButton
-          kind="decide"
-          tool={tool}
-          setTool={setTool}
-          enabled={canDo("decide")}
-          q={quotaText(q.decide)}
-        />
-        <span className="muted small">
+    <div
+      style={{
+        display: "grid",
+        gridTemplateRows: "auto auto 1fr",
+        height: "100%",
+        gap: "var(--s2)",
+        padding: "var(--s2) var(--s3) var(--s3)",
+      }}
+    >
+      <StatusLine view={view} conn={conn} />
+      <div className="row panel" style={{ padding: "var(--s2) var(--s3)", marginTop: 0 }}>
+        <span className="small upper muted">Tool</span>
+        <Button
+          icon="propose"
+          kbd="P"
+          active={tool === "propose"}
+          disabled={!canDo("propose")}
+          onClick={() => setTool(tool === "propose" ? null : "propose")}
+          className={tool === "propose" ? "t-propose" : ""}
+        >
+          Propose {quotaText(q.propose)}
+        </Button>
+        <Button
+          icon="decide"
+          kbd="D"
+          active={tool === "decide"}
+          disabled={!canDo("decide")}
+          onClick={() => setTool(tool === "decide" ? null : "decide")}
+          className={tool === "decide" ? "t-decide" : ""}
+        >
+          Decide {quotaText(q.decide)}
+        </Button>
+        <span className="hint cursor">
           {tool
-            ? `Click an area to ${tool} it (Esc to cancel).`
-            : "Click an area to see what you know about it. Shortcuts: P / D."}
+            ? `Click an area to ${tool} it · Esc to cancel`
+            : "Click an area to see what you know about it"}
         </span>
         <span className="spacer" />
         <MapLegend showActors={view.visibility.showActorToPlayers} />
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 320px", gap: 8, minHeight: 0 }}>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "minmax(0, 1fr) 340px",
+          gap: "var(--s3)",
+          minHeight: 0,
+        }}
+      >
         <MapView
           geometry={view.map}
           fills={fills}
@@ -176,28 +200,30 @@ export function Game({ conn, view }: { conn: PlayerConnection; view: PlayerView 
           onRegionLeave={onLeave}
           onViewChange={(v) => conn.track("map_view_change", v)}
         />
-        <aside className="col" style={{ minHeight: 0, overflow: "auto" }}>
-          <div className="panel">
+        <aside className="col" style={{ minHeight: 0, overflow: "auto", gap: "var(--s2)" }}>
+          <Panel
+            title={region ? region.name : "Area"}
+            icon="scenario"
+            powerOn={false}
+            actions={
+              region ? (
+                <Button iconOnly variant="ghost" icon="close" title="Close" onClick={() => select(null)} />
+              ) : undefined
+            }
+          >
             {!region ? (
-              <p className="muted">Select an area on the map.</p>
+              <p className="muted cursor">Select an area on the map</p>
             ) : (
-              <>
-                <div className="row">
-                  <h2 style={{ margin: 0 }}>{region.name}</h2>
-                  <span className="spacer" />
-                  <button type="button" className="small" onClick={() => select(null)}>
-                    ✕
-                  </button>
-                </div>
-                {view.me.viewName && <p className="small muted">{view.me.viewName}</p>}
-                <table className="grid" style={{ margin: "0.5rem 0" }}>
+              <div className="col">
+                {view.me.viewName && <span className="small muted upper">{view.me.viewName}</span>}
+                <table className="grid">
                   <tbody>
                     {Object.entries(content?.attributes ?? {}).map(([k, val]) => {
                       const def = view.map.attributes.find((a) => a.key === k);
                       return (
                         <tr key={k}>
-                          <td>{def?.label ?? k}</td>
-                          <td style={{ textAlign: "right", fontWeight: 600 }}>
+                          <td className="muted">{def?.label ?? k}</td>
+                          <td style={{ textAlign: "right" }} className="strong">
                             {val}
                             {def?.unit ? ` ${def.unit}` : ""}
                           </td>
@@ -213,123 +239,108 @@ export function Game({ conn, view }: { conn: PlayerConnection; view: PlayerView 
                 </table>
                 {content?.notes && <p className="small">{content.notes}</p>}
                 {onRegion.length > 0 && (
-                  <p className="small">
+                  <div className="row" style={{ gap: 4 }}>
                     {onRegion.map((h) => (
-                      <span key={h.seq} className="pill" style={{ marginRight: 4 }}>
-                        {h.kind === "propose" ? "Proposed" : "Decided"}
+                      <StatusTag key={h.seq}>
+                        <span className={h.kind === "propose" ? "t-propose" : "t-decide"}>
+                          {h.kind === "propose" ? "proposed" : "decided"}
+                        </span>
                         {h.seat !== null && (
                           <>
                             {" "}
-                            by <span className="seat-dot" style={{ background: SEAT_COLOURS[h.seat] }} />{" "}
-                            {h.mine ? "you" : `seat ${h.seat}`}
+                            <SeatDot seat={h.seat} /> {h.mine ? "you" : `seat ${h.seat}`}
                           </>
                         )}
-                      </span>
+                      </StatusTag>
                     ))}
-                  </p>
+                  </div>
                 )}
                 {draft && draft.regionId === region.id ? (
-                  <div className="col" style={{ borderTop: "1px solid var(--border)", paddingTop: 8 }}>
-                    <strong>
-                      {draft.kind === "propose" ? "Propose" : "Decide"} “{region.name}”?
-                    </strong>
+                  <div
+                    className="callout"
+                    style={{
+                      borderLeftColor:
+                        draft.kind === "propose" ? "var(--propose-text)" : "var(--decide-text)",
+                    }}
+                  >
+                    <div className="strong" style={{ marginBottom: "var(--s2)" }}>
+                      <span className={draft.kind === "propose" ? "t-propose" : "t-decide"}>
+                        {draft.kind.toUpperCase()}
+                      </span>{" "}
+                      “{region.name}”?
+                    </div>
                     <div className="row">
-                      <button type="button" className="primary" disabled={busy} onClick={confirmDraft}>
+                      <Button
+                        variant="primary"
+                        icon="ok"
+                        kbd="Enter"
+                        disabled={busy}
+                        onClick={() => void confirmDraft()}
+                      >
                         Confirm
-                      </button>
-                      <button type="button" disabled={busy} onClick={cancelDraft}>
+                      </Button>
+                      <Button icon="close" kbd="Esc" disabled={busy} onClick={cancelDraft}>
                         Cancel
-                      </button>
+                      </Button>
                     </div>
                   </div>
                 ) : (
                   <div className="row">
-                    <button
-                      type="button"
+                    <Button
+                      icon="propose"
                       disabled={!canDo("propose")}
                       onClick={() => openDraft("propose", region.id)}
                     >
                       Propose
-                    </button>
-                    <button
-                      type="button"
+                    </Button>
+                    <Button
+                      icon="decide"
                       disabled={!canDo("decide")}
                       onClick={() => openDraft("decide", region.id)}
                     >
                       Decide
-                    </button>
+                    </Button>
                   </div>
                 )}
-              </>
+              </div>
             )}
-          </div>
+          </Panel>
           <OthersPanel view={view} />
           {view.broadcasts.length > 0 && (
-            <div className="panel col">
-              <strong>Messages</strong>
-              {view.broadcasts
-                .slice()
-                .reverse()
-                .map((b) => (
-                  <div key={b.seq} className="banner small">
-                    {b.text}
-                  </div>
-                ))}
-            </div>
+            <Panel title="Messages" icon="broadcast" powerOn={false}>
+              <div className="col">
+                {view.broadcasts
+                  .slice()
+                  .reverse()
+                  .map((b) => (
+                    <div key={b.seq} className="callout warn small">
+                      {b.text}
+                    </div>
+                  ))}
+              </div>
+            </Panel>
           )}
         </aside>
       </div>
       {view.paused && (
-        <div className="overlay">
-          <div className="panel">
-            <h2>Game paused</h2>
-            <p className="muted">
-              {view.pauseReason === "disconnect"
-                ? "A player lost their connection. The game continues when the facilitator resumes."
-                : "The facilitator paused the game. Please wait."}
-            </p>
-          </div>
-        </div>
+        <Popup title="Game paused" icon="pause" closable={false} width={520}>
+          <p className="cursor">
+            {view.pauseReason === "disconnect"
+              ? "A player lost their connection. The game continues when the facilitator resumes"
+              : "The facilitator paused the game. Please wait"}
+          </p>
+        </Popup>
       )}
       {view.phase === "round_complete" && (
-        <div className="overlay">
-          <div className="panel">
-            <h2>Round {view.round} complete</h2>
-            <p className="muted">Waiting for the facilitator to start round {view.round + 1}.</p>
-          </div>
-        </div>
+        <Popup title={`Round ${view.round} complete`} icon="done" closable={false} width={520}>
+          <p className="cursor">Waiting for the facilitator to start round {view.round + 1}</p>
+        </Popup>
       )}
     </div>
   );
 }
 
-function ToolButton(props: {
-  kind: ActionKind;
-  tool: ActionKind | null;
-  setTool: (t: ActionKind | null) => void;
-  enabled: boolean;
-  q: string;
-}) {
-  const on = props.tool === props.kind;
-  const colour = props.kind === "propose" ? PROPOSE_COLOUR : DECIDE_COLOUR;
-  return (
-    <button
-      type="button"
-      disabled={!props.enabled}
-      onClick={() => props.setTool(on ? null : props.kind)}
-      style={{
-        borderColor: colour,
-        background: on ? colour : undefined,
-        color: on ? "white" : undefined,
-        fontWeight: 600,
-      }}
-    >
-      {props.kind === "propose" ? "Propose" : "Decide"} <span className="small">({props.q})</span>
-    </button>
-  );
-}
-
-function Header({ view, conn }: { view: PlayerView; conn: PlayerConnection }) {
+function StatusLine({ view, conn }: { view: PlayerView; conn: PlayerConnection }) {
   const [, tick] = useState(0);
   useEffect(() => {
     const t = setInterval(() => tick((x) => x + 1), 1000);
@@ -343,58 +354,63 @@ function Header({ view, conn }: { view: PlayerView; conn: PlayerConnection }) {
     left = limit * 1000 - (now - view.roundStartedTs - view.roundPausedMs - pausedNow);
   }
   return (
-    <div className="row panel" style={{ padding: "0.5rem 0.8rem" }}>
-      <strong style={{ fontSize: "1.1rem" }}>
+    <div className="row panel" style={{ padding: "var(--s2) var(--s3)", marginTop: 0 }}>
+      <strong className="upper glow" style={{ fontSize: "var(--fs-title)" }}>
         Round {view.round}/{view.roundCount}
       </strong>
-      <span className="pill">
-        <span className="seat-dot" style={{ background: SEAT_COLOURS[view.me.seat] }} /> Seat {view.me.seat}
+      <span className="faint">│</span>
+      <span className="row nowrap" style={{ gap: 4 }}>
+        <SeatDot seat={view.me.seat} /> <strong>SEAT {view.me.seat}</strong>
       </span>
-      {view.me.k && <span className="pill">{view.me.k}</span>}
-      {view.me.p && <span className="pill">{view.me.p}</span>}
+      {view.me.k && <StatusTag icon="labels">{view.me.k}</StatusTag>}
+      {view.me.p && <StatusTag>{view.me.p}</StatusTag>}
       <span className="spacer" />
-      <span>
-        Proposals left: <strong>{fmtLeft(view.me.quota.propose)}</strong>
+      <span className="row nowrap" style={{ gap: 6 }}>
+        <span className="t-propose strong">PROPOSALS</span>{" "}
+        <AsciiProgress used={view.me.quota.propose.used} limit={view.me.quota.propose.limit} />
       </span>
-      <span>
-        Decisions left: <strong>{fmtLeft(view.me.quota.decide)}</strong>
+      <span className="row nowrap" style={{ gap: 6 }}>
+        <span className="t-decide strong">DECISIONS</span>{" "}
+        <AsciiProgress used={view.me.quota.decide.used} limit={view.me.quota.decide.limit} />
       </span>
       {left !== null && (
-        <span className={`pill ${left < 60_000 ? "bad" : ""}`} style={{ fontSize: "1rem" }}>
-          ⏱ {fmtDuration(left)}
-        </span>
+        <StatusTag tone={left < 60_000 ? "danger" : "neutral"} icon="timeline">
+          {fmtDuration(left)}
+        </StatusTag>
       )}
     </div>
   );
 }
 
-function fmtLeft(q: { used: number; limit: number | null }): string {
-  return q.limit === null ? "∞" : String(Math.max(0, q.limit - q.used));
-}
-
 function OthersPanel({ view }: { view: PlayerView }) {
   if (view.others.length === 0) return null;
   return (
-    <div className="panel col">
-      <strong>Other players</strong>
-      {view.others.map((o) => (
-        <div key={o.seat} className="row small">
-          <span className="seat-dot" style={{ background: SEAT_COLOURS[o.seat] }} />
-          <span>Seat {o.seat}</span>
-          {o.k && <span className="pill">{o.k}</span>}
-          {o.p && <span className="pill">{o.p}</span>}
-          <span className="spacer" />
-          {o.withdrawn ? (
-            <span className="pill">left</span>
-          ) : !o.connected ? (
-            <span className="pill bad">offline</span>
-          ) : o.progress ? (
-            <span className="muted">
-              P {quotaText(o.progress.propose)} · D {quotaText(o.progress.decide)}
-            </span>
-          ) : null}
-        </div>
-      ))}
-    </div>
+    <Panel title="Other players" icon="seats" powerOn={false}>
+      <div className="col" style={{ gap: 4 }}>
+        {view.others.map((o) => (
+          <div key={o.seat} className="row nowrap small">
+            <SeatDot seat={o.seat} />
+            <span>SEAT {o.seat}</span>
+            {o.k && <span className="muted">{o.k}</span>}
+            {o.p && <span className="muted">{o.p}</span>}
+            <span className="spacer" />
+            {o.withdrawn ? (
+              <StatusTag>left</StatusTag>
+            ) : !o.connected ? (
+              <StatusTag tone="danger" icon="disconnected">
+                offline
+              </StatusTag>
+            ) : o.progress ? (
+              <span className="muted">
+                <span className="t-propose">P</span> {quotaText(o.progress.propose)} ·{" "}
+                <span className="t-decide">D</span> {quotaText(o.progress.decide)}
+              </span>
+            ) : (
+              <Icon name="connected" />
+            )}
+          </div>
+        ))}
+      </div>
+    </Panel>
   );
 }
