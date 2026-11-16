@@ -1,14 +1,14 @@
-# WhoKnowsWhoActs
+# Who Knows, Who Acts?
 
 A **research game harness** for a four-player, map-based serious game played on a local network. It provides everything *around* the game: networking, sessions and rounds, per-player map views, propose/decide interactions, a facilitator manager, and a GDPR-aware data pipeline with rich, documented metadata. The game itself can then be designed on top.
 
 | Facilitator · LIVE (Catppuccin Mocha) | Facilitator · SETUP wizard (Catppuccin Latte) |
 | --- | --- |
-| ![Facilitator LIVE tab: lifecycle stepper, NEXT panel, seats with quota bars, composite map with an all-views comparison of a region, and live mirrors of every player's screen](docs/img/facilitator-live.png) | ![Setup wizard popup at step 03 of 10 with the stepper, player-screen appearance options and visibility settings](docs/img/facilitator-setup.png) |
+| ![Facilitator LIVE tab: lifecycle stepper, NEXT panel, seats with quota bars, composite map with an all-views comparison of a region, and live mirrors of every player's screen](docs/img/facilitator-live.png) | ![Setup at step 03 of 10 with the stepper and visibility settings](docs/img/facilitator-setup.png) |
 | **Player · game (Latte)** | **Player · game (Mocha)** |
 | ![Player game screen in Latte: status line with quota bars, propose/decide tools, the shared map with this player's own data and the inline confirm prompt](docs/img/player-game.png) | ![Player game screen in Mocha with CRT scanlines](docs/img/player-game-mocha.png) |
 
-*Screenshots use the fictional demo scenario and simulated players. The player theme is a per-session setting; the facilitator cycles their own with `T` (Latte → Mocha → High contrast).*
+*Screenshots use the fictional demo scenario and simulated players. Every player and the facilitator choose their own display settings (colours, font, text size, animations) as accessibility settings; they are never recorded.*
 
 ## What it does
 
@@ -19,12 +19,13 @@ A **research game harness** for a four-player, map-based serious game played on 
 - **Labels.** Each seat gets a knowledge type (`Ka`–`Kd`) and a power type (`Pa`–`Pd`), assigned manually or randomly in setup step 08 (the seed is logged). By default the K label selects the seat's map view.
 - **Every interaction is recorded** in an append-only, event-sourced log with server and clock-corrected client timestamps. Fine-grained UI telemetry is recorded too: hover, inspect, pan/zoom, tool choice, confirm/cancel, focus, idle, and state acknowledgements for exact reaction times.
 - **Facilitator manager**, organised in order of use: **[1] SETUP | LIVE · [2] REPLAY · [3] DATABASE**.
-  - **SETUP** is 10 steps stacked as a vertical accordion (scenario → rounds → players → onboarding → tags → review & create → connect clients → labels → key sheet → start). The current step is expanded; finished steps collapse into a one-line summary, so you always see where you are. The review step has its own colour.
+  - **SETUP** is 10 steps stacked as a vertical accordion (scenario → rounds → players → onboarding → tags → review & create → connect clients → labels → key sheet → start). The current step is expanded; finished steps collapse into a one-line summary, and a blue wayfinder bar stays pinned to the top while you scroll, so you always see where you are. Review & create and start onboarding have their own colour.
   - After *Start onboarding* the tab flips to **LIVE**, and a green **● LIVE** indicator appears. LIVE has a lifecycle stepper, a NEXT panel with the next action, seats with quota bars, a composite map, player mirrors, a timeline, the event log, live telemetry, and wrap-up popups (takedown cards → export → close).
   - **REPLAY** plays any session back at 1 s per action, pausing at each round end (about 2 minutes for a default session), or lets you step and scrub; **DATABASE** holds exports, printables and takedown.
 - **Intentional TUI aesthetic:**
   - Catppuccin **Latte** and **Mocha** plus a **High contrast** theme (WCAG AAA text), with contrast-tested tokens, **JetBrains Mono**, **Iconoir** icons, box-drawn panels and keyboard shortcuts.
-  - CRT-style **animations** only (tab/screen switches, popups, connect/disconnect), no scanlines or glow; switchable, and off under reduced motion.
+  - CRT-style **animations** only (tab/screen switches, popups, connect/disconnect), no scanlines or glow; off under reduced motion.
+  - **Display settings on every screen** (accessibility, never recorded): colours (Latte / Mocha / High contrast), font (JetBrains Mono / **OpenDyslexic** / system font), text size (Small / Large), animations on/off.
   - The rules every screen follows are in [AESTHETIC-RULES.md](docs/AESTHETIC-RULES.md).
 - **GDPR by design:**
   - in-game versioned consent, with the hash of the exact text shown

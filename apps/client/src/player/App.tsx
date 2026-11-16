@@ -1,9 +1,19 @@
 import type { PlayerView } from "@wkwa/shared";
 import { useEffect, useMemo, useRef } from "react";
 import { useStore } from "../net/store";
-import { applyAppearance, Icon, Popup, StatusTag, ToastView, useSignalClass } from "../ui";
+import {
+  Icon,
+  Popup,
+  playerPrefs,
+  StatusTag,
+  ToastView,
+  TooltipLayer,
+  useDisplayPrefs,
+  useSignalClass,
+} from "../ui";
 import { Centered, OnboardingStepper } from "./chrome";
 import type { PlayerConnection } from "./connection";
+import { DisplayMenu } from "./DisplayMenu";
 import { Game } from "./Game";
 import { BriefingScreen, ConsentScreen, DeclinedScreen, DemographicsScreen } from "./Onboarding";
 
@@ -43,10 +53,8 @@ export function App({ conn }: { conn: PlayerConnection }) {
   const st = useStore(conn.store);
   const screen = screenFor(st.seat, st.view);
 
-  // Appearance is decided per session (identical for every seat); Mocha with animations before a session is known.
-  const theme = st.view?.appearance.playerTheme ?? "mocha";
-  const crt = st.view?.appearance.playerAnimations ?? true;
-  useEffect(() => applyAppearance(theme, crt), [theme, crt]);
+  // Display settings (colours, font, text size, animations): the participant's own choice, not logged.
+  useDisplayPrefs(playerPrefs);
 
   // screen_view telemetry
   const lastScreen = useRef<string | null>(null);
@@ -115,6 +123,8 @@ export function App({ conn }: { conn: PlayerConnection }) {
       <div key={screenKey} className={`screen-switch ${signal}`} style={{ height: "100%" }}>
         {body}
       </div>
+      <DisplayMenu />
+      <TooltipLayer />
       <ToastView toast={st.toast ? { text: st.toast, kind: "warn" } : null} />
     </>
   );

@@ -71,7 +71,11 @@ test("setup wizard → live round → wrap-up → replay", async ({ page: fac, b
   await next(fac).click();
   // 06 review → create
   await current(fac, "review");
-  await expect(fac.locator(".acc-step.current.review .acc-body")).toContainText("e2e, pilot");
+  await expect(fac.locator(".acc-step.current.accent .acc-body")).toContainText("e2e, pilot");
+  // the wayfinder is pinned (sticky) and filled with the primary colour
+  const way = fac.locator("nav.wayfinder");
+  expect(await way.evaluate((el) => getComputedStyle(el).position)).toBe("sticky");
+  await expect(way).toContainText("STEP 06/10");
   await next(fac).click();
 
   // 07 connect & bind
@@ -100,8 +104,9 @@ test("setup wizard → live round → wrap-up → replay", async ({ page: fac, b
   await current(fac, "keysheet");
   await fac.getByRole("checkbox", { name: /key sheet is printed/ }).check();
   await next(fac).click();
-  // 10 start onboarding → LIVE
+  // 10 start onboarding (same accent colour as review) → LIVE
   await current(fac, "start");
+  await expect(fac.locator('.acc-step.current.accent[data-step="start"]')).toBeVisible();
   await next(fac).click();
   await expect(fac.locator(".live-indicator")).toBeVisible();
   await expect(fac.locator(".tab.active")).toContainText("LIVE");

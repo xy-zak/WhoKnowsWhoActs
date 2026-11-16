@@ -1,9 +1,10 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
 import type { AppContext } from "../app";
 import { loadOnboardingContent } from "../content";
+import { deleteSession, listSessionDeletions } from "../gdpr/deleteSession";
 import { eraseParticipant, listErasures, lookupParticipant, parseCodeOrThrow } from "../gdpr/erase";
 import { exportSession, listExports } from "../gdpr/exporter";
-import { keySheetHtml, takedownCardsHtml } from "../gdpr/print";
+import { cardSeats, keySheetHtml, takedownCardPdf } from "../gdpr/print";
 
 type Guard = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
 
@@ -37,11 +38,66 @@ export function registerGdprApi(ctx: AppContext, guard: Guard) {
     reply.type("text/html").send(keySheetHtml(store, req.params.id, study));
   });
 
-  app.get<{ Params: { id: string } }>("/api/sessions/:id/print/cards", opts, async (req, reply) => {
+  /** Seats that have a takedown card (i.e. a participant code). */
+  app.get<{ Params: { id: string } }>("/api/sessions/:id/cards", opts, async (req, reply) => {
     if (!sessionOr404(req.params.id, reply)) return;
-    const study = loadOnboardingContent(runtime.configDir).study;
-    reply.type("text/html").send(takedownCardsHtml(store, req.params.id, study));
+    return { seats: cardSeats(store, req.params.id) };
   });
+
+  /** One takedown card as a PDF (A6, JetBrains Mono). */
+  app.get<{ Params: { id: string; seat: string } }>(
+    "/api/sessions/:id/cards/:seat",
+    opts,
+    async (req, reply) => {
+      if (!sessionOr404(req.params.id, reply)) return;
+      const seat = Number(req.params.seat);
+      const study = loadOnboardingContent(runtime.configDir).study;
+      try {
+        const pdf = await takedownCardPdf(store, req.params.id, seat, study);
+        reply
+          .type("application/pdf")
+          .header(
+            "Content-Disposition",
+            `attachment; filename="takedown-card-${req.params.id}-seat${seat}.pdf"`,
+          )
+          .send(pdf);
+      } catch (e) {
+        reply.code(404).send({ error: (e as Error).message });
+      }
+    },
+  );
+
+  /**
+   * Delete an entire session (irreversible). The body must repeat the session id.
+   * Refused while the session is attached and still running (lobby, onboarding or rounds).
+   */
+  app.post<{ Params: { id: string }; Body: { confirm?: string; deleteExports?: boolean; note?: string } }>(
+    "/api/sessions/:id/delete",
+    opts,
+    async (req, reply) => {
+      const id = req.params.id;
+      if (!sessionOr404(id, reply)) return;
+      if ((req.body?.confirm ?? "").trim() !== id) {
+        return reply.code(400).send({ error: "Confirmation does not match the session id" });
+      }
+      const active = hub.session;
+      if (active?.sessionId === id && !active.isFinal && active.state.phase !== "game_complete") {
+        return reply
+          .code(409)
+          .send({ error: "This session is still running. Close or abort it first, then delete it." });
+      }
+      hub.release(id);
+      const r = deleteSession(store, id, {
+        exportsDir: runtime.exportsDir,
+        deleteExports: req.body?.deleteExports === true,
+        note: req.body?.note ?? "",
+      });
+      ctx.log.info({ rows: r.rows, exportsDeleted: r.exportsDeleted }, "session deleted");
+      return r;
+    },
+  );
+
+  app.get("/api/session-deletions", opts, async () => listSessionDeletions(store));
 
   app.get<{ Params: { code: string } }>("/api/participants/:code", opts, async (req, reply) => {
     try {

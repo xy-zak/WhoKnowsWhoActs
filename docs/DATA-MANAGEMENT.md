@@ -61,8 +61,10 @@ Field-level detail of every logged record is in [DATA-TYPES.md](DATA-TYPES.md).
 | UI telemetry: screen views, hover, inspect, pan/zoom, tool selection, confirm/cancel, focus/visibility, idle (**only after consent**) | Player client | Behavioural research data | Pseudonymous | `telemetry` | Research period |
 | Connection events, clock sync | Server/client | Data-quality checks | Pseudonymous / non-personal | `events`, `telemetry` | Research period |
 | Facilitator actions and notes, broadcasts | Facilitator | Audit trail, context | Non-personal (**must not contain names**) | `events` | Research period |
-| Session config (incl. tags and the player-screen appearance: theme and CRT effects), scenario hash, software version | Facilitator/server | Reproducibility; tags and appearance describe the experimental condition | Non-personal (**tags must not contain names**) | `sessions`, `events` | Indefinitely (with the anonymised data) |
+| Session config (incl. tags), scenario hash, software version | Facilitator/server | Reproducibility; tags describe the experimental condition | Non-personal (**tags must not contain names**) | `sessions`, `events` | Indefinitely (with the anonymised data) |
 | Erasure register | Researcher | Accountability; re-apply erasure after restoring a backup | Pseudonymous (SHA-256 of the code) | `erasures` | As long as any copy/backup of the DB exists |
+| Session-deletion register | Researcher | Re-apply a session deletion after restoring a backup | Pseudonymous (SHA-256 of the codes) | `session_deletions` | As long as any copy/backup of the DB exists |
+| Display settings chosen by a player: colours, font, text size, animations | Player | Accessibility (Latte / Mocha / High contrast · JetBrains Mono / OpenDyslexic / System font · Small / Large · animations on/off) | — (could hint at a visual impairment or dyslexia, i.e. health data) | **Not collected**: that browser's `localStorage` only, never sent or logged | — |
 | Export register / manifest | Server | Know which exports contain a participant | Pseudonymous (hashes) | `exports`, `manifest.json` | As long as the exports exist |
 | Server log | Server | Debugging | Non-personal (no IPs, no payloads, no query strings) | `data/logs/server.log` | Delete after the study |
 | **Real name** | Researcher, by hand | Find the code if a participant loses their card | **Personal** | **Paper key sheet only** | Until the key destruction date |
@@ -244,10 +246,18 @@ sequenceDiagram
 7. **Key sheet:** strike through the line.
 8. **Confirm** to the participant, and keep a note of the request date and completion date (no reasons needed).
 
+**Deleting an entire session.** Use this for practice runs, aborted sessions, or a whole group withdrawing. Use *DATABASE → Delete* (type the session id to confirm) or `npm run cli -- delete-session --session S-…`.
+
+- It removes all of the session's events, telemetry (consent and demographics included) and export-register rows, and the session itself.
+- Running sessions are refused: close or abort first.
+- Optionally it also deletes the session's export folders on this computer. Copies elsewhere must be deleted by hand.
+- An entry in `session_deletions` keeps the session id, row counts and the SHA-256 of its codes, so the deletion can be re-applied after restoring a backup.
+
 **After restoring a backup.** A backup can predate an erasure. After any restore, re-apply the register:
 
 ```bash
 npm run cli -- erasures                    # list register entries (hashes, dates)
+npm run cli -- deletions                   # deleted sessions: re-run delete-session for each
 npm run cli -- erase --code WK-… --yes     # re-run for each code (codes come from your takedown correspondence)
 ```
 
@@ -355,6 +365,8 @@ All commands prompt for the database passphrase.
 | `npm run cli -- anonymise --session S` | Anonymised export |
 | `npm run cli -- erase --code C [--yes]` | Erase all data of a participant |
 | `npm run cli -- erasures` | Show the erasure register |
+| `npm run cli -- delete-session --session S [--yes] [--delete-exports]` | Delete an entire session (typed confirmation unless `--yes`) |
+| `npm run cli -- deletions` | Show the session-deletion register |
 | `npm run cli -- backup --out FILE` | Encrypted backup copy of the DB |
 | `npm run cli -- rekey` | Change the DB passphrase |
 | `npm run cli -- verify` | Integrity check |

@@ -1,12 +1,11 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { ConfirmProvider, installThemeStyles, prefsStore } from "../ui";
-import { applyAppearance } from "../ui/prefs";
+import { applyAppearance, ConfirmProvider, facilitatorPrefs, installThemeStyles } from "../ui";
 import { App } from "./App";
 import { FacilitatorConnection } from "./connection";
 
 installThemeStyles();
-applyAppearance(prefsStore.get().theme, prefsStore.get().animations);
+applyAppearance(facilitatorPrefs.store.get());
 const conn = new FacilitatorConnection();
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

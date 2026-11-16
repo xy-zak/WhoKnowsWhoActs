@@ -8,11 +8,13 @@ export type DB = Database.Database;
 
 export class WrongPassphraseError extends Error {
   constructor() {
-    super("Could not open the database: wrong passphrase (or the file is not a WhoKnowsWhoActs database).");
+    super(
+      "Could not open the database: wrong passphrase (or the file is not a Who Knows, Who Acts? database).",
+    );
   }
 }
 
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 /** A migration is SQL, or a function for data changes that need JavaScript. */
 const MIGRATIONS: Record<number, string | ((db: DB) => void)> = {
@@ -102,6 +104,19 @@ const MIGRATIONS: Record<number, string | ((db: DB) => void)> = {
     const upd = db.prepare("UPDATE sessions SET tags_json = ? WHERE id = ?");
     for (const r of rows) upd.run(JSON.stringify(normaliseTags(r.condition ?? "")), r.id);
   },
+  // v4: register of deleted sessions (to re-apply a deletion after restoring a backup)
+  4: `
+    CREATE TABLE session_deletions (
+      id               INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id       TEXT NOT NULL,
+      deleted_wall     TEXT NOT NULL,
+      created_wall     TEXT NOT NULL,
+      rows_json        TEXT NOT NULL,
+      code_hashes_json TEXT NOT NULL,
+      exports_json     TEXT NOT NULL,
+      note             TEXT NOT NULL DEFAULT ''
+    );
+  `,
 };
 
 function applyKey(db: DB, passphrase: string) {

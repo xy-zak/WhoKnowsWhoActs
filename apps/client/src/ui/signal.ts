@@ -9,18 +9,22 @@ import { useEffect, useRef, useState } from "react";
 export function useSignalClass(connected: boolean): string {
   const [cls, setCls] = useState("");
   const wasConnected = useRef(false);
+  const lost = useRef(false);
   useEffect(() => {
     if (!connected) {
-      if (wasConnected.current) setCls("signal-lost");
+      if (wasConnected.current) {
+        lost.current = true;
+        setCls("signal-lost");
+      }
       return;
     }
-    if (wasConnected.current && cls === "signal-lost") {
+    if (wasConnected.current && lost.current) {
+      lost.current = false;
       setCls("signal-back");
       const t = setTimeout(() => setCls(""), 320);
       return () => clearTimeout(t);
     }
     wasConnected.current = true;
-    // biome-ignore lint/correctness/useExhaustiveDependencies: only react to connection changes
   }, [connected]);
   return cls;
 }

@@ -267,11 +267,7 @@ A new session was created with a scenario and configuration.
         "showOtherLabelsToPlayers": false,
         "showOthersProgress": true
       },
-      "tags": [],
-      "appearance": {
-        "playerTheme": "mocha",
-        "playerAnimations": true
-      }
+      "tags": []
     },
     "scenario": {
       "id": "demo",
@@ -2021,9 +2017,6 @@ Stored verbatim in `SessionCreated.config` and in `sessions.config_json`. Defaul
 | `visibility.showOtherLabelsToPlayers` | `boolean` | `false` | Players see other seats' K/P labels |
 | `visibility.showOthersProgress` | `boolean` | `true` | Players see other seats' quota progress |
 | `tags` | `array<string (≤ 40 chars, pattern)>` | — | Researcher-entered session tags, e.g. ['pilot', 'condition-A'] (entered comma-separated; no personal data) |
-| `appearance` | `object` | — | What player screens look like — identical for all seats and recorded with the session |
-| `appearance.playerTheme` | `"latte" \| "mocha" \| "contrast"` | `"mocha"` | Colour theme of every player screen in this session (Catppuccin Latte = light, Mocha = dark, contrast = high contrast) |
-| `appearance.playerAnimations` | `boolean` | `true` | Animations on player screens (screen switches, popups, connect/disconnect); no static effects |
 
 <!-- END GENERATED: session-config -->
 
@@ -2138,6 +2131,10 @@ Matrices (rows = knowledge type, columns = power type, ■ = held by the same se
 | | `sessions_json` | TEXT | Sessions in which data was found |
 | | `rows_json` | TEXT | Rows deleted per table (`{"events":…,"telemetry":…}`) |
 | | `note` | TEXT | Free note (no names) |
+| `session_deletions` | `session_id`, `deleted_wall`, `created_wall` | TEXT | Which session was deleted, and when it was deleted and created (schema v4) |
+| | `rows_json` | TEXT | Rows deleted (`{"events":…,"telemetry":…,"exports":…}`) |
+| | `code_hashes_json` | TEXT | SHA-256 of the participant codes the session contained (to re-apply the deletion after a backup restore) |
+| | `exports_json`, `note` | TEXT | Export folders known for the session; free note |
 | `exports` | `id`, `session_id`, `kind` | TEXT | Export id, session, `standard` / `anonymised` |
 | | `created_wall`, `path` | TEXT | When and where it was written |
 | | `code_hashes_json` | TEXT | SHA-256 of every participant code contained (lets you find affected exports after an erasure) |

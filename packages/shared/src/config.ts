@@ -122,23 +122,6 @@ export const SessionConfigSchema = z
       .describe(
         "Researcher-entered session tags, e.g. ['pilot', 'condition-A'] (entered comma-separated; no personal data)",
       ),
-    appearance: z
-      .object({
-        playerTheme: z
-          .enum(["latte", "mocha", "contrast"])
-          .default("mocha")
-          .describe(
-            "Colour theme of every player screen in this session (Catppuccin Latte = light, Mocha = dark, contrast = high contrast)",
-          ),
-        playerAnimations: z
-          .boolean()
-          .default(true)
-          .describe(
-            "Animations on player screens (screen switches, popups, connect/disconnect); no static effects",
-          ),
-      })
-      .default({ playerTheme: "mocha", playerAnimations: true })
-      .describe("What player screens look like — identical for all seats and recorded with the session"),
   })
   .describe("Session configuration (stored verbatim in SessionCreated)");
 
@@ -167,7 +150,8 @@ export function normaliseTags(input: string | readonly string[]): string[] {
 
 /**
  * Parse a session config, upgrading older formats: before tags existed,
- * sessions had a single free-text `condition`; it becomes the tag list.
+ * sessions had a single free-text `condition`; it becomes the tag list, and
+ * the old `appearance` block (player animations/theme) is dropped.
  * Used for new configs AND when replaying old SessionCreated events.
  */
 export function parseSessionConfig(input: unknown): SessionConfig {
@@ -176,14 +160,9 @@ export function parseSessionConfig(input: unknown): SessionConfig {
   if (!Array.isArray(obj.tags) && typeof obj.condition === "string") obj.tags = normaliseTags(obj.condition);
   if (Array.isArray(obj.tags)) obj.tags = normaliseTags(obj.tags as string[]);
   delete obj.condition;
-  // before v0.2 the animation switch was called `playerCrt`
-  if (obj.appearance && typeof obj.appearance === "object") {
-    const a = { ...(obj.appearance as Record<string, unknown>) };
-    if (a.playerAnimations === undefined && typeof a.playerCrt === "boolean")
-      a.playerAnimations = a.playerCrt;
-    delete a.playerCrt;
-    obj.appearance = a;
-  }
+  // Display settings (colours, font, text size, animations) used to be partly a session setting
+  // (`appearance`); they are now each screen's own accessibility choice and never part of the config.
+  delete obj.appearance;
   return SessionConfigSchema.parse(obj);
 }
 

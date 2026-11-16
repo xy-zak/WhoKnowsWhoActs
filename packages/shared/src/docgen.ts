@@ -577,7 +577,7 @@ export function renderCodebook(meta: CodebookMeta): string {
   return [
     `# Codebook — ${meta.sessionId}`,
     "",
-    "Generated automatically by the WhoKnowsWhoActs harness from the same schemas that validate the data.",
+    "Generated automatically by the *Who Knows, Who Acts?* harness from the same schemas that validate the data.",
     "",
     header,
     "",

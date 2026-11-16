@@ -1,4 +1,4 @@
-import type { ButtonHTMLAttributes, CSSProperties, ReactNode } from "react";
+import type { ButtonHTMLAttributes, CSSProperties, ReactNode, Ref } from "react";
 import { Icon } from "./Icon";
 import type { IconName } from "./icons";
 
@@ -46,11 +46,14 @@ export function Button({
   size,
   active,
   iconOnly,
+  tip,
   children,
   className = "",
   type = "button",
+  ref,
   ...rest
 }: ButtonHTMLAttributes<HTMLButtonElement> & {
+  ref?: Ref<HTMLButtonElement>;
   variant?: ButtonVariant;
   icon?: IconName;
   kbd?: string;
@@ -58,6 +61,8 @@ export function Button({
   active?: boolean;
   /** Icon-only buttons need a `title` (tooltip) and get it as aria-label. */
   iconOnly?: boolean;
+  /** Hover/focus helper text (styled tooltip, also exposed to screen readers). */
+  tip?: string;
 }) {
   const cls = [
     "btn",
@@ -70,7 +75,15 @@ export function Button({
     .filter(Boolean)
     .join(" ");
   return (
-    <button type={type} className={cls} aria-label={iconOnly ? rest.title : undefined} {...rest}>
+    <button
+      ref={ref}
+      type={type}
+      className={cls}
+      aria-label={iconOnly ? rest.title : undefined}
+      data-tip={tip}
+      aria-description={tip}
+      {...rest}
+    >
       {icon && <Icon name={icon} size={size === "lg" ? 20 : 16} />}
       {children && <span>{children}</span>}
       {kbd && <kbd>{kbd}</kbd>}

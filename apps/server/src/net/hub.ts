@@ -501,6 +501,16 @@ export class Hub {
     cmd("session:abort", AbortMsg, (msg) => s().abort(msg.reason));
   }
 
+  /** Detach a session (e.g. before deleting it); connected players return to the waiting screen. */
+  release(sessionId: string) {
+    if (this.session?.sessionId !== sessionId) return;
+    this.detach("The session was deleted");
+    this.facilitator.emit("scenario", null);
+    this.facilitator.emit("events", { events: [], reset: true });
+    this.facilitator.emit("telemetry:live", { items: [], reset: true });
+    this.pushDashboard();
+  }
+
   /** Called after an erasure changed stored events of the attached session. */
   reloadActiveSession() {
     const m = this.session;

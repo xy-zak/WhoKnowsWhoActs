@@ -19,6 +19,7 @@ import {
   Check,
   Panel,
   Popup,
+  SeatDot,
   StatusTag,
   type StepDef,
   Stepper,
@@ -390,15 +391,35 @@ function WrapUp({ conn, st, onClose }: { conn: FacilitatorConnection; st: GameSt
             Each player's screen now shows their participant code. Hand every participant the takedown card of
             their seat.
           </p>
-          <div className="row">
-            <Button
-              variant="primary"
-              icon="print"
-              onClick={() => void conn.openPrintable(`/api/sessions/${id}/print/cards`).catch(() => {})}
-            >
-              Print takedown cards
-            </Button>
+          <div className="col" style={{ gap: 4 }}>
+            {seatList(st)
+              .filter((x) => x.participantCode)
+              .map((x) => (
+                <div key={x.seat} className="row">
+                  <SeatDot seat={x.seat} />
+                  <strong>SEAT {x.seat}</strong>
+                  <span className="spacer" />
+                  <Button
+                    size="sm"
+                    icon="export"
+                    tip={`Download takedown-card-${id}-seat${x.seat}.pdf (A6) to print`}
+                    onClick={() =>
+                      void conn
+                        .download(
+                          `/api/sessions/${id}/cards/${x.seat}`,
+                          `takedown-card-${id}-seat${x.seat}.pdf`,
+                        )
+                        .catch(() => {})
+                    }
+                  >
+                    Card PDF
+                  </Button>
+                </div>
+              ))}
           </div>
+          <p className="hint">
+            One PDF per participant; delete the downloaded files after printing (they contain the codes).
+          </p>
           <Check label="Cards are handed out." checked={cardsDone} onChange={setCardsDone} />
         </div>
       )}

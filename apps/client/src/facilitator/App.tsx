@@ -3,15 +3,19 @@ import { fmtDuration } from "../common/format";
 import { useStore } from "../net/store";
 import {
   Button,
+  DisplaySettings,
+  FONT_LABEL,
+  facilitatorPrefs,
   Icon,
-  type IconName,
+  nextFont,
+  nextScale,
+  nextTheme,
   Popup,
-  setPrefs,
+  SCALE_LABEL,
   THEME_LABEL,
-  THEME_NAMES,
-  type ThemeName,
   ToastView,
-  usePrefs,
+  TooltipLayer,
+  useDisplayPrefs,
   useShortcuts,
   useSignalClass,
 } from "../ui";
@@ -24,13 +28,7 @@ import { PHASE_LABEL, stageOf } from "./stage";
 
 type Tab = "main" | "replay" | "database";
 
-const THEME_ICON: Record<ThemeName, IconName> = {
-  latte: "themeLight",
-  mocha: "themeDark",
-  contrast: "themeContrast",
-};
-const nextTheme = (t: ThemeName): ThemeName =>
-  THEME_NAMES[(THEME_NAMES.indexOf(t) + 1) % THEME_NAMES.length]!;
+const setPrefs = facilitatorPrefs.set;
 
 export const SHORTCUTS_HELP: Array<[string, string]> = [
   ["1", "SETUP / LIVE tab"],
@@ -38,7 +36,10 @@ export const SHORTCUTS_HELP: Array<[string, string]> = [
   ["3", "DATABASE tab"],
   ["N", "Next action (setup: resume the current step · live: the NEXT panel's action)"],
   ["P", "Pause / resume the round (live)"],
-  ["T", "Next theme: Latte → Mocha → High contrast"],
+  ["D", "Display settings (colours, font, text size, animations)"],
+  ["T", "Next colour theme: Latte → Mocha → High contrast"],
+  ["F", "Next font: JetBrains Mono → OpenDyslexic → System font"],
+  ["S", "Text size: Small ↔ Large"],
   ["A", "Animations on/off (tab switches, popups, connect/disconnect)"],
   ["?", "This help"],
   ["Enter", "Primary action in a popup"],
@@ -56,10 +57,11 @@ function useNow(ms = 1000) {
 
 export function App({ conn }: { conn: FacilitatorConnection }) {
   const fs = useStore(conn.store);
-  const prefs = usePrefs();
+  const prefs = useDisplayPrefs(facilitatorPrefs);
   const [tab, setTab] = useState<Tab>("main");
   const [replayId, setReplayId] = useState<string | null>(null);
   const [help, setHelp] = useState(false);
+  const [display, setDisplay] = useState(false);
   const now = useNow();
   const st = fs.dashboard?.state ?? null;
   const stage = stageOf(st);
@@ -71,7 +73,10 @@ export function App({ conn }: { conn: FacilitatorConnection }) {
     { key: "2", label: "REPLAY", run: () => setTab("replay") },
     { key: "3", label: "DATABASE", run: () => setTab("database") },
     { key: "t", label: "theme", run: () => setPrefs({ theme: nextTheme(prefs.theme) }) },
+    { key: "f", label: "font", run: () => setPrefs({ font: nextFont(prefs.font) }) },
+    { key: "s", label: "text size", run: () => setPrefs({ scale: nextScale(prefs.scale) }) },
     { key: "a", label: "animations", run: () => setPrefs({ animations: !prefs.animations }) },
+    { key: "d", label: "display", run: () => setDisplay(true) },
     { key: "?", label: "help", run: () => setHelp(true) },
   ]);
 
@@ -98,7 +103,7 @@ export function App({ conn }: { conn: FacilitatorConnection }) {
   return (
     <div className="app-shell col" style={{ gap: "var(--s2)" }}>
       <header className="topbar">
-        <span className="brand">WhoKnowsWhoActs</span>
+        <span className="brand">Who Knows, Who Acts?</span>
         <span className="faint">│</span>
         <span className="muted small upper">Facilitator</span>
         {isLive && st && (
@@ -199,18 +204,12 @@ export function App({ conn }: { conn: FacilitatorConnection }) {
         <button
           type="button"
           className="seg"
-          onClick={() => setPrefs({ theme: nextTheme(prefs.theme) })}
-          title="Next theme (T)"
+          onClick={() => setDisplay(true)}
+          title="Display settings (D): colours T · font F · text size S · animations A"
         >
-          <Icon name={THEME_ICON[prefs.theme]} /> <kbd>T</kbd> {THEME_LABEL[prefs.theme].toUpperCase()}
-        </button>
-        <button
-          type="button"
-          className="seg"
-          onClick={() => setPrefs({ animations: !prefs.animations })}
-          title="Animations on/off (A)"
-        >
-          <Icon name="animations" /> <kbd>A</kbd> ANIMATIONS {prefs.animations ? "ON" : "OFF"}
+          <Icon name="display" /> <kbd>D</kbd> {THEME_LABEL[prefs.theme].toUpperCase()} ·{" "}
+          {FONT_LABEL[prefs.font].toUpperCase()} · {SCALE_LABEL[prefs.scale].toUpperCase()}
+          {prefs.animations ? "" : " · NO ANIM"}
         </button>
         <button type="button" className="seg" onClick={() => setHelp(true)} title="Keyboard shortcuts (?)">
           <Icon name="help" /> <kbd>?</kbd> HELP
@@ -250,7 +249,32 @@ export function App({ conn }: { conn: FacilitatorConnection }) {
           </p>
         </Popup>
       )}
+      {display && (
+        <Popup
+          title="Display settings"
+          icon="display"
+          width={560}
+          onClose={() => setDisplay(false)}
+          footer={
+            <>
+              <span className="hint">Only in this browser. Shortcuts: T · F · S · A</span>
+              <span className="spacer" />
+              <Button variant="primary" kbd="Enter" onClick={() => setDisplay(false)}>
+                Done
+              </Button>
+            </>
+          }
+          onPrimary={() => setDisplay(false)}
+        >
+          <DisplaySettings prefs={prefs} onChange={setPrefs} />
+          <p className="small muted">
+            Each player chooses their own display settings on their screen (the <strong>DISPLAY</strong>{" "}
+            button, bottom right). They are never sent to the server or recorded.
+          </p>
+        </Popup>
+      )}
       <ToastView toast={fs.toast} />
+      <TooltipLayer />
     </div>
   );
 }

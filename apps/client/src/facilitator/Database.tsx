@@ -1,6 +1,18 @@
 import { normaliseParticipantCode } from "@wkwa/shared";
 import { useCallback, useEffect, useState } from "react";
-import { Button, Callout, Chip, Field, Icon, Panel, StatusTag, useConfirm } from "../ui";
+import {
+  Button,
+  Callout,
+  Check,
+  Chip,
+  Field,
+  Icon,
+  Panel,
+  Popup,
+  SeatDot,
+  StatusTag,
+  useConfirm,
+} from "../ui";
 import type { FacilitatorConnection } from "./connection";
 
 interface SessionSummary {
@@ -34,6 +46,13 @@ interface Lookup {
   exports: ExportRow[];
   previouslyErased: Array<{ executedWall: string }>;
 }
+interface Deletion {
+  id: number;
+  sessionId: string;
+  deletedWall: string;
+  rows: { events: number; telemetry: number };
+  participants: number;
+}
 interface Erasure {
   id: number;
   codeSha256: string;
@@ -57,7 +76,7 @@ const STATUS_TONE: Record<string, "live" | "warn" | "danger" | "neutral" | "prim
 
 /**
  * DATABASE tab, in order of use: 1 sessions (resume · replay · export · print)
- * → 2 exports register → 3 takedown / erasure → 4 erasure register.
+ * → 2 exports register → 3 takedown / erasure → 4 erasure register → 5 session deletions.
  */
 export function Database({
   conn,
@@ -75,10 +94,14 @@ export function Database({
   const [erasures, setErasures] = useState<Erasure[]>([]);
   const [lastExport, setLastExport] = useState<ExportResult | null>(null);
   const [filter, setFilter] = useState("");
+  const [cardsFor, setCardsFor] = useState<string | null>(null);
+  const [deletions, setDeletions] = useState<Deletion[]>([]);
+  const confirm = useConfirm();
   const refresh = useCallback(() => {
     conn.api<SessionSummary[]>("/api/sessions").then(setSessions, () => {});
     conn.api<ExportRow[]>("/api/exports").then(setExports, () => {});
     conn.api<Erasure[]>("/api/erasures").then(setErasures, () => {});
+    conn.api<Deletion[]>("/api/session-deletions").then(setDeletions, () => {});
   }, [conn]);
   useEffect(refresh, [refresh]);
 
@@ -91,6 +114,47 @@ export function Database({
       conn.toast(`${r.kind} export written`);
       refresh();
     }
+  };
+
+  const removeSession = async (s: SessionSummary) => {
+    const deleteExports = { current: false };
+    const ok = await confirm({
+      title: `Delete session ${s.id}`,
+      icon: "erase",
+      danger: true,
+      requireText: s.id,
+      confirmLabel: "Delete permanently",
+      message: (
+        <div className="col">
+          <p>
+            Deletes <strong>everything</strong> of this session from the database: {s.eventCount} events and{" "}
+            {s.telemetryCount} telemetry rows, including the participants' consent and demographics. This
+            cannot be undone.
+          </p>
+          <p className="muted">
+            A register entry (session id, row counts, hashes of the codes) is kept so the deletion can be
+            re-applied after restoring an older backup. Backups made before now still contain the session.
+          </p>
+          <DeleteExportsCheck onChange={(v) => (deleteExports.current = v)} />
+        </div>
+      ),
+    });
+    if (!ok) return;
+    const r = await conn
+      .api<{ rows: { events: number; telemetry: number }; exportPaths: string[]; exportsDeleted: boolean }>(
+        `/api/sessions/${s.id}/delete`,
+        { method: "POST", body: JSON.stringify({ confirm: s.id, deleteExports: deleteExports.current }) },
+      )
+      .catch(() => null);
+    if (!r) return;
+    conn.toast(
+      `Session ${s.id} deleted (${r.rows.events} events, ${r.rows.telemetry} telemetry rows)` +
+        (r.exportPaths.length && !r.exportsDeleted
+          ? ` — export folders still on disk: ${r.exportPaths.join(", ")}`
+          : ""),
+      r.exportPaths.length && !r.exportsDeleted ? "warn" : "ok",
+    );
+    refresh();
   };
 
   const shown = sessions.filter(
@@ -106,7 +170,7 @@ export function Database({
         title={`1 · Sessions · ${sessions.length}`}
         icon="database"
         actions={
-          <Button size="sm" icon="refresh" onClick={refresh}>
+          <Button size="sm" icon="refresh" tip="Reload the session list and registers" onClick={refresh}>
             Refresh
           </Button>
         }
@@ -165,6 +229,7 @@ export function Database({
                           <Button
                             size="sm"
                             icon="resumeSession"
+                            tip="Attach this unfinished session again (e.g. after a server restart). Players re-join their seats automatically."
                             onClick={() =>
                               conn
                                 .cmd("session:resume", { sessionId: s.id }, "Session resumed")
@@ -174,19 +239,34 @@ export function Database({
                             Resume
                           </Button>
                         )}
-                        <Button size="sm" icon="replay" onClick={() => onReplay(s.id)}>
+                        <Button
+                          size="sm"
+                          icon="replay"
+                          tip="Watch the session again in REPLAY: 1 s per action, pausing at each round end."
+                          onClick={() => onReplay(s.id)}
+                        >
                           Replay
                         </Button>
-                        <Button size="sm" icon="export" onClick={() => void doExport(s.id, "export")}>
+                        <Button
+                          size="sm"
+                          icon="export"
+                          tip="Write a pseudonymised export (CSV + JSON + codebook) with participant codes, for analysis. Store it on institutional storage."
+                          onClick={() => void doExport(s.id, "export")}
+                        >
                           Export
                         </Button>
-                        <Button size="sm" icon="anonymise" onClick={() => void doExport(s.id, "anonymise")}>
+                        <Button
+                          size="sm"
+                          icon="anonymise"
+                          tip="Write an anonymised export: participant codes replaced by random ids, mapping discarded. For publishing or archiving."
+                          onClick={() => void doExport(s.id, "anonymise")}
+                        >
                           Anonymised
                         </Button>
                         <Button
                           size="sm"
                           icon="keysheet"
-                          title="Key sheet"
+                          tip="Open the printable key sheet (seat → code, names written by hand). Print it; don't save it."
                           onClick={() =>
                             void conn.openPrintable(`/api/sessions/${s.id}/print/keysheet`).catch(() => {})
                           }
@@ -196,11 +276,22 @@ export function Database({
                         <Button
                           size="sm"
                           icon="cards"
-                          onClick={() =>
-                            void conn.openPrintable(`/api/sessions/${s.id}/print/cards`).catch(() => {})
-                          }
+                          tip="Download each participant's takedown card as its own PDF (one per seat)."
+                          onClick={() => setCardsFor(s.id)}
                         >
                           Cards
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="danger"
+                          icon="erase"
+                          tip="Permanently delete the whole session from the database (asks for confirmation)."
+                          disabled={
+                            s.id === attachedId && !["closed", "aborted", "game_complete"].includes(s.status)
+                          }
+                          onClick={() => void removeSession(s)}
+                        >
+                          Delete
                         </Button>
                       </div>
                     </td>
@@ -272,6 +363,31 @@ export function Database({
               </table>
             </div>
           </Panel>
+          <Panel title={`5 · Session deletions · ${deletions.length}`} icon="register">
+            <div className="col">
+              <span className="hint">
+                Deleted sessions, kept to re-apply a deletion after restoring an older backup.
+              </span>
+              <table className="grid">
+                <tbody>
+                  {deletions.map((d) => (
+                    <tr key={d.id}>
+                      <td className="mono small">{d.sessionId}</td>
+                      <td className="small">{when(d.deletedWall)}</td>
+                      <td className="small">
+                        {d.participants} participants · {d.rows.events} ev · {d.rows.telemetry} tel
+                      </td>
+                    </tr>
+                  ))}
+                  {deletions.length === 0 && (
+                    <tr>
+                      <td className="faint">None.</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </Panel>
           <Panel title={`4 · Erasure register · ${erasures.length}`} icon="register">
             <div className="col">
               <span className="hint">
@@ -312,7 +428,89 @@ export function Database({
           </Panel>
         </div>
       </div>
+      {cardsFor && <CardsPopup conn={conn} sessionId={cardsFor} onClose={() => setCardsFor(null)} />}
     </div>
+  );
+}
+
+function DeleteExportsCheck({ onChange }: { onChange: (v: boolean) => void }) {
+  const [v, setV] = useState(false);
+  return (
+    <Check
+      label="Also delete this session's export folders on this computer"
+      hint="Copies elsewhere (research drive, USB) must be deleted by hand."
+      checked={v}
+      onChange={(x) => {
+        setV(x);
+        onChange(x);
+      }}
+    />
+  );
+}
+
+/** One takedown card PDF per seat (participant), downloaded individually. */
+function CardsPopup({
+  conn,
+  sessionId,
+  onClose,
+}: {
+  conn: FacilitatorConnection;
+  sessionId: string;
+  onClose: () => void;
+}) {
+  const [seats, setSeats] = useState<number[] | null>(null);
+  useEffect(() => {
+    conn.api<{ seats: number[] }>(`/api/sessions/${sessionId}/cards`).then(
+      (r) => setSeats(r.seats),
+      () => setSeats([]),
+    );
+  }, [conn, sessionId]);
+  return (
+    <Popup
+      title="Takedown cards"
+      icon="cards"
+      width={560}
+      onClose={onClose}
+      footer={
+        <>
+          <span className="spacer" />
+          <Button icon="close" kbd="Esc" onClick={onClose}>
+            Done
+          </Button>
+        </>
+      }
+    >
+      <p className="small muted">
+        One A6 PDF per participant ({sessionId}). Print each and hand it to the participant of that seat. The
+        PDFs contain the participant code: delete the downloaded files after printing.
+      </p>
+      {seats === null && <span className="muted cursor">Loading</span>}
+      {seats?.length === 0 && <span className="faint">No seat has a participant code in this session.</span>}
+      <div className="col">
+        {seats?.map((seat) => (
+          <div key={seat} className="row">
+            <SeatDot seat={seat} />
+            <strong>SEAT {seat}</strong>
+            <span className="spacer" />
+            <Button
+              size="sm"
+              icon="export"
+              tip={`Download takedown-card-${sessionId}-seat${seat}.pdf`}
+              onClick={() =>
+                void conn
+                  .download(
+                    `/api/sessions/${sessionId}/cards/${seat}`,
+                    `takedown-card-${sessionId}-seat${seat}.pdf`,
+                  )
+                  .catch(() => {})
+              }
+            >
+              Card PDF
+            </Button>
+          </div>
+        ))}
+      </div>
+    </Popup>
   );
 }
 
@@ -397,7 +595,12 @@ function ErasurePanel({ conn, onDone }: { conn: FacilitatorConnection; onDone: (
             placeholder="WK-XXXX-XXXX-X"
             style={{ flex: 1 }}
           />
-          <Button type="submit" icon="search" disabled={!code}>
+          <Button
+            type="submit"
+            icon="search"
+            disabled={!code}
+            tip="Find every session and row that holds this participant code"
+          >
             Look up
           </Button>
         </form>
@@ -439,7 +642,12 @@ function ErasurePanel({ conn, onDone }: { conn: FacilitatorConnection; onDone: (
                 </Field>
                 <div className="row">
                   <span className="spacer" />
-                  <Button variant="danger" icon="erase" onClick={() => void erase()}>
+                  <Button
+                    variant="danger"
+                    icon="erase"
+                    tip="Erase all data of this participant (asks you to type the code again)"
+                    onClick={() => void erase()}
+                  >
                     Erase…
                   </Button>
                 </div>

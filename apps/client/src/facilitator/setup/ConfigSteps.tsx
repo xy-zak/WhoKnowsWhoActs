@@ -8,7 +8,7 @@ import {
 } from "@wkwa/shared";
 import { useEffect, useMemo, useState } from "react";
 import { MapView } from "../../map/MapView";
-import { Button, Callout, Check, Chip, Field, Icon, StatusTag, THEME_LABEL, useConfirm } from "../../ui";
+import { Button, Callout, Check, Chip, Field, Icon, StatusTag, useConfirm } from "../../ui";
 import type { FacilitatorConnection } from "../connection";
 import type { Draft } from "./draft";
 
@@ -253,8 +253,6 @@ export function PlayersStep({ d, upd }: { d: Draft; upd: Upd }) {
   const c = d.config;
   const vis = (patch: Partial<SessionConfig["visibility"]>) =>
     setCfg(d, upd, { visibility: { ...c.visibility, ...patch } });
-  const app = (patch: Partial<SessionConfig["appearance"]>) =>
-    setCfg(d, upd, { appearance: { ...c.appearance, ...patch } });
   return (
     <div className="grid-2" style={{ alignItems: "start" }}>
       <div className="col">
@@ -316,43 +314,16 @@ export function PlayersStep({ d, upd }: { d: Draft; upd: Upd }) {
         />
       </div>
       <div className="col">
-        <h3>Player screen appearance</h3>
+        <h3>Player screens</h3>
+        <Callout icon="display">
+          Display settings are <strong>each participant's own choice</strong>, made on their screen with the{" "}
+          <strong>DISPLAY</strong> button (bottom right): colours (Latte, Mocha, High contrast), font
+          (JetBrains Mono, OpenDyslexic, System font), text size (Small, Large) and animations (on/off).
+        </Callout>
         <span className="hint">
-          Identical on every player PC and recorded with the session (part of the experimental condition).
+          They are accessibility settings, so they stay on that PC and are never sent to the server or
+          recorded. Animations are always off when the PC's OS asks for reduced motion.
         </span>
-        <div className="row">
-          {(["mocha", "latte", "contrast"] as const).map((t) => (
-            <label key={t} className="check" style={{ alignItems: "center" }}>
-              <input
-                type="radio"
-                name="playerTheme"
-                checked={c.appearance.playerTheme === t}
-                onChange={() => app({ playerTheme: t })}
-              />
-              <span
-                data-theme={t}
-                style={{
-                  display: "inline-flex",
-                  gap: 6,
-                  alignItems: "center",
-                  padding: "6px 10px",
-                  border: "1px solid var(--control)",
-                  background: "var(--panel)",
-                  color: "var(--text)",
-                }}
-              >
-                <Icon name={t === "mocha" ? "themeDark" : t === "latte" ? "themeLight" : "themeContrast"} />
-                {THEME_LABEL[t].toUpperCase()}
-              </span>
-            </label>
-          ))}
-        </div>
-        <Check
-          label="Animations on player screens"
-          hint="Screen-switch, popup and connect/disconnect animations. No scanlines or glow. Always off for players whose OS requests reduced motion."
-          checked={c.appearance.playerAnimations}
-          onChange={(v) => app({ playerAnimations: v })}
-        />
       </div>
     </div>
   );
@@ -531,11 +502,7 @@ export function ReviewStep({
     ],
     [2, "Highlights", c.clearHighlightsEachRound ? "cleared each round" : "kept across rounds"],
     [2, "Disconnect", c.pauseOnDisconnect ? "auto-pause" : "keep playing"],
-    [
-      2,
-      "Player screens",
-      `${c.appearance.playerTheme.toUpperCase()} · animations ${c.appearance.playerAnimations ? "on" : "off"}`,
-    ],
+    [2, "Player screens", "display settings: each player's own choice (not recorded)"],
     [
       3,
       "Onboarding",

@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════════════════════════════════
- * WhoKnowsWhoActs — base stylesheet (TUI look).
+ * Who Knows, Who Acts? — base stylesheet (TUI look).
  * Colours come ONLY from the semantic tokens injected by ui/tokens.ts.
  * Rules: docs/AESTHETIC-RULES.md
  * ═══════════════════════════════════════════════════════════════════════════ */
@@ -20,6 +20,36 @@
   --s5: 24px;
   --radius: 2px;
   --statusbar-h: 26px;
+  --icon-scale: 1;
+  --map-text: 1;
+}
+
+/* ─── display settings (accessibility, per browser — see ui/prefs.ts) ─── */
+:root[data-font="dyslexic"] {
+  --font: "OpenDyslexic", "Comic Sans MS", sans-serif;
+}
+/* dyslexia style guides advise against ALL CAPS and extra letter-spacing: OpenDyslexic gets neither */
+:root[data-font="dyslexic"] *,
+:root[data-font="dyslexic"] *::before,
+:root[data-font="dyslexic"] *::after {
+  /* biome-ignore lint/complexity/noImportantStyles: an accessibility override must beat every component rule */
+  text-transform: none !important;
+  /* biome-ignore lint/complexity/noImportantStyles: an accessibility override must beat every component rule */
+  letter-spacing: normal !important;
+}
+:root[data-font="system"] {
+  --font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+/* "Large": every size token steps up ~25 % (spacing stays on the 8 px grid) */
+:root[data-scale="large"] {
+  --fs-micro: 14px;
+  --fs-meta: 15px;
+  --fs-body: 16px;
+  --fs-title: 19px;
+  --fs-heading: 25px;
+  --statusbar-h: 32px;
+  --icon-scale: 1.25;
+  --map-text: 1.3;
 }
 
 * {
@@ -989,20 +1019,20 @@ table.grid tr.selected {
   border-top: 1px dashed var(--frame);
   padding-top: var(--s3);
 }
-/* the review step has its own colour (--review), whatever its state */
-.acc-step.review {
+/* the two commit points (06 review & create, 10 start onboarding) have their own colour (--review), whatever their state */
+.acc-step.accent {
   border-color: var(--review);
 }
-.acc-step.review.current {
+.acc-step.accent.current {
   background: var(--review-bg);
   box-shadow: inset 3px 0 0 var(--review);
 }
-.acc-step.review .acc-head .title,
-.acc-step.review .acc-head .num,
-.acc-step.review .acc-head .glyph {
+.acc-step.accent .acc-head .title,
+.acc-step.accent .acc-head .num,
+.acc-step.accent .acc-head .glyph {
   color: var(--review);
 }
-.acc-step.review .callout {
+.acc-step.accent .callout {
   border-left-color: var(--review);
 }
 /* expanding is ordinary UI motion (not a CRT effect): short fade/slide, none with reduced motion */
@@ -1023,4 +1053,163 @@ table.grid tr.selected {
   .acc-body {
     animation: none;
   }
+}
+
+/* ─── tooltips (data-tip; one global layer, see ui/Tooltip.tsx) ─── */
+.tooltip {
+  position: fixed;
+  z-index: 200;
+  max-width: 280px;
+  padding: 5px 8px;
+  font-size: var(--fs-meta);
+  line-height: 1.4;
+  color: var(--text);
+  background: var(--sunken);
+  border: 1px solid var(--control);
+  border-radius: var(--radius);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
+  pointer-events: none;
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 400;
+}
+
+/* ─── display settings: segmented radio groups ─── */
+.segmented {
+  border: none;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+.segmented legend {
+  padding: 0;
+  margin-bottom: var(--s1);
+  font-size: var(--fs-micro);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+}
+.segmented-opts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s1);
+}
+.segmented-opt {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border: 1px solid var(--control);
+  border-radius: var(--radius);
+  background: var(--sunken);
+  color: var(--text);
+  font-size: var(--fs-meta);
+}
+.segmented-opt:hover {
+  border-color: var(--text);
+}
+.segmented-opt.on {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: var(--on-accent);
+  font-weight: 700;
+}
+/* the radio itself is visually hidden; its focus shows on the label */
+.segmented-opt input {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+}
+.segmented-opt:has(input:focus-visible) {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+/* ─── player: DISPLAY button + panel (bottom right, above popups) ─── */
+.display-menu {
+  position: fixed;
+  right: var(--s3);
+  bottom: var(--s3);
+  z-index: 150;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--s2);
+}
+.display-panel {
+  width: min(420px, calc(100vw - 2 * var(--s3)));
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+}
+
+/* ─── setup wayfinder: pinned to the top while scrolling, filled with the primary colour ─── */
+.wayfinder {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  padding: var(--s2) var(--s3);
+  background: var(--primary);
+  color: var(--on-accent);
+  border: 1px solid var(--primary);
+  border-radius: var(--radius);
+  box-shadow: 0 6px 16px -8px rgba(0, 0, 0, 0.45);
+}
+.wayfinder .hint,
+.wayfinder .muted {
+  color: var(--on-accent);
+}
+.wayfinder kbd {
+  color: var(--on-accent);
+  border-color: var(--on-accent);
+  background: transparent;
+}
+.wayfinder .btn {
+  background: var(--panel);
+}
+.wayfinder-strip {
+  display: grid;
+  grid-template-columns: repeat(10, minmax(0, 1fr));
+  gap: var(--s1);
+}
+.wayfinder-strip button {
+  font: inherit;
+  font-size: var(--fs-micro);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+  padding: 2px 6px;
+  color: var(--on-accent);
+  background: transparent;
+  border: 1px dashed var(--on-accent);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+.wayfinder-strip button.done,
+.wayfinder-strip button.locked {
+  border-style: solid;
+}
+.wayfinder-strip button.current {
+  background: var(--on-accent);
+  color: var(--primary);
+  border-style: solid;
+  font-weight: 700;
+}
+.wayfinder-strip button:disabled:not(.current) {
+  cursor: default;
+}
+.wayfinder-strip button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--on-accent) 15%, transparent);
+}
+/* keep a step's head clear of the pinned wayfinder and the status bar when scrolled to */
+.acc-step {
+  scroll-margin-top: calc(var(--wayfinder-h, 90px) + var(--s2));
+  scroll-margin-bottom: calc(var(--statusbar-h) + var(--s2));
 }

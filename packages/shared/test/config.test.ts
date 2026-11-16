@@ -35,27 +35,22 @@ describe("session tags", () => {
   });
 });
 
-describe("player appearance", () => {
-  it("defaults to Mocha with CRT on and is passed to every player", () => {
-    const log = readySession({ appearance: { playerTheme: "latte", playerAnimations: false } });
-    for (let seat = 1; seat <= 4; seat++) {
-      expect(playerView(log.state, testScenario, seat, null, 0).appearance).toEqual({
-        playerTheme: "latte",
-        playerAnimations: false,
-      });
-    }
-    expect(parseSessionConfig({}).appearance).toEqual({ playerTheme: "mocha", playerAnimations: true });
+describe("display settings are not session data", () => {
+  it("is not part of the config or the player view", () => {
+    const log = readySession();
+    expect("appearance" in log.state.config).toBe(false);
+    expect("appearance" in playerView(log.state, testScenario, 1, null, 0)).toBe(false);
   });
 
-  it("upgrades the legacy appearance.playerCrt flag", () => {
-    expect(parseSessionConfig({ appearance: { playerTheme: "latte", playerCrt: false } }).appearance).toEqual(
-      {
-        playerTheme: "latte",
-        playerAnimations: false,
-      },
-    );
+  it("drops the legacy appearance block (playerTheme / playerCrt / playerAnimations)", () => {
+    const cfg = parseSessionConfig({
+      appearance: { playerTheme: "latte", playerCrt: false, playerAnimations: false },
+    });
+    expect("appearance" in cfg).toBe(false);
   });
+});
 
+describe("legacy configs", () => {
   it("replays old SessionCreated events that still use `condition`", () => {
     const log = readySession();
     const ev = log.events[0]!;

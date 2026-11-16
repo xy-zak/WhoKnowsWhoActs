@@ -1,6 +1,6 @@
 # Aesthetic rules
 
-The rules every screen of WhoKnowsWhoActs follows: the facilitator manager and the player screens alike. They keep the interface **intentional and consistent**: a calm terminal (TUI) look with Catppuccin colours (plus a high-contrast theme), JetBrains Mono, Iconoir icons and CRT-style animations. When you add UI, follow these rules and go through the [checklist](#11-checklist-for-new-ui).
+The rules every screen of *Who Knows, Who Acts?* follows: the facilitator manager and the player screens alike. They keep the interface **intentional and consistent**: a calm terminal (TUI) look with Catppuccin colours (plus a high-contrast theme), JetBrains Mono, Iconoir icons and CRT-style animations. When you add UI, follow these rules and go through the [checklist](#11-checklist-for-new-ui).
 
 Implementation: `apps/client/src/ui/`. That folder holds the tokens, base stylesheet, animation layer (`crt.css`) and components. Components must use the semantic tokens, components and icons defined there, **never raw colours, ad-hoc fonts or direct icon imports**.
 
@@ -58,8 +58,8 @@ The table below is generated from `apps/client/src/ui/tokens.ts`.
 | `--warn` | Warnings, attention needed (paused, idle, waiting) | `#b24608 (peach −30%)` | `#fab387 (peach)` | `#ffb84d` |
 | `--danger` | Destructive actions and errors (always with an icon) | `#c80e36 (red −5%)` | `#f38ba8 (red)` | `#ff7070` |
 | `--focus` | Keyboard focus ring, selection outline | `#8136e3 (mauve −5%)` | `#cba6f7 (mauve)` | `#ff5cff` |
-| `--review` | Review / summary before an irreversible commit (setup step 06) — nothing else | `#505fb1 (lavender −30%)` | `#b4befe (lavender)` | `#d2b4ff` |
-| `--review-bg` | Tinted background of the review step | `#e3e6f6 (base + 10% lavender)` | `#2a2b3f (base + 8% lavender)` | `#1a1028` |
+| `--review` | The two setup commit points: 06 review & create, 10 start onboarding — nothing else | `#505fb1 (lavender −30%)` | `#b4befe (lavender)` | `#d2b4ff` |
+| `--review-bg` | Tinted background of the commit steps (06, 10) | `#e3e6f6 (base + 10% lavender)` | `#2a2b3f (base + 8% lavender)` | `#1a1028` |
 | `--on-accent` | Text on a filled accent (primary/live/danger buttons, LIVE badge) | `#eff1f5 (base)` | `#11111b (crust)` | `#000000` |
 | `--propose` | MAP ONLY: propose highlight (hatch + dashed outline) | `#df8e1d (yellow)` | `#f9e2af (yellow)` | `#ffe600` |
 | `--propose-text` | Text/icons that refer to proposing (tool button, legend) | `#915c13 (yellow −35%)` | `#f9e2af (yellow)` | `#ffe600` |
@@ -75,10 +75,22 @@ The table below is generated from `apps/client/src/ui/tokens.ts`.
 
 <!-- END GENERATED: aesthetic-tokens -->
 
-**Who picks the theme:**
+**Who picks the display settings:**
 
-- **Facilitator:** a personal preference. It follows the OS light/dark setting at first; `T` (or the status bar) cycles Latte → Mocha → High contrast. It is remembered per browser and is not research data.
-- **Players:** the **session** decides, via `appearance.playerTheme` (`latte` | `mocha` | `contrast`, default `mocha`) and `appearance.playerAnimations` (default on), set in setup step 03. This is recorded in `SessionCreated`, so every participant in a session sees the same screen and the dataset says which. Players have no toggle.
+**Every screen picks its own display settings: colours, font, text size and animations. They are accessibility settings, never session settings.**
+
+| Setting | Options (default first) |
+| --- | --- |
+| Colours | Latte · Mocha · High contrast (default: what the OS asks for) |
+| Font | JetBrains Mono · OpenDyslexic · System font |
+| Text size | Small · Large (all `--fs-*` tokens, icons and map labels about 25 % bigger) |
+| Animations | On · Off |
+
+- **Facilitator:** the *DISPLAY* segment in the status bar (or `D`) opens the settings popup. Single keys cycle each setting: `T` colours, `F` font, `S` text size, `A` animations.
+- **Players:** a **DISPLAY** button in the bottom-right corner of every player screen opens a small panel with the same four settings. It stays reachable above popups, and `Esc` closes it.
+- **Storage:** remembered per browser (`localStorage`). **Never sent to the server or logged**: a choice like High contrast or OpenDyslexic could hint at a visual impairment or dyslexia.
+- **Default colours:** whatever the OS asks for. *More contrast* or forced colours → High contrast; otherwise dark → Mocha and light → Latte.
+- Implementation: `ui/prefs.ts` (stores) and `ui/DisplaySettings.tsx` (the shared controls) set `data-theme`, `data-font`, `data-scale` and `data-crt` on `<html>`; `theme.css` maps them to tokens.
 
 ### 2.2 Reserved meanings
 
@@ -89,7 +101,7 @@ The table below is generated from `apps/client/src/ui/tokens.ts`.
 | `--warn` (peach) | Needs attention: paused, idle, waiting, unfocused | Errors |
 | `--danger` (red) | Destructive actions and errors, **always with an icon** | Emphasis |
 | `--focus` (mauve) | Keyboard focus ring, selected map region | Anything else |
-| `--review` / `--review-bg` (lavender) | The **review** step of setup (06): the one place where everything is checked before the irreversible *Create session* | Anything else |
+| `--review` / `--review-bg` (lavender) | The two **commit points** of setup: 06 review (everything is checked before the irreversible *Create session*) and 10 start onboarding (locks the seats and goes LIVE) | Anything else |
 | `--propose` / `--propose-text` (yellow) | **Map only**: propose highlight (hatch + dashed outline), and text/icons that refer to proposing | Warnings, chrome |
 | `--decide` / `--decide-text` (red) | **Map only**: decide highlight (fill + solid outline), and text/icons that refer to deciding | — (shares red with danger; context and icons separate them) |
 | `--seat-1…4` (peach, sapphire, green, mauve) | Identity of a seat, **always next to the seat number** | Status. Seat 3's green is an identity colour, not "OK". |
@@ -137,7 +149,11 @@ Every pair that carries text or UI meaning is checked automatically (`apps/clien
 
 ## 3. Typography
 
-**JetBrains Mono** (weights 400 and 700 only, no italics) everywhere, self-hosted via `@fontsource`, so it works offline on the session LAN. Ligatures are off; numbers align naturally in a monospace font.
+**JetBrains Mono** (weights 400 and 700 only, no italics) everywhere by default, self-hosted via `@fontsource`, so it works offline on the session LAN. Ligatures are off; numbers align naturally in a monospace font.
+
+The font is a display setting (§ 2.1). **OpenDyslexic** (also self-hosted) and the **System font** replace it through the `--font` token. Components therefore never name a font; they inherit `--font`. With OpenDyslexic, UPPERCASE and letter spacing are switched off everywhere, as dyslexia style guides advise. Printables (key sheet, takedown cards) always use JetBrains Mono.
+
+The sizes below are the **Small** (default) text size. **Large** steps every token up: 14 / 15 / 16 / 19 / 25 px. Use the `--fs-*` tokens, never fixed pixel sizes, so both sizes work.
 
 | Step | Size | Use |
 | --- | --- | --- |
@@ -235,6 +251,9 @@ Every pair that carries text or UI meaning is checked automatically (`apps/clien
 | `themeLight` | `SunLight` | Switch to the light theme (Latte) |
 | `themeDark` | `HalfMoon` | Switch to the dark theme (Mocha) |
 | `themeContrast` | `Brightness` | Switch to the high-contrast theme |
+| `display` | `Accessibility` | Display settings: colours, font, text size, animations |
+| `font` | `Text` | Font choice |
+| `textSize` | `TextArrowsUpDown` | Text size |
 | `animations` | `Sparks` | Toggle animations (CRT-style screen switches, popups, connect/disconnect) |
 
 <!-- END GENERATED: aesthetic-icons -->
@@ -278,6 +297,12 @@ Use a panel, not a popup, for anything that should stay visible while working. *
 - **Irreversible** actions (erasure) also require **typing** the participant code.
 - Destructive confirmations use the danger tone and a `danger-solid` confirm button. Enter does nothing there, so the user must click or tab to the button.
 
+**Hover helpers** (`<Button tip="…">`, one global tooltip layer in `ui/Tooltip.tsx`):
+
+- They say what a button does and what it touches (e.g. "Write a pseudonymised export … with participant codes").
+- They appear on hover after 350 ms and immediately on keyboard focus. Screen readers get the same text as the button's description.
+- They are never the only place for information that is needed to act safely; confirmations say it again.
+
 **Toasts** (bottom right, above the status bar):
 
 - One at a time, prefixed `[ OK ]`, `[WARN]`, `[FAIL]` or `[INFO]`.
@@ -292,7 +317,8 @@ Use a panel, not a popup, for anything that should stay visible while working. *
 - **Setup:** ten steps as a **vertical accordion** of collapsible panels (`01 SCENARIO`, `02 ROUNDS`, … `10 START`). Exactly one step, the current one, is expanded, with Back and Next/Create/Start in its footer. *Next* collapses it into a one-line summary and expands the next step below.
   - The headers are the stepper: glyph, number, title and the step's summary, so the whole setup can be read at a glance.
   - Finished steps can be reopened by clicking their header. Steps 01–06 lock (■) once the session is created.
-  - **06 REVIEW** has its own colour (`--review`, § 2.2).
+  - A blue **wayfinder bar** is pinned to the top of the page while you scroll. It shows `▶ STEP nn/10 · TITLE`, the keys, and a strip of all ten steps (`✓ 01 Scenario`, `▶ 03 Players`, `· 04 Onboarding`, …); click a finished step to reopen it. Steps scrolled into view stop below the bar.
+  - The two commit points, **06 REVIEW & CREATE** and **10 START ONBOARDING**, have their own colour (`--review`, § 2.2).
   - `Enter` in a step moves to the next one; `N` jumps to the current step. The draft survives reloads.
 - **Live:** a lifecycle stepper `ONBOARDING → ROUND 1 → … → ROUND N → WRAP-UP`, plus a **NEXT** panel with the single next action and its key (`N`).
 - **Players:** a stepper `CONSENT → ABOUT YOU → BRIEFING → READY` during onboarding, and a status line (round, quotas, timer) during the game.
@@ -317,8 +343,8 @@ Ordinary UI motion that is **not** part of the CRT style: an accordion step fade
 
 - **Never animate data.** Maps, highlights, quotas, tables and timers update instantly, especially during a round. Only chrome animates.
 - Nothing loops: no blinking cursors, pulsing dots or flicker except the one-off state changes above. The block cursor `█` is static.
-- **`prefers-reduced-motion: reduce` switches off every animation.** The facilitator can also toggle animations with `A` (status bar: *ANIMATIONS ON/OFF*).
-- For players, animations are a **session setting** (`appearance.playerAnimations`), recorded in the data, so they are part of the experimental condition. They are not a per-PC accident.
+- **`prefers-reduced-motion: reduce` switches off every animation.**
+- Otherwise animations are a display setting of each screen (§ 2.1): the facilitator toggles them with `A` or the DISPLAY popup, each player in their DISPLAY panel. They are not recorded.
 
 ## 10. Keyboard
 
@@ -329,8 +355,8 @@ TUI-style single keys. They are ignored while typing in a field, while a popup i
 | `1` `2` `3` | SETUP/LIVE, REPLAY, DATABASE | — |
 | `N` | Do the NEXT action (setup: jump to the current step) | — |
 | `P` | Pause / resume the round | Propose tool |
-| `D` | — | Decide tool |
-| `T` / `A` | Next theme (Latte → Mocha → High contrast) / animations on/off | — |
+| `D` | Display settings popup | Decide tool |
+| `T` / `F` / `S` / `A` | Next colour theme / next font / text size Small ↔ Large / animations on/off | — (DISPLAY button) |
 | `?` | Shortcut help | — |
 | `Enter` / `Esc` | Primary action (setup: next step) / close a popup | Confirm / cancel an action |
 
@@ -338,12 +364,13 @@ TUI-style single keys. They are ignored while typing in a field, while a popup i
 
 - [ ] Uses only semantic tokens (`var(--…)`): no hex values or Catppuccin names in components.
 - [ ] Every colour use matches its reserved meaning (§ 2.2). New pairs are added to `CONTRAST_PAIRS`, and the tests pass.
-- [ ] Text uses the type scale (§ 3); UPPERCASE only for structure.
+- [ ] Text uses the type-scale tokens (§ 3), no fixed pixel sizes and no named fonts; UPPERCASE only for structure.
 - [ ] Spacing on the 8 px grid; 2 px corners.
 - [ ] Icons only via `<Icon name>`. Any new concept is added to `ICON_TABLE` **and** `ICONS`.
 - [ ] The content sits in a `Panel` with an UPPERCASE title; one primary action per view.
 - [ ] Long step-by-step flow → accordion (§ 8); short interrupting flow → `Popup` with stepper and `STEP nn/NN`. Destructive → `useConfirm({ danger: true })`. Irreversible → `requireText`.
 - [ ] Order of events visible: where am I, what is next?
-- [ ] Works in Latte, Mocha **and** High contrast, with animations on **and** off, and with reduced motion.
+- [ ] Works in Latte, Mocha **and** High contrast; in JetBrains Mono, OpenDyslexic **and** the system font; at Small **and** Large text; with animations on **and** off, and with reduced motion.
 - [ ] Keyboard reachable; focus visible (`--focus`); icon-only buttons have a `title`.
+- [ ] Buttons whose effect isn't obvious from the label (exports, printables, deletions) get a hover/focus helper: `<Button tip="…">`.
 - [ ] Run `npm run docs:generate` if tokens or icons changed.

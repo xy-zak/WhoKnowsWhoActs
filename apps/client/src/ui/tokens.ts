@@ -157,13 +157,13 @@ const DEFS: Array<{
   },
   {
     token: "review",
-    role: "Review / summary before an irreversible commit (setup step 06) — nothing else",
+    role: "The two setup commit points: 06 review & create, 10 start onboarding — nothing else",
     value: (t) => accent(t, "lavender"),
     source: (t) => (t === "latte" ? "lavender −30%" : "lavender"),
   },
   {
     token: "review-bg",
-    role: "Tinted background of the review step",
+    role: "Tinted background of the commit steps (06, 10)",
     value: (t) => mix(cat(t, "base"), cat(t, "lavender"), t === "latte" ? 0.1 : 0.08),
     source: (t) => `base + ${t === "latte" ? 10 : 8}% lavender`,
   },

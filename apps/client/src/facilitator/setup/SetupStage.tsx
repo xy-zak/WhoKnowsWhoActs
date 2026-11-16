@@ -1,5 +1,13 @@
 import { normaliseTags, pairingName, type SessionConfig, seatList } from "@wkwa/shared";
-import { type KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type CSSProperties,
+  type KeyboardEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useStore } from "../../net/store";
 import {
   Button,
@@ -7,7 +15,6 @@ import {
   Check,
   Icon,
   type IconName,
-  Panel,
   StatusTag,
   type StepDef,
   useConfirm,
@@ -51,6 +58,9 @@ export const SETUP_STEPS: Array<StepDef & { icon: IconName; title: string }> = [
 ];
 const LAST_CONFIG = 5;
 const REVIEW = 5;
+const START = 9;
+/** Steps drawn in the accent (review) colour: the two "commit" points of the setup. */
+const ACCENT_STEPS = new Set([REVIEW, START]);
 
 /**
  * SETUP: the ten steps as a vertical accordion. Exactly one step (the current
@@ -73,6 +83,16 @@ export function SetupStage({ conn }: { conn: FacilitatorConnection }) {
   const [urls, setUrls] = useState<Array<{ url: string; iface: string }>>([]);
   const stepRefs = useRef<Array<HTMLElement | null>>([]);
   const didMount = useRef(false);
+  const wayRef = useRef<HTMLElement | null>(null);
+  const [wayH, setWayH] = useState(90);
+  // the pinned wayfinder's height keeps scrolled-to steps clear of it (scroll-margin-top)
+  useEffect(() => {
+    const el = wayRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => setWayH(Math.ceil(el.getBoundingClientRect().height)));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   const upd = useCallback((patch: Partial<Draft>) => {
     setDraftState((cur) => {
@@ -119,6 +139,12 @@ export function SetupStage({ conn }: { conn: FacilitatorConnection }) {
   };
   const locked = (i: number) => lobby && i <= LAST_CONFIG;
   const firstOpenLobbyStep = !allBound ? 6 : !labelled ? 7 : !keySheet ? 8 : 9;
+  const reachable = (i: number) =>
+    !locked(i) &&
+    ((i !== step && done(i)) ||
+      (!lobby && i <= (draft?.reached ?? 0)) ||
+      (lobby && i >= 6 && i <= firstOpenLobbyStep));
+  const glyphOf = (i: number) => (i === step ? "▶" : locked(i) ? "■" : done(i) ? "✓" : "·");
   // when a session appears (created or resumed) jump to the lobby steps
   // biome-ignore lint/correctness/useExhaustiveDependencies: only when the attached lobby session changes
   useEffect(() => {
@@ -152,7 +178,6 @@ export function SetupStage({ conn }: { conn: FacilitatorConnection }) {
   };
 
   // bring the expanded step into view and focus its first field (not on the first render)
-  // biome-ignore lint/correctness/useExhaustiveDependencies: on step change only
   useEffect(() => {
     if (!didMount.current) {
       didMount.current = true;
@@ -198,7 +223,7 @@ export function SetupStage({ conn }: { conn: FacilitatorConnection }) {
   const next = () => {
     if (!canNext(step) || busy) return;
     if (step === REVIEW) return void create();
-    if (step === 9) return void startOnboarding();
+    if (step === START) return void startOnboarding();
     goTo(step + 1);
   };
   const back = () => {
@@ -252,7 +277,7 @@ export function SetupStage({ conn }: { conn: FacilitatorConnection }) {
       case 1:
         return `${cfg.roundCount} rounds · propose ${r.quota.propose ?? "∞"} · decide ${r.quota.decide ?? "∞"}${r.timeLimitSec ? ` · ${r.timeLimitSec}s` : ""}`;
       case 2:
-        return `${cfg.seatCount} seats · view ${cfg.viewAssignment === "byKnowledgeType" ? "follows K" : "manual"} · player screens ${cfg.appearance.playerTheme}${cfg.appearance.playerAnimations ? " + animations" : ""}`;
+        return `${cfg.seatCount} seats · view ${cfg.viewAssignment === "byKnowledgeType" ? "follows K" : "manual"}`;
       case 3:
         return (
           [
@@ -418,7 +443,7 @@ export function SetupStage({ conn }: { conn: FacilitatorConnection }) {
   const primary = (i: number): { label: string; icon: IconName } =>
     i === REVIEW
       ? { label: "Create session", icon: "create" }
-      : i === 9
+      : i === START
         ? { label: "Start onboarding", icon: "start" }
         : { label: "Next", icon: "next" };
   const blockedHint: Record<number, string> = {
@@ -428,43 +453,57 @@ export function SetupStage({ conn }: { conn: FacilitatorConnection }) {
   };
 
   return (
-    <div className="col" style={{ gap: "var(--s3)" }}>
-      <Panel title="Session setup" icon="setup">
+    <div className="col" style={{ gap: "var(--s3)", "--wayfinder-h": `${wayH}px` } as CSSProperties}>
+      <nav ref={wayRef} className="wayfinder" aria-label="Session setup steps">
         <div className="row">
-          <span className="strong t-primary">
+          <Icon name="setup" />
+          <span className="strong upper">Session setup</span>
+          <span className="strong">
             ▶ STEP {String(step + 1).padStart(2, "0")}/10 · {SETUP_STEPS[step]!.title.toUpperCase()}
           </span>
-          <span className="hint">
-            01–06 configure the session · 07–10 prepare the room · <kbd>Enter</kbd> next · <kbd>N</kbd>{" "}
-            current step
-          </span>
           <span className="spacer" />
+          <span className="hint">
+            01–06 configure · 07–10 prepare the room · <kbd>Enter</kbd> next · <kbd>N</kbd> current step
+          </span>
           {lobby && (
-            <Button variant="danger" icon="stop" onClick={() => void discard()}>
+            <Button variant="danger" size="sm" icon="stop" onClick={() => void discard()}>
               Discard session
             </Button>
           )}
         </div>
-        {!lobby && st && ["closed", "aborted"].includes(st.phase) && (
-          <p className="small muted" style={{ marginTop: "var(--s2)" }}>
-            Previous session {st.sessionId} is {st.phase}. Its data is in DATABASE; configure the next one
-            below.
-          </p>
-        )}
-      </Panel>
+        <div className="wayfinder-strip">
+          {SETUP_STEPS.map((def, i) => {
+            const cls = i === step ? "current" : locked(i) ? "locked" : done(i) ? "done" : "upcoming";
+            return (
+              <button
+                key={def.key}
+                type="button"
+                className={cls}
+                aria-current={i === step ? "step" : undefined}
+                disabled={i === step || !reachable(i)}
+                onClick={() => goTo(i)}
+                title={`${String(i + 1).padStart(2, "0")} ${def.title}${locked(i) ? " (locked)" : ""}`}
+              >
+                {glyphOf(i)} {String(i + 1).padStart(2, "0")} {def.label}
+              </button>
+            );
+          })}
+        </div>
+      </nav>
+      {!lobby && st && ["closed", "aborted"].includes(st.phase) && (
+        <p className="small muted" style={{ margin: 0 }}>
+          Previous session {st.sessionId} is {st.phase}. Its data is in DATABASE; configure the next one
+          below.
+        </p>
+      )}
 
       <div className="accordion">
         {SETUP_STEPS.map((def, i) => {
           const isCurrent = i === step;
           const isLocked = locked(i);
           const isDone = !isCurrent && done(i);
-          const reachable =
-            !isLocked &&
-            (isDone ||
-              (!lobby && i <= (draft?.reached ?? 0)) ||
-              (lobby && i >= 6 && i <= firstOpenLobbyStep));
           const state = isCurrent ? "current" : isDone ? "done" : "upcoming";
-          const glyph = isCurrent ? "▶" : isLocked ? "■" : isDone ? "✓" : "·";
+          const glyph = glyphOf(i);
           const p = primary(i);
           return (
             <section
@@ -472,14 +511,14 @@ export function SetupStage({ conn }: { conn: FacilitatorConnection }) {
               ref={(el) => {
                 stepRefs.current[i] = el;
               }}
-              className={`acc-step ${state}${i === REVIEW ? " review" : ""}${isLocked ? " locked" : ""}`}
+              className={`acc-step ${state}${ACCENT_STEPS.has(i) ? " accent" : ""}${isLocked ? " locked" : ""}`}
               data-step={def.key}
             >
               <button
                 type="button"
                 className="acc-head"
                 aria-expanded={isCurrent}
-                disabled={isCurrent || !reachable}
+                disabled={isCurrent || !reachable(i)}
                 onClick={() => goTo(i)}
                 title={isLocked ? "Locked: the session has been created" : undefined}
               >
@@ -489,12 +528,11 @@ export function SetupStage({ conn }: { conn: FacilitatorConnection }) {
                 <span className="title">{def.title}</span>
                 <span className="summary">{isCurrent ? "" : summary(i)}</span>
                 {isCurrent && (
-                  <StatusTag tone={i === REVIEW ? "neutral" : "primary"}>step {i + 1}/10</StatusTag>
+                  <StatusTag tone={ACCENT_STEPS.has(i) ? "neutral" : "primary"}>step {i + 1}/10</StatusTag>
                 )}
                 {isLocked && <StatusTag>locked</StatusTag>}
               </button>
               {isCurrent && (
-                // biome-ignore lint/a11y/noStaticElementInteractions: Enter anywhere in the step moves on (fields keep their own keys)
                 <div className="acc-body" onKeyDown={onBodyKey}>
                   {body(i)}
                   <div className="acc-foot">

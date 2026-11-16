@@ -1,12 +1,12 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { applyAppearance, installThemeStyles } from "../ui";
+import { applyAppearance, installThemeStyles, playerPrefs } from "../ui";
 import { App } from "./App";
 import { PlayerConnection } from "./connection";
 
 installThemeStyles();
-// until the session says otherwise (appearance is a session setting)
-applyAppearance("mocha", true);
+// the participant's own display settings (this browser only, not logged)
+applyAppearance(playerPrefs.store.get());
 const conn = new PlayerConnection();
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

@@ -308,7 +308,10 @@ Used by the dashboard's data pages and by scripts. **Localhost-only** unless `AD
 | `POST` | `/api/sessions/:id/export` | Write a standard (pseudonymised) export to `exports/` |
 | `POST` | `/api/sessions/:id/anonymise` | Write an anonymised export to `exports/` |
 | `GET` | `/api/sessions/:id/print/keysheet` | Printable key sheet (seat → code, blank name column) |
-| `GET` | `/api/sessions/:id/print/cards` | Printable takedown cards (one per seat) |
+| `GET` | `/api/sessions/:id/cards` | Seats that have a takedown card |
+| `GET` | `/api/sessions/:id/cards/:seat` | One takedown card as a PDF (A6, JetBrains Mono), downloaded as `takedown-card-<session>-seat<n>.pdf` |
+| `POST` | `/api/sessions/:id/delete` | Delete the entire session. Body `{ "confirm": "<session id>", "deleteExports"?: true }`. Refused (409) while it is running. |
+| `GET` | `/api/session-deletions` | Session-deletion register |
 | `GET` | `/api/participants/:code` | Look up a participant code (typos tolerated): sessions and row counts, exports containing it, earlier erasures |
 | `POST` | `/api/participants/:code/erase` | Erase all data of a code. Body `{ "confirm": "<code>", "note"?: "…" }` must repeat the code. Refused (409) while the participant is in a session that is still running. |
 | `GET` | `/api/erasures` | Erasure register |

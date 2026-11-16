@@ -138,14 +138,27 @@ describe("GDPR tooling", () => {
     expect(readManifest(r.dir).codeHashes).toEqual([]);
   });
 
-  it("produces printable key sheet and takedown cards", async () => {
+  it("produces a key sheet in the app font and one takedown-card PDF per seat", async () => {
     const sheet = await (await fetch(`${srv.url}/api/sessions/${sessionId}/print/keysheet`)).text();
-    const cards = await (await fetch(`${srv.url}/api/sessions/${sessionId}/print/cards`)).text();
-    for (const c of codes) {
-      expect(sheet).toContain(c);
-      expect(cards).toContain(c);
-    }
+    for (const c of codes) expect(sheet).toContain(c);
     expect(sheet).toContain("CONFIDENTIAL");
+    expect(sheet).toContain('font-family: "JetBrains Mono"');
+    expect(sheet).toContain("data:font/woff2;base64,"); // font embedded: works offline and from a blob: URL
+
+    const list = (await (await fetch(`${srv.url}/api/sessions/${sessionId}/cards`)).json()) as {
+      seats: number[];
+    };
+    expect(list.seats).toEqual([1, 2, 3, 4]);
+    for (const seat of list.seats) {
+      const res = await fetch(`${srv.url}/api/sessions/${sessionId}/cards/${seat}`);
+      expect(res.status).toBe(200);
+      expect(res.headers.get("content-type")).toBe("application/pdf");
+      expect(res.headers.get("content-disposition")).toContain(`seat${seat}.pdf`);
+      const pdf = Buffer.from(await res.arrayBuffer());
+      expect(pdf.subarray(0, 5).toString()).toBe("%PDF-");
+      expect(pdf.includes(Buffer.from("JetBrainsMono"))).toBe(true); // the app font is embedded
+    }
+    expect((await fetch(`${srv.url}/api/sessions/${sessionId}/cards/9`)).status).toBe(404);
   });
 
   it("refuses REST erasure without the typed confirmation", async () => {
@@ -259,5 +272,71 @@ describe("public repository safety", () => {
 
   it("normalises codes the way participants type them", () => {
     expect(normaliseParticipantCode("not a code")).toBeNull();
+  });
+});
+
+describe("deleting a whole session", () => {
+  let srv: TestServer;
+  beforeAll(async () => {
+    srv = await startTestServer();
+  });
+  afterAll(async () => {
+    await srv.close();
+    cleanup(srv.dir);
+  });
+
+  it("requires the typed session id, refuses a running session, then removes everything", async () => {
+    const r = await setupSession(
+      srv.url,
+      { roundCount: 1, defaultRound: { quota: { propose: 1, decide: 1 } } },
+      4,
+      {
+        minDelayMs: 5,
+        maxDelayMs: 15,
+      },
+    );
+    const id = r.sessionId;
+    const post = (body: unknown) =>
+      fetch(`${srv.url}/api/sessions/${id}/delete`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    expect((await post({ confirm: "S-WRONG" })).status).toBe(400);
+    expect((await post({ confirm: id })).status).toBe(409); // still running
+    await r.fac.cmd("round:start");
+    await r.fac.waitForDashboard((d) => d.state?.phase === "game_complete", 20_000);
+    for (const b of r.bots) await b.flushTelemetry();
+    exportSession(
+      { store: srv.ctx.store, scenarios: srv.ctx.scenarios, exportsDir: srv.runtime.exportsDir },
+      id,
+    );
+    const exportDir = path.join(srv.runtime.exportsDir, id);
+    expect(existsSync(exportDir)).toBe(true);
+
+    const res = await post({ confirm: id, deleteExports: true });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      rows: { events: number; telemetry: number };
+      exportsDeleted: boolean;
+    };
+    expect(body.rows.events).toBeGreaterThan(20);
+    expect(body.rows.telemetry).toBeGreaterThan(0);
+    expect(body.exportsDeleted).toBe(true);
+    expect(existsSync(exportDir)).toBe(false);
+
+    const db = srv.ctx.db;
+    for (const t of ["events", "telemetry", "exports"]) {
+      expect(db.prepare(`SELECT count(*) AS n FROM ${t} WHERE session_id = ?`).get(id)).toEqual({ n: 0 });
+    }
+    expect(srv.ctx.store.getSession(id)).toBeUndefined();
+    expect(srv.ctx.hub.session).toBeNull(); // detached
+    const reg = (await (await fetch(`${srv.url}/api/session-deletions`)).json()) as Array<{
+      sessionId: string;
+      participants: number;
+    }>;
+    expect(reg).toMatchObject([{ sessionId: id, participants: 4 }]);
+    for (const b of r.bots) b.stop();
+    r.fac.close();
   });
 });

@@ -281,7 +281,7 @@ export function MapView(props: MapViewProps) {
                     y={ay - 16 * unit}
                     textAnchor="middle"
                     className="map-name"
-                    style={{ fontSize: 12 * unit }}
+                    style={{ fontSize: `calc(${12 * unit}px * var(--map-text, 1))` }}
                   >
                     {r.name}
                   </text>
@@ -292,7 +292,7 @@ export function MapView(props: MapViewProps) {
                     y={ay + 5 * unit}
                     textAnchor="middle"
                     className="map-label"
-                    style={{ fontSize: 15 * unit }}
+                    style={{ fontSize: `calc(${15 * unit}px * var(--map-text, 1))` }}
                   >
                     {label}
                   </text>

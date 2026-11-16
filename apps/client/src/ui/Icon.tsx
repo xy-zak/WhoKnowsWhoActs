@@ -1,4 +1,5 @@
 import {
+  Accessibility,
   Activity,
   AntennaSignal,
   Archive,
@@ -50,6 +51,8 @@ import {
   Sparks,
   SunLight,
   SystemRestart,
+  Text,
+  TextArrowsUpDown,
   TextBox,
   Timer,
   Trash,
@@ -133,6 +136,9 @@ export const ICONS: Record<IconName, IconComponent> = {
   themeLight: SunLight,
   themeDark: HalfMoon,
   themeContrast: Brightness,
+  display: Accessibility,
+  font: Text,
+  textSize: TextArrowsUpDown,
   animations: Sparks,
 };
 
@@ -143,6 +149,10 @@ export function Icon({ name, size = 16, label }: { name: IconName; size?: 16 | 2
     <C
       width={size}
       height={size}
+      style={{
+        width: `calc(${size}px * var(--icon-scale, 1))`,
+        height: `calc(${size}px * var(--icon-scale, 1))`,
+      }}
       strokeWidth={1.5}
       className="icon"
       aria-hidden={label ? undefined : true}

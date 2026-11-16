@@ -117,7 +117,27 @@ export class FacilitatorConnection {
     return body as T;
   }
 
-  /** Open a printable server page (key sheet / cards) in a new tab, with auth. */
+  /** Download a server file (e.g. a takedown-card PDF) with auth, under the given file name. */
+  async download(path: string, filename: string) {
+    const headers = new Headers();
+    if (this.token) headers.set("authorization", `Bearer ${this.token}`);
+    const res = await fetch(path, { headers });
+    if (!res.ok) {
+      const msg = await res.text().catch(() => res.statusText);
+      this.toast(msg || `${res.status}`, "error");
+      throw new Error(msg);
+    }
+    const url = URL.createObjectURL(await res.blob());
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 30_000);
+  }
+
+  /** Open a printable server page (key sheet) in a new tab, with auth. */
   async openPrintable(path: string) {
     const html = await this.api<string>(path);
     const url = URL.createObjectURL(new Blob([html], { type: "text/html" }));

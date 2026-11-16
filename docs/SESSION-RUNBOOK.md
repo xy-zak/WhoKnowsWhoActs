@@ -1,6 +1,6 @@
 # Session runbook
 
-Step by step for running a WhoKnowsWhoActs session: one facilitator laptop as the server and four player PCs on the same local network. It covers preparation, the session itself, wrap-up, and what to do when something goes wrong.
+Step by step for running a *Who Knows, Who Acts?* session: one facilitator laptop as the server and four player PCs on the same local network. It covers preparation, the session itself, wrap-up, and what to do when something goes wrong.
 
 Background: [ARCHITECTURE.md](ARCHITECTURE.md) (how it works) · [NETWORKING.md](NETWORKING.md) (network set-up and troubleshooting) · [DATA-MANAGEMENT.md](DATA-MANAGEMENT.md) (GDPR and takedown) · [DATA-TYPES.md](DATA-TYPES.md) (what is logged) · [AESTHETIC-RULES.md](AESTHETIC-RULES.md) (UI conventions and keyboard shortcuts).
 
@@ -22,13 +22,13 @@ The facilitator manager has three tabs, in order of use:
 | --- | --- |
 | **[1] SETUP / LIVE** | One tab with two faces. **SETUP** walks you through ten steps, stacked as collapsible panels (an accordion): the current step is open, finished steps collapse into a one-line summary. After *Start onboarding* the tab flips to **LIVE**, and a green **● LIVE** indicator appears in the top bar; click it to come back from any tab. |
 | **[2] REPLAY** | Watch any recorded session again. Play shows every propose/decide action for 1 s and pauses at the end of each round (about 2 minutes for a default session of 3 × 4 × 10 actions); the slider and ⏮/⏭ move event by event or action by action. |
-| **[3] DATABASE** | Sessions, exports, printables (key sheet, takedown cards), takedown/erasure, erasure register. |
+| **[3] DATABASE** | Sessions (resume, replay, export, key sheet, takedown-card PDFs, **delete**), exports, takedown/erasure, erasure and deletion registers. Hover any button to see what it does. |
 
 ```mermaid
 flowchart TD
   A["npm start<br/>type the database passphrase"] --> S1
   subgraph SETUP["SETUP tab: 10 steps as an accordion, one open at a time"]
-    S1["01 Scenario"] --> S2["02 Rounds"] --> S3["03 Players and visibility<br/>incl. player screen theme / animations"] --> S4["04 Onboarding"] --> S5["05 Tags and notes"] --> S6["06 Review and CREATE"]
+    S1["01 Scenario"] --> S2["02 Rounds"] --> S3["03 Players and visibility"] --> S4["04 Onboarding"] --> S5["05 Tags and notes"] --> S6["06 Review and CREATE"]
     S6 --> S7["07 Connect and bind<br/>open the player URL on 4 PCs"] --> S8["08 Labels<br/>pairing: aligned or D1–D6<br/>+ K per seat"] --> S9["09 Print the key sheet"] --> S10["10 Start onboarding"]
   end
   S10 --> L1
@@ -39,9 +39,9 @@ flowchart TD
   W --> D["DATABASE: move the export to institutional storage<br/>lock away the key sheet, back up"]
 ```
 
-**Wayfinding.** In SETUP, each step's header shows `✓` done · `▶` current · `·` upcoming · `■` locked plus a summary; the review step (06) is coloured lavender. Wrap-up popups show `STEP nn/NN`. In LIVE, the **NEXT** panel always shows the single next action, and `N` does it.
+**Wayfinding.** In SETUP, a blue bar pinned to the top of the page shows the current step (`▶ STEP 03/10 · PLAYERS & VISIBILITY`) and a strip of all ten steps, even when you scroll; click a finished step to reopen it. Each step's header shows `✓` done · `▶` current · `·` upcoming · `■` locked plus a summary; the two commit points, review & create (06) and start onboarding (10), are coloured lavender. Wrap-up popups show `STEP nn/NN`. In LIVE, the **NEXT** panel always shows the single next action, and `N` does it.
 
-**Keyboard.** `1` `2` `3` switch tabs, `N` next action, `P` pause/resume, `T` theme (Latte → Mocha → High contrast), `A` animations on/off, `?` help. In a setup step `Enter` moves to the next step; in popups `Enter` is the primary action and `Esc` closes. The setup draft is kept in your browser.
+**Keyboard.** `1` `2` `3` switch tabs, `N` next action, `P` pause/resume, `D` display settings, `T` colours (Latte → Mocha → High contrast), `F` font (JetBrains Mono → OpenDyslexic → System font), `S` text size (Small ↔ Large), `A` animations on/off, `?` help. In a setup step `Enter` moves to the next step; in popups `Enter` is the primary action and `Esc` closes. The setup draft is kept in your browser.
 
 Approximate timing: 30 min setup, about 10 min onboarding, the rounds, 10 min wrap-up.
 
@@ -53,12 +53,12 @@ Approximate timing: 30 min setup, about 10 min onboarding, the rounds, 10 min wr
   - `config/briefing.md` (game instructions)
   - `config/study.json`: title, researcher, contact e-mail, retention statement and takedown text. These are shown on the consent screen, the end screen and the takedown cards.
 - [ ] **Scenario** ready in `scenarios/<id>/`: `scenario.json`, `map.svg` (one `<path id=… d=…>` per region, no transforms) and `views.json` (one view per K label: `Ka`–`Kd`). Setup step 01 shows a preview of each view, and lists errors under the scenario.
-- [ ] **Default session settings** in `config/session.default.json`: rounds, quotas, visibility, player-screen appearance. They pre-fill the setup wizard and can be changed per session.
+- [ ] **Default session settings** in `config/session.default.json`: rounds, quotas, visibility, onboarding. They pre-fill the setup wizard and can be changed per session.
 - [ ] **Software installed** on the facilitator laptop: `npm install && npm run build`. Run `npm test` once; it should be all green.
 - [ ] **Database passphrase chosen**, at least 5 random words. Store it in a password manager and/or a sealed envelope held by your supervisor. A lost passphrase means lost data: there is no recovery.
 - [ ] **Dry run** with bots: `npm start`, then `npm run bots -- --count 3` in a second terminal. Play the fourth seat yourself on another device. Tag practice sessions `pilot` (step 05), or use a separate data directory (`WKWA_DATA_DIR=data-pilot npm start`).
 - [ ] **Network** planned: ideally a dedicated router/switch without internet, with Wi-Fi "client isolation" off. See [NETWORKING.md](NETWORKING.md).
-- [ ] **Printer** reachable from the laptop. Key sheet and takedown cards are printed per session from the manager.
+- [ ] **Printer** reachable from the laptop. The key sheet and the takedown cards (one PDF per participant) are printed per session from the manager.
 
 ## 3. The day before a session
 
@@ -83,7 +83,7 @@ Approximate timing: 30 min setup, about 10 min onboarding, the rounds, 10 min wr
 | --- | --- |
 | **01 Scenario** | The map and datasets. Use the preview's view selector to check each view. |
 | **02 Rounds** | Number of rounds, rule (quotas or facilitator-ended), quotas per player, optional time limit, how the next round starts, per-round overrides. |
-| **03 Players & visibility** | Seats, how map views are assigned, what players see about each other, and the **player-screen appearance** (Mocha / Latte / High contrast, animations on/off). The appearance is identical for every PC and is recorded with the session. |
+| **03 Players & visibility** | Seats, how map views are assigned and what players see about each other. Display settings (colours, font, text size, animations) are **not** set here: each participant chooses them with the **DISPLAY** button on their screen, and they are not recorded. |
 | **04 Onboarding** | Consent, demographics, briefing. Turning consent off asks for confirmation: only for tests without participants. |
 | **05 Tags & notes** | Comma-separated **tags** (e.g. `pilot, condition-A`). They label the session in DATABASE and the exports. **Never use names.** |
 | **06 Review & create** | One summary of everything, with *Edit* links. **CREATE SESSION** writes it into `SessionCreated`; steps 01–06 are then locked (■). |
@@ -133,7 +133,7 @@ Every destructive action asks for confirmation in a popup.
 
 ### 4.5 Wrap-up (three popups)
 
-1. **Takedown cards:** every player's screen shows their participant code. *Print takedown cards*, cut them out, give each participant the card of their seat, then tick "Cards are handed out".
+1. **Takedown cards:** every player's screen shows their participant code. Download each seat's **Card PDF** (A6), print it and give it to that participant, then tick "Cards are handed out". Delete the downloaded PDFs after printing (they contain the codes).
 2. **Export:** *Export session* writes the pseudonymised export; the path is shown.
 3. **Close:** archives the session. The tab flips back to **SETUP** for the next session, and the finished session appears in DATABASE and REPLAY.
 
@@ -147,6 +147,8 @@ Debrief participants as your protocol requires.
 - [ ] **Backup:** `npm run cli -- backup --out …` to institutional storage.
 - [ ] Stop the server with `Ctrl+C`.
 - [ ] Optional: `npm run cli -- verify` (integrity check).
+
+**Practice or failed sessions:** delete them entirely in *DATABASE → Delete* (you type the session id to confirm), optionally with their export folders.
 
 **Takedown requests later on:** follow [DATA-MANAGEMENT.md § 10](DATA-MANAGEMENT.md#10-takedown-and-erasure-procedure).
 
@@ -164,7 +166,7 @@ Debrief participants as your protocol requires.
 | Player URL **does not load** | — | See [NETWORKING.md § troubleshooting](NETWORKING.md): firewall, wrong IP, Wi-Fi client isolation. Step 07 lists the URLs of every network interface. |
 | Player PC shows **"opened in another window"** | The same seat was opened twice | Close the extra tab; the newest window holds the seat. |
 | Manager says **ACCESS DENIED** | It was opened from another PC | Use `http://localhost:3000/facilitator` on the laptop, or start with `ADMIN_TOKEN=…` and open `/facilitator?token=…`. |
-| Animations are distracting / slow, or text is hard to read | CRT-style animations; theme | Manager: press `A` (animations) or `T` (theme, incl. High contrast). Players: in step 03 switch *Animations on player screens* off or choose *High contrast* (for the next session). Anyone whose OS requests reduced motion never gets animations. |
+| Animations are distracting / slow, or text is hard to read | Display settings | Manager: `D` (or the DISPLAY segment in the status bar), or directly `A` animations, `T` colours (incl. High contrast), `F` font (incl. OpenDyslexic), `S` text size. Players: the **DISPLAY** button in the bottom-right corner of their screen has the same four settings; show the participant where it is. Anyone whose OS requests reduced motion never gets animations. |
 | Everything is broken, you must stop | — | *Tools → Abort session* (with a reason). Data is kept and marked aborted; players see the end screen with their code. |
 
 ## 7. Printable checklist

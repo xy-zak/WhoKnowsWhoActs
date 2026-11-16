@@ -74,6 +74,9 @@ export const ICON_TABLE = {
   themeLight: { iconoir: "SunLight", meaning: "Switch to the light theme (Latte)" },
   themeDark: { iconoir: "HalfMoon", meaning: "Switch to the dark theme (Mocha)" },
   themeContrast: { iconoir: "Brightness", meaning: "Switch to the high-contrast theme" },
+  display: { iconoir: "Accessibility", meaning: "Display settings: colours, font, text size, animations" },
+  font: { iconoir: "Text", meaning: "Font choice" },
+  textSize: { iconoir: "TextArrowsUpDown", meaning: "Text size" },
   animations: {
     iconoir: "Sparks",
     meaning: "Toggle animations (CRT-style screen switches, popups, connect/disconnect)",

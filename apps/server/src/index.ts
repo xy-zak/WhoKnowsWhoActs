@@ -18,7 +18,7 @@ function lanAddresses(): string[] {
 async function main() {
   const runtime = runtimeFromEnv();
   const hv = harnessVersion();
-  console.log(`\nWhoKnowsWhoActs harness v${hv.version} (${hv.gitCommit})\n`);
+  console.log(`\nWho Knows, Who Acts? harness v${hv.version} (${hv.gitCommit})\n`);
   const dbFile = path.join(runtime.dataDir, "wkwa.db");
   let ctx: Awaited<ReturnType<typeof createApp>> | undefined;
   for (let attempt = 1; !ctx; attempt++) {

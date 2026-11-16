@@ -7,6 +7,9 @@
  *   anonymise --session S            anonymised export (codes → random ids, mapping discarded)
  *   erase    --code C [--yes] [--note TEXT]   erase all data of a participant
  *   erasures                         show the erasure register
+ *   delete-session --session S [--yes] [--delete-exports] [--note TEXT]
+ *                                    delete an ENTIRE session (irreversible)
+ *   deletions                        show the session-deletion register
  *   backup   --out FILE              encrypted backup copy of the database
  *   rekey                            change the database passphrase
  *   verify                           integrity check of the database
@@ -22,14 +25,16 @@ import { EVENT_DEFS, type EventType, TELEMETRY_DEFS, type TelemetryType } from "
 import { ScenarioLibrary } from "./content";
 import { backupDatabase, getMeta, openDatabase, rekeyDatabase } from "./db/database";
 import { Store } from "./db/store";
+import { deleteSession, listSessionDeletions } from "./gdpr/deleteSession";
 import { eraseParticipant, listErasures, lookupParticipant } from "./gdpr/erase";
 import { exportSession } from "./gdpr/exporter";
 import { obtainPassphrase, promptHidden } from "./passphrase";
 import { runtimeFromEnv } from "./runtime";
 
-const USAGE = `Usage: npm run cli -- <sessions|lookup|export|anonymise|erase|erasures|backup|rekey|verify> [options]
+const USAGE = `Usage: npm run cli -- <sessions|lookup|export|anonymise|erase|erasures|delete-session|deletions|backup|rekey|verify> [options]
   lookup --code C          export --session S       anonymise --session S
-  erase --code C [--yes] [--note TEXT]               backup --out FILE`;
+  erase --code C [--yes] [--note TEXT]               backup --out FILE
+  delete-session --session S [--yes] [--delete-exports] [--note TEXT]`;
 
 async function confirm(question: string): Promise<boolean> {
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
@@ -48,6 +53,7 @@ async function main() {
       out: { type: "string" },
       note: { type: "string", default: "" },
       yes: { type: "boolean", default: false },
+      "delete-exports": { type: "boolean", default: false },
     },
   });
   if (!command || command === "help" || command === "--help") {
@@ -142,6 +148,54 @@ async function main() {
             `#${e.id} ${e.executedWall}  sha256=${e.codeSha256.slice(0, 16)}…  sessions=${e.sessions.map((s) => s.sessionId).join(",")}  rows=${e.rows.events}+${e.rows.telemetry}${e.note ? `  note=${e.note}` : ""}`,
           );
         }
+        break;
+      }
+      case "delete-session": {
+        const id = need(values.session, "session");
+        const row = store.getSession(id);
+        if (!row) throw new Error(`Unknown session ${id}`);
+        const counts = store.listSessions().find((x) => x.id === id)!;
+        console.log(
+          `Session ${id} (${row.status}, created ${row.created_wall.slice(0, 16)}): ${counts.eventCount} events, ${counts.telemetryCount} telemetry rows.`,
+        );
+        console.log(
+          "If the server is running with this session attached, use the manager (DATABASE) instead.",
+        );
+        if (!values.yes) {
+          const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+          const typed = (await rl.question(`Type the session id (${id}) to delete it permanently: `)).trim();
+          rl.close();
+          if (typed !== id) {
+            console.log("Cancelled.");
+            break;
+          }
+        }
+        const r = deleteSession(store, id, {
+          exportsDir: runtime.exportsDir,
+          deleteExports: values["delete-exports"],
+          note: values.note,
+        });
+        console.log(
+          `Deleted ${r.rows.events} events, ${r.rows.telemetry} telemetry rows, ${r.rows.exports} export register rows. Register entry added.`,
+        );
+        if (r.exportPaths.length) {
+          console.log(
+            r.exportsDeleted
+              ? "Export folders deleted:"
+              : "Export folders still on disk (delete them on every copy):",
+          );
+          for (const p of r.exportPaths) console.log(`  ${p}`);
+        }
+        console.log("Backups made before now still contain the session.");
+        break;
+      }
+      case "deletions": {
+        const rows = listSessionDeletions(store);
+        if (rows.length === 0) console.log("Session-deletion register is empty.");
+        for (const d of rows)
+          console.log(
+            `#${d.id} ${d.deletedWall}  ${d.sessionId}  participants=${d.participants}  rows=${d.rows.events}+${d.rows.telemetry}${d.note ? `  note=${d.note}` : ""}`,
+          );
         break;
       }
       case "backup": {

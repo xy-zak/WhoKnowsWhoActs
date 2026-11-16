@@ -15,6 +15,5 @@
     "showOtherLabelsToPlayers": false,
     "showOthersProgress": true
   },
-  "tags": [],
-  "appearance": { "playerTheme": "mocha", "playerAnimations": true }
+  "tags": []
 }

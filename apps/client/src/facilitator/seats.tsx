@@ -290,7 +290,7 @@ export function LabelsEditor({
                 {DISSOCIATED_PAIRINGS.map((_, i) => {
                   const p: LabelPairing = { mode: "dissociated", id: i + 1 };
                   return (
-                    <option key={i} value={i + 1}>
+                    <option key={pairingText(p)} value={i + 1}>
                       D{i + 1} · {pairingText(p)}
                     </option>
                   );
