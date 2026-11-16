@@ -223,16 +223,6 @@ export function MapView(props: MapViewProps) {
             const hasPropose = hs.some((h) => h.kind === "propose");
             return (
               <g key={r.id}>
-                {hasDecide && (
-                  <path
-                    d={r.path}
-                    fill={DECIDE_COLOUR}
-                    fillOpacity={0.28}
-                    stroke={DECIDE_COLOUR}
-                    strokeWidth={4}
-                    vectorEffect="non-scaling-stroke"
-                  />
-                )}
                 {hasPropose && (
                   <path
                     d={r.path}
@@ -240,6 +230,16 @@ export function MapView(props: MapViewProps) {
                     stroke={PROPOSE_COLOUR}
                     strokeWidth={3.5}
                     strokeDasharray="10 6"
+                    vectorEffect="non-scaling-stroke"
+                  />
+                )}
+                {hasDecide && (
+                  <path
+                    d={r.path}
+                    fill={DECIDE_COLOUR}
+                    fillOpacity={0.28}
+                    stroke={DECIDE_COLOUR}
+                    strokeWidth={4}
                     vectorEffect="non-scaling-stroke"
                   />
                 )}

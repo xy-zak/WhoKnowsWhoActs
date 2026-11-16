@@ -1,4 +1,6 @@
-import { reduceEvents } from "@wkwa/shared";
+import { existsSync, readFileSync } from "node:fs";
+import path from "node:path";
+import { reduceEvents, SessionConfigSchema } from "@wkwa/shared";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import type { AppContext } from "../app";
 import { redactEvent } from "../net/hub";
@@ -19,6 +21,13 @@ export function registerApi(ctx: AppContext, guard: Guard) {
   }));
 
   app.get("/api/scenarios", opts, async () => scenarios.list());
+
+  /** Default session configuration for the setup form (config/session.default.json, validated). */
+  app.get("/api/config/session-defaults", opts, async () => {
+    const file = path.join(ctx.runtime.configDir, "session.default.json");
+    const raw = existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : {};
+    return SessionConfigSchema.parse(raw);
+  });
 
   app.get("/api/sessions", opts, async () => store.listSessions());
 
