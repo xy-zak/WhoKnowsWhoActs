@@ -1,5 +1,7 @@
 export * from "./config";
+export * from "./docgen";
 export * from "./events";
+export * from "./exportColumns";
 export * from "./ids";
 export * from "./labels";
 export * from "./meta";

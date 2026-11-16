@@ -252,7 +252,9 @@ export const EVENT_DEFS = {
     payload: z.object({
       round: z.number().int().min(1).describe("Round number (1-based)"),
       spec: RoundSpecSchema.describe("Effective round definition"),
-      startedBy: z.enum(["facilitator", "auto"]),
+      startedBy: z
+        .enum(["facilitator", "auto"])
+        .describe("Started by the facilitator, or automatically (roundAdvance = auto)"),
     }),
     example: {
       round: 1,
@@ -357,10 +359,10 @@ export const EVENT_DEFS = {
     frequency: "rare",
     payload: z.object({
       targetSeq: z.number().int().describe("seq of the ProposalMade/DecisionMade being revoked"),
-      targetType: z.enum(["ProposalMade", "DecisionMade"]),
+      targetType: z.enum(["ProposalMade", "DecisionMade"]).describe("Type of the revoked event"),
       targetSeat: SeatSchema.describe("Seat whose action was revoked"),
-      regionId: z.string(),
-      reason: z.string().max(200),
+      regionId: z.string().describe("Region of the revoked action"),
+      reason: z.string().max(200).describe("Facilitator's reason (free text, no personal data)"),
     }),
     example: {
       targetSeq: 57,
@@ -380,9 +382,11 @@ export const EVENT_DEFS = {
     dataClass: "non-personal",
     frequency: "roundCount per session",
     payload: z.object({
-      round: z.number().int().min(1),
-      reason: z.enum(["quota_met", "time_limit", "facilitator"]),
-      durationMs: Ms("Server time from RoundStarted to now, excluding nothing (pauses included)"),
+      round: z.number().int().min(1).describe("Round that ended (1-based)"),
+      reason: z
+        .enum(["quota_met", "time_limit", "facilitator"])
+        .describe("Why the round ended: all quotas used, time limit elapsed, or facilitator force-ended it"),
+      durationMs: Ms("Wall-clock server time from RoundStarted to RoundCompleted, pauses included"),
       pausedMs: Ms("Total time paused during the round"),
       actionCounts: z
         .record(z.string(), z.object({ propose: z.number().int(), decide: z.number().int() }))
@@ -406,7 +410,9 @@ export const EVENT_DEFS = {
     dataClass: "non-personal",
     frequency: "0–n",
     payload: z.object({
-      reason: z.enum(["facilitator", "disconnect"]),
+      reason: z
+        .enum(["facilitator", "disconnect"])
+        .describe("Paused by the facilitator, or automatically because a player disconnected"),
       seat: SeatSchema.nullable().describe("Seat that disconnected (reason = disconnect)"),
     }),
     example: { reason: "disconnect", seat: 3 },
@@ -461,8 +467,10 @@ export const EVENT_DEFS = {
     dataClass: "non-personal",
     frequency: "1 per session",
     payload: z.object({
-      roundsPlayed: z.number().int().min(0),
-      reason: z.enum(["all_rounds", "facilitator"]),
+      roundsPlayed: z.number().int().min(0).describe("Number of rounds started"),
+      reason: z
+        .enum(["all_rounds", "facilitator"])
+        .describe("All rounds were played, or the facilitator ended the game early"),
     }),
     example: { roundsPlayed: 3, reason: "all_rounds" },
   }),
@@ -487,7 +495,9 @@ export const EVENT_DEFS = {
     visibleTo: "Everyone",
     dataClass: "non-personal",
     frequency: "rare",
-    payload: z.object({ reason: z.string().max(200) }),
+    payload: z.object({
+      reason: z.string().max(200).describe("Facilitator's reason (free text, no personal data)"),
+    }),
     example: { reason: "network failure" },
   }),
 } as const;

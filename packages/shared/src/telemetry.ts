@@ -13,7 +13,8 @@ const Ms = (d: string) => z.number().min(0).describe(`${d} (milliseconds)`);
 export const TELEMETRY_DEFS = {
   screen_view: defineRecord({
     summary: "The player's client showed a new screen.",
-    trigger: "Client switches screen (waiting, consent, demographics, briefing, game, round_break, end, …).",
+    trigger:
+      "Client switches screen. Telemetry is only stored after consent, so pre-consent screens (waiting, lobby, consent, declined) never appear in the data.",
     actors: ["player"],
     changesState: false,
     visibleTo: "Facilitator",
@@ -49,7 +50,7 @@ export const TELEMETRY_DEFS = {
     dataClass: "pseudonymous",
     frequency: "tens to hundreds per seat per round",
     payload: z.object({
-      regionId: z.string(),
+      regionId: z.string().describe("Hovered region"),
       durationMs: Ms("Hover duration"),
     }),
     example: { regionId: "R04", durationMs: 1840 },
@@ -64,8 +65,8 @@ export const TELEMETRY_DEFS = {
     dataClass: "pseudonymous",
     frequency: "tens per seat per round",
     payload: z.object({
-      regionId: z.string(),
-      action: z.enum(["open", "close"]),
+      regionId: z.string().describe("Inspected region"),
+      action: z.enum(["open", "close"]).describe("Panel opened or closed"),
       durationMs: Ms("How long the panel was open (close only)").nullable(),
     }),
     example: { regionId: "R04", action: "close", durationMs: 5320 },
@@ -111,8 +112,10 @@ export const TELEMETRY_DEFS = {
     frequency: "≥ number of actions",
     payload: z.object({
       kind: ActionKindSchema,
-      regionId: z.string(),
-      outcome: z.enum(["opened", "cancelled", "confirmed"]),
+      regionId: z.string().describe("Region of the drafted action"),
+      outcome: z
+        .enum(["opened", "cancelled", "confirmed"])
+        .describe("Confirmation step opened, cancelled, or confirmed (confirmed → intent sent)"),
     }),
     example: { kind: "propose", regionId: "R07", outcome: "cancelled" },
   }),
@@ -125,7 +128,7 @@ export const TELEMETRY_DEFS = {
     visibleTo: "Facilitator (player card shows focus state)",
     dataClass: "pseudonymous",
     frequency: "0–n",
-    payload: z.object({ focused: z.boolean() }),
+    payload: z.object({ focused: z.boolean().describe("True = window has focus") }),
     example: { focused: false },
   }),
 
@@ -137,7 +140,7 @@ export const TELEMETRY_DEFS = {
     visibleTo: "Facilitator (player card shows visibility)",
     dataClass: "pseudonymous",
     frequency: "0–n",
-    payload: z.object({ visible: z.boolean() }),
+    payload: z.object({ visible: z.boolean().describe("True = tab is visible") }),
     example: { visible: true },
   }),
 
@@ -150,7 +153,7 @@ export const TELEMETRY_DEFS = {
     dataClass: "pseudonymous",
     frequency: "0–n",
     payload: z.object({
-      state: z.enum(["start", "end"]),
+      state: z.enum(["start", "end"]).describe("Idle period started or ended"),
       durationMs: Ms("Length of the idle period (end only)").nullable(),
     }),
     example: { state: "end", durationMs: 47210 },

@@ -1,0 +1,605 @@
+import type { DataClass } from "./meta";
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * EXPORT FILES — the contract between the server's exporter and the
+ * researcher's analysis scripts. Every file written to
+ *   exports/<sessionId>/<exportId>/          (standard, pseudonymised)
+ *   exports/<sessionId>/anon-<id>/           (anonymised)
+ * is described here, column by column. docs/DATA-TYPES.md and each export's
+ * codebook.md are generated from this list — change it here first.
+ *
+ * Conventions for every CSV:
+ *  - UTF-8, comma-separated, RFC 4180 quoting, header row, `\n` line ends.
+ *  - Empty cell = null / not applicable.
+ *  - Booleans are 0/1. Timestamps: `*_ts` = Unix epoch ms (may have decimals),
+ *    `*_wall` = ISO-8601 UTC string.
+ *  - Seat lists are space-separated seat numbers, e.g. "1 3".
+ *  - In anonymised exports the `participant_code` column holds a random
+ *    `A-XXXXXX` id instead (consistent within that export only).
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+export type ExportColumnType =
+  | "string"
+  | "integer"
+  | "number"
+  | "bool01"
+  | "epoch-ms"
+  | "iso-datetime"
+  | "seat-list"
+  | "json";
+
+export interface ExportColumn {
+  name: string;
+  type: ExportColumnType;
+  description: string;
+  /** Where the value comes from (event field, derivation rule, …). */
+  source: string;
+}
+
+/** Columns generated from the study config (one per consent item / demographic question). */
+export interface DynamicColumns {
+  /** e.g. `answer_<itemId>` — `<id>` is replaced by each id. */
+  pattern: string;
+  type: ExportColumnType;
+  description: string;
+  source: string;
+  /** Which config list provides the ids. */
+  idsFrom: "consentItems" | "demographicQuestions";
+}
+
+export interface ExportFileDef {
+  file: string;
+  format: "csv" | "json" | "md";
+  /** What one row (CSV) or the document (JSON/MD) represents. */
+  rowUnit: string;
+  description: string;
+  dataClass: DataClass;
+  columns: ExportColumn[];
+  dynamicColumns?: DynamicColumns;
+}
+
+const SESSION_ID: ExportColumn = {
+  name: "session_id",
+  type: "string",
+  description: "Session id, e.g. S-20261116-7KQ2",
+  source: "envelope.sessionId",
+};
+const SEAT: ExportColumn = {
+  name: "seat",
+  type: "integer",
+  description: "Seat number (1–4)",
+  source: "envelope.seat / SeatBound.seat",
+};
+const CODE: ExportColumn = {
+  name: "participant_code",
+  type: "string",
+  description: "Pseudonymous participant code (anonymised export: random A-XXXXXX id)",
+  source: "envelope.participantCode",
+};
+
+export const EXPORT_FILES: ExportFileDef[] = [
+  {
+    file: "session.json",
+    format: "json",
+    rowUnit: "one document per export",
+    description: "Session metadata: configuration, scenario, software version and a per-round summary.",
+    dataClass: "non-personal",
+    columns: [
+      {
+        name: "exportId",
+        type: "string",
+        description: "Id of this export",
+        source: "generated at export time",
+      },
+      {
+        name: "kind",
+        type: "string",
+        description: "'standard' (pseudonymised) or 'anonymised'",
+        source: "export request",
+      },
+      {
+        name: "exportedWall",
+        type: "iso-datetime",
+        description: "When the export was made",
+        source: "server clock",
+      },
+      { name: "sessionId", type: "string", description: "Session id", source: "sessions.id" },
+      {
+        name: "status",
+        type: "string",
+        description: "Session phase at export time",
+        source: "reduced state.phase",
+      },
+      {
+        name: "createdWall",
+        type: "iso-datetime",
+        description: "Session creation time",
+        source: "SessionCreated",
+      },
+      {
+        name: "scenario",
+        type: "json",
+        description: "{ id, title, version, hash } of the scenario used",
+        source: "SessionCreated.scenario",
+      },
+      {
+        name: "config",
+        type: "json",
+        description: "Full effective session configuration",
+        source: "SessionCreated.config",
+      },
+      {
+        name: "condition",
+        type: "string",
+        description: "Experimental condition label",
+        source: "SessionCreated.config.condition",
+      },
+      {
+        name: "notes",
+        type: "string",
+        description: "Researcher notes at creation",
+        source: "SessionCreated.notes",
+      },
+      {
+        name: "harness",
+        type: "json",
+        description: "{ version, gitCommit } of the harness software",
+        source: "SessionCreated.harness",
+      },
+      {
+        name: "rounds",
+        type: "json",
+        description: "[{ round, startedWall, endedWall, reason, durationMs, pausedMs }] per played round",
+        source: "RoundStarted + RoundCompleted",
+      },
+      {
+        name: "counts",
+        type: "json",
+        description: "{ events, telemetry, actions, players } row counts in this export",
+        source: "computed",
+      },
+    ],
+  },
+  {
+    file: "players.csv",
+    format: "csv",
+    rowUnit: "one row per seat that was bound at the end of the session",
+    description: "Who sat where, with which labels, and their onboarding status.",
+    dataClass: "pseudonymous",
+    columns: [
+      SESSION_ID,
+      SEAT,
+      CODE,
+      {
+        name: "terminal",
+        type: "integer",
+        description: "Terminal number of the browser bound to the seat",
+        source: "SeatBound.terminal",
+      },
+      {
+        name: "k_label",
+        type: "string",
+        description: "Knowledge type (Ka–Kd)",
+        source: "last LabelsAssigned",
+      },
+      { name: "p_label", type: "string", description: "Power type (Pa–Pd)", source: "last LabelsAssigned" },
+      {
+        name: "view",
+        type: "string",
+        description: "Map view id shown to the seat",
+        source: "last LabelsAssigned",
+      },
+      {
+        name: "consent_status",
+        type: "string",
+        description: "pending | given | declined | skipped",
+        source: "ConsentRecorded (skipped if consent step disabled)",
+      },
+      {
+        name: "consent_version",
+        type: "string",
+        description: "Consent form version answered",
+        source: "ConsentRecorded.formVersion",
+      },
+      {
+        name: "demographics_submitted",
+        type: "bool01",
+        description: "1 if the questionnaire was submitted",
+        source: "DemographicsSubmitted",
+      },
+      {
+        name: "briefing_acknowledged",
+        type: "bool01",
+        description: "1 if the briefing was confirmed",
+        source: "BriefingAcknowledged",
+      },
+      {
+        name: "withdrawn",
+        type: "bool01",
+        description: "1 if the participant withdrew",
+        source: "ParticipantWithdrawn",
+      },
+      {
+        name: "reconnects",
+        type: "integer",
+        description: "Number of reconnections during the session",
+        source: "PlayerConnected.reconnect",
+      },
+      {
+        name: "rejections",
+        type: "integer",
+        description: "Number of rejected propose/decide attempts",
+        source: "IntentRejected",
+      },
+    ],
+  },
+  {
+    file: "actions.csv",
+    format: "csv",
+    rowUnit: "one row per ProposalMade / DecisionMade event (revoked ones included, flagged)",
+    description: "Analysis-ready table of every map interaction with labels, timings and context.",
+    dataClass: "pseudonymous",
+    columns: [
+      SESSION_ID,
+      { name: "seq", type: "integer", description: "Event seq of the action", source: "envelope.seq" },
+      { name: "round", type: "integer", description: "Round number", source: "envelope.round" },
+      SEAT,
+      CODE,
+      {
+        name: "k_label",
+        type: "string",
+        description: "Knowledge type of the seat at action time",
+        source: "state",
+      },
+      {
+        name: "p_label",
+        type: "string",
+        description: "Power type of the seat at action time",
+        source: "state",
+      },
+      { name: "view", type: "string", description: "View of the seat at action time", source: "state" },
+      { name: "kind", type: "string", description: "propose | decide", source: "event type" },
+      { name: "region_id", type: "string", description: "Target region id", source: "payload.regionId" },
+      { name: "region_name", type: "string", description: "Target region name", source: "scenario regions" },
+      {
+        name: "server_ts",
+        type: "epoch-ms",
+        description: "Server time the action was accepted",
+        source: "envelope",
+      },
+      {
+        name: "server_wall",
+        type: "iso-datetime",
+        description: "Same as server_ts, human-readable",
+        source: "envelope",
+      },
+      {
+        name: "client_ts",
+        type: "epoch-ms",
+        description: "Client time of the confirm click, corrected to server time",
+        source: "envelope.clientTs",
+      },
+      {
+        name: "client_seq",
+        type: "integer",
+        description: "Client intent counter",
+        source: "envelope.clientSeq",
+      },
+      {
+        name: "ms_since_round_start",
+        type: "number",
+        description: "Server ms since the round started",
+        source: "payload.msSinceRoundStart",
+      },
+      {
+        name: "ms_since_prev_own_action",
+        type: "number",
+        description: "Server ms since this seat's previous action in the same round (empty for the first)",
+        source: "derived from server_ts",
+      },
+      {
+        name: "reaction_ms",
+        type: "number",
+        description:
+          "server_ts minus clientTs of this seat's latest state_received telemetry before the action (time from seeing the latest state to acting); empty if none",
+        source: "derived: telemetry state_received",
+      },
+      {
+        name: "quota_used",
+        type: "integer",
+        description: "Actions of this kind used by the seat this round, incl. this one",
+        source: "payload.quotaUsed",
+      },
+      {
+        name: "quota_limit",
+        type: "integer",
+        description: "Quota for this kind this round (empty = unlimited)",
+        source: "payload.quotaLimit",
+      },
+      {
+        name: "prior_proposals",
+        type: "seat-list",
+        description: "Seats that had proposed this region earlier this round",
+        source: "payload.priorProposals",
+      },
+      {
+        name: "prior_decisions",
+        type: "seat-list",
+        description: "Seats that had decided this region earlier this round",
+        source: "payload.priorDecisions",
+      },
+      {
+        name: "revoked",
+        type: "bool01",
+        description: "1 if the facilitator revoked the action",
+        source: "ActionRevoked",
+      },
+      {
+        name: "revoked_by_seq",
+        type: "integer",
+        description: "seq of the ActionRevoked event (empty if not revoked)",
+        source: "ActionRevoked.seq",
+      },
+    ],
+  },
+  {
+    file: "events.csv",
+    format: "csv",
+    rowUnit: "one row per stored event",
+    description:
+      "The complete event log (envelope + JSON payload). DemographicsSubmitted payloads are redacted here — answers are only in demographics.csv.",
+    dataClass: "pseudonymous",
+    columns: [
+      SESSION_ID,
+      { name: "seq", type: "integer", description: "Position in the event log", source: "envelope.seq" },
+      {
+        name: "type",
+        type: "string",
+        description: "Event type (see DATA-TYPES.md)",
+        source: "envelope.type",
+      },
+      {
+        name: "actor_kind",
+        type: "string",
+        description: "player | facilitator | system",
+        source: "envelope.actorKind",
+      },
+      {
+        name: "seat",
+        type: "integer",
+        description: "Seat (empty for session-level events)",
+        source: "envelope.seat",
+      },
+      CODE,
+      {
+        name: "round",
+        type: "integer",
+        description: "Round at the time (0 = before round 1)",
+        source: "envelope.round",
+      },
+      { name: "server_ts", type: "epoch-ms", description: "Server timestamp", source: "envelope.serverTs" },
+      {
+        name: "server_wall",
+        type: "iso-datetime",
+        description: "Server wall-clock time",
+        source: "envelope.serverWall",
+      },
+      {
+        name: "client_ts",
+        type: "epoch-ms",
+        description: "Corrected client timestamp (player events only)",
+        source: "envelope.clientTs",
+      },
+      {
+        name: "client_seq",
+        type: "integer",
+        description: "Client intent counter",
+        source: "envelope.clientSeq",
+      },
+      {
+        name: "payload_json",
+        type: "json",
+        description: 'Event payload as JSON (DemographicsSubmitted → {"redacted":true})',
+        source: "events.payload_json",
+      },
+    ],
+  },
+  {
+    file: "telemetry.csv",
+    format: "csv",
+    rowUnit: "one row per stored telemetry item",
+    description: "Fine-grained UI behaviour (hover, inspect, pan/zoom, focus, idle, acks, clock sync).",
+    dataClass: "pseudonymous",
+    columns: [
+      { name: "id", type: "integer", description: "Telemetry row id", source: "telemetry.id" },
+      SESSION_ID,
+      SEAT,
+      CODE,
+      { name: "round", type: "integer", description: "Round when received", source: "telemetry.round" },
+      {
+        name: "type",
+        type: "string",
+        description: "Telemetry type (see DATA-TYPES.md)",
+        source: "telemetry.type",
+      },
+      {
+        name: "client_ts",
+        type: "epoch-ms",
+        description: "Corrected client timestamp",
+        source: "telemetry.client_ts",
+      },
+      {
+        name: "client_offset_ms",
+        type: "number",
+        description: "Clock offset the client applied",
+        source: "telemetry.client_offset_ms",
+      },
+      {
+        name: "server_ts",
+        type: "epoch-ms",
+        description: "Server receive time",
+        source: "telemetry.server_ts",
+      },
+      {
+        name: "server_wall",
+        type: "iso-datetime",
+        description: "Server receive time, human-readable",
+        source: "telemetry.server_wall",
+      },
+      {
+        name: "payload_json",
+        type: "json",
+        description: "Telemetry payload as JSON",
+        source: "telemetry.payload_json",
+      },
+    ],
+  },
+  {
+    file: "consent.csv",
+    format: "csv",
+    rowUnit: "one row per ConsentRecorded event",
+    description: "Consent answers per participant, one column per consent item.",
+    dataClass: "pseudonymous-sensitive",
+    columns: [
+      SESSION_ID,
+      { name: "seq", type: "integer", description: "Event seq", source: "envelope.seq" },
+      SEAT,
+      CODE,
+      {
+        name: "form_version",
+        type: "string",
+        description: "Consent form version",
+        source: "payload.formVersion",
+      },
+      {
+        name: "text_sha256",
+        type: "string",
+        description: "SHA-256 of the exact consent text shown",
+        source: "payload.textSha256",
+      },
+      {
+        name: "consented",
+        type: "bool01",
+        description: "1 if all required items were accepted",
+        source: "payload.consented",
+      },
+      {
+        name: "duration_ms",
+        type: "number",
+        description: "Time on the consent screen",
+        source: "payload.durationMs",
+      },
+      {
+        name: "server_wall",
+        type: "iso-datetime",
+        description: "When consent was recorded",
+        source: "envelope",
+      },
+    ],
+    dynamicColumns: {
+      pattern: "answer_<id>",
+      type: "bool01",
+      description: "Answer to consent item <id>",
+      source: "payload.answers[<id>]",
+      idsFrom: "consentItems",
+    },
+  },
+  {
+    file: "demographics.csv",
+    format: "csv",
+    rowUnit: "one row per DemographicsSubmitted event",
+    description: "Questionnaire answers (option values), one column per question.",
+    dataClass: "pseudonymous-sensitive",
+    columns: [
+      SESSION_ID,
+      SEAT,
+      CODE,
+      {
+        name: "form_version",
+        type: "string",
+        description: "Questionnaire version",
+        source: "payload.formVersion",
+      },
+      {
+        name: "duration_ms",
+        type: "number",
+        description: "Time on the questionnaire",
+        source: "payload.durationMs",
+      },
+      { name: "server_wall", type: "iso-datetime", description: "When submitted", source: "envelope" },
+    ],
+    dynamicColumns: {
+      pattern: "q_<id>",
+      type: "string",
+      description: "Selected option value for question <id> ('prefer_not_to_say' allowed)",
+      source: "payload.answers[<id>]",
+      idsFrom: "demographicQuestions",
+    },
+  },
+  {
+    file: "manifest.json",
+    format: "json",
+    rowUnit: "one document per export",
+    description:
+      "Inventory of the export, used to trace which exports contain a participant after an erasure request.",
+    dataClass: "pseudonymous",
+    columns: [
+      { name: "exportId", type: "string", description: "Id of this export", source: "generated" },
+      { name: "sessionId", type: "string", description: "Session exported", source: "sessions.id" },
+      { name: "kind", type: "string", description: "'standard' | 'anonymised'", source: "export request" },
+      {
+        name: "createdWall",
+        type: "iso-datetime",
+        description: "When the export was made",
+        source: "server clock",
+      },
+      {
+        name: "files",
+        type: "json",
+        description: "[{ name, rows, sha256 }] for every file in the folder (integrity check)",
+        source: "computed",
+      },
+      {
+        name: "codeHashes",
+        type: "json",
+        description:
+          "SHA-256 of every participant code contained (standard exports only; empty list in anonymised exports)",
+        source: "computed",
+      },
+    ],
+  },
+  {
+    file: "codebook.md",
+    format: "md",
+    rowUnit: "one document per export",
+    description:
+      "Human-readable data dictionary for this export (generated from the same definitions as this table).",
+    dataClass: "non-personal",
+    columns: [],
+  },
+];
+
+export function exportFile(name: string): ExportFileDef {
+  const f = EXPORT_FILES.find((x) => x.file === name);
+  if (!f) throw new Error(`Unknown export file ${name}`);
+  return f;
+}
+
+/** Expand a file's columns, including config-dependent dynamic columns. */
+export function expandColumns(
+  def: ExportFileDef,
+  ids: { consentItems?: string[]; demographicQuestions?: string[] } = {},
+): ExportColumn[] {
+  if (!def.dynamicColumns) return def.columns;
+  const d = def.dynamicColumns;
+  const list = ids[d.idsFrom] ?? [];
+  return [
+    ...def.columns,
+    ...list.map((id) => ({
+      name: d.pattern.replace("<id>", id),
+      type: d.type,
+      description: d.description.replace("<id>", id),
+      source: d.source.replace("<id>", id),
+    })),
+  ];
+}

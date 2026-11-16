@@ -192,6 +192,14 @@ export const MESSAGES: Record<string, MessageDef> = {
     schema: "{ reason: string }",
     logged: "—",
   },
+  rehello: {
+    namespace: "/player",
+    direction: "server→client",
+    description:
+      "A session was (re)attached on the server; the client re-sends `hello` with its stored seat token so its seat is re-claimed.",
+    schema: "{}",
+    logged: "—",
+  },
   state: {
     namespace: "/player",
     direction: "server→client",
