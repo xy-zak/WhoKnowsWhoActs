@@ -1,0 +1,29 @@
+# ─── Research data: NEVER commit (this repository is public) ───
+data/
+exports/
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+*.sqlcipher
+*.bak
+*.csv
+!scenarios/**/*.csv
+.env
+.env.*
+
+# ─── Build / tooling ───
+node_modules/
+dist/
+coverage/
+playwright-report/
+test-results/
+.vite/
+*.tsbuildinfo
+*.log
+
+# ─── Editors / OS ───
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json

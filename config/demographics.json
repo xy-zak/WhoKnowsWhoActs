@@ -1,0 +1,40 @@
+{
+  "version": "PLACEHOLDER-v0",
+  "intro": "A few background questions. Every question has a 'Prefer not to say' option.",
+  "questions": [
+    {
+      "id": "age_bracket",
+      "text": "What is your age?",
+      "options": [
+        { "value": "18_24", "label": "18–24" },
+        { "value": "25_34", "label": "25–34" },
+        { "value": "35_44", "label": "35–44" },
+        { "value": "45_plus", "label": "45 or older" },
+        { "value": "prefer_not_to_say", "label": "Prefer not to say" }
+      ]
+    },
+    {
+      "id": "field",
+      "text": "Which field best describes your study or work?",
+      "options": [
+        { "value": "design_arts", "label": "Design / arts" },
+        { "value": "engineering_it", "label": "Engineering / IT" },
+        { "value": "social_sciences", "label": "Social sciences" },
+        { "value": "business", "label": "Business / management" },
+        { "value": "other", "label": "Other" },
+        { "value": "prefer_not_to_say", "label": "Prefer not to say" }
+      ]
+    },
+    {
+      "id": "games_experience",
+      "text": "How often do you play board or video games?",
+      "options": [
+        { "value": "never", "label": "Never" },
+        { "value": "monthly", "label": "A few times a year / monthly" },
+        { "value": "weekly", "label": "Weekly" },
+        { "value": "daily", "label": "(Almost) daily" },
+        { "value": "prefer_not_to_say", "label": "Prefer not to say" }
+      ]
+    }
+  ]
+}

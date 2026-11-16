@@ -1,0 +1,45 @@
+{
+  "name": "whoknowswhoacts",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Research game harness: 4-player LAN map game with facilitator dashboard and GDPR-aware data pipeline.",
+  "license": "MIT",
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "build": "npm run build -w @wkwa/client",
+    "start": "tsx apps/server/src/index.ts",
+    "cli": "tsx apps/server/src/cli.ts",
+    "bots": "tsx apps/server/src/tools/bots.ts",
+    "typecheck": "tsc -p packages/shared && tsc -p apps/server && tsc -p apps/client",
+    "lint": "biome check .",
+    "format": "biome format --write .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "docs:generate": "tsx scripts/generate-docs.ts",
+    "docs:check": "tsx scripts/generate-docs.ts --check"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.6.8",
+    "@playwright/test": "^1.65.1",
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/node": "^26.6.6",
+    "mermaid": "^12.3.0",
+    "socket.io-client": "^4.8.4",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vitest": "^5.1.0"
+  },
+  "allowScripts": {
+    "better-sqlite3-multiple-ciphers@13.1.1": true,
+    "esbuild@0.28.2": true
+  }
+}

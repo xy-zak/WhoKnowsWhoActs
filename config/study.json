@@ -1,0 +1,10 @@
+{
+  "title": "WhoKnowsWhoActs — collaborative map decision study",
+  "institution": "[Institution]",
+  "researcher": "[Researcher name], MSc student",
+  "contactEmail": "[study contact e-mail]",
+  "supervisor": "[Supervisor name]",
+  "retention": "Pseudonymised research data are kept for [N] years after the thesis is completed, then anonymised or deleted, in line with [institution] research data policy.",
+  "takedownInstructions": "Keep this card. If you want your data removed from the study at any time, e-mail the contact address above and quote this code. You do not need to give a reason.",
+  "briefingMarkdownFile": "briefing.md"
+}

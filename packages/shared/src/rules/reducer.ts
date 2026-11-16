@@ -1,0 +1,207 @@
+import type { StoredEvent } from "../events";
+import { emptySeat, type GameState, initialState, type SeatState } from "../state";
+
+/**
+ * Apply one event to the state (mutates `state` in place and returns it).
+ *
+ * The reducer is the ONLY place game state changes. It must stay pure with
+ * respect to its inputs (no clocks, no randomness) so that replaying the
+ * event log always reproduces exactly the same state — on the server, in
+ * the facilitator's replay view, and in tests.
+ */
+export function applyEvent(state: GameState, ev: StoredEvent): GameState {
+  state.lastSeq = ev.seq;
+  state.lastTs = ev.serverTs;
+  const seatOf = (n: number | null | undefined): SeatState | undefined =>
+    n === null || n === undefined ? undefined : state.seats[n];
+
+  switch (ev.type) {
+    case "SessionCreated": {
+      const p = ev.payload;
+      state.sessionId = ev.sessionId;
+      state.createdTs = ev.serverTs;
+      state.config = p.config;
+      state.scenario = p.scenario;
+      state.regionIds = p.regionIds;
+      state.viewIds = p.viewIds;
+      state.phase = "lobby";
+      state.seats = {};
+      for (let i = 1; i <= p.config.seatCount; i++) state.seats[i] = emptySeat(i);
+      break;
+    }
+    case "SessionNote":
+      state.notes.push({ seq: ev.seq, text: ev.payload.text, serverTs: ev.serverTs });
+      break;
+    case "SeatBound": {
+      const s = seatOf(ev.payload.seat);
+      if (!s) break;
+      Object.assign(s, emptySeat(s.seat), {
+        k: s.k,
+        p: s.p,
+        view: s.view,
+        bound: true,
+        participantCode: ev.participantCode,
+        terminal: ev.payload.terminal,
+        bindingId: ev.payload.bindingId,
+        bindingSeq: ev.seq,
+      });
+      break;
+    }
+    case "SeatUnbound": {
+      const s = seatOf(ev.payload.seat);
+      if (!s) break;
+      Object.assign(s, emptySeat(s.seat), { k: s.k, p: s.p, view: s.view });
+      break;
+    }
+    case "LabelsAssigned":
+      for (const a of ev.payload.assignments) {
+        const s = seatOf(a.seat);
+        if (!s) continue;
+        s.k = a.k;
+        s.p = a.p;
+        s.view = a.view;
+      }
+      break;
+    case "OnboardingStarted":
+      state.phase = "onboarding";
+      state.onboardingSteps = ev.payload.steps;
+      for (const s of Object.values(state.seats)) {
+        if (!ev.payload.steps.includes("consent")) s.consent = "skipped";
+      }
+      break;
+    case "ConsentRecorded": {
+      const s = seatOf(ev.seat);
+      if (s) s.consent = ev.payload.consented ? "given" : "declined";
+      break;
+    }
+    case "DemographicsSubmitted": {
+      const s = seatOf(ev.seat);
+      if (s) s.demographics = true;
+      break;
+    }
+    case "BriefingAcknowledged": {
+      const s = seatOf(ev.seat);
+      if (s) s.briefing = true;
+      break;
+    }
+    case "PlayerConnected": {
+      const s = seatOf(ev.payload.seat);
+      if (!s) break;
+      s.connected = true;
+      if (ev.payload.reconnect) s.reconnects += 1;
+      s.everConnected = true;
+      break;
+    }
+    case "PlayerDisconnected": {
+      const s = seatOf(ev.payload.seat);
+      if (s) s.connected = false;
+      break;
+    }
+    case "RoundStarted":
+      state.phase = "round_active";
+      state.round = ev.payload.round;
+      state.roundSpec = ev.payload.spec;
+      state.roundStartedTs = ev.serverTs;
+      state.roundPausedMs = 0;
+      state.paused = false;
+      state.pauseReason = null;
+      state.pausedSince = null;
+      state.rounds.push({
+        round: ev.payload.round,
+        spec: ev.payload.spec,
+        startedTs: ev.serverTs,
+        endedTs: null,
+        reason: null,
+      });
+      break;
+    case "ProposalMade":
+    case "DecisionMade": {
+      state.actions.push({
+        seq: ev.seq,
+        kind: ev.type === "ProposalMade" ? "propose" : "decide",
+        seat: ev.seat ?? 0,
+        regionId: ev.payload.regionId,
+        round: state.round,
+        serverTs: ev.serverTs,
+        revoked: false,
+      });
+      const s = seatOf(ev.seat);
+      if (s) s.lastActionTs = ev.serverTs;
+      break;
+    }
+    case "IntentRejected": {
+      const s = seatOf(ev.seat);
+      if (s) s.rejections += 1;
+      break;
+    }
+    case "ActionRevoked": {
+      const a = state.actions.find((x) => x.seq === ev.payload.targetSeq);
+      if (a) a.revoked = true;
+      break;
+    }
+    case "RoundCompleted": {
+      if (state.paused && state.pausedSince !== null) state.roundPausedMs += ev.serverTs - state.pausedSince;
+      state.paused = false;
+      state.pauseReason = null;
+      state.pausedSince = null;
+      state.phase = "round_complete";
+      const r = state.rounds.find((x) => x.round === ev.payload.round);
+      if (r) {
+        r.endedTs = ev.serverTs;
+        r.reason = ev.payload.reason;
+      }
+      break;
+    }
+    case "GamePaused":
+      state.paused = true;
+      state.pauseReason = ev.payload.reason;
+      state.pausedSince = ev.serverTs;
+      break;
+    case "GameResumed":
+      if (state.pausedSince !== null) state.roundPausedMs += ev.serverTs - state.pausedSince;
+      state.paused = false;
+      state.pauseReason = null;
+      state.pausedSince = null;
+      break;
+    case "FacilitatorBroadcast":
+      state.broadcasts.push({ seq: ev.seq, text: ev.payload.text, serverTs: ev.serverTs });
+      break;
+    case "ParticipantWithdrawn": {
+      const s = seatOf(ev.payload.seat);
+      if (!s) break;
+      s.withdrawn = true;
+      s.connected = false;
+      if (ev.payload.by === "erasure") s.participantCode = null;
+      break;
+    }
+    case "GameCompleted":
+      state.phase = "game_complete";
+      state.endReason = ev.payload.reason;
+      state.paused = false;
+      break;
+    case "SessionClosed":
+      state.phase = "closed";
+      state.paused = false;
+      break;
+    case "SessionAborted":
+      state.phase = "aborted";
+      state.endReason = ev.payload.reason;
+      state.paused = false;
+      break;
+    default: {
+      const _exhaustive: never = ev;
+      void _exhaustive;
+    }
+  }
+  return state;
+}
+
+/** Fold a list of events into a fresh state (optionally only up to and including `uptoSeq`). */
+export function reduceEvents(events: readonly StoredEvent[], uptoSeq = Number.POSITIVE_INFINITY): GameState {
+  const state = initialState();
+  for (const ev of events) {
+    if (ev.seq > uptoSeq) break;
+    applyEvent(state, ev);
+  }
+  return state;
+}

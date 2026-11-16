@@ -1,0 +1,20 @@
+{
+  "seatCount": 4,
+  "roundCount": 3,
+  "defaultRound": { "rule": "quota", "quota": { "propose": 5, "decide": 5 }, "timeLimitSec": null },
+  "roundOverrides": {},
+  "roundAdvance": "facilitator",
+  "autoAdvanceDelaySec": 10,
+  "viewAssignment": "byKnowledgeType",
+  "allowDuplicateLabels": false,
+  "clearHighlightsEachRound": true,
+  "pauseOnDisconnect": true,
+  "onboarding": { "consent": true, "demographics": true, "briefing": true },
+  "visibility": {
+    "showActorToPlayers": true,
+    "showOwnLabels": true,
+    "showOtherLabelsToPlayers": false,
+    "showOthersProgress": true
+  },
+  "condition": ""
+}

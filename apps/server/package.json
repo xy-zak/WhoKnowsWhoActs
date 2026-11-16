@@ -1,0 +1,13 @@
+{
+  "name": "@wkwa/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@fastify/static": "^10.1.11",
+    "better-sqlite3-multiple-ciphers": "^13.1.1",
+    "fastify": "^5.12.8",
+    "pino": "^10.4.0",
+    "socket.io": "^4.8.4"
+  }
+}
