@@ -389,8 +389,11 @@ export class Hub {
     seat: number,
     msg: { clockOffsetMs: number; items: unknown[] },
   ): number {
-    const code = m.state.seats[seat]?.participantCode;
+    const seatState = m.state.seats[seat];
+    const code = seatState?.participantCode;
     if (!code || m.isFinal) return 0;
+    // No interaction telemetry is stored before the participant has consented.
+    if (seatState.consent !== "given" && seatState.consent !== "skipped") return 0;
     const items: TelemetryItem[] = [];
     for (const raw of msg.items) {
       const it = parseTelemetryItem(raw);

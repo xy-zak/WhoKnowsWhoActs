@@ -4,7 +4,7 @@
     "description": "Water-related information",
     "regions": {
       "R01": {
-        "fill": "#9ebcdc",
+        "fill": "#b7c5ce",
         "label": "28",
         "attributes": {
           "floodRisk": 28,
@@ -12,7 +12,7 @@
         }
       },
       "R02": {
-        "fill": "#2c6bab",
+        "fill": "#617d90",
         "label": "79",
         "attributes": {
           "floodRisk": 79,
@@ -20,7 +20,7 @@
         }
       },
       "R03": {
-        "fill": "#477eb7",
+        "fill": "#758e9f",
         "label": "67",
         "attributes": {
           "floodRisk": 67,
@@ -28,7 +28,7 @@
         }
       },
       "R04": {
-        "fill": "#a3bfde",
+        "fill": "#bac8d0",
         "label": "26",
         "attributes": {
           "floodRisk": 26,
@@ -36,7 +36,7 @@
         }
       },
       "R05": {
-        "fill": "#2767a9",
+        "fill": "#5e7b8e",
         "label": "81",
         "attributes": {
           "floodRisk": 81,
@@ -44,7 +44,7 @@
         }
       },
       "R06": {
-        "fill": "#b7cee6",
+        "fill": "#c9d4db",
         "label": "17",
         "attributes": {
           "floodRisk": 17,
@@ -52,7 +52,7 @@
         }
       },
       "R07": {
-        "fill": "#6896c5",
+        "fill": "#8ea3b1",
         "label": "52",
         "attributes": {
           "floodRisk": 52,
@@ -60,7 +60,7 @@
         }
       },
       "R08": {
-        "fill": "#6694c4",
+        "fill": "#8da2b0",
         "label": "53",
         "attributes": {
           "floodRisk": 53,
@@ -68,7 +68,7 @@
         }
       },
       "R09": {
-        "fill": "#3571af",
+        "fill": "#688395",
         "label": "75",
         "attributes": {
           "floodRisk": 75,
@@ -76,7 +76,7 @@
         }
       },
       "R10": {
-        "fill": "#3571af",
+        "fill": "#688395",
         "label": "75",
         "attributes": {
           "floodRisk": 75,
@@ -84,7 +84,7 @@
         }
       },
       "R11": {
-        "fill": "#8aaed3",
+        "fill": "#a7b8c3",
         "label": "37",
         "attributes": {
           "floodRisk": 37,
@@ -92,7 +92,7 @@
         }
       },
       "R12": {
-        "fill": "#b9cfe7",
+        "fill": "#cbd6dd",
         "label": "16",
         "attributes": {
           "floodRisk": 16,
@@ -106,7 +106,7 @@
     "description": "People and housing",
     "regions": {
       "R01": {
-        "fill": "#b35125",
+        "fill": "#8f7851",
         "label": "16937",
         "attributes": {
           "population": 16937,
@@ -114,7 +114,7 @@
         }
       },
       "R02": {
-        "fill": "#be6941",
+        "fill": "#9d8967",
         "label": "14178",
         "attributes": {
           "population": 14178,
@@ -122,7 +122,7 @@
         }
       },
       "R03": {
-        "fill": "#d59b7f",
+        "fill": "#beaf96",
         "label": "8099",
         "attributes": {
           "population": 8099,
@@ -130,7 +130,7 @@
         }
       },
       "R04": {
-        "fill": "#eed0bf",
+        "fill": "#dfd7c6",
         "label": "1821",
         "attributes": {
           "population": 1821,
@@ -138,7 +138,7 @@
         }
       },
       "R05": {
-        "fill": "#dfb199",
+        "fill": "#ccbfaa",
         "label": "5536",
         "attributes": {
           "population": 5536,
@@ -146,7 +146,7 @@
         }
       },
       "R06": {
-        "fill": "#f3dacb",
+        "fill": "#e6ded0",
         "label": "607",
         "attributes": {
           "population": 607,
@@ -154,7 +154,7 @@
         }
       },
       "R07": {
-        "fill": "#b85d33",
+        "fill": "#96815c",
         "label": "15525",
         "attributes": {
           "population": 15525,
@@ -162,7 +162,7 @@
         }
       },
       "R08": {
-        "fill": "#e5bca7",
+        "fill": "#d3c8b4",
         "label": "4198",
         "attributes": {
           "population": 4198,
@@ -170,7 +170,7 @@
         }
       },
       "R09": {
-        "fill": "#d39779",
+        "fill": "#bbac92",
         "label": "8624",
         "attributes": {
           "population": 8624,
@@ -178,7 +178,7 @@
         }
       },
       "R10": {
-        "fill": "#d8a287",
+        "fill": "#c2b49c",
         "label": "7327",
         "attributes": {
           "population": 7327,
@@ -186,7 +186,7 @@
         }
       },
       "R11": {
-        "fill": "#c16f49",
+        "fill": "#a28e6d",
         "label": "13400",
         "attributes": {
           "population": 13400,
@@ -194,7 +194,7 @@
         }
       },
       "R12": {
-        "fill": "#e3b7a1",
+        "fill": "#d0c4b0",
         "label": "4747",
         "attributes": {
           "population": 4747,
@@ -208,7 +208,7 @@
     "description": "Nature and biodiversity",
     "regions": {
       "R01": {
-        "fill": "#8ec09d",
+        "fill": "#adc0aa",
         "label": "4",
         "attributes": {
           "biodiversity": 4,
@@ -216,7 +216,7 @@
         }
       },
       "R02": {
-        "fill": "#187b3f",
+        "fill": "#5b8058",
         "label": "9",
         "attributes": {
           "biodiversity": 9,
@@ -224,7 +224,7 @@
         }
       },
       "R03": {
-        "fill": "#a6ceb0",
+        "fill": "#bdcdbb",
         "label": "3",
         "attributes": {
           "biodiversity": 3,
@@ -232,7 +232,7 @@
         }
       },
       "R04": {
-        "fill": "#2f8952",
+        "fill": "#6c8d68",
         "label": "8",
         "attributes": {
           "biodiversity": 8,
@@ -240,7 +240,7 @@
         }
       },
       "R05": {
-        "fill": "#479765",
+        "fill": "#7c9a78",
         "label": "7",
         "attributes": {
           "biodiversity": 7,
@@ -248,7 +248,7 @@
         }
       },
       "R06": {
-        "fill": "#a6ceb0",
+        "fill": "#bdcdbb",
         "label": "3",
         "attributes": {
           "biodiversity": 3,
@@ -256,7 +256,7 @@
         }
       },
       "R07": {
-        "fill": "#5fa578",
+        "fill": "#8ca789",
         "label": "6",
         "attributes": {
           "biodiversity": 6,
@@ -264,7 +264,7 @@
         }
       },
       "R08": {
-        "fill": "#bedcc3",
+        "fill": "#cddacb",
         "label": "2",
         "attributes": {
           "biodiversity": 2,
@@ -272,7 +272,7 @@
         }
       },
       "R09": {
-        "fill": "#5fa578",
+        "fill": "#8ca789",
         "label": "6",
         "attributes": {
           "biodiversity": 6,
@@ -280,7 +280,7 @@
         }
       },
       "R10": {
-        "fill": "#77b38b",
+        "fill": "#9db49a",
         "label": "5",
         "attributes": {
           "biodiversity": 5,
@@ -288,7 +288,7 @@
         }
       },
       "R11": {
-        "fill": "#5fa578",
+        "fill": "#8ca789",
         "label": "6",
         "attributes": {
           "biodiversity": 6,
@@ -296,7 +296,7 @@
         }
       },
       "R12": {
-        "fill": "#479765",
+        "fill": "#7c9a78",
         "label": "7",
         "attributes": {
           "biodiversity": 7,
@@ -310,7 +310,7 @@
     "description": "Costs and opportunities",
     "regions": {
       "R01": {
-        "fill": "#bfafd5",
+        "fill": "#c4bccc",
         "label": "141",
         "attributes": {
           "landPrice": 141,
@@ -318,7 +318,7 @@
         }
       },
       "R02": {
-        "fill": "#dfd8eb",
+        "fill": "#e0dce5",
         "label": "49",
         "attributes": {
           "landPrice": 49,
@@ -326,7 +326,7 @@
         }
       },
       "R03": {
-        "fill": "#9b82be",
+        "fill": "#a59ab0",
         "label": "242",
         "attributes": {
           "landPrice": 242,
@@ -334,7 +334,7 @@
         }
       },
       "R04": {
-        "fill": "#b8a6d1",
+        "fill": "#beb6c7",
         "label": "161",
         "attributes": {
           "landPrice": 161,
@@ -342,7 +342,7 @@
         }
       },
       "R05": {
-        "fill": "#68419c",
+        "fill": "#786989",
         "label": "387",
         "attributes": {
           "landPrice": 387,
@@ -350,7 +350,7 @@
         }
       },
       "R06": {
-        "fill": "#8869b1",
+        "fill": "#9487a1",
         "label": "297",
         "attributes": {
           "landPrice": 297,
@@ -358,7 +358,7 @@
         }
       },
       "R07": {
-        "fill": "#643c9a",
+        "fill": "#746586",
         "label": "399",
         "attributes": {
           "landPrice": 399,
@@ -366,7 +366,7 @@
         }
       },
       "R08": {
-        "fill": "#a690c5",
+        "fill": "#aea5b9",
         "label": "211",
         "attributes": {
           "landPrice": 211,
@@ -374,7 +374,7 @@
         }
       },
       "R09": {
-        "fill": "#e1dbec",
+        "fill": "#e2dee7",
         "label": "43",
         "attributes": {
           "landPrice": 43,
@@ -382,7 +382,7 @@
         }
       },
       "R10": {
-        "fill": "#b7a5d0",
+        "fill": "#bdb5c6",
         "label": "163",
         "attributes": {
           "landPrice": 163,
@@ -390,7 +390,7 @@
         }
       },
       "R11": {
-        "fill": "#724da3",
+        "fill": "#817291",
         "label": "359",
         "attributes": {
           "landPrice": 359,
@@ -398,7 +398,7 @@
         }
       },
       "R12": {
-        "fill": "#9a80bd",
+        "fill": "#a399af",
         "label": "246",
         "attributes": {
           "landPrice": 246,
