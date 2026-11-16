@@ -279,7 +279,7 @@ export const EVENT_DEFS = {
       quotaLimit: z.number().int().nullable().describe("Proposal quota this round (null = unlimited)"),
       priorProposals: SeatList.describe("Seats that had already proposed this region this round"),
       priorDecisions: SeatList.describe("Seats that had already decided this region this round"),
-      msSinceRoundStart: Ms("Server time since the round started"),
+      msSinceRoundStart: Ms("Active (un-paused) server time since the round started"),
     }),
     example: {
       regionId: "R07",
@@ -311,7 +311,7 @@ export const EVENT_DEFS = {
         "Seats that had proposed this region this round before this decision",
       ),
       priorDecisions: SeatList.describe("Seats that had already decided this region this round"),
-      msSinceRoundStart: Ms("Server time since the round started"),
+      msSinceRoundStart: Ms("Active (un-paused) server time since the round started"),
     }),
     example: {
       regionId: "R07",
