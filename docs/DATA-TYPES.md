@@ -75,6 +75,7 @@ erDiagram
     TEXT harness_version
     TEXT git_commit
     TEXT updated_wall
+    INTEGER last_seq "high-water mark of seq"
   }
   events {
     TEXT session_id PK, FK
@@ -2024,6 +2025,7 @@ Stored verbatim in `SessionCreated.config` and in `sessions.config_json`. Defaul
 | | `condition`, `notes` | TEXT | Researcher-entered labels (no personal data) |
 | | `config_json` | TEXT | Effective session configuration (see above) |
 | | `harness_version`, `git_commit` | TEXT | Software version |
+| | `last_seq` | INTEGER | Highest `seq` ever assigned in the session, so seq numbers are never reused after an erasure (schema v2) |
 | `erasures` | `code_sha256` | TEXT | SHA-256 of the erased participant code (not the code itself) |
 | | `requested_wall`, `executed_wall` | TEXT | When the request was made and executed |
 | | `sessions_json` | TEXT | Sessions in which data was found |
@@ -2103,7 +2105,7 @@ Analysis-ready table of every map interaction with labels, timings and context. 
 | `server_wall` | iso-datetime | Same as server_ts, human-readable | envelope |
 | `client_ts` | epoch-ms | Client time of the confirm click, corrected to server time | envelope.clientTs |
 | `client_seq` | integer | Client intent counter | envelope.clientSeq |
-| `ms_since_round_start` | number | Server ms since the round started | payload.msSinceRoundStart |
+| `ms_since_round_start` | number | Active (un-paused) server ms since the round started | payload.msSinceRoundStart |
 | `ms_since_prev_own_action` | number | Server ms since this seat's previous action in the same round (empty for the first) | derived from server_ts |
 | `reaction_ms` | number | server_ts minus clientTs of this seat's latest state_received telemetry before the action (time from seeing the latest state to acting); empty if none | derived: telemetry state_received |
 | `quota_used` | integer | Actions of this kind used by the seat this round, incl. this one | payload.quotaUsed |

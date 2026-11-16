@@ -1,4 +1,4 @@
-import { normaliseParticipantCode, reduceEvents } from "@wkwa/shared";
+import { reduceEvents } from "@wkwa/shared";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import type { AppContext } from "../app";
 import { redactEvent } from "../net/hub";
@@ -57,13 +57,6 @@ export function registerApi(ctx: AppContext, guard: Guard) {
     if (!row) return reply.code(404).send({ error: "Unknown session" });
     const scenario = scenarios.load(row.scenario_id);
     return { scenario, hashMatches: scenario.hash === row.scenario_hash };
-  });
-
-  /** Where does a participant code occur? (takedown look-up) */
-  app.get<{ Params: { code: string } }>("/api/participants/:code", opts, async (req, reply) => {
-    const code = normaliseParticipantCode(req.params.code);
-    if (!code) return reply.code(400).send({ error: "Not a valid participant code (check for typos)" });
-    return { code, occurrences: store.lookupCode(code) };
   });
 
   registerGdprApi(ctx, guard);

@@ -160,10 +160,13 @@ export class Store {
   private allocSeq(sessionId: string): number {
     let next = this.nextSeq.get(sessionId);
     if (next === undefined) {
-      const row = this.db.prepare("SELECT max(seq) AS m FROM events WHERE session_id = ?").get(sessionId) as {
-        m: number | null;
-      };
-      next = (row.m ?? 0) + 1;
+      const row = this.db
+        .prepare(
+          `SELECT max(coalesce((SELECT max(seq) FROM events WHERE session_id = @id), 0),
+                      coalesce((SELECT last_seq FROM sessions WHERE id = @id), 0)) AS m`,
+        )
+        .get({ id: sessionId }) as { m: number };
+      next = row.m + 1;
     }
     this.nextSeq.set(sessionId, next + 1);
     return next;
@@ -171,6 +174,17 @@ export class Store {
 
   /** Append an event. seq, timestamps and round are assigned here. */
   appendEvent(sessionId: string, ev: NewEvent, round: number, ts = nowTs()): StoredEvent {
+    try {
+      return this.insertEvent(sessionId, ev, round, ts);
+    } catch (e) {
+      // Another process (the CLI) may have appended to this session: refresh the seq cache and retry once.
+      if ((e as { code?: string }).code !== "SQLITE_CONSTRAINT_PRIMARYKEY") throw e;
+      this.nextSeq.delete(sessionId);
+      return this.insertEvent(sessionId, ev, round, ts);
+    }
+  }
+
+  private insertEvent(sessionId: string, ev: NewEvent, round: number, ts: number): StoredEvent {
     const seq = this.allocSeq(sessionId);
     const stored = {
       sessionId,
@@ -187,26 +201,29 @@ export class Store {
       payload: ev.payload,
     } as StoredEvent;
     try {
-      this.db
-        .prepare(
-          `INSERT INTO events (session_id, seq, type, actor_kind, seat, participant_code, round, server_ts, server_wall,
+      this.db.transaction(() => {
+        this.db
+          .prepare(
+            `INSERT INTO events (session_id, seq, type, actor_kind, seat, participant_code, round, server_ts, server_wall,
             client_ts, client_seq, payload_json)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        )
-        .run(
-          sessionId,
-          seq,
-          stored.type,
-          stored.actorKind,
-          stored.seat,
-          stored.participantCode,
-          round,
-          ts,
-          stored.serverWall,
-          stored.clientTs,
-          stored.clientSeq,
-          JSON.stringify(stored.payload),
-        );
+          )
+          .run(
+            sessionId,
+            seq,
+            stored.type,
+            stored.actorKind,
+            stored.seat,
+            stored.participantCode,
+            round,
+            ts,
+            stored.serverWall,
+            stored.clientTs,
+            stored.clientSeq,
+            JSON.stringify(stored.payload),
+          );
+        this.db.prepare("UPDATE sessions SET last_seq = max(last_seq, ?) WHERE id = ?").run(seq, sessionId);
+      })();
     } catch (e) {
       this.nextSeq.delete(sessionId);
       throw e;

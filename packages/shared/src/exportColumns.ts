@@ -288,7 +288,7 @@ export const EXPORT_FILES: ExportFileDef[] = [
       {
         name: "ms_since_round_start",
         type: "number",
-        description: "Server ms since the round started",
+        description: "Active (un-paused) server ms since the round started",
         source: "payload.msSinceRoundStart",
       },
       {

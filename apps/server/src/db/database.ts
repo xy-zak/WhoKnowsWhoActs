@@ -11,7 +11,7 @@ export class WrongPassphraseError extends Error {
   }
 }
 
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 
 const MIGRATIONS: Record<number, string> = {
   1: `
@@ -84,6 +84,11 @@ const MIGRATIONS: Record<number, string> = {
       code_hashes_json TEXT NOT NULL,
       files_json       TEXT NOT NULL
     );
+  `,
+  2: `
+    -- high-water mark of events.seq: seq numbers are never reused, even after an erasure
+    ALTER TABLE sessions ADD COLUMN last_seq INTEGER NOT NULL DEFAULT 0;
+    UPDATE sessions SET last_seq = coalesce((SELECT max(seq) FROM events WHERE events.session_id = sessions.id), 0);
   `,
 };
 
@@ -162,11 +167,15 @@ export function rekeyDatabase(db: DB, newPassphrase: string) {
   db.pragma("journal_mode = WAL");
 }
 
-/** Write an encrypted, consistent copy of the database (same passphrase). */
+/**
+ * Write an encrypted, consistent copy of the database (same cipher and passphrase).
+ * SQLite's online-backup API cannot target a new encrypted file, but
+ * SQLite3MultipleCiphers' `VACUUM INTO` writes the copy with the source's encryption.
+ */
 export async function backupDatabase(db: DB, target: string) {
   mkdirSync(path.dirname(target), { recursive: true });
-  db.pragma("wal_checkpoint(TRUNCATE)");
-  await db.backup(target);
+  if (existsSync(target)) throw new Error(`${target} already exists`);
+  db.exec(`VACUUM INTO '${target.replace(/'/g, "''")}'`);
 }
 
 /** Make deleted data physically unrecoverable from the database file. */
