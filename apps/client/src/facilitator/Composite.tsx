@@ -182,7 +182,6 @@ export function CompositeMap({
               title="Region"
               icon="review"
               powerOn={false}
-              style={{ overflow: "auto", maxHeight: height }}
               actions={
                 <Button
                   iconOnly
@@ -193,7 +192,9 @@ export function CompositeMap({
                 />
               }
             >
-              <RegionComparison scenario={scenario} state={state} regionId={selected} onRevoke={onRevoke} />
+              <div style={{ overflow: "auto", maxHeight: height - 40 }}>
+                <RegionComparison scenario={scenario} state={state} regionId={selected} onRevoke={onRevoke} />
+              </div>
             </Panel>
           )}
         </div>

@@ -1,12 +1,14 @@
 # WhoKnowsWhoActs
 
-A **research game harness** for a four-player, map-based serious game played on a local network. It provides everything *around* the game: networking, sessions and rounds, per-player map views, propose/decide interactions, a facilitator dashboard, and a GDPR-aware data pipeline with rich, documented metadata. The game itself can then be designed on top.
+A **research game harness** for a four-player, map-based serious game played on a local network. It provides everything *around* the game: networking, sessions and rounds, per-player map views, propose/decide interactions, a facilitator manager, and a GDPR-aware data pipeline with rich, documented metadata. The game itself can then be designed on top.
 
-| Player view | Facilitator dashboard |
+| Facilitator · LIVE (Catppuccin Mocha) | Facilitator · SETUP wizard (Catppuccin Latte) |
 | --- | --- |
-| ![Player view: the shared map outline with this player's own data, proposals (amber, hatched) and decisions (red)](docs/img/player-game.png) | ![Facilitator dashboard: seats, composite map with an all-views comparison of a region, and live mirrors of every player's screen](docs/img/facilitator-live.png) |
+| ![Facilitator LIVE tab: lifecycle stepper, NEXT panel, seats with quota bars, composite map with an all-views comparison of a region, and live mirrors of every player's screen](docs/img/facilitator-live.png) | ![Setup wizard popup at step 03 of 10 with the stepper, player-screen appearance options and visibility settings](docs/img/facilitator-setup.png) |
+| **Player · game (Latte)** | **Player · game (Mocha)** |
+| ![Player game screen in Latte: status line with quota bars, propose/decide tools, the shared map with this player's own data and the inline confirm prompt](docs/img/player-game.png) | ![Player game screen in Mocha with CRT scanlines](docs/img/player-game-mocha.png) |
 
-*Screenshots use the fictional demo scenario and simulated players.*
+*Screenshots use the fictional demo scenario and simulated players. The player theme is a per-session setting; the facilitator toggles their own with `T`.*
 
 ## What it does
 
@@ -14,9 +16,15 @@ A **research game harness** for a four-player, map-based serious game played on 
 - **Same outline, different knowledge.** Every player sees the same map regions, but each gets a different dataset (*view*) for them. The server enforces this: a player's browser never receives another player's data. The facilitator sees the **composite** of all views and live mirrors of every player's screen.
 - **Propose and decide.** *Propose* highlights a region for everyone (amber, hatched); *decide* marks it in a second colour (red). Both pass through a confirmation step.
 - **Rounds.** Default: 3 rounds, and a round ends when every player has made 5 proposals and 5 decisions. Rounds can be changed per session (quotas, unlimited, time limits, facilitator-ended rounds, per-round overrides) and extended in code (pluggable round rules and validators).
-- **Labels.** Each seat gets a knowledge type (`Ka`–`Kd`) and a power type (`Pa`–`Pd`), assigned manually or randomly from the dashboard (the seed is logged). By default the K label selects the seat's map view.
+- **Labels.** Each seat gets a knowledge type (`Ka`–`Kd`) and a power type (`Pa`–`Pd`), assigned manually or randomly in setup step 08 (the seed is logged). By default the K label selects the seat's map view.
 - **Every interaction is recorded** in an append-only, event-sourced log with server and clock-corrected client timestamps. Fine-grained UI telemetry is recorded too: hover, inspect, pan/zoom, tool choice, confirm/cancel, focus, idle, and state acknowledgements for exact reaction times.
-- **Facilitator dashboard.** Session setup, seat binding, labels, onboarding status, pause/resume, revoke, broadcast, notes, composite map, player mirrors, timeline, event log, live telemetry, exports, erasure, and full **session replay**.
+- **Facilitator manager**, organised in order of use: **[1] SETUP | LIVE · [2] REPLAY · [3] DATABASE**.
+  - **SETUP** is a 10-step wizard in popups (scenario → rounds → players → onboarding → tags → review & create → connect terminals → labels → key sheet → start), with a stepper so you always know where you are.
+  - After *Start onboarding* the tab flips to **LIVE**, and a green **● LIVE** indicator appears. LIVE has a lifecycle stepper, a NEXT panel with the next action, seats with quota bars, a composite map, player mirrors, a timeline, the event log, live telemetry, and wrap-up popups (takedown cards → export → close).
+  - **REPLAY** scrubs through any session; **DATABASE** holds exports, printables and takedown.
+- **Intentional TUI aesthetic:**
+  - Catppuccin **Latte/Mocha** with contrast-tested tokens, **JetBrains Mono**, **Iconoir** icons, box-drawn panels, keyboard shortcuts, and subtle **CRT** effects. Reduced motion is respected.
+  - The rules every screen follows are in [AESTHETIC-RULES.md](docs/AESTHETIC-RULES.md).
 - **GDPR by design:**
   - in-game versioned consent, with the hash of the exact text shown
   - **no telemetry before consent**
@@ -38,10 +46,10 @@ npm run build        # build the browser clients
 npm start            # asks for (or creates) the database passphrase
 ```
 
-- Facilitator: open `http://localhost:3000/facilitator` **on the server laptop**.
+- Facilitator manager: open `http://localhost:3000/facilitator` **on the server laptop**. The SETUP wizard opens automatically.
 - Players: open one of the `http://<laptop-ip>:3000/` URLs printed at start-up.
 
-Try it alone: create a session in the dashboard, then run `npm run bots -- --count 3` and play the fourth seat yourself in another browser window. Alternatively, `npm run bots -- --count 4 --auto` plays a whole session by itself.
+Try it alone: walk the SETUP wizard in the manager, then run `npm run bots -- --count 3` and play the fourth seat yourself in another browser window. Alternatively, `npm run bots -- --count 4 --auto` plays a whole session by itself.
 
 For real sessions, follow the **[session runbook](docs/SESSION-RUNBOOK.md)**.
 
@@ -67,14 +75,15 @@ For real sessions, follow the **[session runbook](docs/SESSION-RUNBOOK.md)**.
 | [NETWORKING.md](docs/NETWORKING.md) | LAN topology, hub-and-spoke protocol, connection/reconnect/clock-sync sequences, message catalogue, REST API, security, troubleshooting |
 | [DATA-MANAGEMENT.md](docs/DATA-MANAGEMENT.md) | GDPR design: data inventory and flow, pseudonymisation, consent, encryption, takedown procedure, anonymisation, retention, risk table, ethics checklist |
 | [DATA-TYPES.md](docs/DATA-TYPES.md) | Field-level catalogue of everything that is logged and exported |
-| [SESSION-RUNBOOK.md](docs/SESSION-RUNBOOK.md) | Step by step for running a session, plus troubleshooting |
+| [SESSION-RUNBOOK.md](docs/SESSION-RUNBOOK.md) | Step by step for running a session (setup wizard, LIVE, wrap-up), plus troubleshooting |
+| [AESTHETIC-RULES.md](docs/AESTHETIC-RULES.md) | Colour tokens and reserved meanings, typography, icons, panels, popups, wayfinding, CRT/motion, keyboard, checklist for new UI |
 
 ## Repository layout
 
 ```
 packages/shared/   schemas (zod), event reducer, rules, projections, doc generators — used by server and clients
 apps/server/       Fastify + Socket.IO server, encrypted store, session manager, REST API, GDPR tooling, CLI, bots
-apps/client/       React/Vite: player app (/) and facilitator dashboard (/facilitator)
+apps/client/       React/Vite: design system (ui/), player app (/) and facilitator manager (/facilitator)
 config/            study info, consent, demographics, briefing, default session settings (placeholders!)
 scenarios/demo/    fictional demo map (SVG) with four placeholder datasets
 docs/              design documentation

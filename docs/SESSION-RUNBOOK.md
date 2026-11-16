@@ -1,8 +1,8 @@
 # Session runbook
 
-A step-by-step guide for running a WhoKnowsWhoActs session: one facilitator laptop as the server and four player PCs on the same local network. It covers preparation, the session itself, wrap-up, and what to do when something goes wrong.
+Step by step for running a WhoKnowsWhoActs session: one facilitator laptop as the server and four player PCs on the same local network. It covers preparation, the session itself, wrap-up, and what to do when something goes wrong.
 
-Background: [ARCHITECTURE.md](ARCHITECTURE.md) (how it works) · [NETWORKING.md](NETWORKING.md) (network setup and troubleshooting) · [DATA-MANAGEMENT.md](DATA-MANAGEMENT.md) (GDPR and takedown) · [DATA-TYPES.md](DATA-TYPES.md) (what is logged).
+Background: [ARCHITECTURE.md](ARCHITECTURE.md) (how it works) · [NETWORKING.md](NETWORKING.md) (network set-up and troubleshooting) · [DATA-MANAGEMENT.md](DATA-MANAGEMENT.md) (GDPR and takedown) · [DATA-TYPES.md](DATA-TYPES.md) (what is logged) · [AESTHETIC-RULES.md](AESTHETIC-RULES.md) (UI conventions and keyboard shortcuts).
 
 ## Contents
 
@@ -16,110 +16,134 @@ Background: [ARCHITECTURE.md](ARCHITECTURE.md) (how it works) · [NETWORKING.md]
 
 ## 1. Overview
 
+The facilitator manager has three tabs, in order of use:
+
+| Tab | What it is for |
+| --- | --- |
+| **[1] SETUP / LIVE** | One tab with two faces. **SETUP** walks you through ten steps in popups. After *Start onboarding* the tab flips to **LIVE**, and a green **● LIVE** indicator appears in the top bar; click it to come back from any tab. |
+| **[2] REPLAY** | Scrub through any recorded session. |
+| **[3] DATABASE** | Sessions, exports, printables (key sheet, takedown cards), takedown/erasure, erasure register. |
+
 ```mermaid
 flowchart TD
-  A["Start network + server<br/>npm start, type passphrase"] --> B["Dashboard: Setup<br/>create session"]
-  B --> C["Open the game on the 4 player PCs<br/>each shows a terminal number"]
-  C --> D["Bind terminals to seats<br/>assign or randomise K/P labels"]
-  D --> E["Print the key sheet"]
-  E --> F["Participants arrive and sit down"]
-  F --> G["Start onboarding<br/>consent, demographics, briefing"]
-  G --> H{"Everyone<br/>consented?"}
-  H -- "no" --> W["Withdraw the seat,<br/>or replace the participant"]
-  W --> I
-  H -- "yes" --> I["Start round 1"]
-  I --> J["Monitor: composite map, mirrors,<br/>event log; pause or revoke if needed"]
-  J --> K{"Last round<br/>done?"}
-  K -- "no" --> L["Start next round"] --> J
-  K -- "yes" --> M["End screens show the codes<br/>hand out takedown cards"]
-  M --> N["Export the session<br/>Sessions & data, Export"]
-  N --> O["Close the session"]
-  O --> P["After: move export to institutional storage,<br/>lock away the key sheet, back up the DB"]
+  A["npm start<br/>type the database passphrase"] --> S1
+  subgraph SETUP["SETUP tab: 10 steps, each in a popup"]
+    S1["01 Scenario"] --> S2["02 Rounds"] --> S3["03 Players and visibility<br/>incl. player screen theme / CRT"] --> S4["04 Onboarding"] --> S5["05 Tags and notes"] --> S6["06 Review and CREATE"]
+    S6 --> S7["07 Connect and bind<br/>open the player URL on 4 PCs"] --> S8["08 Labels<br/>K / P per seat"] --> S9["09 Print the key sheet"] --> S10["10 Start onboarding"]
+  end
+  S10 --> L1
+  subgraph LIVE["LIVE tab: lifecycle stepper + NEXT panel"]
+    L1["Onboarding<br/>consent, about you, briefing"] --> L2["Round 1"] --> L3["Round 2"] --> L4["Round 3"] --> W
+    W["Wrap-up popups:<br/>1 takedown cards, 2 export, 3 close"]
+  end
+  W --> D["DATABASE: move the export to institutional storage<br/>lock away the key sheet, back up"]
 ```
 
-Approximate timing: 30 min setup, about 10 min onboarding, the rounds, then 10 min wrap-up.
+**Wayfinding.** Every popup shows `STEP nn/NN` and a stepper (`✓` done · `▶` current · `·` upcoming · `■` locked). In LIVE, the **NEXT** panel always shows the single next action, and `N` does it.
+
+**Keyboard.** `1` `2` `3` switch tabs, `N` next action, `P` pause/resume, `T` theme, `C` CRT effects, `?` help. In popups: `Enter` is the primary action and `Esc` closes. Setup progress is kept when you close a popup.
+
+Approximate timing: 30 min setup, about 10 min onboarding, the rounds, 10 min wrap-up.
 
 ## 2. Once, before the study
 
-- [ ] **Ethics approval** obtained. The approved texts are in place:
+- [ ] **Ethics approval** obtained, with the approved texts in place:
   - `config/consent.md` (information letter) and `config/consent.json` (checkbox statements). **Bump `version`** whenever the text changes.
   - `config/demographics.json` (questions; every question offers `prefer_not_to_say`)
   - `config/briefing.md` (game instructions)
   - `config/study.json`: title, researcher, contact e-mail, retention statement and takedown text. These are shown on the consent screen, the end screen and the takedown cards.
-- [ ] **Scenario** ready in `scenarios/<id>/`: `scenario.json`, `map.svg` (one `<path id=… d=…>` per region, no transforms) and `views.json` (one view per K label: `Ka`–`Kd`). Check it in *Setup*: errors are listed under the scenario picker.
-- [ ] **Default session settings** in `config/session.default.json`: rounds, quotas, visibility. These can still be changed per session in *Setup*.
+- [ ] **Scenario** ready in `scenarios/<id>/`: `scenario.json`, `map.svg` (one `<path id=… d=…>` per region, no transforms) and `views.json` (one view per K label: `Ka`–`Kd`). Setup step 01 shows a preview of each view, and lists errors under the scenario.
+- [ ] **Default session settings** in `config/session.default.json`: rounds, quotas, visibility, player-screen appearance. They pre-fill the setup wizard and can be changed per session.
 - [ ] **Software installed** on the facilitator laptop: `npm install && npm run build`. Run `npm test` once; it should be all green.
-- [ ] **Database passphrase chosen.** Use at least 5 random words. Store it in a password manager and/or a sealed envelope held by your supervisor. A lost passphrase means lost data: there is no recovery.
-- [ ] **Dry run** with bots: `npm start`, then `npm run bots -- --count 3` in a second terminal, and play the fourth seat yourself on another device. Delete practice sessions from your data before the real study, or use a separate data directory (`WKWA_DATA_DIR=data-pilot npm start`).
-- [ ] **Network** planned. Use a dedicated router or switch without internet if possible, and disable "client isolation" on Wi-Fi. See [NETWORKING.md](NETWORKING.md).
-- [ ] **Paper**: key sheet and takedown cards are printed per session from the dashboard. Make sure a printer is reachable, or print right after binding the seats.
+- [ ] **Database passphrase chosen**, at least 5 random words. Store it in a password manager and/or a sealed envelope held by your supervisor. A lost passphrase means lost data: there is no recovery.
+- [ ] **Dry run** with bots: `npm start`, then `npm run bots -- --count 3` in a second terminal. Play the fourth seat yourself on another device. Tag practice sessions `pilot` (step 05), or use a separate data directory (`WKWA_DATA_DIR=data-pilot npm start`).
+- [ ] **Network** planned: ideally a dedicated router/switch without internet, with Wi-Fi "client isolation" off. See [NETWORKING.md](NETWORKING.md).
+- [ ] **Printer** reachable from the laptop. Key sheet and takedown cards are printed per session from the manager.
 
 ## 3. The day before a session
 
 - [ ] Laptop charged, OS updates done (so nothing restarts during the session), sleep disabled.
-- [ ] Router/switch and cables tested. Each player PC can open `http://<laptop-ip>:3000/`.
+- [ ] Router/switch and cables tested; each player PC can open `http://<laptop-ip>:3000/`.
 - [ ] Firewall on the laptop allows incoming TCP 3000 (see NETWORKING.md § troubleshooting).
 - [ ] Encrypted backup of the database: `npm run cli -- backup --out /path/to/backup/wkwa-YYYYMMDD.db`.
 
 ## 4. Session day
 
-### 4.1 Start (about 30 minutes before)
+### 4.1 Start the server (about 30 minutes before)
 
 1. Connect the laptop and the player PCs to the session network.
-2. On the laptop: `npm start`, then type the database passphrase. The terminal prints:
-   - the **dashboard** URL: `http://localhost:3000/facilitator` (open it on the laptop itself)
-   - the **player** URL(s): `http://<laptop-ip>:3000/`
-3. In the dashboard, go to **Setup**: pick the scenario, check rounds, quotas and visibility, enter the *condition* label (e.g. `A`, `pilot`; never names), then **Create session**.
+2. On the laptop, run `npm start` and type the database passphrase. The terminal prints the **manager** URL (`http://localhost:3000/facilitator`; open it on the laptop) and the **player** URL(s).
+3. The manager opens on **SETUP** with step **01** in a popup.
 
-> If the server was restarted, the most recent unfinished session is resumed automatically, and browsers re-claim their seats on their own.
+> If the server was restarted mid-session, the most recent unfinished session is resumed automatically, browsers re-claim their seats on their own, and the tab shows LIVE again.
 
-### 4.2 Prepare the player PCs (about 15 minutes before)
+### 4.2 SETUP steps 01–06: configure
 
-1. On each player PC, open the player URL in a browser, full-screen (F11). Each screen shows **Terminal N** in large type.
-2. In **Live → Seats**, bind each terminal to a seat with *bind terminal…*. Write the seat number on a sticky note on each PC if that helps.
-3. Assign the labels: choose K and P per seat and click **Save labels**, or click **🎲 Randomise labels** (the random seed is logged).
-   - With `viewAssignment = byKnowledgeType`, the K label also decides which map data the seat sees.
-4. **Print the key sheet**: *Sessions & data → Key sheet*. Do not save it as a file.
+| Step | What to check |
+| --- | --- |
+| **01 Scenario** | The map and datasets. Use the preview's view selector to check each view. |
+| **02 Rounds** | Number of rounds, rule (quotas or facilitator-ended), quotas per player, optional time limit, how the next round starts, per-round overrides. |
+| **03 Players & visibility** | Seats, how map views are assigned, label rules, what players see about each other, and the **player-screen appearance** (Mocha/Latte, CRT). The appearance is identical for every PC and is recorded with the session. |
+| **04 Onboarding** | Consent, demographics, briefing. Turning consent off asks for confirmation: only for tests without participants. |
+| **05 Tags & notes** | Comma-separated **tags** (e.g. `pilot, condition-A`). They label the session in DATABASE and the exports. **Never use names.** |
+| **06 Review & create** | One summary of everything, with *Edit* links. **CREATE SESSION** writes it into `SessionCreated`; steps 01–06 are then locked (■). |
 
-### 4.3 Participants arrive
+The draft is kept in your browser until you create the session, so a reload loses nothing.
 
-1. Seat each participant at a PC. When convenient, write their **name by hand** on the key sheet line for their seat. Names never go into the software.
-2. Click **Start onboarding** (*Live → Session flow*). Seats are now locked.
-3. Watch the *Onboarding* column: `consent given` → `demo ✓` → `brief ✓`.
-4. If a participant **declines** consent, their screen says thank you and stops. Either:
-   - **Withdraw** the seat and continue with fewer players (round completion then ignores that seat), or
-   - abort, and create a new session with a replacement participant.
-   Afterwards, erase the decliner's code (§ 5).
+### 4.3 SETUP steps 07–10: prepare the room (about 15 minutes before)
 
-### 4.4 Rounds
+| Step | What to do |
+| --- | --- |
+| **07 Connect & bind** | The popup shows the player URL(s). Open it on each PC in full-screen (F11); each screen shows **TERMINAL N**. Bind each terminal to a seat. The step is done when it shows `[4/4 seats bound]`. |
+| **08 Labels** | Choose K and P per seat and *Save labels*, or *Randomise all* (the seed is logged). Duplicates are highlighted. With view assignment "follows K", the K label also selects the seat's map data. |
+| **09 Key sheet** | *Print key sheet*, then tick "printed and stored separately". Write names on it **by hand** as participants arrive; names never go into the software. |
+| **10 Start onboarding** | A final checklist. **Seat the participants first**, then *START ONBOARDING*. Seats lock, players go to consent → about you → briefing, and the tab flips to **LIVE**. |
 
-1. **Start round 1** becomes available once every active seat has finished onboarding.
-2. During the round, watch:
-   - the **composite map** (colour it by any view; click a region to compare what each view says about it)
-   - the **player mirrors** (exactly what each player sees, with their live hover position)
-   - the **Seats** table: quota progress, *unfocused*, *tab hidden*, *idle* and latency badges
-   - the **timeline** and the **event log**
-3. Tools during a round:
-   - **Pause / Resume**. The game pauses automatically when a player disconnects (if `pauseOnDisconnect` is on).
-   - **Revoke** a misclicked proposal or decision (event log or region panel). The original event stays in the log, and the seat gets its quota back.
-   - **Broadcast** a message to all screens (e.g. "5 minutes left").
-   - **Add note** for anything noteworthy (e.g. "seat 3 asked about zooming"). **Never type names.**
-   - **End round now** forces the round to finish, e.g. if the rule is `manual`.
-4. With the default rule, a round ends by itself when every player has used 5 proposals and 5 decisions. Then click **Start round 2**, and so on (unless auto-advance is on).
+Closing a popup is always safe: the SETUP page shows the stepper and **RESUME STEP n** (`N`). To throw a lobby session away and start over, use **Discard session**.
 
-### 4.5 End
+### 4.4 LIVE: onboarding and rounds
 
-1. After the last round the dashboard shows **Game complete**. Every player screen shows their **participant code** and the contact address.
-2. Print and hand out the **takedown cards**: *Sessions & data → Takedown cards*. Cut them out and give each participant the card for their seat.
-3. Debrief participants as your protocol requires.
-4. **Export**: *Sessions & data → Export*. The path is shown; the export contains pseudonymised data.
-5. **Close session** (*Live*). Player screens keep showing the end screen until the next session is created.
+The top of LIVE shows the **lifecycle**: `ONBOARDING ─ ROUND 1 ─ ROUND 2 ─ ROUND 3 ─ WRAP-UP`. Below it, **NEXT** always says what happens next:
+
+| NEXT says | Do |
+| --- | --- |
+| "Waiting for onboarding: seat 2 (consent), …" | Wait. The Seats panel shows each seat's onboarding step. |
+| "Seat 3 declined consent" | **Withdraw** that seat (Seats panel) to continue with fewer players, or abort and set up again. |
+| "Everyone is ready" → **START ROUND 1** (`N`) | Start the round. |
+| "Round 1 of 3 in progress · 14/40 actions · 4:12" | Monitor. **PAUSE** (`P`) if needed; *End round now* forces the end. |
+| "Round 1 complete" → **START ROUND 2** (`N`) | Start the next round (or it starts automatically if auto-advance is on). |
+| "Game complete" → **WRAP UP SESSION** (`N`) | Go to § 4.5. |
+
+While a round runs, watch:
+
+- **Seats**: quota bars `▰▰▱▱▱`, `[UNFOCUSED]`, `[TAB HIDDEN]`, `[IDLE]`, latency, reconnects.
+- **Composite map**: colour it by any view. Click a region to compare what every view says about it.
+- **Player views**: exactly what each player sees, with their live hover position.
+- **Timeline**, **Event log** (filter by type or seat; click a row for the full event) and **Live telemetry**.
+
+**Tools:**
+
+- **Broadcast** a message to every screen.
+- **Add note** for anything noteworthy. **Never type names.**
+- **Edit labels** (only during onboarding and between rounds).
+- **End game early** and **Abort session**.
+- **Revoke** an action from the event log or the region panel (current round only). The seat gets its quota back; the original event stays in the log.
+
+Every destructive action asks for confirmation in a popup.
+
+### 4.5 Wrap-up (three popups)
+
+1. **Takedown cards:** every player's screen shows their participant code. *Print takedown cards*, cut them out, give each participant the card of their seat, then tick "Cards are handed out".
+2. **Export:** *Export session* writes the pseudonymised export; the path is shown.
+3. **Close:** archives the session. The tab flips back to **SETUP** for the next session, and the finished session appears in DATABASE and REPLAY.
+
+Debrief participants as your protocol requires.
 
 ## 5. After the session
 
 - [ ] Move the export folder (`exports/<sessionId>/…`) to **institutional storage** and delete the local copy.
-- [ ] Lock away the **key sheet**, separate from any data. Write the planned destruction date on it.
-- [ ] **Decliners or withdrawn participants:** erase their data if your protocol says so. Use *Sessions & data → Takedown / erasure* (type the code twice) or `npm run cli -- erase --code WK-…`.
+- [ ] Lock the **key sheet** away, separate from any data, with the planned destruction date written on it.
+- [ ] **Decliners or withdrawn participants:** erase their data if your protocol says so. Use *DATABASE → 3 · Takedown / erasure* (look up the code, then type it again to confirm) or `npm run cli -- erase --code WK-…`.
 - [ ] **Backup:** `npm run cli -- backup --out …` to institutional storage.
 - [ ] Stop the server with `Ctrl+C`.
 - [ ] Optional: `npm run cli -- verify` (integrity check).
@@ -130,33 +154,33 @@ Approximate timing: 30 min setup, about 10 min onboarding, the rounds, then 10 m
 
 | Situation | What happens | What to do |
 | --- | --- | --- |
-| A player's browser was **reloaded or closed** | The seat is kept: the browser holds a reconnect token. If it happened during a round, the game auto-pauses. | Re-open the player URL on the same PC; it re-joins the same seat. Then **Resume**. |
-| A player PC **lost the network** | `PlayerDisconnected` and an auto-pause | Fix the connection; the page reconnects by itself. Then **Resume**. |
-| **Wrong terminal** bound to a seat (lobby) | — | **Unbind** the seat and bind the right terminal. Before onboarding this is harmless. |
-| A participant **leaves** mid-game | — | **Withdraw** their seat. Rounds then complete without them. |
-| **Misclick** by a player | The action is visible to everyone | **Revoke** it in the event log or the region panel (current round only). |
-| **Server crashed** or the laptop restarted | Events up to the crash are safely stored | Run `npm start` again and type the passphrase. The session is resumed automatically, and browsers reconnect and re-claim their seats. Then **Resume**. A round time limit keeps counting the downtime; extend or end the round if needed. |
+| A player's browser was **reloaded or closed** | The seat is kept (the browser holds a reconnect token). During a round the game auto-pauses. | Re-open the player URL on the same PC; it re-joins the same seat. Then **RESUME** (`P`). |
+| A player PC **lost the network** | `PlayerDisconnected` and an auto-pause; the player sees "Connection lost" | Fix the connection; the page reconnects by itself. Then **RESUME**. |
+| **Wrong terminal** bound (step 07) | — | **Unbind** it and bind the right one. Harmless before onboarding. |
+| A participant **leaves** mid-game | — | **Withdraw** their seat (Seats panel). Rounds complete without them. |
+| **Misclick** by a player | Visible to everyone | **Revoke** it (event log or region panel, current round only). |
+| **Server crashed** or laptop restarted | Events up to the crash are stored | `npm start` again and type the passphrase. The session resumes, browsers re-claim their seats, and the tab shows LIVE. Then **RESUME**. A round time limit keeps counting the downtime; end the round if needed. |
 | **"Wrong passphrase"** at start | The server refuses to open the database | Retype it, paying attention to keyboard layout and caps lock. |
-| Player URL **does not load** | — | See [NETWORKING.md § troubleshooting](NETWORKING.md): firewall, wrong IP, Wi-Fi client isolation. |
-| Player PC shows **"opened in another window"** | The same seat was opened in two tabs or PCs | Close the extra tab; the newest window holds the seat. |
-| **Dashboard says "access denied"** | It was opened from a PC other than the laptop | Use `http://localhost:3000/facilitator` on the laptop, or start with `ADMIN_TOKEN=…` and open `/facilitator?token=…`. |
-| Everything is broken, you need to stop | — | **Abort session** (with a reason). The data is kept and marked as aborted; participants see the end screen with their code. |
+| Player URL **does not load** | — | See [NETWORKING.md § troubleshooting](NETWORKING.md): firewall, wrong IP, Wi-Fi client isolation. Step 07 lists the URLs of every network interface. |
+| Player PC shows **"opened in another window"** | The same seat was opened twice | Close the extra tab; the newest window holds the seat. |
+| Manager says **ACCESS DENIED** | It was opened from another PC | Use `http://localhost:3000/facilitator` on the laptop, or start with `ADMIN_TOKEN=…` and open `/facilitator?token=…`. |
+| Screen effects are distracting / slow | CRT scanlines, glow and animations | Manager: press `C`. Players: set *CRT effects on player screens* off in step 03 (for the next session). Anyone whose OS requests reduced motion never gets the effects. |
+| Everything is broken, you must stop | — | *Tools → Abort session* (with a reason). Data is kept and marked aborted; players see the end screen with their code. |
 
 ## 7. Printable checklist
 
 **Before participants arrive**
 - [ ] Network up; `npm start`; passphrase entered
-- [ ] Session created (scenario, rounds, condition checked)
-- [ ] 4 player PCs show terminal numbers; all bound to seats
-- [ ] Labels assigned or randomised; key sheet printed
+- [ ] Steps 01–06 done (scenario, rounds, players, onboarding, tags) → session created
+- [ ] Step 07: 4 terminals bound · Step 08: labels assigned · Step 09: key sheet printed
 
 **With participants**
 - [ ] Names written on the key sheet (by hand)
-- [ ] Onboarding started; all consented / demographics / briefing ✓
-- [ ] Round 1 … round N played
-- [ ] End screens with codes shown; takedown cards handed out
+- [ ] Step 10: onboarding started (tab shows LIVE)
+- [ ] All seats ready → round 1 … round N
+- [ ] Wrap-up 1: takedown cards handed out
 
 **Wrap-up**
-- [ ] Export done → moved to institutional storage → local copy deleted
-- [ ] Session closed; server stopped
+- [ ] Wrap-up 2: export → moved to institutional storage → local copy deleted
+- [ ] Wrap-up 3: session closed; server stopped
 - [ ] Key sheet locked away; backup made; decliners erased (if applicable)

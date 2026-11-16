@@ -150,7 +150,10 @@ flowchart TB
 | `packages/shared/src/projections.ts` | `playerView`, `facilitatorView` |
 | `packages/shared/src/docgen.ts`, `exportColumns.ts` | Documentation and codebook generation; export file contract |
 | `apps/server/src/` | `index.ts` (boot), `cli.ts`, `app.ts`, `content.ts` (scenario/config loading), `db/` (SQLCipher, store), `session/SessionManager.ts`, `net/hub.ts` (Socket.IO), `api/` (REST), `gdpr/` (exporter, erasure, print pages), `tools/` (bots) |
-| `apps/client/src/` | `map/` (SVG renderer), `net/` (socket, clock sync, telemetry), `player/`, `facilitator/` |
+| `apps/client/src/ui/` | Design system: `tokens.ts` (Catppuccin Latte/Mocha → semantic colour tokens, contrast-tested), `theme.css` (TUI base styles), `crt.css` (subtle CRT layer), components (`Panel`, `Button`, `Popup`, `useConfirm`, `Stepper`, `StatusTag`, `AsciiProgress`, …), `Icon.tsx` + `icons.ts` (semantic Iconoir icons). Rules: [AESTHETIC-RULES.md](AESTHETIC-RULES.md) |
+| `apps/client/src/facilitator/` | Manager shell (`App.tsx`: top bar, LIVE indicator, tabs, status bar, shortcuts), `setup/` (10-step wizard), `live/` (lifecycle, NEXT, tools, wrap-up), `seats.tsx`, `Composite.tsx`, `EventLog.tsx`, `Timeline.tsx`, `Replay.tsx`, `Database.tsx` |
+| `apps/client/src/player/` | Player screens (waiting, onboarding with stepper, game, end); appearance comes from the session |
+| `apps/client/src/` (other) | `map/` (SVG renderer, themed via CSS variables), `net/` (socket, clock sync, telemetry) |
 | `config/` | `study.json`, `consent.json` + `consent.md`, `demographics.json`, `briefing.md`, `session.default.json` |
 | `scenarios/<id>/` | `scenario.json`, `map.svg`, `views.json` |
 

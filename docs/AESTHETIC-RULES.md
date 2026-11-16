@@ -259,7 +259,7 @@ Use a panel, not a popup, for anything that should stay visible while working.
 - **Only one popup at a time.** Never stack popups. A confirmation replaces the step popup for its duration.
 - Focus moves into the popup and is trapped there. It returns to where it was afterwards.
 - **Enter** runs the primary action, except in destructive popups.
-- **Esc** closes, or goes back in a wizard. Esc never confirms anything.
+- **Esc** closes the popup. In wizards, progress is kept and the page offers **RESUME STEP n**. Esc never confirms anything; use **Back** to go to the previous step.
 - Global single-key shortcuts are paused while a popup is open.
 
 **Confirmations** (`useConfirm()`):
@@ -281,7 +281,8 @@ Use a panel, not a popup, for anything that should stay visible while working.
   - A green **`● LIVE S-…`** indicator in the top bar shows that a session is running; clicking it always leads back to it.
 - **Setup wizard:** ten steps, each in a popup, with a stepper that is always visible: `01 SCENARIO ─ 02 ROUNDS ─ 03 PLAYERS ─ 04 ONBOARDING ─ 05 TAGS ─ 06 REVIEW ─ 07 CONNECT ─ 08 LABELS ─ 09 KEY SHEET ─ 10 START`.
   - Steps 1–6 can be revisited until the session is created. They are then shown as locked (■).
-  - Closing the popup never loses work: the page shows **RESUME STEP n**.
+  - Closing the popup never loses work: the page shows **RESUME STEP n** (`N`).
+  - The wizard opens automatically, except right after a session has ended, so DATABASE stays reachable.
 - **Live:** a lifecycle stepper `ONBOARDING → ROUND 1 → … → ROUND N → WRAP-UP`, plus a **NEXT** panel with the single next action and its key (`N`).
 - **Players:** a stepper `CONSENT → ABOUT YOU → BRIEFING → READY` during onboarding, and a status line (round, quotas, timer) during the game.
 - **Stepper glyphs:** `✓` done · `▶` current · `·` upcoming · `■` locked.
@@ -319,7 +320,7 @@ TUI-style single keys. They are ignored while typing in a field, while a popup i
 | `D` | — | Decide tool |
 | `T` / `C` | Toggle theme / CRT | — |
 | `?` | Shortcut help | — |
-| `Enter` / `Esc` | Primary action / back or close in popups | Confirm / cancel an action |
+| `Enter` / `Esc` | Primary action / close in popups (wizard progress is kept) | Confirm / cancel an action |
 
 ## 11. Checklist for new UI
 
