@@ -1,0 +1,133 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+ * CRT layer (subtle). Everything here is gated behind [data-crt="on"] on
+ * <html> and switched off completely under prefers-reduced-motion.
+ * Rules: docs/AESTHETIC-RULES.md § Motion & CRT.
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+/* scanlines: fixed overlay, never intercepts the pointer */
+:root[data-crt="on"] body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1000;
+  background: repeating-linear-gradient(
+    to bottom,
+    rgba(0, 0, 0, var(--scan-alpha)) 0px,
+    rgba(0, 0, 0, var(--scan-alpha)) 1px,
+    transparent 1px,
+    transparent 3px
+  );
+}
+
+/* phosphor glow on accents (dark theme only: --glow = 1) */
+:root[data-crt="on"][data-theme="mocha"] .glow,
+:root[data-crt="on"][data-theme="mocha"] .live-indicator,
+:root[data-crt="on"][data-theme="mocha"] .tab.active,
+:root[data-crt="on"][data-theme="mocha"] .stepper li.current button,
+:root[data-crt="on"][data-theme="mocha"] .terminal-number,
+:root[data-crt="on"][data-theme="mocha"] .next-action .prompt,
+:root[data-crt="on"][data-theme="mocha"] .popup-title {
+  text-shadow: 0 0 6px color-mix(in srgb, currentColor 55%, transparent);
+}
+:root[data-crt="on"][data-theme="mocha"] .live-indicator {
+  box-shadow: 0 0 10px color-mix(in srgb, var(--live) 60%, transparent);
+}
+
+/* power-on: popups and panels "switch on" when they appear */
+@keyframes crt-on {
+  0% {
+    transform: scaleY(0.02) scaleX(0.7);
+    filter: brightness(2.6);
+    opacity: 0.25;
+  }
+  55% {
+    transform: scaleY(1.015) scaleX(1);
+    filter: brightness(1.25);
+    opacity: 1;
+  }
+  100% {
+    transform: none;
+    filter: none;
+    opacity: 1;
+  }
+}
+@keyframes crt-off {
+  0% {
+    transform: none;
+    opacity: 1;
+  }
+  60% {
+    transform: scaleY(0.02) scaleX(0.85);
+    filter: brightness(2);
+    opacity: 0.8;
+  }
+  100% {
+    transform: scaleY(0.01) scaleX(0);
+    opacity: 0;
+  }
+}
+:root[data-crt="on"] .popup {
+  animation: crt-on 180ms ease-out both;
+}
+:root[data-crt="on"] .popup.closing {
+  animation: crt-off 130ms ease-in both;
+}
+:root[data-crt="on"] .panel.power-on {
+  animation: crt-on 220ms ease-out both;
+}
+
+/* typed-in title: reveal left→right in character steps (--chars set inline) */
+@keyframes crt-type {
+  from {
+    clip-path: inset(0 100% 0 0);
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+  }
+}
+:root[data-crt="on"] .typed {
+  animation: crt-type 320ms steps(var(--chars, 20)) both;
+}
+
+/* blinking block cursor */
+@keyframes crt-blink {
+  50% {
+    opacity: 0;
+  }
+}
+.cursor::after {
+  content: "█";
+  margin-left: 2px;
+  color: var(--primary);
+  font-weight: 400;
+}
+:root[data-crt="on"] .cursor::after {
+  animation: crt-blink 1.05s steps(1) infinite;
+}
+:root[data-crt="off"] .cursor::after {
+  content: none;
+}
+
+/* LIVE dot pulse */
+@keyframes crt-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+:root[data-crt="on"] .live-dot {
+  animation: crt-pulse 1.6s ease-in-out infinite;
+}
+
+/* Reduced motion: no CRT at all (animations, glow and scanlines). */
+@media (prefers-reduced-motion: reduce) {
+  :root[data-crt="on"] body::after {
+    display: none;
+  }
+  :root[data-crt="on"] *,
+  :root[data-crt="on"] *::before,
+  :root[data-crt="on"] *::after {
+    animation: none !important;
+    text-shadow: none !important;
+  }
+}

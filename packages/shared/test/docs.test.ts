@@ -2,12 +2,12 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { ALL_BLOCKS } from "../../../scripts/docBlocks";
 import {
   applyGeneratedBlocks,
   EVENT_DEFS,
   EVENT_TYPES,
   EXPORT_FILES,
-  GENERATED_BLOCKS,
   MESSAGES,
   renderCodebook,
   TELEMETRY_DEFS,
@@ -32,7 +32,7 @@ describe("generated documentation", () => {
     const stale: string[] = [];
     for (const file of docFiles()) {
       const content = readFileSync(file, "utf8");
-      const result = applyGeneratedBlocks(content);
+      const result = applyGeneratedBlocks(content, ALL_BLOCKS);
       expect(result.unknown, `unknown generated blocks in ${file}`).toEqual([]);
       if (result.content !== content) stale.push(file);
     }
@@ -43,7 +43,7 @@ describe("generated documentation", () => {
     const all = docFiles()
       .map((f) => readFileSync(f, "utf8"))
       .join("\n");
-    for (const name of Object.keys(GENERATED_BLOCKS)) {
+    for (const name of Object.keys(ALL_BLOCKS)) {
       expect(all, `block ${name} not used`).toContain(`<!-- BEGIN GENERATED: ${name} -->`);
     }
   });

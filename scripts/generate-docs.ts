@@ -9,6 +9,7 @@ import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { applyGeneratedBlocks } from "../packages/shared/src/docgen";
+import { ALL_BLOCKS } from "./docBlocks";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -28,7 +29,7 @@ export function generateAll(check: boolean): { stale: string[]; unknown: string[
   const written: string[] = [];
   for (const file of docFiles()) {
     const before = readFileSync(file, "utf8");
-    const result = applyGeneratedBlocks(before);
+    const result = applyGeneratedBlocks(before, ALL_BLOCKS);
     for (const u of result.unknown) unknown.push(`${relative(root, file)}: ${u}`);
     if (result.content !== before) {
       stale.push(relative(root, file));
