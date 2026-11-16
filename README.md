@@ -93,4 +93,4 @@ The harness is meant to be extended. See [ARCHITECTURE.md § 12 Extension guide]
 
 ## License
 
-No license has been chosen yet; all rights reserved until a `LICENSE` file is added.
+[MIT](LICENSE). The license covers the software only: research data collected with it is not part of this repository and is governed by your study's data management plan.
