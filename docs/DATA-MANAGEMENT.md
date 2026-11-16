@@ -160,7 +160,7 @@ stateDiagram-v2
 - **In-game consent screen.** It shows `config/consent.md` (the information letter) and the statements from `config/consent.json`. Each statement is a checkbox, marked *required* or *optional* (e.g. reuse in future research).
 - **What is recorded** (`ConsentRecorded`): form `version`, **SHA-256 of the exact text shown**, the answer to every item, whether consent was given, and how long the screen was open. This proves which text each participant agreed to, even if the file is edited later.
 - **Nothing behavioural before consent.** The client only switches on telemetry once consent is given, and the server *also* drops any telemetry batch from a seat whose consent status is not `given` (or `skipped`, if the consent step is disabled). Before consent, only operational events exist for a seat: `SeatBound`, `PlayerConnected` / `PlayerDisconnected`, plus the session-level `LabelsAssigned` and `OnboardingStarted`.
-- **Declining.** If any required item is unticked, the player sees a thank-you screen and cannot continue. The seat is flagged on the dashboard and round 1 cannot start. What remains for that code is the operational events above plus `ConsentRecorded` with `consented: false`. **Recommended:** after the session, erase the decliner's code (*Data Management → Erase*, or `npm run cli -- erase --code …`) unless your ethics committee wants decline records kept; then replace the participant or run the session with fewer seats.
+- **Declining.** If any required item is unticked, the player sees a thank-you screen and cannot continue. The seat is flagged on the dashboard and round 1 cannot start. What remains for that code is the operational events above plus `ConsentRecorded` with `consented: false`. **Recommended:** after the session, erase the decliner's code (dashboard *Sessions & data → Takedown / erasure*, or `npm run cli -- erase --code …`) unless your ethics committee wants decline records kept; then replace the participant or run the session with fewer seats.
 - **Withdrawal during the session.** The facilitator marks the seat as withdrawn (`ParticipantWithdrawn`). From then on, the seat's intents are rejected and it is excluded from round completion. Whether data collected *before* withdrawal is kept or erased follows the consent text. To erase it, run the erasure procedure.
 - **Changing the text:** edit `consent.md` / `consent.json` and **bump `version`**.
 
@@ -204,7 +204,7 @@ sequenceDiagram
   actor P as Former participant
   participant R as Researcher
   participant K as Paper key sheet
-  participant H as Harness CLI or Data Management page
+  participant H as Harness CLI or dashboard (Sessions & data)
   participant X as Export copies and backups
   P->>R: e-mail asking to remove their data
   alt participant quotes their code
@@ -234,7 +234,7 @@ sequenceDiagram
    - *Code lost:* verify the person's identity reasonably (e.g. name, session date, the reply goes to the address they used). Then find their name on that session's key sheet and read the code.
    - *Key sheet already destroyed and code lost:* the data can no longer be linked to the person. Explain this; it was stated in the consent text.
 3. **Look up** what exists: `lookup` lists the sessions and the number of event and telemetry rows.
-4. **Erase:** `npm run cli -- erase --code WK-… ` (asks for confirmation; `--yes` skips it), or use *Data Management → Erase* on the dashboard, which requires typing the code again.
+4. **Erase:** `npm run cli -- erase --code WK-… ` (asks for confirmation; `--yes` skips it), or use *Sessions & data → Takedown / erasure* on the dashboard, which requires typing the code again (refused while that participant's session is still running: end the session first).
    - All `events` and `telemetry` rows with that code are deleted: actions, consent, demographics, connections, telemetry.
    - Each affected session gets a `ParticipantWithdrawn` event (`by: "erasure"`) **without** the code, so replays and exports show a withdrawn seat instead of silently missing data.
    - An entry is added to the `erasures` register: SHA-256 of the code, date, sessions, row counts.

@@ -164,7 +164,7 @@ export function CompositeMap({
         <span className="spacer" />
         <MapLegend />
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: selected ? "minmax(0,1fr) 360px" : "1fr", gap: 8 }}>
+      <div style={{ display: "grid", gridTemplateColumns: selected ? "minmax(0,1fr) 420px" : "1fr", gap: 8 }}>
         <div style={{ height }}>
           <MapView
             geometry={scenario}

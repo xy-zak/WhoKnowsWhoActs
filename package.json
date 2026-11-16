@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "description": "Research game harness: 4-player LAN map game with facilitator dashboard and GDPR-aware data pipeline.",
-  "license": "MIT",
+  "license": "UNLICENSED",
   "type": "module",
   "workspaces": [
     "packages/*",

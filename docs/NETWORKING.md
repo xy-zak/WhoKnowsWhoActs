@@ -297,16 +297,18 @@ Used by the dashboard's data pages and by scripts. **Localhost-only** unless `AD
 | --- | --- | --- |
 | `GET` | `/api/health` | Liveness check (no data) |
 | `GET` | `/api/scenarios` | Available scenarios |
+| `GET` | `/api/config/session-defaults` | Default session configuration for the setup form (`config/session.default.json`, validated) |
 | `GET` | `/api/sessions` | All sessions with status |
 | `GET` | `/api/sessions/:id` | One session (metadata + reduced state) |
 | `GET` | `/api/sessions/:id/events` | Full event log (for replay); demographic answers redacted |
-| `GET` | `/api/sessions/:id/telemetry` | Telemetry rows of the session |
+| `GET` | `/api/sessions/:id/telemetry` | Telemetry rows of the session (`?afterId=&limit=` for paging) |
+| `GET` | `/api/sessions/:id/scenario` | Scenario of the session (all views) + whether its files still match the recorded hash (replay) |
 | `POST` | `/api/sessions/:id/export` | Write a standard (pseudonymised) export to `exports/` |
 | `POST` | `/api/sessions/:id/anonymise` | Write an anonymised export to `exports/` |
 | `GET` | `/api/sessions/:id/print/keysheet` | Printable key sheet (seat → code, blank name column) |
 | `GET` | `/api/sessions/:id/print/cards` | Printable takedown cards (one per seat) |
-| `GET` | `/api/participants/:code` | Look up a participant code: sessions and row counts |
-| `POST` | `/api/participants/:code/erase` | Erase all data of a code. Body `{ "confirm": "<code>" }` must repeat the code. |
+| `GET` | `/api/participants/:code` | Look up a participant code (typos tolerated): sessions and row counts, exports containing it, earlier erasures |
+| `POST` | `/api/participants/:code/erase` | Erase all data of a code. Body `{ "confirm": "<code>", "note"?: "…" }` must repeat the code. Refused (409) while the participant is in a session that is still running. |
 | `GET` | `/api/erasures` | Erasure register |
 | `GET` | `/api/exports` | Export register |
 

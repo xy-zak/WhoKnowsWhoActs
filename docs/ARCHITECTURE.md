@@ -149,7 +149,7 @@ flowchart TB
 | `packages/shared/src/rules/` | `reducer.ts`, `validators.ts`, `roundRules.ts` |
 | `packages/shared/src/projections.ts` | `playerView`, `facilitatorView` |
 | `packages/shared/src/docgen.ts`, `exportColumns.ts` | Documentation and codebook generation; export file contract |
-| `apps/server/src/` | `index.ts` (boot), `cli.ts`, `db/`, `session/`, `net/`, `api/`, `export/`, `gdpr/`, `tools/` (bots) |
+| `apps/server/src/` | `index.ts` (boot), `cli.ts`, `app.ts`, `content.ts` (scenario/config loading), `db/` (SQLCipher, store), `session/SessionManager.ts`, `net/hub.ts` (Socket.IO), `api/` (REST), `gdpr/` (exporter, erasure, print pages), `tools/` (bots) |
 | `apps/client/src/` | `map/` (SVG renderer), `net/` (socket, clock sync, telemetry), `player/`, `facilitator/` |
 | `config/` | `study.json`, `consent.json` + `consent.md`, `demographics.json`, `briefing.md`, `session.default.json` |
 | `scenarios/<id>/` | `scenario.json`, `map.svg`, `views.json` |
@@ -414,8 +414,18 @@ scenarios/<id>/
 | --- | --- | --- |
 | Rules | Vitest (`packages/shared/test`) | Quotas, round completion, pause, revoke, overrides, custom validators, deterministic replay, projection asymmetry, participant-code checksums |
 | Documentation | Vitest + `npm run docs:check` | Generated blocks are up to date; every event, telemetry type and message is documented |
-| Server integration | Vitest + `socket.io-client` bots | A full 3-round game with 4 bots on a temporary encrypted DB: event counts, rejections, reconnect deduplication, **no cross-view data leakage**, exports parse |
-| GDPR | Vitest | Wrong passphrase fails; no plaintext codes in the DB file; erasure removes every row; logs contain no IP addresses; data folders are git-ignored |
-| Browser | Playwright | Facilitator + 4 player contexts through binding → consent → demographics → one round; every Mermaid diagram in the docs parses |
+| Server integration | Vitest + `socket.io-client` bots | A full 3-round game with 4 bots on a temporary encrypted DB: event counts, rejections, reconnect + auto-pause, intent deduplication, revoke, resume from the log, **no cross-view data leakage**, no codes in payloads, IP-free logs |
+| GDPR | Vitest | Wrong passphrase fails; no plaintext codes in the DB file; export files match `EXPORT_FILES` column by column; anonymised exports contain no codes; erasure removes every row, adds the register entry and never reuses seq numbers; backups are encrypted; rekey works; data folders are git-ignored |
+| Browser | Playwright (`npm run test:e2e`) | Facilitator page + 4 real player browsers through binding → consent → demographics → briefing → a round of propose/decide → end screen with code → export → replay (fresh temporary DB per run); every Mermaid diagram in the docs parses and renders |
 
 **Bots** (`npm run bots -- --count 3`) are simulated players. They connect like real browsers, complete onboarding and propose/decide at random within their quotas. Use them to rehearse a session alone: run 3 bots, play the fourth seat yourself, and watch the dashboard.
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--url` | `http://localhost:3000` | Server to connect to |
+| `--count` | `3` | Number of simulated players |
+| `--delay` | `1500-5000` | Random pause between a bot's actions (ms, `min-max`) |
+| `--auto` | off | Also act as facilitator: create a session if none is attached, bind every terminal (bots **and** humans) to the next free seat, randomise labels, start onboarding and each round. **Never use during a real session.** |
+| `--seats` | `4` | Seat count of the session `--auto` creates |
+| `--round-pause` | `3000` | Pause (ms) `--auto` waits between rounds |
+| `--admin-token` | – | `ADMIN_TOKEN` when the server is on another machine |
