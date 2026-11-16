@@ -71,11 +71,9 @@ export function registerGdprApi(ctx: AppContext, guard: Guard) {
       const attached =
         active?.state.seats && Object.values(active.state.seats).some((s) => s.participantCode === code);
       if (attached && !active!.isFinal && active!.state.phase !== "game_complete") {
-        return reply
-          .code(409)
-          .send({
-            error: "This participant is in the running session. Withdraw them, end the session, then erase.",
-          });
+        return reply.code(409).send({
+          error: "This participant is in the running session. Withdraw them, end the session, then erase.",
+        });
       }
       const result = eraseParticipant(store, code, req.body?.note ?? "");
       if (attached) hub.reloadActiveSession();
