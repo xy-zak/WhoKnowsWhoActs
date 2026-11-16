@@ -76,7 +76,6 @@ export function Button({
     .filter(Boolean)
     .join(" ");
   return (
-    // biome-ignore lint/a11y/useButtonType: type is passed through (defaults to "button")
     <button type={type} className={cls} aria-label={iconOnly ? rest.title : undefined} {...rest}>
       {icon && <Icon name={icon} size={size === "lg" ? 20 : 16} />}
       {children && <span>{children}</span>}

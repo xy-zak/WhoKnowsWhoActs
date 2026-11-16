@@ -9,6 +9,7 @@ import {
   generateAnonymousId,
   initialState,
   type PayloadOf,
+  parseSessionConfig,
   randomCrockford,
   reduceEvents,
   renderCodebook,
@@ -288,8 +289,8 @@ export function exportSession(
     status: final.phase,
     createdWall: row.created_wall,
     scenario: created?.payload.scenario ?? null,
-    config: created?.payload.config ?? JSON.parse(row.config_json),
-    condition: row.condition,
+    config: parseSessionConfig(created?.payload.config ?? JSON.parse(row.config_json)),
+    tags: JSON.parse(row.tags_json ?? "[]") as string[],
     notes: row.notes,
     harness: created?.payload.harness ?? { version: row.harness_version, gitCommit: row.git_commit },
     rounds: final.rounds.map((r) => {

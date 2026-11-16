@@ -37,6 +37,9 @@ export type RoundSpec = z.infer<typeof RoundSpecSchema>;
 
 /* ─────────────────────────── Session config ─────────────────────────── */
 
+export const MAX_TAGS = 20;
+export const MAX_TAG_LENGTH = 40;
+
 export const SessionConfigSchema = z
   .object({
     seatCount: z
@@ -107,19 +110,72 @@ export const SessionConfigSchema = z
         showOthersProgress: true,
       })
       .describe("What players can see about each other"),
-    condition: z
-      .string()
-      .max(100)
-      .default("")
-      .describe("Free label for the experimental condition (researcher-entered, no personal data)"),
+    tags: z
+      .array(
+        z
+          .string()
+          .min(1)
+          .max(MAX_TAG_LENGTH)
+          .regex(/^[^,]+$/, "Tags cannot contain commas"),
+      )
+      .max(MAX_TAGS)
+      .default([])
+      .describe(
+        "Researcher-entered session tags, e.g. ['pilot', 'condition-A'] (entered comma-separated; no personal data)",
+      ),
+    appearance: z
+      .object({
+        playerTheme: z
+          .enum(["latte", "mocha"])
+          .default("mocha")
+          .describe(
+            "Colour theme of every player screen in this session (Catppuccin Latte = light, Mocha = dark)",
+          ),
+        playerCrt: z
+          .boolean()
+          .default(true)
+          .describe("Subtle CRT effects (scanlines, glow, power-on animations) on player screens"),
+      })
+      .default({ playerTheme: "mocha", playerCrt: true })
+      .describe("What player screens look like — identical for all seats and recorded with the session"),
   })
   .describe("Session configuration (stored verbatim in SessionCreated)");
 
 export type SessionConfig = z.infer<typeof SessionConfigSchema>;
 export type SessionConfigInput = z.input<typeof SessionConfigSchema>;
 
+/**
+ * Normalise tags typed as one comma-separated string (or a list): trimmed,
+ * inner whitespace collapsed, empty entries dropped, de-duplicated
+ * case-insensitively (first spelling wins), at most MAX_TAGS of at most
+ * MAX_TAG_LENGTH characters.
+ */
+export function normaliseTags(input: string | readonly string[]): string[] {
+  const parts = typeof input === "string" ? input.split(",") : input.flatMap((t) => t.split(","));
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of parts) {
+    const t = raw.replace(/\s+/g, " ").trim().slice(0, MAX_TAG_LENGTH).trim();
+    if (!t || seen.has(t.toLowerCase())) continue;
+    seen.add(t.toLowerCase());
+    out.push(t);
+    if (out.length >= MAX_TAGS) break;
+  }
+  return out;
+}
+
+/**
+ * Parse a session config, upgrading older formats: before tags existed,
+ * sessions had a single free-text `condition`; it becomes the tag list.
+ * Used for new configs AND when replaying old SessionCreated events.
+ */
 export function parseSessionConfig(input: unknown): SessionConfig {
-  return SessionConfigSchema.parse(input ?? {});
+  const obj: Record<string, unknown> =
+    input && typeof input === "object" ? { ...(input as Record<string, unknown>) } : {};
+  if (!Array.isArray(obj.tags) && typeof obj.condition === "string") obj.tags = normaliseTags(obj.condition);
+  if (Array.isArray(obj.tags)) obj.tags = normaliseTags(obj.tags as string[]);
+  delete obj.condition;
+  return SessionConfigSchema.parse(obj);
 }
 
 /** Effective round spec for round `n` (1-based). */

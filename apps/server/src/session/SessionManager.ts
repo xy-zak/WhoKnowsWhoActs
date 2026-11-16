@@ -18,6 +18,7 @@ import {
   P_LABELS,
   type PayloadOf,
   type PLabel,
+  parseSessionConfig,
   quotaLimit,
   quotaUsed,
   randomCrockford,
@@ -92,7 +93,8 @@ export class SessionManager {
 
   /* ═════════════════════════ lifecycle ═════════════════════════ */
 
-  static create(deps: SessionDeps, config: SessionConfig, notes: string): SessionManager {
+  static create(deps: SessionDeps, input: SessionConfig, notes: string): SessionManager {
+    const config = parseSessionConfig(input); // normalises tags
     for (const k of K_LABELS) {
       if (config.viewAssignment === "byKnowledgeType" && !deps.scenario.views[k]) {
         throw new CommandError(
@@ -110,7 +112,7 @@ export class SessionManager {
       scenario_version: deps.scenario.version,
       scenario_hash: deps.scenario.hash,
       status: "lobby",
-      condition: config.condition,
+      tags_json: JSON.stringify(config.tags),
       notes,
       config_json: JSON.stringify(config),
       harness_version: hv.version,

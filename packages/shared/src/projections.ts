@@ -76,6 +76,8 @@ export interface PlayerView {
   highlights: Highlight[];
   broadcasts: Array<{ seq: number; text: string; serverTs: number }>;
   onboarding: OnboardingContent | null;
+  /** Theme + CRT of player screens, set per session (identical for all seats). */
+  appearance: GameState["config"]["appearance"];
   /** Study contact details, shown on the end/withdrawn screen next to the takedown code. */
   study: StudyConfig | null;
   visibility: GameState["config"]["visibility"];
@@ -152,6 +154,7 @@ export function playerView(
     })),
     broadcasts: state.broadcasts.slice(-5),
     onboarding: nextStep ? onboarding : null,
+    appearance: state.config.appearance,
     study: END_PHASES.has(state.phase) || seat.withdrawn ? (onboarding?.study ?? null) : null,
     visibility: vis,
   };

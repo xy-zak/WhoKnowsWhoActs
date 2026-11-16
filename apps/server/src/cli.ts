@@ -72,7 +72,7 @@ async function main() {
         if (rows.length === 0) console.log("No sessions.");
         for (const s of rows) {
           console.log(
-            `${s.id}  ${s.status.padEnd(14)} ${s.createdWall.slice(0, 16)}  scenario=${s.scenarioId} v${s.scenarioVersion}  events=${s.eventCount} telemetry=${s.telemetryCount}${s.condition ? `  condition=${s.condition}` : ""}`,
+            `${s.id}  ${s.status.padEnd(14)} ${s.createdWall.slice(0, 16)}  scenario=${s.scenarioId} v${s.scenarioVersion}  events=${s.eventCount} telemetry=${s.telemetryCount}${s.tags.length ? `  tags=${s.tags.join(",")}` : ""}`,
           );
         }
         break;

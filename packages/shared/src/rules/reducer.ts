@@ -1,3 +1,4 @@
+import { parseSessionConfig } from "../config";
 import type { StoredEvent } from "../events";
 import { emptySeat, type GameState, initialState, type SeatState } from "../state";
 
@@ -20,7 +21,8 @@ export function applyEvent(state: GameState, ev: StoredEvent): GameState {
       const p = ev.payload;
       state.sessionId = ev.sessionId;
       state.createdTs = ev.serverTs;
-      state.config = p.config;
+      // upgrade older configs (e.g. `condition` → `tags`) so replays of old sessions keep working
+      state.config = parseSessionConfig(p.config);
       state.scenario = p.scenario;
       state.regionIds = p.regionIds;
       state.viewIds = p.viewIds;

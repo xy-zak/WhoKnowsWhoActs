@@ -20,6 +20,10 @@ function motionAllowed(): boolean {
 
 const FOCUSABLE =
   'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+/** Same selector list, scoped to the popup body (each alternative needs the prefix). */
+const BODY_FOCUSABLE = FOCUSABLE.split(", ")
+  .map((sel) => `.popup-body ${sel}`)
+  .join(", ");
 
 export interface PopupProps {
   title: string;
@@ -77,7 +81,7 @@ export function Popup({
     openCount++;
     const prev = document.activeElement as HTMLElement | null;
     const first =
-      ref.current?.querySelector<HTMLElement>(".popup-body " + FOCUSABLE) ??
+      ref.current?.querySelector<HTMLElement>(BODY_FOCUSABLE) ??
       ref.current?.querySelector<HTMLElement>(FOCUSABLE);
     first?.focus();
     return () => {

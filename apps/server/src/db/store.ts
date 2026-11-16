@@ -17,6 +17,7 @@ export interface SessionRow {
   scenario_hash: string;
   status: string;
   condition: string;
+  tags_json: string;
   notes: string;
   config_json: string;
   harness_version: string;
@@ -31,7 +32,7 @@ export interface SessionSummary {
   scenarioId: string;
   scenarioVersion: string;
   status: string;
-  condition: string;
+  tags: string[];
   notes: string;
   eventCount: number;
   telemetryCount: number;
@@ -107,15 +108,16 @@ export class Store {
 
   /* ─────────── sessions ─────────── */
 
-  insertSession(row: Omit<SessionRow, "updated_wall">) {
+  insertSession(row: Omit<SessionRow, "updated_wall" | "condition">) {
     this.db
       .prepare(
-        `INSERT INTO sessions (id, created_wall, scenario_id, scenario_version, scenario_hash, status, condition, notes,
-          config_json, harness_version, git_commit, updated_wall)
-         VALUES (@id, @created_wall, @scenario_id, @scenario_version, @scenario_hash, @status, @condition, @notes,
-          @config_json, @harness_version, @git_commit, @created_wall)`,
+        `INSERT INTO sessions (id, created_wall, scenario_id, scenario_version, scenario_hash, status, condition, tags_json,
+          notes, config_json, harness_version, git_commit, updated_wall)
+         VALUES (@id, @created_wall, @scenario_id, @scenario_version, @scenario_hash, @status, @condition, @tags_json,
+          @notes, @config_json, @harness_version, @git_commit, @created_wall)`,
       )
-      .run(row);
+      // `condition` is the pre-v3 column; it keeps a readable copy of the tags
+      .run({ ...row, condition: (JSON.parse(row.tags_json) as string[]).join(", ") });
   }
 
   setSessionStatus(id: string, status: string) {
@@ -148,7 +150,7 @@ export class Store {
       scenarioId: r.scenario_id,
       scenarioVersion: r.scenario_version,
       status: r.status,
-      condition: r.condition,
+      tags: JSON.parse(r.tags_json ?? "[]") as string[],
       notes: r.notes,
       eventCount: r.event_count,
       telemetryCount: r.telemetry_count,

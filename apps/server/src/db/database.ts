@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
+import { normaliseTags } from "@wkwa/shared";
 import Database from "better-sqlite3-multiple-ciphers";
 
 export type DB = Database.Database;
@@ -11,9 +12,10 @@ export class WrongPassphraseError extends Error {
   }
 }
 
-const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
-const MIGRATIONS: Record<number, string> = {
+/** A migration is SQL, or a function for data changes that need JavaScript. */
+const MIGRATIONS: Record<number, string | ((db: DB) => void)> = {
   1: `
     CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 
@@ -90,6 +92,16 @@ const MIGRATIONS: Record<number, string> = {
     ALTER TABLE sessions ADD COLUMN last_seq INTEGER NOT NULL DEFAULT 0;
     UPDATE sessions SET last_seq = coalesce((SELECT max(seq) FROM events WHERE events.session_id = sessions.id), 0);
   `,
+  // v3: free-text `condition` becomes a list of tags (the old column stays, unused)
+  3: (db) => {
+    db.exec("ALTER TABLE sessions ADD COLUMN tags_json TEXT NOT NULL DEFAULT '[]'");
+    const rows = db.prepare("SELECT id, condition FROM sessions").all() as Array<{
+      id: string;
+      condition: string;
+    }>;
+    const upd = db.prepare("UPDATE sessions SET tags_json = ? WHERE id = ?");
+    for (const r of rows) upd.run(JSON.stringify(normaliseTags(r.condition ?? "")), r.id);
+  },
 };
 
 function applyKey(db: DB, passphrase: string) {
@@ -102,7 +114,7 @@ function applyKey(db: DB, passphrase: string) {
  * Open (or create) the SQLCipher-encrypted database.
  * The passphrase never touches disk; a wrong passphrase throws WrongPassphraseError.
  */
-export function openDatabase(file: string, passphrase: string): DB {
+export function openDatabase(file: string, passphrase: string, opts: { targetVersion?: number } = {}): DB {
   if (!passphrase) throw new Error("A database passphrase is required.");
   mkdirSync(path.dirname(file), { recursive: true });
   const isNew = !existsSync(file);
@@ -118,11 +130,11 @@ export function openDatabase(file: string, passphrase: string): DB {
   db.pragma("secure_delete = ON");
   db.pragma("foreign_keys = ON");
   db.pragma("synchronous = FULL");
-  migrate(db, isNew);
+  migrate(db, isNew, opts.targetVersion ?? SCHEMA_VERSION);
   return db;
 }
 
-function migrate(db: DB, isNew: boolean) {
+function migrate(db: DB, isNew: boolean, target: number) {
   const hasMeta = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='meta'").get();
   let version = 0;
   if (hasMeta) {
@@ -137,11 +149,12 @@ function migrate(db: DB, isNew: boolean) {
     };
     if (tables.n > 0) throw new Error("Database has unknown structure; refusing to migrate.");
   }
-  for (let v = version + 1; v <= SCHEMA_VERSION; v++) {
+  for (let v = version + 1; v <= target; v++) {
     const sql = MIGRATIONS[v];
     if (!sql) throw new Error(`Missing migration ${v}`);
     db.transaction(() => {
-      db.exec(sql);
+      if (typeof sql === "function") sql(db);
+      else db.exec(sql);
       if (v === 1) {
         db.prepare("INSERT INTO meta(key, value) VALUES ('server_secret', ?)").run(
           randomBytes(32).toString("hex"),

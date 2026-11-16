@@ -69,7 +69,8 @@ erDiagram
     TEXT scenario_version
     TEXT scenario_hash
     TEXT status "current phase"
-    TEXT condition
+    TEXT condition "pre-v3; copy of tags"
+    TEXT tags_json "session tags (v3)"
     TEXT notes
     TEXT config_json
     TEXT harness_version
@@ -266,7 +267,11 @@ A new session was created with a scenario and configuration.
         "showOtherLabelsToPlayers": false,
         "showOthersProgress": true
       },
-      "condition": ""
+      "tags": [],
+      "appearance": {
+        "playerTheme": "mocha",
+        "playerCrt": true
+      }
     },
     "scenario": {
       "id": "demo",
@@ -2009,7 +2014,10 @@ Stored verbatim in `SessionCreated.config` and in `sessions.config_json`. Defaul
 | `visibility.showOwnLabels` | `boolean` | `true` | Players see their own K/P labels |
 | `visibility.showOtherLabelsToPlayers` | `boolean` | `false` | Players see other seats' K/P labels |
 | `visibility.showOthersProgress` | `boolean` | `true` | Players see other seats' quota progress |
-| `condition` | `string (≤ 100 chars)` | `""` | Free label for the experimental condition (researcher-entered, no personal data) |
+| `tags` | `array<string (≤ 40 chars, pattern)>` | — | Researcher-entered session tags, e.g. ['pilot', 'condition-A'] (entered comma-separated; no personal data) |
+| `appearance` | `object` | — | What player screens look like — identical for all seats and recorded with the session |
+| `appearance.playerTheme` | `"latte" \| "mocha"` | `"mocha"` | Colour theme of every player screen in this session (Catppuccin Latte = light, Mocha = dark) |
+| `appearance.playerCrt` | `boolean` | `true` | Subtle CRT effects (scanlines, glow, power-on animations) on player screens |
 
 <!-- END GENERATED: session-config -->
 
@@ -2022,7 +2030,9 @@ Stored verbatim in `SessionCreated.config` and in `sessions.config_json`. Defaul
 | | `created_wall`, `updated_wall` | TEXT | ISO-8601 UTC |
 | | `scenario_id`, `scenario_version`, `scenario_hash` | TEXT | Scenario used (hash = SHA-256 of the loaded map and views) |
 | | `status` | TEXT | Current phase (`lobby` … `closed` / `aborted`), a cache of the reduced state |
-| | `condition`, `notes` | TEXT | Researcher-entered labels (no personal data) |
+| | `tags_json` | TEXT | Session tags as a JSON list, e.g. `["pilot","A"]` (schema v3; entered comma-separated in setup) |
+| | `condition` | TEXT | Before schema v3: a single free-text condition label. Since v3 it holds a readable copy of the tags; migration 3 converted old values to tags |
+| | `notes` | TEXT | Researcher-entered notes (no personal data) |
 | | `config_json` | TEXT | Effective session configuration (see above) |
 | | `harness_version`, `git_commit` | TEXT | Software version |
 | | `last_seq` | INTEGER | Highest `seq` ever assigned in the session, so seq numbers are never reused after an erasure (schema v2) |
@@ -2057,7 +2067,7 @@ Session metadata: configuration, scenario, software version and a per-round summ
 | `createdWall` | iso-datetime | Session creation time | SessionCreated |
 | `scenario` | json | { id, title, version, hash } of the scenario used | SessionCreated.scenario |
 | `config` | json | Full effective session configuration | SessionCreated.config |
-| `condition` | string | Experimental condition label | SessionCreated.config.condition |
+| `tags` | json | Session tags (list of strings), e.g. ["pilot", "condition-A"] | SessionCreated.config.tags |
 | `notes` | string | Researcher notes at creation | SessionCreated.notes |
 | `harness` | json | { version, gitCommit } of the harness software | SessionCreated.harness |
 | `rounds` | json | [{ round, startedWall, endedWall, reason, durationMs, pausedMs }] per played round | RoundStarted + RoundCompleted |

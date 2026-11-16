@@ -61,7 +61,7 @@ Field-level detail of every logged record is in [DATA-TYPES.md](DATA-TYPES.md).
 | UI telemetry: screen views, hover, inspect, pan/zoom, tool selection, confirm/cancel, focus/visibility, idle (**only after consent**) | Player client | Behavioural research data | Pseudonymous | `telemetry` | Research period |
 | Connection events, clock sync | Server/client | Data-quality checks | Pseudonymous / non-personal | `events`, `telemetry` | Research period |
 | Facilitator actions and notes, broadcasts | Facilitator | Audit trail, context | Non-personal (**must not contain names**) | `events` | Research period |
-| Session config, scenario hash, software version | Facilitator/server | Reproducibility | Non-personal | `sessions`, `events` | Indefinitely (with the anonymised data) |
+| Session config (incl. tags and the player-screen appearance: theme and CRT effects), scenario hash, software version | Facilitator/server | Reproducibility; tags and appearance describe the experimental condition | Non-personal (**tags must not contain names**) | `sessions`, `events` | Indefinitely (with the anonymised data) |
 | Erasure register | Researcher | Accountability; re-apply erasure after restoring a backup | Pseudonymous (SHA-256 of the code) | `erasures` | As long as any copy/backup of the DB exists |
 | Export register / manifest | Server | Know which exports contain a participant | Pseudonymous (hashes) | `exports`, `manifest.json` | As long as the exports exist |
 | Server log | Server | Debugging | Non-personal (no IPs, no payloads, no query strings) | `data/logs/server.log` | Delete after the study |

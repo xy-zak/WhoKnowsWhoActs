@@ -129,10 +129,10 @@ export const EXPORT_FILES: ExportFileDef[] = [
         source: "SessionCreated.config",
       },
       {
-        name: "condition",
-        type: "string",
-        description: "Experimental condition label",
-        source: "SessionCreated.config.condition",
+        name: "tags",
+        type: "json",
+        description: 'Session tags (list of strings), e.g. ["pilot", "condition-A"]',
+        source: "SessionCreated.config.tags",
       },
       {
         name: "notes",
