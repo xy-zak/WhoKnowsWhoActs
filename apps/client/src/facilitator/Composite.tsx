@@ -1,15 +1,9 @@
-import {
-  type GameState,
-  type Highlight,
-  playerView,
-  type Scenario,
-  SEAT_COLOURS,
-  seatList,
-} from "@wkwa/shared";
+import { type GameState, type Highlight, playerView, type Scenario, seatList } from "@wkwa/shared";
 import { useMemo, useState } from "react";
 import { MapLegend, MapView } from "../map/MapView";
+import { Button, Check, Panel, SeatDot, StatusTag } from "../ui";
 
-/** All four views' information about the same region, side by side. */
+/** All views' information about one region, side by side. */
 function RegionComparison({
   scenario,
   state,
@@ -34,7 +28,7 @@ function RegionComparison({
   return (
     <div className="col">
       <h3 style={{ margin: 0 }}>
-        {region?.name} <span className="muted small">({regionId})</span>
+        {region?.name} <span className="faint">{regionId}</span>
       </h3>
       <div style={{ overflowX: "auto" }}>
         <table className="grid">
@@ -43,18 +37,12 @@ function RegionComparison({
               <th />
               {viewIds.map((v) => (
                 <th key={v}>
-                  {v}{" "}
-                  {seatsByView(v).map((s) => (
-                    <span
-                      key={s}
-                      className="seat-dot"
-                      style={{ background: SEAT_COLOURS[s] }}
-                      title={`seat ${s}`}
-                    />
-                  ))}
-                  <div className="small muted" style={{ fontWeight: 400 }}>
-                    {scenario.views[v]!.name}
-                  </div>
+                  <span className="row nowrap" style={{ gap: 3 }}>
+                    {v}
+                    {seatsByView(v).map((s) => (
+                      <SeatDot key={s} seat={s} />
+                    ))}
+                  </span>
                 </th>
               ))}
             </tr>
@@ -64,16 +52,12 @@ function RegionComparison({
               const def = scenario.attributes.find((a) => a.key === k);
               return (
                 <tr key={k}>
-                  <td>{def?.label ?? k}</td>
+                  <td className="muted">{def?.label ?? k}</td>
                   {viewIds.map((v) => {
                     const val = scenario.views[v]!.regions[regionId]?.attributes[k];
                     return (
-                      <td key={v} style={{ fontWeight: val === undefined ? 400 : 600 }}>
-                        {val === undefined ? (
-                          <span className="muted">–</span>
-                        ) : (
-                          `${val}${def?.unit ? ` ${def.unit}` : ""}`
-                        )}
+                      <td key={v} className={val === undefined ? "faint" : "strong"}>
+                        {val === undefined ? "–" : `${val}${def?.unit ? ` ${def.unit}` : ""}`}
                       </td>
                     );
                   })}
@@ -83,19 +67,21 @@ function RegionComparison({
           </tbody>
         </table>
       </div>
-      <strong className="small">Actions on this region</strong>
-      {actions.length === 0 && <span className="small muted">none</span>}
+      <span className="small upper muted">Actions on this region</span>
+      {actions.length === 0 && <span className="small faint">none</span>}
       {actions.map((a) => (
         <div key={a.seq} className="row small">
-          <span className="mono">#{a.seq}</span>
+          <span className="mono faint">#{a.seq}</span>
           <span>R{a.round}</span>
-          <span className="seat-dot" style={{ background: SEAT_COLOURS[a.seat] }} /> seat {a.seat}
-          <span className={`pill ${a.kind === "decide" ? "bad" : "warn"}`}>{a.kind}</span>
-          {a.revoked && <span className="pill">revoked</span>}
+          <SeatDot seat={a.seat} /> seat {a.seat}
+          <span className={a.kind === "decide" ? "t-decide strong" : "t-propose strong"}>
+            {a.kind.toUpperCase()}
+          </span>
+          {a.revoked && <StatusTag>revoked</StatusTag>}
           {onRevoke && !a.revoked && a.round === state.round && state.phase === "round_active" && (
-            <button type="button" className="small danger" onClick={() => onRevoke(a.seq)}>
+            <Button size="sm" icon="revoke" onClick={() => onRevoke(a.seq)}>
               Revoke
-            </button>
+            </Button>
           )}
         </div>
       ))}
@@ -145,60 +131,81 @@ export function CompositeMap({
     .map(([seat, regionId]) => ({ seat: Number(seat), regionId: regionId! }));
 
   return (
-    <div className="panel col">
-      <div className="row">
-        <strong>Composite map</strong>
-        <span className="small muted">colour by</span>
-        <select value={colourBy} onChange={(e) => setColourBy(e.target.value)}>
+    <Panel
+      title="Composite map"
+      icon="scenario"
+      actions={
+        <select
+          aria-label="Colour the map by view"
+          value={colourBy}
+          onChange={(e) => setColourBy(e.target.value)}
+        >
           {viewIds.map((v) => (
             <option key={v} value={v}>
-              {v} — {scenario.views[v]!.name}
+              colour: {v} — {scenario.views[v]!.name}
             </option>
           ))}
-          <option value="none">none (outline only)</option>
+          <option value="none">colour: none</option>
         </select>
-        <label className="row small">
-          <input type="checkbox" checked={allRounds} onChange={(e) => setAllRounds(e.target.checked)} /> all
-          rounds
-        </label>
-        <span className="spacer" />
-        <MapLegend />
-      </div>
-      <div style={{ display: "grid", gridTemplateColumns: selected ? "minmax(0,1fr) 420px" : "1fr", gap: 8 }}>
-        <div style={{ height }}>
-          <MapView
-            geometry={scenario}
-            fills={fills}
-            labels={labels}
-            showNames
-            highlights={highlights}
-            hoverMarkers={hoverMarkers}
-            selectedRegionId={selected}
-            interactive
-            zoomable
-            onRegionClick={(id) => setSelected(id === selected ? null : id)}
-          />
+      }
+    >
+      <div className="col">
+        <div className="row">
+          <Check label="all rounds" checked={allRounds} onChange={setAllRounds} />
+          <span className="spacer" />
+          <MapLegend />
         </div>
-        {selected && (
-          <div className="panel" style={{ boxShadow: "none", overflow: "auto", maxHeight: height }}>
-            <div className="row">
-              <span className="spacer" />
-              <button type="button" className="small" onClick={() => setSelected(null)}>
-                ✕
-              </button>
-            </div>
-            <RegionComparison scenario={scenario} state={state} regionId={selected} onRevoke={onRevoke} />
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: selected ? "minmax(0,1fr) 420px" : "1fr",
+            gap: "var(--s2)",
+          }}
+        >
+          <div style={{ height }}>
+            <MapView
+              geometry={scenario}
+              fills={fills}
+              labels={labels}
+              showNames
+              highlights={highlights}
+              hoverMarkers={hoverMarkers}
+              selectedRegionId={selected}
+              interactive
+              zoomable
+              onRegionClick={(id) => setSelected(id === selected ? null : id)}
+            />
           </div>
-        )}
+          {selected && (
+            <Panel
+              nested
+              title="Region"
+              icon="review"
+              powerOn={false}
+              style={{ overflow: "auto", maxHeight: height }}
+              actions={
+                <Button
+                  iconOnly
+                  variant="ghost"
+                  icon="close"
+                  title="Close"
+                  onClick={() => setSelected(null)}
+                />
+              }
+            >
+              <RegionComparison scenario={scenario} state={state} regionId={selected} onRevoke={onRevoke} />
+            </Panel>
+          )}
+        </div>
+        <span className="hint">
+          Dotted outlines = where a seat is hovering now. Click a region to compare all views.
+        </span>
       </div>
-      <span className="small muted">
-        Dotted coloured outlines = region a seat is hovering right now. Click a region to compare all views.
-      </span>
-    </div>
+    </Panel>
   );
 }
 
-/** Each player's map exactly as their projection shows it (computed with the same shared function). */
+/** Each player's map exactly as their projection shows it (same shared function as the server). */
 export function PlayerMirrors({
   scenario,
   state,
@@ -213,9 +220,14 @@ export function PlayerMirrors({
   const seats = seatList(state).filter((s) => s.bound || s.withdrawn);
   if (seats.length === 0) return null;
   return (
-    <div className="panel col">
-      <strong>Player views (as each player sees them)</strong>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 8 }}>
+    <Panel title="Player views" icon="visibility">
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
+          gap: "var(--s2)",
+        }}
+      >
         {seats.map((s) => {
           let pv: ReturnType<typeof playerView> | null = null;
           try {
@@ -227,22 +239,21 @@ export function PlayerMirrors({
           const hover = presence[s.seat];
           return (
             <div key={s.seat} className="col" style={{ gap: 4 }}>
-              <div className="row small">
-                <span className="seat-dot" style={{ background: SEAT_COLOURS[s.seat] }} />
-                <strong>Seat {s.seat}</strong>
-                {s.k && <span className="pill">{s.k}</span>}
-                {s.p && <span className="pill">{s.p}</span>}
-                <span className="muted">{s.view ? scenario.views[s.view]?.name : ""}</span>
+              <div className="row nowrap small">
+                <SeatDot seat={s.seat} />
+                <strong>SEAT {s.seat}</strong>
+                {s.k && <span className="muted">{s.k}</span>}
+                {s.p && <span className="muted">{s.p}</span>}
                 <span className="spacer" />
                 {s.withdrawn ? (
-                  <span className="pill">withdrawn</span>
+                  <StatusTag>withdrawn</StatusTag>
                 ) : s.connected ? (
-                  <span className="pill ok">online</span>
+                  <StatusTag tone="live">online</StatusTag>
                 ) : (
-                  <span className="pill bad">offline</span>
+                  <StatusTag tone="danger">offline</StatusTag>
                 )}
               </div>
-              <div style={{ height: 190 }}>
+              <div style={{ height: 180 }}>
                 <MapView
                   geometry={scenario}
                   fills={fills}
@@ -251,10 +262,11 @@ export function PlayerMirrors({
                   markScale={1.6}
                 />
               </div>
+              <span className="micro faint">{s.view ? scenario.views[s.view]?.name : ""}</span>
             </div>
           );
         })}
       </div>
-    </div>
+    </Panel>
   );
 }

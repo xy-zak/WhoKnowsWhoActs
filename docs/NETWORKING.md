@@ -297,6 +297,8 @@ Used by the dashboard's data pages and by scripts. **Localhost-only** unless `AD
 | --- | --- | --- |
 | `GET` | `/api/health` | Liveness check (no data) |
 | `GET` | `/api/scenarios` | Available scenarios |
+| `GET` | `/api/scenarios/:id` | Full scenario (outline + all views) for the setup preview |
+| `GET` | `/api/server-info` | Player URLs on this machine's LAN interfaces (setup step "Connect & bind") |
 | `GET` | `/api/config/session-defaults` | Default session configuration for the setup form (`config/session.default.json`, validated) |
 | `GET` | `/api/sessions` | All sessions with status |
 | `GET` | `/api/sessions/:id` | One session (metadata + reduced state) |

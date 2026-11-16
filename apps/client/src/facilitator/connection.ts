@@ -1,6 +1,7 @@
 import type { Ack, DashboardMsg, Scenario, StoredEvent, StoredTelemetry } from "@wkwa/shared";
 import { io, type Socket } from "socket.io-client";
 import { Store } from "../net/store";
+import type { ToastMsg } from "../ui/Toast";
 
 export interface FacState {
   connected: boolean;
@@ -10,7 +11,7 @@ export interface FacState {
   events: StoredEvent[];
   telemetry: StoredTelemetry[];
   presence: Record<number, string | null>;
-  toast: { text: string; kind: "ok" | "error" } | null;
+  toast: ToastMsg | null;
 }
 
 const TOKEN_KEY = "wkwa.adminToken";
@@ -71,12 +72,12 @@ export class FacilitatorConnection {
     );
   }
 
-  toast(text: string, kind: "ok" | "error" = "ok") {
+  toast(text: string, kind: ToastMsg["kind"] = "ok") {
     if (this.toastTimer) clearTimeout(this.toastTimer);
     this.store.set((s) => ({ ...s, toast: { text, kind } }));
     this.toastTimer = setTimeout(
       () => this.store.set((s) => ({ ...s, toast: null })),
-      kind === "error" ? 6000 : 2500,
+      kind === "error" ? 6000 : 3000,
     );
   }
 

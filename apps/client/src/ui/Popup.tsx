@@ -42,7 +42,14 @@ export interface PopupProps {
   tone?: "default" | "danger";
   /** Allow closing with Esc / ✕ (default true). */
   closable?: boolean;
+  /** Internal: marks the confirmation popup (it is never hidden). */
+  isConfirm?: boolean;
+  /** Change this (e.g. the wizard step) to move focus into the new content and replay the title animation. */
+  focusKey?: string | number;
 }
+
+/** True while a confirmation popup is showing: other popups hide (one popup at a time). */
+const ConfirmPendingContext = createContext(false);
 
 /**
  * Modal popup: title bar (icon, UPPERCASE title, step counter, ✕), optional
@@ -61,7 +68,12 @@ export function Popup({
   width = 760,
   tone = "default",
   closable = true,
+  isConfirm = false,
+  focusKey,
 }: PopupProps) {
+  const hidden = useContext(ConfirmPendingContext) && !isConfirm;
+  const hiddenRef = useRef(hidden);
+  hiddenRef.current = hidden;
   const ref = useRef<HTMLDivElement>(null);
   const [closing, setClosing] = useState(false);
   const closeRef = useRef(onClose);
@@ -80,18 +92,28 @@ export function Popup({
   useEffect(() => {
     openCount++;
     const prev = document.activeElement as HTMLElement | null;
-    const first =
-      ref.current?.querySelector<HTMLElement>(BODY_FOCUSABLE) ??
-      ref.current?.querySelector<HTMLElement>(FOCUSABLE);
-    first?.focus();
     return () => {
       openCount--;
       prev?.focus?.();
     };
   }, []);
 
+  // Focus the first field of the body; fall back to the primary (last) footer button — never the ✕.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-run when the content (focusKey) changes
+  useEffect(() => {
+    const t = setTimeout(() => {
+      const field = ref.current?.querySelector<HTMLElement>(BODY_FOCUSABLE);
+      const footer = [
+        ...(ref.current?.querySelectorAll<HTMLElement>(`.popup-foot ${FOCUSABLE.split(", ")[0]}`) ?? []),
+      ];
+      (field ?? footer.at(-1) ?? ref.current)?.focus();
+    }, 0);
+    return () => clearTimeout(t);
+  }, [focusKey]);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (hiddenRef.current) return;
       if (e.key === "Escape" && closable) {
         e.preventDefault();
         requestClose();
@@ -118,6 +140,7 @@ export function Popup({
     return () => window.removeEventListener("keydown", onKey);
   }, [closable, requestClose]);
 
+  if (hidden) return null;
   return createPortal(
     <div className="backdrop" onMouseDown={(e) => e.target === e.currentTarget && closable && requestClose()}>
       <div
@@ -125,13 +148,14 @@ export function Popup({
         className={`popup tone-${tone}${closing ? " closing" : ""}`}
         style={{ "--popup-w": `${width}px` } as React.CSSProperties}
         role="dialog"
+        tabIndex={-1}
         aria-modal="true"
         aria-label={title}
       >
         <div className="popup-head">
           <span className="popup-title">
             {icon && <Icon name={icon} size={20} />}
-            <span className="typed" style={{ "--chars": title.length } as React.CSSProperties}>
+            <span key={title} className="typed" style={{ "--chars": title.length } as React.CSSProperties}>
               {title}
             </span>
           </span>
@@ -195,9 +219,10 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
   const textOk = !req?.requireText || typed.trim().toUpperCase() === req.requireText.trim().toUpperCase();
   return (
     <ConfirmContext.Provider value={confirm}>
-      {children}
+      <ConfirmPendingContext.Provider value={req !== null}>{children}</ConfirmPendingContext.Provider>
       {req && (
         <Popup
+          isConfirm
           title={req.title}
           icon={req.icon ?? (req.danger ? "warning" : "info")}
           tone={req.danger ? "danger" : "default"}

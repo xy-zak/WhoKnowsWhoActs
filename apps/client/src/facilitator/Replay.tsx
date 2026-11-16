@@ -1,6 +1,7 @@
 import { reduceEvents, type Scenario, type StoredEvent, type StoredTelemetry, seatList } from "@wkwa/shared";
 import { useEffect, useMemo, useState } from "react";
 import { fmtDuration } from "../common/format";
+import { Button, Panel, StatusTag } from "../ui";
 import { CompositeMap, PlayerMirrors } from "./Composite";
 import type { FacilitatorConnection } from "./connection";
 import { EventLog, summarise } from "./EventLog";
@@ -94,18 +95,44 @@ export function Replay({
 
   if (!sessionId) {
     return (
-      <div className="panel col">
-        <h2>Replay a session</h2>
-        {sessions.map((s) => (
-          <button type="button" key={s.id} onClick={() => onPick(s.id)} style={{ textAlign: "left" }}>
-            <span className="mono">{s.id}</span> · {s.status} · {s.createdWall.slice(0, 16).replace("T", " ")}
-          </button>
-        ))}
-        {sessions.length === 0 && <span className="muted">No sessions recorded yet.</span>}
-      </div>
+      <Panel title="Replay · choose a session" icon="replay">
+        <div className="col">
+          <span className="hint">
+            Every recorded session can be scrubbed through with the same reducer that ran it live.
+          </span>
+          <table className="grid">
+            <tbody>
+              {sessions.map((s) => (
+                <tr key={s.id} onClick={() => onPick(s.id)} style={{ cursor: "pointer" }}>
+                  <td className="mono">{s.id}</td>
+                  <td>
+                    <StatusTag>{s.status.replace("_", " ")}</StatusTag>
+                  </td>
+                  <td className="small">{s.createdWall.slice(0, 16).replace("T", " ")}</td>
+                  <td style={{ textAlign: "right" }}>
+                    <Button size="sm" icon="start">
+                      Replay
+                    </Button>
+                  </td>
+                </tr>
+              ))}
+              {sessions.length === 0 && (
+                <tr>
+                  <td className="faint">No sessions recorded yet.</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </Panel>
     );
   }
-  if (!data || !state) return <div className="panel">Loading {sessionId}…</div>;
+  if (!data || !state)
+    return (
+      <Panel title="Replay" icon="replay">
+        <span className="cursor muted">Loading {sessionId}</span>
+      </Panel>
+    );
 
   const regionName = (id: string) => data.scenario.regions.find((r) => r.id === id)?.name ?? id;
   const current = upto.at(-1);
@@ -119,68 +146,82 @@ export function Replay({
     .map((s) => s.seat);
 
   return (
-    <div className="col" style={{ gap: 10 }}>
-      <div className="panel col">
-        <div className="row">
-          <strong>Replay</strong>
-          <span className="mono">{data.sessionId}</span>
-          <span className="pill">{state.phase}</span>
-          {state.round > 0 && <span className="pill">round {state.round}</span>}
-          {state.paused && <span className="pill bad">paused</span>}
-          {!data.hashMatches && <span className="pill warn">scenario files changed since recording</span>}
-          <span className="spacer" />
-          <button type="button" className="small" onClick={() => onPick("")}>
-            Other session…
-          </button>
-        </div>
-        <div className="row">
-          <button type="button" onClick={() => stepTo(-1)} title="Previous event">
-            ⏮
-          </button>
-          {speed ? (
-            <button type="button" onClick={() => setSpeed(0)}>
-              ⏸
-            </button>
-          ) : (
-            <button type="button" onClick={() => setSpeed(4)}>
-              ▶
-            </button>
-          )}
-          <button type="button" onClick={() => stepTo(1)} title="Next event">
-            ⏭
-          </button>
-          <select value={speed} onChange={(e) => setSpeed(Number(e.target.value))}>
-            <option value={0}>paused</option>
-            <option value={1}>1×</option>
-            <option value={4}>4×</option>
-            <option value={16}>16×</option>
-            <option value={64}>64×</option>
-          </select>
-          <input
-            type="range"
-            min={start}
-            max={end}
-            step="any"
-            value={cursor}
-            onChange={(e) => setCursor(Number(e.target.value))}
-            style={{ flex: 1 }}
-          />
-          <span className="mono small">
-            {fmtDuration(cursor - start)} / {fmtDuration(end - start)}
-          </span>
-        </div>
-        {current && (
-          <div className="small">
-            <span className="mono">#{current.seq}</span> {current.type}
-            {current.seat ? ` · seat ${current.seat}` : ""} — {summarise(current, regionName)}
+    <div className="col" style={{ gap: "var(--s3)" }}>
+      <Panel
+        title={`Replay · ${data.sessionId}`}
+        icon="replay"
+        actions={
+          <Button size="sm" icon="back" onClick={() => onPick("")}>
+            Other session
+          </Button>
+        }
+      >
+        <div className="col">
+          <div className="row">
+            <StatusTag tone="primary">{state.phase.replace("_", " ")}</StatusTag>
+            {state.round > 0 && <StatusTag>round {state.round}</StatusTag>}
+            {state.paused && (
+              <StatusTag tone="warn" icon="pause">
+                paused
+              </StatusTag>
+            )}
+            {state.config.tags.map((t) => (
+              <StatusTag key={t} icon="tag">
+                {t}
+              </StatusTag>
+            ))}
+            {!data.hashMatches && (
+              <StatusTag tone="warn" icon="warning">
+                scenario files changed since recording
+              </StatusTag>
+            )}
           </div>
-        )}
-      </div>
+          <div className="row nowrap">
+            <Button iconOnly icon="back" title="Previous event" onClick={() => stepTo(-1)} />
+            {speed ? (
+              <Button iconOnly icon="pause" title="Pause playback" onClick={() => setSpeed(0)} />
+            ) : (
+              <Button iconOnly variant="primary" icon="start" title="Play" onClick={() => setSpeed(4)} />
+            )}
+            <Button iconOnly icon="next" title="Next event" onClick={() => stepTo(1)} />
+            <select
+              aria-label="Playback speed"
+              value={speed}
+              onChange={(e) => setSpeed(Number(e.target.value))}
+            >
+              <option value={0}>paused</option>
+              <option value={1}>1×</option>
+              <option value={4}>4×</option>
+              <option value={16}>16×</option>
+              <option value={64}>64×</option>
+            </select>
+            <input
+              type="range"
+              aria-label="Replay position"
+              min={start}
+              max={end}
+              step="any"
+              value={cursor}
+              onChange={(e) => setCursor(Number(e.target.value))}
+              style={{ flex: 1 }}
+            />
+            <span className="mono small">
+              {fmtDuration(cursor - start)} / {fmtDuration(end - start)}
+            </span>
+          </div>
+          {current && (
+            <div className="small">
+              <span className="faint">#{current.seq}</span> <strong>{current.type}</strong>
+              {current.seat ? ` · seat ${current.seat}` : ""} — {summarise(current, regionName)}
+            </div>
+          )}
+        </div>
+      </Panel>
       <div
         style={{
           display: "grid",
           gridTemplateColumns: "minmax(0, 3fr) minmax(0, 2fr)",
-          gap: 10,
+          gap: "var(--s3)",
           alignItems: "start",
         }}
       >

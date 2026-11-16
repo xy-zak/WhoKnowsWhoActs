@@ -1,11 +1,6 @@
-import {
-  EVENT_TYPES,
-  type GameState,
-  SEAT_COLOURS,
-  type StoredEvent,
-  type StoredTelemetry,
-} from "@wkwa/shared";
+import { EVENT_TYPES, type GameState, type StoredEvent, type StoredTelemetry } from "@wkwa/shared";
 import { Fragment, useMemo, useState } from "react";
+import { Button, Panel, SeatDot } from "../ui";
 
 function ms(ts: number) {
   const d = new Date(ts);
@@ -98,88 +93,90 @@ export function EventLog({
     !state.actions.find((a) => a.seq === e.seq)?.revoked;
 
   return (
-    <div className="panel col">
-      <div className="row">
-        <strong>Event log</strong>
-        <span className="muted small">{events.length} events</span>
-        <span className="spacer" />
-        <select value={type} onChange={(e) => setType(e.target.value)}>
-          <option value="">all types</option>
-          {EVENT_TYPES.map((t) => (
-            <option key={t}>{t}</option>
-          ))}
-        </select>
-        <select value={seat} onChange={(e) => setSeat(e.target.value)}>
-          <option value="">all seats</option>
-          {[1, 2, 3, 4].map((s) => (
-            <option key={s} value={s}>
-              seat {s}
-            </option>
-          ))}
-        </select>
-      </div>
-      <div style={{ maxHeight, overflow: "auto" }}>
-        <table className="grid">
-          <thead>
-            <tr>
-              <th>#</th>
-              <th>time</th>
-              <th>R</th>
-              <th>type</th>
-              <th>seat</th>
-              <th>details</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((e) => (
-              <Fragment key={e.seq}>
-                <tr
-                  onClick={() => setOpen(open === e.seq ? null : e.seq)}
-                  style={{ cursor: "pointer", background: e.seq === highlightSeq ? "#fff3c4" : undefined }}
-                >
-                  <td className="mono">{e.seq}</td>
-                  <td className="mono small">{ms(e.serverTs)}</td>
-                  <td>{e.round || ""}</td>
-                  <td>{e.type}</td>
-                  <td>
-                    {e.seat && (
-                      <>
-                        <span className="seat-dot" style={{ background: SEAT_COLOURS[e.seat] }} /> {e.seat}
-                      </>
-                    )}
-                  </td>
-                  <td className="small">{summarise(e, regionName)}</td>
-                  <td>
-                    {revocable(e) && (
-                      <button
-                        type="button"
-                        className="small danger"
-                        onClick={(x) => {
-                          x.stopPropagation();
-                          onRevoke!(e.seq);
-                        }}
-                      >
-                        Revoke
-                      </button>
-                    )}
-                  </td>
-                </tr>
-                {open === e.seq && (
-                  <tr>
-                    <td colSpan={7}>
-                      <pre className="mono small" style={{ margin: 0, whiteSpace: "pre-wrap" }}>
-                        {JSON.stringify({ ...e, payload: e.payload }, null, 2)}
-                      </pre>
+    <Panel title={`Event log · ${events.length}`} icon="review">
+      <div className="col">
+        <div className="row">
+          <span className="hint">Newest first · click a row for the full event</span>
+          <span className="spacer" />
+          <select aria-label="Filter by event type" value={type} onChange={(e) => setType(e.target.value)}>
+            <option value="">all types</option>
+            {EVENT_TYPES.map((t) => (
+              <option key={t}>{t}</option>
+            ))}
+          </select>
+          <select aria-label="Filter by seat" value={seat} onChange={(e) => setSeat(e.target.value)}>
+            <option value="">all seats</option>
+            {[1, 2, 3, 4].map((s) => (
+              <option key={s} value={s}>
+                seat {s}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div style={{ maxHeight, overflow: "auto" }}>
+          <table className="grid">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>time</th>
+                <th>R</th>
+                <th>type</th>
+                <th>seat</th>
+                <th>details</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((e) => (
+                <Fragment key={e.seq}>
+                  <tr
+                    onClick={() => setOpen(open === e.seq ? null : e.seq)}
+                    className={e.seq === highlightSeq ? "selected" : ""}
+                    style={{ cursor: "pointer" }}
+                  >
+                    <td className="faint">{e.seq}</td>
+                    <td className="mono small">{ms(e.serverTs)}</td>
+                    <td>{e.round || ""}</td>
+                    <td>{e.type}</td>
+                    <td>
+                      {e.seat && (
+                        <span className="row nowrap" style={{ gap: 4 }}>
+                          <SeatDot seat={e.seat} /> {e.seat}
+                        </span>
+                      )}
+                    </td>
+                    <td className="small">{summarise(e, regionName)}</td>
+                    <td>
+                      {revocable(e) && (
+                        <Button
+                          size="sm"
+                          icon="revoke"
+                          onClick={(x) => {
+                            x.stopPropagation();
+                            onRevoke!(e.seq);
+                          }}
+                        >
+                          Revoke
+                        </Button>
+                      )}
                     </td>
                   </tr>
-                )}
-              </Fragment>
-            ))}
-          </tbody>
-        </table>
+                  {open === e.seq && (
+                    <tr>
+                      <td colSpan={7}>
+                        <pre className="mono small" style={{ margin: 0, whiteSpace: "pre-wrap" }}>
+                          {JSON.stringify({ ...e, payload: e.payload }, null, 2)}
+                        </pre>
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
-    </div>
+    </Panel>
   );
 }
 
@@ -192,37 +189,38 @@ export function TelemetryFeed({
 }) {
   const rows = items.slice(-150).reverse();
   return (
-    <div className="panel col">
-      <div className="row">
-        <strong>Live telemetry</strong>
-        <span className="muted small">last {rows.length} items (state acks and clock syncs hidden)</span>
+    <Panel title="Live telemetry" icon="telemetry">
+      <div className="col">
+        <span className="hint">Last {rows.length} items · state acks and clock syncs hidden</span>
+        <div style={{ maxHeight: 340, overflow: "auto" }}>
+          <table className="grid">
+            <tbody>
+              {rows.map((t) => {
+                const p = t.payload as Record<string, unknown>;
+                const detail = Object.entries(p)
+                  .map(([k, v]) =>
+                    k === "regionId"
+                      ? regionName(String(v))
+                      : `${k}=${typeof v === "object" ? JSON.stringify(v) : v}`,
+                  )
+                  .join(" ");
+                return (
+                  <tr key={t.id}>
+                    <td className="mono small">{ms(t.clientTs)}</td>
+                    <td>
+                      <span className="row nowrap" style={{ gap: 4 }}>
+                        <SeatDot seat={t.seat} /> {t.seat}
+                      </span>
+                    </td>
+                    <td>{t.type}</td>
+                    <td className="small">{detail}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       </div>
-      <div style={{ maxHeight: 260, overflow: "auto" }}>
-        <table className="grid">
-          <tbody>
-            {rows.map((t) => {
-              const p = t.payload as Record<string, unknown>;
-              const detail = Object.entries(p)
-                .map(([k, v]) =>
-                  k === "regionId"
-                    ? regionName(String(v))
-                    : `${k}=${typeof v === "object" ? JSON.stringify(v) : v}`,
-                )
-                .join(" ");
-              return (
-                <tr key={t.id}>
-                  <td className="mono small">{ms(t.clientTs)}</td>
-                  <td>
-                    <span className="seat-dot" style={{ background: SEAT_COLOURS[t.seat] }} /> {t.seat}
-                  </td>
-                  <td>{t.type}</td>
-                  <td className="small">{detail}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-    </div>
+    </Panel>
   );
 }

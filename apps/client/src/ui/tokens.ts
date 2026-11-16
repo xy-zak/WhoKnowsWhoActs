@@ -249,7 +249,8 @@ export function themeCss(): string {
       .map(([k, v]) => `--${k}:${v};`)
       .join("");
     const fx = THEME_EFFECTS[t];
-    return `:root[data-theme="${t}"]{${vars}--scan-alpha:${fx.scanAlpha};--glow:${fx.glow ? 1 : 0};color-scheme:${t === "latte" ? "light" : "dark"};}`;
+    // also on any element, so a block can preview the other theme (setup step 03)
+    return `:root[data-theme="${t}"],[data-theme="${t}"]{${vars}--scan-alpha:${fx.scanAlpha};--glow:${fx.glow ? 1 : 0};color-scheme:${t === "latte" ? "light" : "dark"};}`;
   }).join("\n");
 }
 

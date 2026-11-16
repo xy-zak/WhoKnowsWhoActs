@@ -1,5 +1,6 @@
-import { SEAT_COLOURS, type StoredEvent } from "@wkwa/shared";
-import { DECIDE_COLOUR, PROPOSE_COLOUR } from "../map/MapView";
+import type { StoredEvent } from "@wkwa/shared";
+import { DECIDE_COLOUR, PROPOSE_COLOUR, seatColour } from "../map/MapView";
+import { Panel } from "../ui";
 
 /**
  * Swimlane timeline: one lane per seat, proposals (○) and decisions (■) over
@@ -46,103 +47,113 @@ export function Timeline({
   );
 
   return (
-    <div className="panel col">
-      <div className="row">
-        <strong>Timeline</strong>
-        <span className="small muted">○ propose · ■ decide · shaded = paused · minutes since round 1</span>
-      </div>
-      <svg
-        viewBox={`0 0 ${W} ${H}`}
-        style={{ width: "100%", height: "auto" }}
-        role="img"
-        aria-label="Timeline"
-      >
-        {rounds.map((r) => (
-          <g key={r.round}>
+    <Panel title="Timeline" icon="timeline">
+      <div className="col">
+        <span className="hint">○ propose · ■ decide · shaded = paused · minutes since round 1</span>
+        <svg
+          viewBox={`0 0 ${W} ${H}`}
+          style={{ width: "100%", height: "auto" }}
+          role="img"
+          aria-label="Timeline"
+        >
+          {rounds.map((r) => (
+            <g key={r.round}>
+              <rect
+                x={x(r.s)}
+                y={top - 4}
+                width={Math.max(1, x(r.e ?? now) - x(r.s))}
+                height={H - top}
+                style={{ fill: r.round % 2 ? "var(--sunken)" : "var(--hover)" }}
+              />
+              <text x={x(r.s) + 3} y={11} fontSize={11} style={{ fill: "var(--muted)" }}>
+                Round {r.round}
+              </text>
+            </g>
+          ))}
+          {pauses.map((p) => (
             <rect
-              x={x(r.s)}
+              key={p.s}
+              x={x(p.s)}
               y={top - 4}
-              width={Math.max(1, x(r.e ?? now) - x(r.s))}
+              width={Math.max(1, x(p.e ?? now) - x(p.s))}
               height={H - top}
-              fill={r.round % 2 ? "#f3f1ea" : "#e9eef3"}
+              style={{ fill: "var(--warn)", opacity: 0.18 }}
             />
-            <text x={x(r.s) + 3} y={11} fontSize={11} fill="#555">
-              Round {r.round}
-            </text>
-          </g>
-        ))}
-        {pauses.map((p) => (
-          <rect
-            key={p.s}
-            x={x(p.s)}
-            y={top - 4}
-            width={Math.max(1, x(p.e ?? now) - x(p.s))}
-            height={H - top}
-            fill="#c93c37"
-            opacity={0.15}
-          />
-        ))}
-        {seats.map((s, i) => (
-          <g key={s}>
+          ))}
+          {seats.map((s, i) => (
+            <g key={s}>
+              <line
+                x1={60}
+                x2={W - 10}
+                y1={top + i * laneH + laneH / 2}
+                y2={top + i * laneH + laneH / 2}
+                style={{ stroke: "var(--frame)" }}
+                strokeDasharray="2 4"
+              />
+              <circle cx={12} cy={top + i * laneH + laneH / 2} r={6} style={{ fill: seatColour(s) }} />
+              <text x={22} y={top + i * laneH + laneH / 2 + 4} fontSize={12} style={{ fill: "var(--text)" }}>
+                seat {s}
+              </text>
+            </g>
+          ))}
+          {events.map((e) => {
+            if ((e.type !== "ProposalMade" && e.type !== "DecisionMade") || e.seat === null) return null;
+            const lane = seats.indexOf(e.seat);
+            if (lane < 0) return null;
+            const cx = x(e.serverTs);
+            const cy = top + lane * laneH + laneH / 2;
+            const op = revoked.has(e.seq) ? 0.25 : 1;
+            return e.type === "ProposalMade" ? (
+              <circle
+                key={e.seq}
+                cx={cx}
+                cy={cy}
+                r={5}
+                style={{ fill: "var(--panel)", stroke: PROPOSE_COLOUR, opacity: op }}
+                strokeWidth={2.5}
+              >
+                <title>{`#${e.seq} propose ${e.payload.regionId}`}</title>
+              </circle>
+            ) : (
+              <rect
+                key={e.seq}
+                x={cx - 4.5}
+                y={cy - 4.5}
+                width={9}
+                height={9}
+                style={{ fill: DECIDE_COLOUR, opacity: op }}
+              >
+                <title>{`#${e.seq} decide ${e.payload.regionId}`}</title>
+              </rect>
+            );
+          })}
+          {[0, 0.25, 0.5, 0.75, 1].map((f) => {
+            const ts = start + f * (end - start);
+            return (
+              <text
+                key={f}
+                x={x(ts)}
+                y={H - 1}
+                fontSize={10}
+                style={{ fill: "var(--faint)" }}
+                textAnchor="middle"
+              >
+                {((ts - start) / 60_000).toFixed(1)}
+              </text>
+            );
+          })}
+          {cursorTs !== undefined && (
             <line
-              x1={60}
-              x2={W - 10}
-              y1={top + i * laneH + laneH / 2}
-              y2={top + i * laneH + laneH / 2}
-              stroke="#ddd"
+              x1={x(cursorTs)}
+              x2={x(cursorTs)}
+              y1={top - 6}
+              y2={H}
+              style={{ stroke: "var(--focus)" }}
+              strokeWidth={2}
             />
-            <circle cx={12} cy={top + i * laneH + laneH / 2} r={6} fill={SEAT_COLOURS[s]} />
-            <text x={22} y={top + i * laneH + laneH / 2 + 4} fontSize={12}>
-              seat {s}
-            </text>
-          </g>
-        ))}
-        {events.map((e) => {
-          if ((e.type !== "ProposalMade" && e.type !== "DecisionMade") || e.seat === null) return null;
-          const lane = seats.indexOf(e.seat);
-          if (lane < 0) return null;
-          const cx = x(e.serverTs);
-          const cy = top + lane * laneH + laneH / 2;
-          const op = revoked.has(e.seq) ? 0.25 : 1;
-          return e.type === "ProposalMade" ? (
-            <circle
-              key={e.seq}
-              cx={cx}
-              cy={cy}
-              r={5}
-              fill="white"
-              stroke={PROPOSE_COLOUR}
-              strokeWidth={2.5}
-              opacity={op}
-            >
-              <title>{`#${e.seq} propose ${e.payload.regionId}`}</title>
-            </circle>
-          ) : (
-            <rect
-              key={e.seq}
-              x={cx - 4.5}
-              y={cy - 4.5}
-              width={9}
-              height={9}
-              fill={DECIDE_COLOUR}
-              opacity={op}
-            >
-              <title>{`#${e.seq} decide ${e.payload.regionId}`}</title>
-            </rect>
-          );
-        })}
-        {[0, 0.25, 0.5, 0.75, 1].map((f) => {
-          const ts = start + f * (end - start);
-          return (
-            <text key={f} x={x(ts)} y={H - 1} fontSize={10} fill="#888" textAnchor="middle">
-              {((ts - start) / 60_000).toFixed(1)}
-            </text>
-          );
-        })}
-        {cursorTs !== undefined && (
-          <line x1={x(cursorTs)} x2={x(cursorTs)} y1={top - 6} y2={H} stroke="#111" strokeWidth={2} />
-        )}
-      </svg>
-    </div>
+          )}
+        </svg>
+      </div>
+    </Panel>
   );
 }

@@ -97,7 +97,7 @@
   }
 }
 .cursor::after {
-  content: "█";
+  content: "█" / "";
   margin-left: 2px;
   color: var(--primary);
   font-weight: 400;

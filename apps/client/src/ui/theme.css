@@ -113,6 +113,12 @@ code,
 .t-danger {
   color: var(--danger);
 }
+.t-propose {
+  color: var(--propose-text);
+}
+.t-decide {
+  color: var(--decide-text);
+}
 
 /* ─── layout ─── */
 .row {
@@ -177,7 +183,7 @@ code,
   color: var(--text);
 }
 .panel-title::before {
-  content: "─";
+  content: "─" / "";
   color: var(--frame);
   margin-right: 2px;
 }
@@ -214,12 +220,12 @@ code,
     border-color 80ms;
 }
 .btn::before {
-  content: "[";
+  content: "[" / "";
   color: var(--faint);
   font-weight: 400;
 }
 .btn::after {
-  content: "]";
+  content: "]" / "";
   color: var(--faint);
   font-weight: 400;
 }
@@ -418,12 +424,12 @@ table.grid tr.selected {
   color: var(--muted);
 }
 .tag::before {
-  content: "[";
+  content: "[" / "";
   font-weight: 400;
   color: var(--faint);
 }
 .tag::after {
-  content: "]";
+  content: "]" / "";
   font-weight: 400;
   color: var(--faint);
 }
@@ -498,7 +504,7 @@ table.grid tr.selected {
   align-items: center;
 }
 .stepper li + li::before {
-  content: "──";
+  content: "──" / "";
   color: var(--frame);
   margin: 0 4px;
 }
@@ -810,7 +816,7 @@ table.grid tr.selected {
   padding-left: 2ch;
 }
 .markdown li::marker {
-  content: "› ";
+  content: "› " / "";
   color: var(--faint);
 }
 

@@ -1,5 +1,6 @@
-import { type Highlight, type MapGeometry, SEAT_COLOURS } from "@wkwa/shared";
-import { type PointerEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { Highlight, MapGeometry } from "@wkwa/shared";
+import { type PointerEvent, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { Button } from "../ui/components";
 
 export interface ViewChange {
   x: number;
@@ -30,9 +31,11 @@ export interface MapViewProps {
   markScale?: number;
 }
 
-export const PROPOSE_COLOUR = "#ffab00";
-export const DECIDE_COLOUR = "#d7263d";
-const LAND = "#e8e4d8";
+/* Theme tokens (see docs/AESTHETIC-RULES.md). SVG presentation attributes do not resolve var(), so colours go in `style`. */
+export const PROPOSE_COLOUR = "var(--propose)";
+export const DECIDE_COLOUR = "var(--decide)";
+const LAND = "var(--land)";
+export const seatColour = (seat: number | null) => (seat === null ? "var(--faint)" : `var(--seat-${seat})`);
 
 function parseViewBox(vb: string): [number, number, number, number] {
   const n = vb.split(/[\s,]+/).map(Number);
@@ -162,6 +165,7 @@ export function MapView(props: MapViewProps) {
     return m;
   }, [highlights]);
 
+  const hatchId = `hatch-${useId().replace(/:/g, "")}`;
   const unit = (base[2] / 1000) * markScale; // marks scale with the map size
   const badgeR = 10 * unit;
 
@@ -180,21 +184,20 @@ export function MapView(props: MapViewProps) {
       >
         <defs>
           <pattern
-            id="hatch-propose"
+            id={hatchId}
             patternUnits="userSpaceOnUse"
             width={12 * unit}
             height={12 * unit}
             patternTransform="rotate(45)"
           >
-            <rect width={12 * unit} height={12 * unit} fill={PROPOSE_COLOUR} fillOpacity={0.12} />
+            <rect width={12 * unit} height={12 * unit} style={{ fill: PROPOSE_COLOUR, fillOpacity: 0.14 }} />
             <line
               x1="0"
               y1="0"
               x2="0"
               y2={12 * unit}
-              stroke={PROPOSE_COLOUR}
+              style={{ stroke: PROPOSE_COLOUR, strokeOpacity: 0.65 }}
               strokeWidth={4 * unit}
-              strokeOpacity={0.55}
             />
           </pattern>
         </defs>
@@ -205,7 +208,7 @@ export function MapView(props: MapViewProps) {
             d={r.path}
             data-region={r.id}
             className={`map-region${interactive ? " interactive" : ""}${selectedRegionId === r.id ? " selected" : ""}`}
-            fill={fills[r.id] ?? LAND}
+            style={{ fill: fills[r.id] ?? LAND }}
             onClick={() => {
               if (!suppressClick.current && interactive) props.onRegionClick?.(r.id);
             }}
@@ -226,8 +229,8 @@ export function MapView(props: MapViewProps) {
                 {hasPropose && (
                   <path
                     d={r.path}
-                    fill="url(#hatch-propose)"
-                    stroke={PROPOSE_COLOUR}
+                    fill={`url(#${hatchId})`}
+                    style={{ stroke: PROPOSE_COLOUR }}
                     strokeWidth={3.5}
                     strokeDasharray="10 6"
                     vectorEffect="non-scaling-stroke"
@@ -236,9 +239,7 @@ export function MapView(props: MapViewProps) {
                 {hasDecide && (
                   <path
                     d={r.path}
-                    fill={DECIDE_COLOUR}
-                    fillOpacity={0.28}
-                    stroke={DECIDE_COLOUR}
+                    style={{ fill: DECIDE_COLOUR, fillOpacity: 0.3, stroke: DECIDE_COLOUR }}
                     strokeWidth={4}
                     vectorEffect="non-scaling-stroke"
                   />
@@ -254,7 +255,7 @@ export function MapView(props: MapViewProps) {
                 key={`hover-${h.seat}`}
                 d={r.path}
                 fill="none"
-                stroke={SEAT_COLOURS[h.seat] ?? "#444"}
+                style={{ stroke: seatColour(h.seat) }}
                 strokeWidth={5}
                 strokeDasharray="2 5"
                 strokeLinecap="round"
@@ -299,7 +300,7 @@ export function MapView(props: MapViewProps) {
                 {hs.map((h, i) => {
                   const cx = ax + (i - (total - 1) / 2) * gap;
                   const cy = ay + 26 * unit;
-                  const colour = h.seat === null ? "#777" : (SEAT_COLOURS[h.seat] ?? "#777");
+                  const colour = seatColour(h.seat);
                   const text = h.seat === null ? "?" : String(h.seat);
                   return h.kind === "propose" ? (
                     <g key={h.seq}>
@@ -307,8 +308,7 @@ export function MapView(props: MapViewProps) {
                         cx={cx}
                         cy={cy}
                         r={badgeR}
-                        fill="white"
-                        stroke={colour}
+                        style={{ fill: "var(--panel)", stroke: colour }}
                         strokeWidth={3 * unit}
                       />
                       <text
@@ -317,7 +317,7 @@ export function MapView(props: MapViewProps) {
                         textAnchor="middle"
                         fontSize={11 * unit}
                         fontWeight={700}
-                        fill="#222"
+                        style={{ fill: "var(--text)" }}
                       >
                         {text}
                       </text>
@@ -330,9 +330,8 @@ export function MapView(props: MapViewProps) {
                         width={badgeR * 2}
                         height={badgeR * 2}
                         rx={3 * unit}
-                        fill={colour}
-                        stroke="#222"
-                        strokeWidth={1 * unit}
+                        style={{ fill: colour, stroke: "var(--panel)" }}
+                        strokeWidth={1.5 * unit}
                       />
                       <text
                         x={cx}
@@ -340,7 +339,7 @@ export function MapView(props: MapViewProps) {
                         textAnchor="middle"
                         fontSize={11 * unit}
                         fontWeight={700}
-                        fill="white"
+                        style={{ fill: "var(--on-accent)" }}
                       >
                         {text}
                       </text>
@@ -354,22 +353,17 @@ export function MapView(props: MapViewProps) {
       </svg>
       {zoomable && (
         <div className="map-controls">
-          <button type="button" onClick={() => zoomBy(1.4)} title="Zoom in">
-            +
-          </button>
-          <button type="button" onClick={() => zoomBy(1 / 1.4)} title="Zoom out">
-            −
-          </button>
-          <button
-            type="button"
+          <Button iconOnly icon="zoomIn" title="Zoom in" onClick={() => zoomBy(1.4)} />
+          <Button iconOnly icon="zoomOut" title="Zoom out" onClick={() => zoomBy(1 / 1.4)} />
+          <Button
+            iconOnly
+            icon="zoomReset"
+            title="Reset view"
             onClick={() => {
               setVb(base);
               emitView(base);
             }}
-            title="Reset view"
-          >
-            ⤢
-          </button>
+          />
         </div>
       )}
     </div>
@@ -380,12 +374,12 @@ export function MapLegend({ showActors = true }: { showActors?: boolean }) {
   return (
     <div className="legend">
       <span>
-        <span className="sw" style={{ background: PROPOSE_COLOUR, opacity: 0.7 }} />
-        Proposed {showActors && "(○ = seat)"}
+        <span className="sw" style={{ background: PROPOSE_COLOUR, color: "var(--propose-text)" }} />
+        <span className="t-propose">PROPOSED</span> {showActors && "○ = seat"}
       </span>
       <span>
-        <span className="sw" style={{ background: DECIDE_COLOUR, opacity: 0.7 }} />
-        Decided {showActors && "(■ = seat)"}
+        <span className="sw" style={{ background: DECIDE_COLOUR, color: "var(--decide-text)" }} />
+        <span className="t-decide">DECIDED</span> {showActors && "■ = seat"}
       </span>
     </div>
   );

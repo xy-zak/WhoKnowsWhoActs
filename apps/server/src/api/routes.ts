@@ -1,4 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
+import type { AddressInfo } from "node:net";
+import os from "node:os";
 import path from "node:path";
 import { reduceEvents, SessionConfigSchema } from "@wkwa/shared";
 import type { FastifyReply, FastifyRequest } from "fastify";
@@ -21,6 +23,32 @@ export function registerApi(ctx: AppContext, guard: Guard) {
   }));
 
   app.get("/api/scenarios", opts, async () => scenarios.list());
+
+  /** Full scenario (outline + all views) for the setup preview. */
+  app.get<{ Params: { id: string } }>("/api/scenarios/:id", opts, async (req, reply) => {
+    try {
+      return scenarios.load(req.params.id);
+    } catch (e) {
+      return reply.code(404).send({ error: (e as Error).message });
+    }
+  });
+
+  /** Where players should point their browsers (setup step "Connect & bind"). */
+  app.get("/api/server-info", opts, async () => {
+    const addr = app.server.address() as AddressInfo | null;
+    const port = addr?.port ?? ctx.runtime.port;
+    const proto = ctx.runtime.tlsCert ? "https" : "http";
+    const lan: Array<{ url: string; iface: string }> = [];
+    if (ctx.runtime.host === "0.0.0.0" || ctx.runtime.host === "::") {
+      for (const [iface, list] of Object.entries(os.networkInterfaces())) {
+        for (const a of list ?? []) {
+          if (a.family === "IPv4" && !a.internal)
+            lan.push({ url: `${proto}://${a.address}:${port}/`, iface });
+        }
+      }
+    } else lan.push({ url: `${proto}://${ctx.runtime.host}:${port}/`, iface: "configured host" });
+    return { playerUrls: lan, port, tls: Boolean(ctx.runtime.tlsCert) };
+  });
 
   /** Default session configuration for the setup form (config/session.default.json, validated). */
   app.get("/api/config/session-defaults", opts, async () => {
