@@ -56,6 +56,7 @@ export function applyEvent(state: GameState, ev: StoredEvent): GameState {
       break;
     }
     case "LabelsAssigned":
+      state.labelPairing = ev.payload.pairing ?? null;
       for (const a of ev.payload.assignments) {
         const s = seatOf(a.seat);
         if (!s) continue;

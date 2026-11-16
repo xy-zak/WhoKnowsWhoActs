@@ -6,18 +6,25 @@ import { CONTRAST_PAIRS, contrast, THEMES, TOKEN_DOCS } from "./tokens";
 export const AESTHETIC_BLOCKS: Record<string, () => string> = {
   "aesthetic-tokens": () =>
     table(
-      ["Token", "Role", "Latte (light)", "Mocha (dark)"],
-      TOKEN_DOCS.map((d) => [`\`${d.token}\``, d.role, `\`${d.latte}\``, `\`${d.mocha}\``]),
+      ["Token", "Role", "Latte (light)", "Mocha (dark)", "High contrast"],
+      TOKEN_DOCS.map((d) => [
+        `\`${d.token}\``,
+        d.role,
+        `\`${d.latte}\``,
+        `\`${d.mocha}\``,
+        `\`${d.contrast}\``,
+      ]),
     ),
   "aesthetic-contrast": () =>
     table(
-      ["Foreground", "Background", "Minimum", "Latte", "Mocha"],
+      ["Foreground", "Background", "Minimum", "Latte", "Mocha", "High contrast"],
       CONTRAST_PAIRS.map(([fg, bg, min]) => [
         `\`--${fg}\``,
         `\`--${bg}\``,
         `${min}:1`,
         `${contrast(THEMES.latte[fg]!, THEMES.latte[bg]!).toFixed(2)}:1`,
         `${contrast(THEMES.mocha[fg]!, THEMES.mocha[bg]!).toFixed(2)}:1`,
+        `${contrast(THEMES.contrast[fg]!, THEMES.contrast[bg]!).toFixed(2)}:1`,
       ]),
     ),
   "aesthetic-icons": () =>

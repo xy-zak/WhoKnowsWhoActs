@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { SessionConfigSchema } from "./config";
-import { ActionKindSchema, KLabelSchema, PLabelSchema, SeatSchema } from "./labels";
+import { ActionKindSchema, KLabelSchema, SeatSchema } from "./labels";
 import { TelemetryItemSchema } from "./telemetry";
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -22,7 +22,7 @@ export const PlayerHello = z.object({
   terminalKey: z
     .string()
     .regex(/^[0-9a-f]{32}$/)
-    .describe("Random per-browser key (localStorage) so a PC keeps its terminal number across reloads"),
+    .describe("Random per-browser key (localStorage) so a PC keeps its client number across reloads"),
   seatToken: z
     .string()
     .nullable()
@@ -75,10 +75,31 @@ export const SessionCreate = z.object({
 export const SessionResume = z.object({ sessionId: z.string() });
 export const SeatBind = z.object({ terminal: z.number().int().min(1), seat: SeatSchema });
 export const SeatUnbind = z.object({ seat: SeatSchema, reason: z.string().max(200).default("facilitator") });
+/** K per seat + pairing; the server derives each P from the pairing (P is never chosen freely). */
 export const LabelsSet = z.object({
-  assignments: z.array(
-    z.object({ seat: SeatSchema, k: KLabelSchema, p: PLabelSchema, view: z.string().optional() }),
-  ),
+  assignments: z.array(z.object({ seat: SeatSchema, k: KLabelSchema, view: z.string().optional() })),
+  pairing: z
+    .object({
+      mode: z.enum(["aligned", "dissociated"]),
+      id: z
+        .number()
+        .int()
+        .min(1)
+        .max(6)
+        .nullable()
+        .describe("1–6; null with dissociated = pick one at random (seed logged)"),
+    })
+    .default({ mode: "aligned", id: null }),
+});
+export const LabelsRandomise = z.object({
+  pairing: z
+    .object({ mode: z.enum(["aligned", "dissociated"]), id: z.number().int().min(1).max(6).nullable() })
+    .default({ mode: "aligned", id: null })
+    .describe("Pairing to use; dissociated with id null = random D1–D6"),
+  shuffleK: z
+    .boolean()
+    .default(true)
+    .describe("Shuffle which seat gets which K (otherwise seat order: seat 1 = Ka …)"),
 });
 export const ActionRevoke = z.object({
   seq: z.number().int().min(1),
@@ -110,7 +131,7 @@ export const MESSAGES: Record<string, MessageDef> = {
     namespace: "/player",
     direction: "client→server",
     description:
-      "First message after connecting. Identifies the browser (terminal) and, if present, re-claims a seat.",
+      "First message after connecting. Identifies the browser (client) and, if present, re-claims a seat.",
     schema: PlayerHello,
     ack: "{ terminal: number, seat: number | null }",
     logged: "PlayerConnected (only if the seat token is valid)",
@@ -174,7 +195,7 @@ export const MESSAGES: Record<string, MessageDef> = {
   terminal: {
     namespace: "/player",
     direction: "server→client",
-    description: "Terminal number assigned to this browser (shown in large type while unassigned).",
+    description: "Client number assigned to this browser (shown in large type while unassigned).",
     schema: "{ terminal: number }",
     logged: "—",
   },
@@ -228,7 +249,7 @@ export const MESSAGES: Record<string, MessageDef> = {
   "seat:bind": {
     namespace: "/facilitator",
     direction: "client→server",
-    description: "Bind a connected terminal to a seat; generates the participant code.",
+    description: "Bind a connected client to a seat; generates the participant code.",
     schema: SeatBind,
     ack: "Ack<{ participantCode }>",
     logged: "SeatBound, PlayerConnected",
@@ -244,7 +265,8 @@ export const MESSAGES: Record<string, MessageDef> = {
   "labels:set": {
     namespace: "/facilitator",
     direction: "client→server",
-    description: "Set K/P labels (and view when viewAssignment = manual) for every seat.",
+    description:
+      "Set the K label of every seat (and view when viewAssignment = manual) plus the K–P pairing (aligned or dissociated D1–D6); the server derives each P.",
     schema: LabelsSet,
     ack: "Ack",
     logged: "LabelsAssigned (method = manual)",
@@ -252,8 +274,9 @@ export const MESSAGES: Record<string, MessageDef> = {
   "labels:randomise": {
     namespace: "/facilitator",
     direction: "client→server",
-    description: "Randomly assign distinct K and P labels to the seats.",
-    schema: Empty,
+    description:
+      "Shuffle which seat gets which K (optional) and apply a pairing; dissociated without a number picks D1–D6 at random.",
+    schema: LabelsRandomise,
     ack: "Ack",
     logged: "LabelsAssigned (method = random, with seed)",
   },
@@ -358,7 +381,7 @@ export const MESSAGES: Record<string, MessageDef> = {
     namespace: "/facilitator",
     direction: "server→client",
     description:
-      "Full session state (all seats incl. participant codes), connected terminals and live per-seat statistics.",
+      "Full session state (all seats incl. participant codes), connected clients and live per-seat statistics.",
     schema: "DashboardMsg",
     logged: "—",
   },

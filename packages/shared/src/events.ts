@@ -1,6 +1,13 @@
 import { z } from "zod";
 import { RoundSpecSchema, SessionConfigSchema } from "./config";
-import { ActionKindSchema, KLabelSchema, PLabelSchema, SeatSchema, ViewIdSchema } from "./labels";
+import {
+  ActionKindSchema,
+  KLabelSchema,
+  LabelPairingSchema,
+  PLabelSchema,
+  SeatSchema,
+  ViewIdSchema,
+} from "./labels";
 import { defineRecord } from "./meta";
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -74,8 +81,8 @@ export const EVENT_DEFS = {
   }),
 
   SeatBound: defineRecord({
-    summary: "A browser terminal was assigned to a seat and a participant code was generated.",
-    trigger: "Facilitator binds a connected terminal to a seat in the lobby.",
+    summary: "A client (player browser) was assigned to a seat and a participant code was generated.",
+    trigger: "Facilitator binds a connected client to a seat in the lobby (setup step 07).",
     actors: ["facilitator"],
     changesState: true,
     visibleTo: "Facilitator; the bound player sees their seat",
@@ -83,7 +90,13 @@ export const EVENT_DEFS = {
     frequency: "1 per seat (more if re-bound)",
     payload: z.object({
       seat: SeatSchema,
-      terminal: z.number().int().min(1).describe("Terminal number displayed on the player's screen"),
+      terminal: z
+        .number()
+        .int()
+        .min(1)
+        .describe(
+          "Client number displayed on the player's screen (field kept as `terminal` for compatibility)",
+        ),
       bindingId: z.string().describe("Random id of this binding (used to derive the reconnect token)"),
     }),
     example: { seat: 2, terminal: 3, bindingId: "b-7KQ2M9" },
@@ -101,12 +114,13 @@ export const EVENT_DEFS = {
       seat: SeatSchema,
       reason: z.string().max(200).describe("Short reason"),
     }),
-    example: { seat: 2, reason: "bound wrong terminal" },
+    example: { seat: 2, reason: "bound wrong client" },
   }),
 
   LabelsAssigned: defineRecord({
-    summary: "Knowledge-type, power-type and map view were (re)assigned to seats.",
-    trigger: "Facilitator sets labels manually or presses 'Randomise'. Not allowed during an active round.",
+    summary: "Knowledge-type, power-type and map view were (re)assigned to seats, with the K–P pairing used.",
+    trigger:
+      "Facilitator saves labels (K per seat + pairing) or shuffles K across seats, in setup step 08 or between rounds. P always follows from the pairing. Not allowed during an active round.",
     actors: ["facilitator"],
     changesState: true,
     visibleTo: "Facilitator; each player sees own labels (configurable)",
@@ -124,15 +138,17 @@ export const EVENT_DEFS = {
         )
         .describe("Complete assignment for every seat"),
       method: z.enum(["manual", "random"]).describe("How the assignment was produced"),
-      seed: z.string().nullable().describe("Seed of the random assignment (null for manual)"),
+      seed: z.string().nullable().describe("Seed of the random part of the assignment (null for manual)"),
+      pairing: LabelPairingSchema,
     }),
     example: {
       assignments: [
-        { seat: 1, k: "Ka", p: "Pc", view: "Ka" },
-        { seat: 2, k: "Kb", p: "Pa", view: "Kb" },
+        { seat: 1, k: "Ka", p: "Pd", view: "Ka" },
+        { seat: 2, k: "Kb", p: "Pc", view: "Kb" },
       ],
       method: "random",
       seed: "4QX9T2",
+      pairing: { mode: "dissociated", id: 6 },
     },
   }),
 

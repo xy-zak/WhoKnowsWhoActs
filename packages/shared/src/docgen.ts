@@ -3,6 +3,7 @@ import { SessionConfigSchema } from "./config";
 import { EVENT_DEFS, EVENT_TYPES, EventEnvelopeSchema, type EventType } from "./events";
 import { EXPORT_FILES, type ExportFileDef, expandColumns } from "./exportColumns";
 import { CROCKFORD, normaliseParticipantCode } from "./ids";
+import { DISSOCIATED_PAIRINGS, K_LABELS, type LabelPairing, P_LABELS, pairedP, pairingPerm } from "./labels";
 import type { DataClass, RecordMeta } from "./meta";
 import { MESSAGES, type MessageDef } from "./protocol";
 import {
@@ -605,7 +606,61 @@ export function renderCodebook(meta: CodebookMeta): string {
 
 /* ─────────────────────────── Generated blocks in docs/*.md ─────────────────────────── */
 
+/** The K–P pairing table: aligned + the six fully dissociative pairings, as list and as 4×4 matrices. */
+export function renderLabelPairings(): string {
+  const all: Array<{ name: string; pairing: LabelPairing }> = [
+    { name: "aligned", pairing: { mode: "aligned", id: null } },
+    ...DISSOCIATED_PAIRINGS.map((_, i) => ({
+      name: `D${i + 1}`,
+      pairing: { mode: "dissociated" as const, id: i + 1 },
+    })),
+  ];
+  const list = table(
+    ["Pairing", "Stored as", ...K_LABELS.map((k) => `${k} →`), "Cycle"],
+    all.map(({ name, pairing }) => {
+      const perm = pairingPerm(pairing);
+      let cycle = "—";
+      if (pairing.mode === "dissociated") {
+        const letters = "abcd";
+        let i = 0;
+        const path = [letters[0]];
+        do {
+          i = perm[i]!;
+          path.push(letters[i]);
+        } while (i !== 0);
+        cycle = path.join("→");
+      }
+      return [
+        `**${name}**`,
+        code(JSON.stringify(pairing)),
+        ...K_LABELS.map((k) => pairedP(k, pairing)),
+        cycle,
+      ];
+    }),
+  );
+  const matrices = all
+    .map(({ name, pairing }) =>
+      [
+        `**${name}**`,
+        "",
+        table(
+          [name, ...P_LABELS],
+          K_LABELS.map((k) => [k, ...P_LABELS.map((p) => (pairedP(k, pairing) === p ? "■" : "·"))]),
+        ),
+      ].join("\n"),
+    )
+    .join("\n\n");
+  return [
+    list,
+    "",
+    "Matrices (rows = knowledge type, columns = power type, ■ = held by the same seat):",
+    "",
+    matrices,
+  ].join("\n");
+}
+
 export const GENERATED_BLOCKS: Record<string, () => string> = {
+  "label-pairings": renderLabelPairings,
   "event-envelope": renderEnvelopeTable,
   "telemetry-envelope": renderTelemetryEnvelopeTable,
   "event-index": renderEventIndex,

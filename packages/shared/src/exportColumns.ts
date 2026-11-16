@@ -153,6 +153,13 @@ export const EXPORT_FILES: ExportFileDef[] = [
         source: "RoundStarted + RoundCompleted",
       },
       {
+        name: "labelPairing",
+        type: "json",
+        description:
+          "{ mode, id, name, pairs } of the final label assignment: aligned, or fully dissociated D1–D6 (see the pairing table), e.g. { mode: 'dissociated', id: 6, name: 'D6', pairs: 'Ka–Pd Kb–Pc Kc–Pa Kd–Pb' }",
+        source: "last LabelsAssigned.pairing",
+      },
+      {
         name: "counts",
         type: "json",
         description: "{ events, telemetry, actions, players } row counts in this export",
@@ -173,7 +180,7 @@ export const EXPORT_FILES: ExportFileDef[] = [
       {
         name: "terminal",
         type: "integer",
-        description: "Terminal number of the browser bound to the seat",
+        description: "Client number of the browser bound to the seat (column name kept as terminal)",
         source: "SeatBound.terminal",
       },
       {
@@ -230,6 +237,13 @@ export const EXPORT_FILES: ExportFileDef[] = [
         type: "integer",
         description: "Number of rejected propose/decide attempts",
         source: "IntentRejected",
+      },
+      {
+        name: "pairing",
+        type: "string",
+        description:
+          "K–P pairing in force at the end: 'aligned' or 'D1'…'D6' (fully dissociated, see the pairing table)",
+        source: "last LabelsAssigned.pairing",
       },
     ],
   },

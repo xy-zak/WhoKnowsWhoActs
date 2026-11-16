@@ -15,8 +15,9 @@ Related documents: [DATA-MANAGEMENT.md](DATA-MANAGEMENT.md) (why the data is col
 5. [Telemetry types](#telemetry-types)
 6. [One action, all its traces](#one-action-all-its-traces)
 7. [Session configuration](#session-configuration)
-8. [Other tables](#other-tables)
-9. [Export files](#export-files)
+8. [Label pairings](#label-pairings)
+9. [Other tables](#other-tables)
+10. [Export files](#export-files)
 
 ---
 
@@ -164,9 +165,9 @@ Columns shared by every event row:
 | --- | --- | --- | --- | --- | --- |
 | [`SessionCreated`](#sessioncreated) | A new session was created with a scenario and configuration. | facilitator | yes | non-personal | 1 per session |
 | [`SessionNote`](#sessionnote) | Facilitator annotation (e.g. 'fire alarm', 'participant asked a question'). | facilitator | no | non-personal | 0–n per session |
-| [`SeatBound`](#seatbound) | A browser terminal was assigned to a seat and a participant code was generated. | facilitator | yes | pseudonymous | 1 per seat (more if re-bound) |
+| [`SeatBound`](#seatbound) | A client (player browser) was assigned to a seat and a participant code was generated. | facilitator | yes | pseudonymous | 1 per seat (more if re-bound) |
 | [`SeatUnbound`](#seatunbound) | A seat binding was removed before the game started. | facilitator | yes | pseudonymous | rare |
-| [`LabelsAssigned`](#labelsassigned) | Knowledge-type, power-type and map view were (re)assigned to seats. | facilitator | yes | pseudonymous | 1–n per session |
+| [`LabelsAssigned`](#labelsassigned) | Knowledge-type, power-type and map view were (re)assigned to seats, with the K–P pairing used. | facilitator | yes | pseudonymous | 1–n per session |
 | [`OnboardingStarted`](#onboardingstarted) | Seats are locked; players move to the consent / demographics / briefing screens. | facilitator | yes | non-personal | 1 per session |
 | [`ConsentRecorded`](#consentrecorded) | Participant answered the in-game consent form. | player | yes | pseudonymous · sensitive | 1 per seat |
 | [`DemographicsSubmitted`](#demographicssubmitted) | Participant submitted the demographics questionnaire. | player | yes | pseudonymous · sensitive | 1 per seat |
@@ -253,7 +254,6 @@ A new session was created with a scenario and configuration.
       "roundAdvance": "facilitator",
       "autoAdvanceDelaySec": 10,
       "viewAssignment": "byKnowledgeType",
-      "allowDuplicateLabels": false,
       "clearHighlightsEachRound": true,
       "pauseOnDisconnect": true,
       "onboarding": {
@@ -270,7 +270,7 @@ A new session was created with a scenario and configuration.
       "tags": [],
       "appearance": {
         "playerTheme": "mocha",
-        "playerCrt": true
+        "playerAnimations": true
       }
     },
     "scenario": {
@@ -344,11 +344,11 @@ Facilitator annotation (e.g. 'fire alarm', 'participant asked a question').
 
 ### `SeatBound`
 
-A browser terminal was assigned to a seat and a participant code was generated.
+A client (player browser) was assigned to a seat and a participant code was generated.
 
 |  |  |
 | --- | --- |
-| **Trigger** | Facilitator binds a connected terminal to a seat in the lobby. |
+| **Trigger** | Facilitator binds a connected client to a seat in the lobby (setup step 07). |
 | **Caused by** | facilitator |
 | **Changes game state** | yes |
 | **Visible to** | Facilitator; the bound player sees their seat |
@@ -360,7 +360,7 @@ A browser terminal was assigned to a seat and a participant code was generated.
 | Field | Type | Description |
 | --- | --- | --- |
 | `seat` | `integer 1–4` | Seat number (1–4) within the session |
-| `terminal` | `integer ≥ 1` | Terminal number displayed on the player's screen |
+| `terminal` | `integer ≥ 1` | Client number displayed on the player's screen (field kept as `terminal` for compatibility) |
 | `bindingId` | `string` | Random id of this binding (used to derive the reconnect token) |
 
 <details><summary>Example row</summary>
@@ -425,7 +425,7 @@ A seat binding was removed before the game started.
   "clientSeq": null,
   "payload": {
     "seat": 2,
-    "reason": "bound wrong terminal"
+    "reason": "bound wrong client"
   }
 }
 ```
@@ -434,11 +434,11 @@ A seat binding was removed before the game started.
 
 ### `LabelsAssigned`
 
-Knowledge-type, power-type and map view were (re)assigned to seats.
+Knowledge-type, power-type and map view were (re)assigned to seats, with the K–P pairing used.
 
 |  |  |
 | --- | --- |
-| **Trigger** | Facilitator sets labels manually or presses 'Randomise'. Not allowed during an active round. |
+| **Trigger** | Facilitator saves labels (K per seat + pairing) or shuffles K across seats, in setup step 08 or between rounds. P always follows from the pairing. Not allowed during an active round. |
 | **Caused by** | facilitator |
 | **Changes game state** | yes |
 | **Visible to** | Facilitator; each player sees own labels (configurable) |
@@ -455,7 +455,10 @@ Knowledge-type, power-type and map view were (re)assigned to seats.
 | `assignments[].p` | `"Pa" \| "Pb" \| "Pc" \| "Pd"` | Power-type label (Pa–Pd) |
 | `assignments[].view` | `string` | Id of the map view (dataset) shown to a seat, e.g. 'Ka' |
 | `method` | `"manual" \| "random"` | How the assignment was produced |
-| `seed` | `string \| null` | Seed of the random assignment (null for manual) |
+| `seed` | `string \| null` | Seed of the random part of the assignment (null for manual) |
+| `pairing` | `object` | K–P pairing used for this label assignment |
+| `pairing.mode` | `"aligned" \| "dissociated"` | aligned (Ka–Pa …) or fully dissociated |
+| `pairing.id` | `integer 1–6 \| null` | Number (1–6) of the fully dissociative pairing in the pairing table; null when aligned |
 
 <details><summary>Example row</summary>
 
@@ -477,18 +480,22 @@ Knowledge-type, power-type and map view were (re)assigned to seats.
       {
         "seat": 1,
         "k": "Ka",
-        "p": "Pc",
+        "p": "Pd",
         "view": "Ka"
       },
       {
         "seat": 2,
         "k": "Kb",
-        "p": "Pa",
+        "p": "Pc",
         "view": "Kb"
       }
     ],
     "method": "random",
-    "seed": "4QX9T2"
+    "seed": "4QX9T2",
+    "pairing": {
+      "mode": "dissociated",
+      "id": 6
+    }
   }
 }
 ```
@@ -2002,7 +2009,6 @@ Stored verbatim in `SessionCreated.config` and in `sessions.config_json`. Defaul
 | `roundAdvance` | `"facilitator" \| "auto"` | `"facilitator"` | Who starts the next round after one completes |
 | `autoAdvanceDelaySec` | `integer ≥ 0` | `10` | Delay before the next round starts when roundAdvance = 'auto' |
 | `viewAssignment` | `"byKnowledgeType" \| "manual"` | `"byKnowledgeType"` | How a seat's map view is chosen: from its K label, or set manually by the facilitator |
-| `allowDuplicateLabels` | `boolean` | `false` | Allow two seats to share a K or P label |
 | `clearHighlightsEachRound` | `boolean` | `true` | If true, players only see the current round's proposals/decisions |
 | `pauseOnDisconnect` | `boolean` | `true` | Automatically pause the game when a player disconnects during a round |
 | `onboarding` | `object` | — | Onboarding steps each player completes before round 1 |
@@ -2016,10 +2022,101 @@ Stored verbatim in `SessionCreated.config` and in `sessions.config_json`. Defaul
 | `visibility.showOthersProgress` | `boolean` | `true` | Players see other seats' quota progress |
 | `tags` | `array<string (≤ 40 chars, pattern)>` | — | Researcher-entered session tags, e.g. ['pilot', 'condition-A'] (entered comma-separated; no personal data) |
 | `appearance` | `object` | — | What player screens look like — identical for all seats and recorded with the session |
-| `appearance.playerTheme` | `"latte" \| "mocha"` | `"mocha"` | Colour theme of every player screen in this session (Catppuccin Latte = light, Mocha = dark) |
-| `appearance.playerCrt` | `boolean` | `true` | Subtle CRT effects (scanlines, glow, power-on animations) on player screens |
+| `appearance.playerTheme` | `"latte" \| "mocha" \| "contrast"` | `"mocha"` | Colour theme of every player screen in this session (Catppuccin Latte = light, Mocha = dark, contrast = high contrast) |
+| `appearance.playerAnimations` | `boolean` | `true` | Animations on player screens (screen switches, popups, connect/disconnect); no static effects |
 
 <!-- END GENERATED: session-config -->
+
+## Label pairings
+
+Every seat holds one knowledge type (K) and one power type (P). The facilitator chooses which seat gets which K (setup step 08); **P is never chosen freely**. It follows from one of two kinds of **pairing**:
+
+- **Aligned**: each seat holds the same letter for K and P (Ka–Pa, Kb–Pb, Kc–Pc, Kd–Pd).
+- **Fully dissociated**: no seat holds the same letter for K and P, **and** no two seats mirror each other. A "player pair" such as Ka–Pd plus Kd–Pa is excluded. Following the links K → P → (same letter as K) visits all four letters in one loop. There are exactly **3! = 6** such pairings, numbered **D1–D6** in the order below.
+
+  Of the 9 pairings without a same-letter seat, the other 3 (Ka–Pb + Kb–Pa with Kc–Pd + Kd–Pc, and so on) consist of two player pairs and are not allowed.
+
+The pairing is stored with every `LabelsAssigned` event as `pairing: { mode, id }`. `id` is the number in this table; it is `null` for aligned. Exports carry it as `players.csv.pairing` (`aligned` / `D1`…`D6`) and `session.json.labelPairing`. With fewer than four seats, the seats hold the pairs of their K labels only.
+
+<!-- BEGIN GENERATED: label-pairings -->
+<!-- Generated by `npm run docs:generate` from packages/shared — do not edit by hand. -->
+
+| Pairing | Stored as | Ka → | Kb → | Kc → | Kd → | Cycle |
+| --- | --- | --- | --- | --- | --- | --- |
+| **aligned** | `{"mode":"aligned","id":null}` | Pa | Pb | Pc | Pd | — |
+| **D1** | `{"mode":"dissociated","id":1}` | Pb | Pc | Pd | Pa | a→b→c→d→a |
+| **D2** | `{"mode":"dissociated","id":2}` | Pb | Pd | Pa | Pc | a→b→d→c→a |
+| **D3** | `{"mode":"dissociated","id":3}` | Pc | Pa | Pd | Pb | a→c→d→b→a |
+| **D4** | `{"mode":"dissociated","id":4}` | Pc | Pd | Pb | Pa | a→c→b→d→a |
+| **D5** | `{"mode":"dissociated","id":5}` | Pd | Pa | Pb | Pc | a→d→c→b→a |
+| **D6** | `{"mode":"dissociated","id":6}` | Pd | Pc | Pa | Pb | a→d→b→c→a |
+
+Matrices (rows = knowledge type, columns = power type, ■ = held by the same seat):
+
+**aligned**
+
+| aligned | Pa | Pb | Pc | Pd |
+| --- | --- | --- | --- | --- |
+| Ka | ■ | · | · | · |
+| Kb | · | ■ | · | · |
+| Kc | · | · | ■ | · |
+| Kd | · | · | · | ■ |
+
+**D1**
+
+| D1 | Pa | Pb | Pc | Pd |
+| --- | --- | --- | --- | --- |
+| Ka | · | ■ | · | · |
+| Kb | · | · | ■ | · |
+| Kc | · | · | · | ■ |
+| Kd | ■ | · | · | · |
+
+**D2**
+
+| D2 | Pa | Pb | Pc | Pd |
+| --- | --- | --- | --- | --- |
+| Ka | · | ■ | · | · |
+| Kb | · | · | · | ■ |
+| Kc | ■ | · | · | · |
+| Kd | · | · | ■ | · |
+
+**D3**
+
+| D3 | Pa | Pb | Pc | Pd |
+| --- | --- | --- | --- | --- |
+| Ka | · | · | ■ | · |
+| Kb | ■ | · | · | · |
+| Kc | · | · | · | ■ |
+| Kd | · | ■ | · | · |
+
+**D4**
+
+| D4 | Pa | Pb | Pc | Pd |
+| --- | --- | --- | --- | --- |
+| Ka | · | · | ■ | · |
+| Kb | · | · | · | ■ |
+| Kc | · | ■ | · | · |
+| Kd | ■ | · | · | · |
+
+**D5**
+
+| D5 | Pa | Pb | Pc | Pd |
+| --- | --- | --- | --- | --- |
+| Ka | · | · | · | ■ |
+| Kb | ■ | · | · | · |
+| Kc | · | ■ | · | · |
+| Kd | · | · | ■ | · |
+
+**D6**
+
+| D6 | Pa | Pb | Pc | Pd |
+| --- | --- | --- | --- | --- |
+| Ka | · | · | · | ■ |
+| Kb | · | · | ■ | · |
+| Kc | ■ | · | · | · |
+| Kd | · | ■ | · | · |
+
+<!-- END GENERATED: label-pairings -->
 
 ## Other tables
 
@@ -2071,6 +2168,7 @@ Session metadata: configuration, scenario, software version and a per-round summ
 | `notes` | string | Researcher notes at creation | SessionCreated.notes |
 | `harness` | json | { version, gitCommit } of the harness software | SessionCreated.harness |
 | `rounds` | json | [{ round, startedWall, endedWall, reason, durationMs, pausedMs }] per played round | RoundStarted + RoundCompleted |
+| `labelPairing` | json | { mode, id, name, pairs } of the final label assignment: aligned, or fully dissociated D1–D6 (see the pairing table), e.g. { mode: 'dissociated', id: 6, name: 'D6', pairs: 'Ka–Pd Kb–Pc Kc–Pa Kd–Pb' } | last LabelsAssigned.pairing |
 | `counts` | json | { events, telemetry, actions, players } row counts in this export | computed |
 
 #### `players.csv`
@@ -2082,7 +2180,7 @@ Who sat where, with which labels, and their onboarding status. _Unit:_ one row p
 | `session_id` | string | Session id, e.g. S-20261116-7KQ2 | envelope.sessionId |
 | `seat` | integer | Seat number (1–4) | envelope.seat / SeatBound.seat |
 | `participant_code` | string | Pseudonymous participant code (anonymised export: random A-XXXXXX id) | envelope.participantCode |
-| `terminal` | integer | Terminal number of the browser bound to the seat | SeatBound.terminal |
+| `terminal` | integer | Client number of the browser bound to the seat (column name kept as terminal) | SeatBound.terminal |
 | `k_label` | string | Knowledge type (Ka–Kd) | last LabelsAssigned |
 | `p_label` | string | Power type (Pa–Pd) | last LabelsAssigned |
 | `view` | string | Map view id shown to the seat | last LabelsAssigned |
@@ -2093,6 +2191,7 @@ Who sat where, with which labels, and their onboarding status. _Unit:_ one row p
 | `withdrawn` | bool01 | 1 if the participant withdrew | ParticipantWithdrawn |
 | `reconnects` | integer | Number of reconnections during the session | PlayerConnected.reconnect |
 | `rejections` | integer | Number of rejected propose/decide attempts | IntentRejected |
+| `pairing` | string | K–P pairing in force at the end: 'aligned' or 'D1'…'D6' (fully dissociated, see the pairing table) | last LabelsAssigned.pairing |
 
 #### `actions.csv`
 

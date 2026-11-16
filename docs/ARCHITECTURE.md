@@ -50,8 +50,8 @@ Design principles:
 | Term | Meaning |
 | --- | --- |
 | **Session** | One play-through with 4 participants, identified by `S-YYYYMMDD-XXXX`. |
-| **Terminal** | A browser that connected to the server, shown as "Terminal N" until it is bound. |
-| **Seat** | One of the 4 player positions (1–4). A terminal is *bound* to a seat by the facilitator. |
+| **Client** | A player browser that connected to the server, shown as "Client N" until it is bound. In events, exports and the protocol the number is stored in fields named `terminal` (e.g. `SeatBound.terminal`, `players.csv.terminal`), kept for compatibility. |
+| **Seat** | One of the 4 player positions (1–4). A client is *bound* to a seat by the facilitator. |
 | **Participant code** | Random pseudonymous id (`WK-XXXX-XXXX-C`) generated when a seat is bound. Used for takedown requests. |
 | **Labels** | Each seat gets one knowledge type (`Ka`–`Kd`) and one power type (`Pa`–`Pd`). |
 | **Scenario** | Map outline (SVG regions) plus a set of *views*. |
@@ -228,7 +228,7 @@ stateDiagram-v2
 
 | Phase | What happens | Who moves it on |
 | --- | --- | --- |
-| `lobby` | Terminals connect and are bound to seats. K/P labels (and views) are assigned. | Facilitator: *Start onboarding* (all seats bound and labelled) |
+| `lobby` | Clients connect and are bound to seats. K/P labels (and views) are assigned. | Facilitator: *Start onboarding* (all seats bound and labelled) |
 | `onboarding` | Each player completes consent → demographics → briefing. Steps can be disabled in config. | Facilitator: *Start round 1* (only once every seat is ready) |
 | `round_active` | Players propose and decide within their quotas. Can be **paused** (by the facilitator, or automatically on disconnect). | Round rule (quotas met), time limit, or facilitator *End round* |
 | `round_complete` | Break between rounds. | Facilitator *Start round* (or auto-advance after `autoAdvanceDelaySec`) |
@@ -428,7 +428,7 @@ scenarios/<id>/
 | `--url` | `http://localhost:3000` | Server to connect to |
 | `--count` | `3` | Number of simulated players |
 | `--delay` | `1500-5000` | Random pause between a bot's actions (ms, `min-max`) |
-| `--auto` | off | Also act as facilitator: create a session if none is attached, bind every terminal (bots **and** humans) to the next free seat, randomise labels, start onboarding and each round. **Never use during a real session.** |
+| `--auto` | off | Also act as facilitator: create a session if none is attached, bind every client (bots **and** humans) to the next free seat, randomise labels, start onboarding and each round. **Never use during a real session.** |
 | `--seats` | `4` | Seat count of the session `--auto` creates |
 | `--round-pause` | `3000` | Pause (ms) `--auto` waits between rounds |
 | `--admin-token` | – | `ADMIN_TOKEN` when the server is on another machine |

@@ -52,7 +52,7 @@ Field-level detail of every logged record is in [DATA-TYPES.md](DATA-TYPES.md).
 | Data | Source | Purpose | Class | Stored in | Retention (proposal) |
 | --- | --- | --- | --- | --- | --- |
 | Participant code `WK-XXXX-XXXX-C` | Server, generated when the seat is bound | Link records of one person; enable takedown | Pseudonymous identifier | `events.participant_code`, `telemetry.participant_code`; takedown card; key sheet | Until anonymisation |
-| Seat, terminal number | Facilitator binding | Session logistics | Pseudonymous (in combination) | `events` | Research period |
+| Seat, client number (`terminal`) | Facilitator binding | Session logistics | Pseudonymous (in combination) | `events` | Research period |
 | K/P labels, assigned view | Facilitator | Experimental manipulation | Pseudonymous (via seat) | `events` (`LabelsAssigned`) | Research period |
 | Consent answers, form version, text hash, time on screen | Player | Proof of informed consent | Pseudonymous · sensitive | `events` (`ConsentRecorded`) | As long as the data it covers exist |
 | Demographics (bracketed options) | Player | Describe the sample; covariates | Pseudonymous · sensitive | `events` (`DemographicsSubmitted`); hidden from the live dashboard | Research period |

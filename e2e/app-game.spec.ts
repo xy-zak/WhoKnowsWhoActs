@@ -2,7 +2,7 @@ import { type Browser, expect, type Page, test } from "@playwright/test";
 
 /**
  * End-to-end through the real UI: the facilitator walks the 10-step setup
- * wizard, four player browsers onboard and play one round, the tab flips to
+ * accordion, four player browsers onboard and play one round, the tab flips to
  * LIVE, the wrap-up popups export and close the session, then REPLAY.
  */
 test.setTimeout(180_000);
@@ -12,7 +12,7 @@ async function newPlayer(browser: Browser): Promise<{ page: Page; terminal: numb
   const page = await ctx.newPage();
   await page.goto("/");
   await expect(page.getByText("Waiting for the facilitator to assign a seat")).toBeVisible();
-  const terminal = Number(await page.locator(".terminal-number").textContent());
+  const terminal = Number(await page.locator(".client-number").textContent());
   return { page, terminal };
 }
 
@@ -36,65 +36,72 @@ async function act(page: Page, kind: "Propose" | "Decide", region: string) {
   await expect(page.locator("aside").getByRole("button", { name: /Confirm/ })).toHaveCount(0);
 }
 
+/** The primary button of the expanded setup step (accordion). */
 const next = (fac: Page) =>
-  fac.locator(".popup-foot").getByRole("button", { name: /Next|Create session|Start onboarding/ });
+  fac
+    .locator(".acc-step.current .acc-foot")
+    .getByRole("button", { name: /Next|Create session|Start onboarding/ });
+const current = (fac: Page, key: string) =>
+  expect(fac.locator(`.acc-step.current[data-step="${key}"]`)).toBeVisible();
 
 test("setup wizard → live round → wrap-up → replay", async ({ page: fac, browser }) => {
   fac.on("pageerror", (e) => console.log("facilitator page error:", e.message));
   await fac.goto("/facilitator");
 
   // 01 scenario
-  await expect(fac.locator(".popup-title", { hasText: "Choose the scenario" })).toBeVisible();
-  await expect(fac.locator(".popup-step", { hasText: "STEP 01/10" })).toBeVisible();
+  await current(fac, "scenario");
+  await expect(fac.locator(".popup")).toHaveCount(0); // setup uses an accordion, not popups
   await fac.getByRole("radio", { name: /Demo island/ }).check();
   await next(fac).click();
   // 02 rounds: one round, 1 + 1 actions
-  await expect(fac.locator(".popup-step", { hasText: "STEP 02/10" })).toBeVisible();
+  await current(fac, "rounds");
   await fac.getByRole("spinbutton", { name: "Number of rounds" }).fill("1");
   await fac.getByRole("spinbutton", { name: "Proposals per player" }).fill("1");
   await fac.getByRole("spinbutton", { name: "Decisions per player" }).fill("1");
   await next(fac).click();
   // 03 players (defaults) → 04 onboarding (defaults)
-  await expect(fac.locator(".popup-step", { hasText: "STEP 03/10" })).toBeVisible();
+  await current(fac, "players");
   await next(fac).click();
-  await expect(fac.locator(".popup-step", { hasText: "STEP 04/10" })).toBeVisible();
+  await current(fac, "onboarding");
   await next(fac).click();
   // 05 tags
-  await expect(fac.locator(".popup-step", { hasText: "STEP 05/10" })).toBeVisible();
+  await current(fac, "tags");
   await fac.getByRole("textbox", { name: "Tags" }).fill("e2e, pilot, E2E");
   await expect(fac.locator(".chip")).toHaveCount(2);
   await next(fac).click();
   // 06 review → create
-  await expect(fac.locator(".popup-step", { hasText: "STEP 06/10" })).toBeVisible();
-  await expect(fac.locator(".popup-body")).toContainText("e2e, pilot");
+  await current(fac, "review");
+  await expect(fac.locator(".acc-step.current.review .acc-body")).toContainText("e2e, pilot");
   await next(fac).click();
 
   // 07 connect & bind
-  await expect(fac.locator(".popup-step", { hasText: "STEP 07/10" })).toBeVisible();
+  await current(fac, "connect");
   const players = [];
   for (let i = 0; i < 4; i++) players.push(await newPlayer(browser));
   for (const [i, p] of players.entries()) {
     await fac
-      .getByRole("combobox", { name: `Bind a terminal to seat ${i + 1}` })
-      .selectOption({ label: `Terminal ${p.terminal}` });
+      .getByRole("combobox", { name: `Bind a client to seat ${i + 1}` })
+      .selectOption({ label: `Client ${p.terminal}` });
     await expect(p.page.getByText(`Seat ${i + 1}`)).toBeVisible();
   }
-  await expect(fac.locator(".popup").getByText("4/4 seats bound")).toBeVisible();
+  await expect(fac.locator(".acc-step.current").getByText("4/4 seats bound")).toBeVisible();
   await next(fac).click();
   // 08 labels
-  await expect(fac.locator(".popup-step", { hasText: "STEP 08/10" })).toBeVisible();
-  await fac
-    .locator(".popup")
-    .getByRole("button", { name: /Randomise all/ })
-    .click();
+  await current(fac, "labels");
+  // fully dissociated pairing D6 in seat order: Ka–Pd, Kb–Pc, Kc–Pa, Kd–Pb
+  const step8 = fac.locator(".acc-step.current");
+  await step8.getByRole("radio", { name: /Dissociated/ }).check();
+  await step8.getByRole("combobox", { name: "Dissociative pairing" }).selectOption("6");
+  await step8.getByRole("button", { name: /Save labels/ }).click();
   await expect(next(fac)).toBeEnabled();
+  await expect(fac.locator(".acc-step.current")).toContainText("Ka–Pd Kb–Pc Kc–Pa Kd–Pb");
   await next(fac).click();
   // 09 key sheet
-  await expect(fac.locator(".popup-step", { hasText: "STEP 09/10" })).toBeVisible();
+  await current(fac, "keysheet");
   await fac.getByRole("checkbox", { name: /key sheet is printed/ }).check();
   await next(fac).click();
   // 10 start onboarding → LIVE
-  await expect(fac.locator(".popup-step", { hasText: "STEP 10/10" })).toBeVisible();
+  await current(fac, "start");
   await next(fac).click();
   await expect(fac.locator(".live-indicator")).toBeVisible();
   await expect(fac.locator(".tab.active")).toContainText("LIVE");
@@ -117,15 +124,16 @@ test("setup wizard → live round → wrap-up → replay", async ({ page: fac, b
   await fac.screenshot({ path: "test-results/facilitator-live.png", fullPage: true });
 
   // wrap-up: cards → export → close
+  const popupNext = fac.locator(".popup-foot").getByRole("button", { name: /Next/ });
   await fac.getByRole("button", { name: /Wrap up session/ }).click();
   await fac.getByRole("checkbox", { name: /Cards are handed out/ }).check();
-  await next(fac).click();
+  await popupNext.click();
   await fac
     .locator(".popup")
     .getByRole("button", { name: /Export session/ })
     .click();
   await expect(fac.locator(".popup").getByText(/Written to/)).toBeVisible();
-  await next(fac).click();
+  await popupNext.click();
   await fac
     .locator(".popup-foot")
     .getByRole("button", { name: /Close session/ })

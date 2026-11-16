@@ -20,16 +20,16 @@ The facilitator manager has three tabs, in order of use:
 
 | Tab | What it is for |
 | --- | --- |
-| **[1] SETUP / LIVE** | One tab with two faces. **SETUP** walks you through ten steps in popups. After *Start onboarding* the tab flips to **LIVE**, and a green **● LIVE** indicator appears in the top bar; click it to come back from any tab. |
-| **[2] REPLAY** | Scrub through any recorded session. |
+| **[1] SETUP / LIVE** | One tab with two faces. **SETUP** walks you through ten steps, stacked as collapsible panels (an accordion): the current step is open, finished steps collapse into a one-line summary. After *Start onboarding* the tab flips to **LIVE**, and a green **● LIVE** indicator appears in the top bar; click it to come back from any tab. |
+| **[2] REPLAY** | Watch any recorded session again. Play shows every propose/decide action for 1 s and pauses at the end of each round (about 2 minutes for a default session of 3 × 4 × 10 actions); the slider and ⏮/⏭ move event by event or action by action. |
 | **[3] DATABASE** | Sessions, exports, printables (key sheet, takedown cards), takedown/erasure, erasure register. |
 
 ```mermaid
 flowchart TD
   A["npm start<br/>type the database passphrase"] --> S1
-  subgraph SETUP["SETUP tab: 10 steps, each in a popup"]
-    S1["01 Scenario"] --> S2["02 Rounds"] --> S3["03 Players and visibility<br/>incl. player screen theme / CRT"] --> S4["04 Onboarding"] --> S5["05 Tags and notes"] --> S6["06 Review and CREATE"]
-    S6 --> S7["07 Connect and bind<br/>open the player URL on 4 PCs"] --> S8["08 Labels<br/>K / P per seat"] --> S9["09 Print the key sheet"] --> S10["10 Start onboarding"]
+  subgraph SETUP["SETUP tab: 10 steps as an accordion, one open at a time"]
+    S1["01 Scenario"] --> S2["02 Rounds"] --> S3["03 Players and visibility<br/>incl. player screen theme / animations"] --> S4["04 Onboarding"] --> S5["05 Tags and notes"] --> S6["06 Review and CREATE"]
+    S6 --> S7["07 Connect and bind<br/>open the player URL on 4 PCs"] --> S8["08 Labels<br/>pairing: aligned or D1–D6<br/>+ K per seat"] --> S9["09 Print the key sheet"] --> S10["10 Start onboarding"]
   end
   S10 --> L1
   subgraph LIVE["LIVE tab: lifecycle stepper + NEXT panel"]
@@ -39,9 +39,9 @@ flowchart TD
   W --> D["DATABASE: move the export to institutional storage<br/>lock away the key sheet, back up"]
 ```
 
-**Wayfinding.** Every popup shows `STEP nn/NN` and a stepper (`✓` done · `▶` current · `·` upcoming · `■` locked). In LIVE, the **NEXT** panel always shows the single next action, and `N` does it.
+**Wayfinding.** In SETUP, each step's header shows `✓` done · `▶` current · `·` upcoming · `■` locked plus a summary; the review step (06) is coloured lavender. Wrap-up popups show `STEP nn/NN`. In LIVE, the **NEXT** panel always shows the single next action, and `N` does it.
 
-**Keyboard.** `1` `2` `3` switch tabs, `N` next action, `P` pause/resume, `T` theme, `C` CRT effects, `?` help. In popups: `Enter` is the primary action and `Esc` closes. Setup progress is kept when you close a popup.
+**Keyboard.** `1` `2` `3` switch tabs, `N` next action, `P` pause/resume, `T` theme (Latte → Mocha → High contrast), `A` animations on/off, `?` help. In a setup step `Enter` moves to the next step; in popups `Enter` is the primary action and `Esc` closes. The setup draft is kept in your browser.
 
 Approximate timing: 30 min setup, about 10 min onboarding, the rounds, 10 min wrap-up.
 
@@ -73,7 +73,7 @@ Approximate timing: 30 min setup, about 10 min onboarding, the rounds, 10 min wr
 
 1. Connect the laptop and the player PCs to the session network.
 2. On the laptop, run `npm start` and type the database passphrase. The terminal prints the **manager** URL (`http://localhost:3000/facilitator`; open it on the laptop) and the **player** URL(s).
-3. The manager opens on **SETUP** with step **01** in a popup.
+3. The manager opens on **SETUP** with step **01 SCENARIO** expanded.
 
 > If the server was restarted mid-session, the most recent unfinished session is resumed automatically, browsers re-claim their seats on their own, and the tab shows LIVE again.
 
@@ -83,7 +83,7 @@ Approximate timing: 30 min setup, about 10 min onboarding, the rounds, 10 min wr
 | --- | --- |
 | **01 Scenario** | The map and datasets. Use the preview's view selector to check each view. |
 | **02 Rounds** | Number of rounds, rule (quotas or facilitator-ended), quotas per player, optional time limit, how the next round starts, per-round overrides. |
-| **03 Players & visibility** | Seats, how map views are assigned, label rules, what players see about each other, and the **player-screen appearance** (Mocha/Latte, CRT). The appearance is identical for every PC and is recorded with the session. |
+| **03 Players & visibility** | Seats, how map views are assigned, what players see about each other, and the **player-screen appearance** (Mocha / Latte / High contrast, animations on/off). The appearance is identical for every PC and is recorded with the session. |
 | **04 Onboarding** | Consent, demographics, briefing. Turning consent off asks for confirmation: only for tests without participants. |
 | **05 Tags & notes** | Comma-separated **tags** (e.g. `pilot, condition-A`). They label the session in DATABASE and the exports. **Never use names.** |
 | **06 Review & create** | One summary of everything, with *Edit* links. **CREATE SESSION** writes it into `SessionCreated`; steps 01–06 are then locked (■). |
@@ -94,12 +94,12 @@ The draft is kept in your browser until you create the session, so a reload lose
 
 | Step | What to do |
 | --- | --- |
-| **07 Connect & bind** | The popup shows the player URL(s). Open it on each PC in full-screen (F11); each screen shows **TERMINAL N**. Bind each terminal to a seat. The step is done when it shows `[4/4 seats bound]`. |
-| **08 Labels** | Choose K and P per seat and *Save labels*, or *Randomise all* (the seed is logged). Duplicates are highlighted. With view assignment "follows K", the K label also selects the seat's map data. |
+| **07 Connect & bind** | The step shows the player URL(s). Open it on each PC in full-screen (F11); each screen shows **CLIENT N**. Bind each client to a seat. The step is done when it shows `[4/4 seats bound]`. |
+| **08 Labels** | 1 · Choose the **K–P pairing**: *Aligned* (Ka–Pa, Kb–Pb …) or *Dissociated* — one of the six fully dissociative pairings D1–D6 (no seat holds the same letter, no two seats mirror each other), or *random* (seed logged). The 4×4 matrix shows the result. 2 · Choose which seat gets which **K** (seat order by default, or *Shuffle K across seats*). **P is derived from the pairing**, never chosen per seat. *Save labels*. The pairing number is stored with the labels and in the exports; see [DATA-TYPES.md § Label pairings](DATA-TYPES.md#label-pairings). With view assignment "follows K", the K label also selects the seat's map data. |
 | **09 Key sheet** | *Print key sheet*, then tick "printed and stored separately". Write names on it **by hand** as participants arrive; names never go into the software. |
 | **10 Start onboarding** | A final checklist. **Seat the participants first**, then *START ONBOARDING*. Seats lock, players go to consent → about you → briefing, and the tab flips to **LIVE**. |
 
-Closing a popup is always safe: the SETUP page shows the stepper and **RESUME STEP n** (`N`). To throw a lobby session away and start over, use **Discard session**.
+Reopen a finished step by clicking its header (steps 01–06 are locked once the session exists). `N` jumps back to the current step. To throw a lobby session away and start over, use **Discard session**.
 
 ### 4.4 LIVE: onboarding and rounds
 
@@ -156,7 +156,7 @@ Debrief participants as your protocol requires.
 | --- | --- | --- |
 | A player's browser was **reloaded or closed** | The seat is kept (the browser holds a reconnect token). During a round the game auto-pauses. | Re-open the player URL on the same PC; it re-joins the same seat. Then **RESUME** (`P`). |
 | A player PC **lost the network** | `PlayerDisconnected` and an auto-pause; the player sees "Connection lost" | Fix the connection; the page reconnects by itself. Then **RESUME**. |
-| **Wrong terminal** bound (step 07) | — | **Unbind** it and bind the right one. Harmless before onboarding. |
+| **Wrong client** bound (step 07) | — | **Unbind** it and bind the right one. Harmless before onboarding. |
 | A participant **leaves** mid-game | — | **Withdraw** their seat (Seats panel). Rounds complete without them. |
 | **Misclick** by a player | Visible to everyone | **Revoke** it (event log or region panel, current round only). |
 | **Server crashed** or laptop restarted | Events up to the crash are stored | `npm start` again and type the passphrase. The session resumes, browsers re-claim their seats, and the tab shows LIVE. Then **RESUME**. A round time limit keeps counting the downtime; end the round if needed. |
@@ -164,7 +164,7 @@ Debrief participants as your protocol requires.
 | Player URL **does not load** | — | See [NETWORKING.md § troubleshooting](NETWORKING.md): firewall, wrong IP, Wi-Fi client isolation. Step 07 lists the URLs of every network interface. |
 | Player PC shows **"opened in another window"** | The same seat was opened twice | Close the extra tab; the newest window holds the seat. |
 | Manager says **ACCESS DENIED** | It was opened from another PC | Use `http://localhost:3000/facilitator` on the laptop, or start with `ADMIN_TOKEN=…` and open `/facilitator?token=…`. |
-| Screen effects are distracting / slow | CRT scanlines, glow and animations | Manager: press `C`. Players: set *CRT effects on player screens* off in step 03 (for the next session). Anyone whose OS requests reduced motion never gets the effects. |
+| Animations are distracting / slow, or text is hard to read | CRT-style animations; theme | Manager: press `A` (animations) or `T` (theme, incl. High contrast). Players: in step 03 switch *Animations on player screens* off or choose *High contrast* (for the next session). Anyone whose OS requests reduced motion never gets animations. |
 | Everything is broken, you must stop | — | *Tools → Abort session* (with a reason). Data is kept and marked aborted; players see the end screen with their code. |
 
 ## 7. Printable checklist
@@ -172,7 +172,7 @@ Debrief participants as your protocol requires.
 **Before participants arrive**
 - [ ] Network up; `npm start`; passphrase entered
 - [ ] Steps 01–06 done (scenario, rounds, players, onboarding, tags) → session created
-- [ ] Step 07: 4 terminals bound · Step 08: labels assigned · Step 09: key sheet printed
+- [ ] Step 07: 4 clients bound · Step 08: labels assigned · Step 09: key sheet printed
 
 **With participants**
 - [ ] Names written on the key sheet (by hand)

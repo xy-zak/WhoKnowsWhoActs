@@ -2,6 +2,8 @@ import {
   type GameState,
   isOnboardingComplete,
   nextOnboardingStep,
+  pairingName,
+  pairingText,
   quotaLimit,
   quotaUsed,
   roundActiveMs,
@@ -471,6 +473,11 @@ export function LiveStage({ conn }: { conn: FacilitatorConnection }) {
           {st.paused && (
             <StatusTag tone="warn" icon="pause">
               paused
+            </StatusTag>
+          )}
+          {st.labelPairing && (
+            <StatusTag icon="labels" title={pairingText(st.labelPairing)}>
+              pairing {pairingName(st.labelPairing)}
             </StatusTag>
           )}
           {st.config.tags.map((t) => (

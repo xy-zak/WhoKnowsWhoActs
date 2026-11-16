@@ -1,40 +1,15 @@
 /* ═══════════════════════════════════════════════════════════════════════════
- * CRT layer (subtle). Everything here is gated behind [data-crt="on"] on
- * <html> and switched off completely under prefers-reduced-motion.
- * Rules: docs/AESTHETIC-RULES.md § Motion & CRT.
+ * CRT animations. No static effects (no scanlines, no glow/bloom): the CRT
+ * character lives only in three kinds of motion —
+ *   1. switching tabs / screens  (.screen-switch)
+ *   2. popups opening and closing (.popup, .popup.closing, .typed)
+ *   3. connecting / disconnecting  (.signal-lost, .signal-back, .conn-flicker)
+ * Everything is gated behind [data-crt="on"] on <html> and switched off
+ * completely under prefers-reduced-motion.
+ * Rules: docs/AESTHETIC-RULES.md § 9.
  * ═══════════════════════════════════════════════════════════════════════════ */
 
-/* scanlines: fixed overlay, never intercepts the pointer */
-:root[data-crt="on"] body::after {
-  content: "";
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  z-index: 1000;
-  background: repeating-linear-gradient(
-    to bottom,
-    rgba(0, 0, 0, var(--scan-alpha)) 0px,
-    rgba(0, 0, 0, var(--scan-alpha)) 1px,
-    transparent 1px,
-    transparent 3px
-  );
-}
-
-/* phosphor glow on accents (dark theme only: --glow = 1) */
-:root[data-crt="on"][data-theme="mocha"] .glow,
-:root[data-crt="on"][data-theme="mocha"] .live-indicator,
-:root[data-crt="on"][data-theme="mocha"] .tab.active,
-:root[data-crt="on"][data-theme="mocha"] .stepper li.current button,
-:root[data-crt="on"][data-theme="mocha"] .terminal-number,
-:root[data-crt="on"][data-theme="mocha"] .next-action .prompt,
-:root[data-crt="on"][data-theme="mocha"] .popup-title {
-  text-shadow: 0 0 6px color-mix(in srgb, currentColor 55%, transparent);
-}
-:root[data-crt="on"][data-theme="mocha"] .live-indicator {
-  box-shadow: 0 0 10px color-mix(in srgb, var(--live) 60%, transparent);
-}
-
-/* power-on: popups and panels "switch on" when they appear */
+/* power-on: a thin bright line opens vertically into the picture */
 @keyframes crt-on {
   0% {
     transform: scaleY(0.02) scaleX(0.7);
@@ -52,6 +27,7 @@
     opacity: 1;
   }
 }
+/* power-off: the picture collapses into a line, then a dot */
 @keyframes crt-off {
   0% {
     transform: none;
@@ -67,16 +43,61 @@
     opacity: 0;
   }
 }
-:root[data-crt="on"] .popup {
-  animation: crt-on 180ms ease-out both;
+/* channel switch: short vertical roll with a brightness blip */
+@keyframes crt-switch {
+  0% {
+    transform: translateY(-6px) scaleY(0.96);
+    filter: brightness(1.8);
+    opacity: 0.2;
+  }
+  60% {
+    transform: translateY(1px) scaleY(1.005);
+    filter: brightness(1.1);
+    opacity: 1;
+  }
+  100% {
+    transform: none;
+    filter: none;
+    opacity: 1;
+  }
 }
-:root[data-crt="on"] .popup.closing {
-  animation: crt-off 130ms ease-in both;
+/* signal lost: brief flicker, then the picture dims and squeezes slightly */
+@keyframes crt-signal-lost {
+  0% {
+    filter: none;
+    opacity: 1;
+  }
+  20% {
+    filter: brightness(1.8);
+    opacity: 0.9;
+  }
+  35% {
+    filter: brightness(0.4);
+    opacity: 0.6;
+  }
+  50% {
+    filter: brightness(1.4);
+    opacity: 0.8;
+  }
+  100% {
+    filter: grayscale(0.6) brightness(0.75);
+    opacity: 0.55;
+    transform: scaleY(0.985);
+  }
 }
-:root[data-crt="on"] .panel.power-on {
-  animation: crt-on 220ms ease-out both;
+/* status flicker when a connection state changes */
+@keyframes crt-flicker {
+  0%,
+  40%,
+  80% {
+    opacity: 0.25;
+  }
+  20%,
+  60%,
+  100% {
+    opacity: 1;
+  }
 }
-
 /* typed-in title: reveal left→right in character steps (--chars set inline) */
 @keyframes crt-type {
   from {
@@ -86,48 +107,56 @@
     clip-path: inset(0 0 0 0);
   }
 }
+
+/* 1 · tabs / screens */
+:root[data-crt="on"] .screen-switch {
+  animation: crt-switch 200ms ease-out both;
+  transform-origin: top center;
+}
+
+/* 2 · popups */
+:root[data-crt="on"] .popup {
+  animation: crt-on 180ms ease-out both;
+}
+:root[data-crt="on"] .popup.closing {
+  animation: crt-off 130ms ease-in both;
+}
 :root[data-crt="on"] .typed {
   animation: crt-type 320ms steps(var(--chars, 20)) both;
 }
 
-/* blinking block cursor */
-@keyframes crt-blink {
-  50% {
-    opacity: 0;
-  }
+/* 3 · connecting / disconnecting */
+.signal-lost {
+  filter: grayscale(0.6) brightness(0.75);
+  opacity: 0.55;
 }
+:root[data-crt="on"] .signal-lost {
+  animation: crt-signal-lost 420ms ease-out both;
+}
+:root[data-crt="on"] .signal-back {
+  animation: crt-on 260ms ease-out both;
+}
+:root[data-crt="on"] .conn-flicker {
+  animation: crt-flicker 320ms steps(1) both;
+}
+
+/* static block cursor (no blinking: only the motions above animate) */
 .cursor::after {
   content: "█" / "";
   margin-left: 2px;
   color: var(--primary);
   font-weight: 400;
 }
-:root[data-crt="on"] .cursor::after {
-  animation: crt-blink 1.05s steps(1) infinite;
-}
-:root[data-crt="off"] .cursor::after {
-  content: none;
-}
 
-/* LIVE dot pulse */
-@keyframes crt-pulse {
-  50% {
-    opacity: 0.35;
-  }
-}
-:root[data-crt="on"] .live-dot {
-  animation: crt-pulse 1.6s ease-in-out infinite;
-}
-
-/* Reduced motion: no CRT at all (animations, glow and scanlines). */
+/* Reduced motion: no CRT animation at all. */
 @media (prefers-reduced-motion: reduce) {
-  :root[data-crt="on"] body::after {
-    display: none;
-  }
-  :root[data-crt="on"] *,
-  :root[data-crt="on"] *::before,
-  :root[data-crt="on"] *::after {
-    animation: none !important;
-    text-shadow: none !important;
+  :root[data-crt="on"] .screen-switch,
+  :root[data-crt="on"] .popup,
+  :root[data-crt="on"] .popup.closing,
+  :root[data-crt="on"] .typed,
+  :root[data-crt="on"] .signal-lost,
+  :root[data-crt="on"] .signal-back,
+  :root[data-crt="on"] .conn-flicker {
+    animation: none;
   }
 }

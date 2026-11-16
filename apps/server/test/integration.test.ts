@@ -185,3 +185,56 @@ describe("robustness", () => {
     );
   });
 });
+
+describe("label pairings", () => {
+  let srv: TestServer;
+  beforeAll(async () => {
+    srv = await startTestServer();
+  });
+  afterAll(async () => {
+    await srv.close();
+    cleanup(srv.dir);
+  });
+
+  it("derives P from the pairing; dissociated without a number picks D1–D6 and logs it", async () => {
+    const { FacilitatorClient, Bot } = await import("../src/tools/botClient");
+    const fac = new FacilitatorClient(srv.url);
+    await fac.connected();
+    await fac.cmd("session:create", { scenarioId: "demo", config: {}, notes: "" });
+    const bots = Array.from({ length: 4 }, () => new Bot({ url: srv.url, autoPlay: false }));
+    const terminals = await Promise.all(bots.map((b) => b.waitForTerminal()));
+    for (let i = 0; i < 4; i++) await fac.cmd("seat:bind", { terminal: terminals[i], seat: i + 1 });
+    const seats = () => Object.values(srv.ctx.hub.session!.state.seats).map((s) => `${s.k}${s.p}`);
+
+    await fac.cmd("labels:set", {
+      assignments: [1, 2, 3, 4].map((seat) => ({ seat, k: `K${"abcd"[seat - 1]}` })),
+      pairing: { mode: "dissociated", id: 6 },
+    });
+    expect(seats()).toEqual(["KaPd", "KbPc", "KcPa", "KdPb"]);
+    expect(srv.ctx.hub.session!.state.labelPairing).toEqual({ mode: "dissociated", id: 6 });
+
+    await fac.cmd("labels:randomise", { pairing: { mode: "dissociated", id: null }, shuffleK: true });
+    const st = srv.ctx.hub.session!.state;
+    expect(st.labelPairing?.mode).toBe("dissociated");
+    expect(st.labelPairing?.id).toBeGreaterThanOrEqual(1);
+    for (const s of Object.values(st.seats)) expect(s.k!.slice(1)).not.toBe(s.p!.slice(1)); // never the same letter
+
+    await fac.cmd("labels:randomise", { pairing: { mode: "aligned", id: null }, shuffleK: true });
+    for (const s of Object.values(srv.ctx.hub.session!.state.seats))
+      expect(s.k!.slice(1)).toBe(s.p!.slice(1));
+
+    await expect(
+      fac.cmd("labels:set", {
+        assignments: [1, 2, 3, 4].map((seat) => ({ seat, k: "Ka" })),
+        pairing: { mode: "aligned", id: null },
+      }),
+    ).rejects.toThrow(/only once/);
+    const last = srv.ctx.store
+      .listEvents(srv.ctx.hub.session!.sessionId)
+      .filter((e) => e.type === "LabelsAssigned")
+      .at(-1)!;
+    expect(last.payload).toMatchObject({ method: "random", pairing: { mode: "aligned", id: null } });
+    for (const b of bots) b.stop();
+    fac.close();
+  });
+});

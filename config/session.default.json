@@ -6,7 +6,6 @@
   "roundAdvance": "facilitator",
   "autoAdvanceDelaySec": 10,
   "viewAssignment": "byKnowledgeType",
-  "allowDuplicateLabels": false,
   "clearHighlightsEachRound": true,
   "pauseOnDisconnect": true,
   "onboarding": { "consent": true, "demographics": true, "briefing": true },
@@ -17,5 +16,5 @@
     "showOthersProgress": true
   },
   "tags": [],
-  "appearance": { "playerTheme": "mocha", "playerCrt": true }
+  "appearance": { "playerTheme": "mocha", "playerAnimations": true }
 }

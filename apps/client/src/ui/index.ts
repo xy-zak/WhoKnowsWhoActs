@@ -9,5 +9,6 @@ export { ICON_TABLE, type IconName } from "./icons";
 export { ConfirmProvider, isPopupOpen, Popup, type PopupProps, useConfirm } from "./Popup";
 export { applyAppearance, type Prefs, prefsStore, setPrefs, usePrefs } from "./prefs";
 export { type Shortcut, useShortcuts } from "./shortcuts";
+export { useSignalClass } from "./signal";
 export { type ToastMsg, ToastView } from "./Toast";
-export { installThemeStyles, THEMES, type ThemeName } from "./tokens";
+export { installThemeStyles, THEME_LABEL, THEME_NAMES, THEMES, type ThemeName } from "./tokens";

@@ -5,7 +5,7 @@
  * empty seats while developing or piloting, or to load-test a setup.
  *
  * --auto also drives the facilitator side: creates a session if none is
- * active, binds every terminal (bots AND humans) to the next free seat,
+ * active, binds every client (bots AND humans) to the next free seat,
  * randomises labels, starts onboarding and starts each round. Never use
  * --auto during a real session.
  */
@@ -68,7 +68,7 @@ async function autoFacilitate() {
         const unseated = d.terminals.filter((t) => t.connected && t.seat === null);
         if (free.length > 0 && unseated.length > 0) {
           await fac.cmd("seat:bind", { terminal: unseated[0]!.terminal, seat: free[0] });
-          log(`bound terminal ${unseated[0]!.terminal} → seat ${free[0]}`);
+          log(`bound client ${unseated[0]!.terminal} → seat ${free[0]}`);
         } else if (free.length === 0) {
           if (seats.some((s) => !s.k)) await fac.cmd("labels:randomise");
           else await fac.cmd("onboarding:start");

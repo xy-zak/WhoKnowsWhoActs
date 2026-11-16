@@ -34,11 +34,11 @@ export const ICON_TABLE = {
   // seats & players
   seat: { iconoir: "User", meaning: "A seat / player" },
   seats: { iconoir: "Group", meaning: "All seats" },
-  terminal: { iconoir: "Computer", meaning: "A browser terminal (player PC)" },
-  bind: { iconoir: "UserPlus", meaning: "Bind a terminal to a seat" },
+  client: { iconoir: "Computer", meaning: "A client: a connected player browser / PC" },
+  bind: { iconoir: "UserPlus", meaning: "Bind a client to a seat" },
   withdraw: { iconoir: "UserXmark", meaning: "Withdraw a participant / unbind a seat" },
   labels: { iconoir: "Label", meaning: "K/P labels" },
-  randomise: { iconoir: "DiceFive", meaning: "Randomise labels" },
+  randomise: { iconoir: "DiceFive", meaning: "Shuffle K labels across seats / random pairing" },
   connected: { iconoir: "Wifi", meaning: "Connected" },
   disconnected: { iconoir: "WifiOff", meaning: "Disconnected" },
   idle: { iconoir: "Hourglass", meaning: "Idle / waiting" },
@@ -73,7 +73,11 @@ export const ICON_TABLE = {
   lock: { iconoir: "Lock", meaning: "Locked (step can no longer be changed)" },
   themeLight: { iconoir: "SunLight", meaning: "Switch to the light theme (Latte)" },
   themeDark: { iconoir: "HalfMoon", meaning: "Switch to the dark theme (Mocha)" },
-  crt: { iconoir: "Tv", meaning: "Toggle CRT effects" },
+  themeContrast: { iconoir: "Brightness", meaning: "Switch to the high-contrast theme" },
+  animations: {
+    iconoir: "Sparks",
+    meaning: "Toggle animations (CRT-style screen switches, popups, connect/disconnect)",
+  },
 } as const;
 
 export type IconName = keyof typeof ICON_TABLE;

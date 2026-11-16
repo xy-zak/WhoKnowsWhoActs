@@ -1,7 +1,20 @@
 import { useEffect, useState } from "react";
 import { fmtDuration } from "../common/format";
 import { useStore } from "../net/store";
-import { Button, Icon, Popup, setPrefs, ToastView, usePrefs, useShortcuts } from "../ui";
+import {
+  Button,
+  Icon,
+  type IconName,
+  Popup,
+  setPrefs,
+  THEME_LABEL,
+  THEME_NAMES,
+  type ThemeName,
+  ToastView,
+  usePrefs,
+  useShortcuts,
+  useSignalClass,
+} from "../ui";
 import type { FacilitatorConnection } from "./connection";
 import { Database } from "./Database";
 import { LiveStage } from "./live/LiveStage";
@@ -11,14 +24,22 @@ import { PHASE_LABEL, stageOf } from "./stage";
 
 type Tab = "main" | "replay" | "database";
 
+const THEME_ICON: Record<ThemeName, IconName> = {
+  latte: "themeLight",
+  mocha: "themeDark",
+  contrast: "themeContrast",
+};
+const nextTheme = (t: ThemeName): ThemeName =>
+  THEME_NAMES[(THEME_NAMES.indexOf(t) + 1) % THEME_NAMES.length]!;
+
 export const SHORTCUTS_HELP: Array<[string, string]> = [
   ["1", "SETUP / LIVE tab"],
   ["2", "REPLAY tab"],
   ["3", "DATABASE tab"],
   ["N", "Next action (setup: resume the current step · live: the NEXT panel's action)"],
   ["P", "Pause / resume the round (live)"],
-  ["T", "Toggle theme (Latte ↔ Mocha)"],
-  ["C", "Toggle CRT effects"],
+  ["T", "Next theme: Latte → Mocha → High contrast"],
+  ["A", "Animations on/off (tab switches, popups, connect/disconnect)"],
   ["?", "This help"],
   ["Enter", "Primary action in a popup"],
   ["Esc", "Close a popup (setup progress is kept)"],
@@ -43,13 +64,14 @@ export function App({ conn }: { conn: FacilitatorConnection }) {
   const st = fs.dashboard?.state ?? null;
   const stage = stageOf(st);
   const isLive = stage === "live";
+  const signal = useSignalClass(fs.connected);
 
   useShortcuts([
     { key: "1", label: "SETUP/LIVE", run: () => setTab("main") },
     { key: "2", label: "REPLAY", run: () => setTab("replay") },
     { key: "3", label: "DATABASE", run: () => setTab("database") },
-    { key: "t", label: "theme", run: () => setPrefs({ theme: prefs.theme === "mocha" ? "latte" : "mocha" }) },
-    { key: "c", label: "CRT", run: () => setPrefs({ crt: !prefs.crt }) },
+    { key: "t", label: "theme", run: () => setPrefs({ theme: nextTheme(prefs.theme) }) },
+    { key: "a", label: "animations", run: () => setPrefs({ animations: !prefs.animations }) },
     { key: "?", label: "help", run: () => setHelp(true) },
   ]);
 
@@ -121,7 +143,8 @@ export function App({ conn }: { conn: FacilitatorConnection }) {
         </nav>
       </header>
 
-      <main>
+      {/* key → remount on tab/stage change, which plays the CRT screen-switch animation */}
+      <main key={`${tab}-${stage}`} className={`screen-switch ${signal}`}>
         {tab === "main" && (stage === "live" ? <LiveStage conn={conn} /> : <SetupStage conn={conn} />)}
         {tab === "replay" && (
           <Replay conn={conn} sessionId={replayId} onPick={(id) => setReplayId(id || null)} />
@@ -140,10 +163,10 @@ export function App({ conn }: { conn: FacilitatorConnection }) {
       </main>
 
       <footer className="statusbar">
-        <span className="seg">
+        <span className="seg conn-flicker" key={fs.connected ? "on" : "off"}>
           <Icon name={fs.connected ? "connected" : "disconnected"} />
           <strong className={fs.connected ? "t-live" : "t-danger"}>
-            {fs.connected ? "ONLINE" : "OFFLINE"}
+            {fs.connected ? "ONLINE" : "OFFLINE — reconnecting"}
           </strong>
         </span>
         <span className="seg">
@@ -176,19 +199,18 @@ export function App({ conn }: { conn: FacilitatorConnection }) {
         <button
           type="button"
           className="seg"
-          onClick={() => setPrefs({ theme: prefs.theme === "mocha" ? "latte" : "mocha" })}
-          title="Toggle theme (T)"
+          onClick={() => setPrefs({ theme: nextTheme(prefs.theme) })}
+          title="Next theme (T)"
         >
-          <Icon name={prefs.theme === "mocha" ? "themeLight" : "themeDark"} /> <kbd>T</kbd>{" "}
-          {prefs.theme.toUpperCase()}
+          <Icon name={THEME_ICON[prefs.theme]} /> <kbd>T</kbd> {THEME_LABEL[prefs.theme].toUpperCase()}
         </button>
         <button
           type="button"
           className="seg"
-          onClick={() => setPrefs({ crt: !prefs.crt })}
-          title="Toggle CRT effects (C)"
+          onClick={() => setPrefs({ animations: !prefs.animations })}
+          title="Animations on/off (A)"
         >
-          <Icon name="crt" /> <kbd>C</kbd> CRT {prefs.crt ? "ON" : "OFF"}
+          <Icon name="animations" /> <kbd>A</kbd> ANIMATIONS {prefs.animations ? "ON" : "OFF"}
         </button>
         <button type="button" className="seg" onClick={() => setHelp(true)} title="Keyboard shortcuts (?)">
           <Icon name="help" /> <kbd>?</kbd> HELP

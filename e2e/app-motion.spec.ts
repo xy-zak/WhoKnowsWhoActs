@@ -1,23 +1,37 @@
-import { expect, test } from "@playwright/test";
+import { expect, type Page, test } from "@playwright/test";
 
-/** prefers-reduced-motion switches every CRT effect off (docs/AESTHETIC-RULES.md § 9). */
-test("reduced motion disables CRT animations and scanlines", async ({ page }) => {
-  await page.emulateMedia({ reducedMotion: "reduce" });
-  await page.goto("/facilitator");
-  await page.waitForSelector(".popup");
-  expect(await page.evaluate(() => document.documentElement.dataset.crt)).toBe("on");
-  const popupAnimation = await page.locator(".popup").evaluate((el) => getComputedStyle(el).animationName);
-  expect(popupAnimation).toBe("none");
-  const scanlines = await page.evaluate(() => getComputedStyle(document.body, "::after").display);
-  expect(scanlines).toBe("none");
-});
+/**
+ * CRT = animations only (docs/AESTHETIC-RULES.md § 9): no scanlines or glow,
+ * animated screen switches and popups, nothing at all with reduced motion.
+ */
+const scanlines = (page: Page) => page.evaluate(() => getComputedStyle(document.body, "::after").content);
+const animation = (page: Page, sel: string) =>
+  page
+    .locator(sel)
+    .first()
+    .evaluate((el) => getComputedStyle(el).animationName);
 
-test("with CRT on and motion allowed, popups power on and scanlines show", async ({ page }) => {
+test("with motion allowed: screens switch with an animation, no static CRT effects", async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "no-preference" });
   await page.goto("/facilitator");
+  await page.waitForSelector(".acc-step.current");
+  expect(await page.evaluate(() => document.documentElement.dataset.crt)).toBe("on");
+  expect(await scanlines(page)).toBe("none");
+  expect(await animation(page, "main.screen-switch")).toBe("crt-switch");
+  const glow = await page.locator(".tab.active").evaluate((el) => getComputedStyle(el).textShadow);
+  expect(glow).toBe("none");
+  await page.keyboard.press("?");
   await page.waitForSelector(".popup");
-  const popupAnimation = await page.locator(".popup").evaluate((el) => getComputedStyle(el).animationName);
-  expect(popupAnimation).toBe("crt-on");
-  const scanlines = await page.evaluate(() => getComputedStyle(document.body, "::after").content);
-  expect(scanlines).not.toBe("none");
+  expect(await animation(page, ".popup")).toBe("crt-on");
+});
+
+test("reduced motion disables every CRT animation", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.goto("/facilitator");
+  await page.waitForSelector(".acc-step.current");
+  expect(await animation(page, "main.screen-switch")).toBe("none");
+  expect(await animation(page, ".acc-body")).toBe("none");
+  await page.keyboard.press("?");
+  await page.waitForSelector(".popup");
+  expect(await animation(page, ".popup")).toBe("none");
 });

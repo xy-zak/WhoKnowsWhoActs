@@ -4,6 +4,7 @@ import {
   activeSeats,
   applyEvent,
   DEFAULT_VALIDATORS,
+  DISSOCIATED_PAIRINGS,
   type GameState,
   generateParticipantCode,
   generateSessionId,
@@ -11,13 +12,13 @@ import {
   isOnboardingComplete,
   K_LABELS,
   type KLabel,
+  type LabelPairing,
   type NewEvent,
   nextOnboardingStep,
   type OnboardingContent,
   type OnboardingStep,
-  P_LABELS,
   type PayloadOf,
-  type PLabel,
+  pairedP,
   parseSessionConfig,
   quotaLimit,
   quotaUsed,
@@ -56,7 +57,7 @@ export interface SessionDeps {
   validators?: Validator[];
 }
 
-type LabelAssignment = { seat: number; k: KLabel; p: PLabel; view?: string };
+type LabelAssignment = { seat: number; k: KLabel; view?: string };
 
 const FINAL_PHASES = new Set(["closed", "aborted"]);
 
@@ -291,10 +292,17 @@ export class SessionManager {
 
   /* ═════════════════════════ labels ═════════════════════════ */
 
+  /**
+   * Assign K labels (each at most once) and a K–P pairing. P is always derived
+   * from the pairing — aligned (Ka–Pa …) or one of the six fully dissociative
+   * pairings D1–D6 — so no other K/P combination can ever occur.
+   * A dissociated pairing without a number gets a random one (seed logged).
+   */
   setLabels(
     assignments: LabelAssignment[],
+    pairingIn: { mode: "aligned" | "dissociated"; id: number | null } = { mode: "aligned", id: null },
     method: "manual" | "random" = "manual",
-    seed: string | null = null,
+    seedIn: string | null = null,
   ) {
     this.run(() => {
       this.requirePhase("lobby", "onboarding", "round_complete");
@@ -304,46 +312,53 @@ export class SessionManager {
       if (given.length !== seats.length || given.some((s, i) => s !== seats[i])) {
         throw new CommandError(`Assign labels to every seat exactly once (seats ${seats.join(", ")})`);
       }
-      if (!cfg.allowDuplicateLabels) {
-        if (new Set(assignments.map((a) => a.k)).size !== assignments.length)
-          throw new CommandError("Each K label may be used only once");
-        if (new Set(assignments.map((a) => a.p)).size !== assignments.length)
-          throw new CommandError("Each P label may be used only once");
+      if (new Set(assignments.map((a) => a.k)).size !== assignments.length) {
+        throw new CommandError("Each K label may be used only once");
+      }
+      let seed = seedIn;
+      let pairing: LabelPairing;
+      if (pairingIn.mode === "aligned") pairing = { mode: "aligned", id: null };
+      else if (pairingIn.id !== null) pairing = { mode: "dissociated", id: pairingIn.id };
+      else {
+        seed = seed ?? randomCrockford(6);
+        const rng = seededRandom(`${seed}:pairing`);
+        pairing = { mode: "dissociated", id: 1 + Math.floor(rng() * DISSOCIATED_PAIRINGS.length) };
+        method = "random";
       }
       const full = assignments.map((a) => {
         const view =
           cfg.viewAssignment === "byKnowledgeType" ? a.k : (a.view ?? this.state.seats[a.seat]?.view ?? a.k);
         if (!this.scenario.views[view]) throw new CommandError(`Scenario has no view '${view}'`);
-        return { seat: a.seat, k: a.k, p: a.p, view };
+        return { seat: a.seat, k: a.k, p: pairedP(a.k, pairing), view };
       });
       this.append({
         type: "LabelsAssigned",
         actorKind: "facilitator",
-        payload: { assignments: full, method, seed },
+        payload: { assignments: full, method, seed, pairing },
       });
     });
   }
 
-  randomiseLabels() {
+  /** Shuffle which seat gets which K (or keep seat order) and apply a pairing. Seed is logged. */
+  randomiseLabels(
+    pairing: { mode: "aligned" | "dissociated"; id: number | null } = { mode: "aligned", id: null },
+    shuffleK = true,
+  ) {
     const seed = randomCrockford(6);
     const rng = seededRandom(seed);
-    const shuffle = <T>(arr: readonly T[]) => {
-      const a = [...arr];
-      for (let i = a.length - 1; i > 0; i--) {
+    const ks = [...K_LABELS];
+    if (shuffleK) {
+      for (let i = ks.length - 1; i > 0; i--) {
         const j = Math.floor(rng() * (i + 1));
-        [a[i], a[j]] = [a[j]!, a[i]!];
+        [ks[i], ks[j]] = [ks[j]!, ks[i]!];
       }
-      return a;
-    };
-    const ks = shuffle(K_LABELS);
-    const ps = shuffle(P_LABELS);
+    }
     const assignments = seatList(this.state).map((s, i) => ({
       seat: s.seat,
       k: ks[i % ks.length]!,
-      p: ps[i % ps.length]!,
       view: s.view ?? undefined,
     }));
-    this.setLabels(assignments, "random", seed);
+    this.setLabels(assignments, pairing, "random", seed);
   }
 
   /* ═════════════════════════ flow ═════════════════════════ */

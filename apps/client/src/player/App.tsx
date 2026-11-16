@@ -1,7 +1,7 @@
 import type { PlayerView } from "@wkwa/shared";
 import { useEffect, useMemo, useRef } from "react";
 import { useStore } from "../net/store";
-import { applyAppearance, Icon, Popup, StatusTag, ToastView } from "../ui";
+import { applyAppearance, Icon, Popup, StatusTag, ToastView, useSignalClass } from "../ui";
 import { Centered, OnboardingStepper } from "./chrome";
 import type { PlayerConnection } from "./connection";
 import { Game } from "./Game";
@@ -43,9 +43,9 @@ export function App({ conn }: { conn: PlayerConnection }) {
   const st = useStore(conn.store);
   const screen = screenFor(st.seat, st.view);
 
-  // Appearance is decided per session (identical for every seat); Mocha + CRT before a session is known.
+  // Appearance is decided per session (identical for every seat); Mocha with animations before a session is known.
   const theme = st.view?.appearance.playerTheme ?? "mocha";
-  const crt = st.view?.appearance.playerCrt ?? true;
+  const crt = st.view?.appearance.playerAnimations ?? true;
   useEffect(() => applyAppearance(theme, crt), [theme, crt]);
 
   // screen_view telemetry
@@ -58,6 +58,9 @@ export function App({ conn }: { conn: PlayerConnection }) {
   }, [screen, st.seat, conn]);
 
   useGlobalTelemetry(conn);
+  const signal = useSignalClass(st.connected);
+  // the game screen stays mounted through pauses and round breaks (keeps tool / selection)
+  const screenKey = screen === "paused" || screen === "round_break" ? "game" : screen;
 
   const body = useMemo(() => {
     const v = st.view;
@@ -109,7 +112,9 @@ export function App({ conn }: { conn: PlayerConnection }) {
           <p className="cursor">Reconnecting to the game server. Please do not close this window</p>
         </Popup>
       )}
-      {body}
+      <div key={screenKey} className={`screen-switch ${signal}`} style={{ height: "100%" }}>
+        {body}
+      </div>
       <ToastView toast={st.toast ? { text: st.toast, kind: "warn" } : null} />
     </>
   );
@@ -125,9 +130,12 @@ function Waiting({
   notice: string | null;
 }) {
   return (
-    <Centered title="Terminal" icon="terminal" width={560}>
-      <div className="terminal-number">{terminal ?? "··"}</div>
-      <p className={connected ? "muted cursor" : "t-warn cursor"}>
+    <Centered title="Client" icon="client" width={560}>
+      <div className="client-number">{terminal ?? "··"}</div>
+      <p
+        key={connected ? "on" : "off"}
+        className={`conn-flicker ${connected ? "muted cursor" : "t-warn cursor"}`}
+      >
         {connected
           ? "Connected. Waiting for the facilitator to assign a seat"
           : "Connecting to the game server"}
@@ -147,7 +155,7 @@ function EndScreen({ view, withdrawn }: { view: PlayerView; withdrawn: boolean }
         <>
           <p className="muted upper small">Your personal participant code</p>
           <div
-            className="glow strong"
+            className="strong"
             style={{
               fontSize: 32,
               letterSpacing: "0.1em",

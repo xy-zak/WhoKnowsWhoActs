@@ -10,12 +10,14 @@ import { flavors } from "@catppuccin/palette";
  * carries text or UI meaning.
  * ═══════════════════════════════════════════════════════════════════════════ */
 
-export type ThemeName = "latte" | "mocha";
-export const THEME_NAMES: ThemeName[] = ["latte", "mocha"];
+/** Catppuccin flavours + a hand-made high-contrast theme (black, white, saturated accents; WCAG AAA text). */
+export type ThemeName = "latte" | "mocha" | "contrast";
+export const THEME_NAMES: ThemeName[] = ["latte", "mocha", "contrast"];
+type CatTheme = "latte" | "mocha";
 
 type CatName = keyof (typeof flavors)["latte"]["colors"];
 
-function cat(theme: ThemeName, name: CatName): string {
+function cat(theme: CatTheme, name: CatName): string {
   return flavors[theme].colors[name].hex;
 }
 
@@ -56,9 +58,10 @@ const LATTE_DARKEN: Partial<Record<CatName, number>> = {
   red: 0.05,
   mauve: 0.05,
   sapphire: 0.3,
+  lavender: 0.3,
 };
 
-function accent(theme: ThemeName, name: CatName): string {
+function accent(theme: CatTheme, name: CatName): string {
   const hex = cat(theme, name);
   return theme === "latte" ? shade(hex, LATTE_DARKEN[name] ?? 0) : hex;
 }
@@ -68,14 +71,15 @@ export interface TokenDoc {
   role: string;
   latte: string;
   mocha: string;
+  contrast: string;
 }
 
 /** Semantic token → [description, Latte source, Mocha source]. Sources are Catppuccin names or rules. */
 const DEFS: Array<{
   token: string;
   role: string;
-  value: (t: ThemeName) => string;
-  source: (t: ThemeName) => string;
+  value: (t: CatTheme) => string;
+  source: (t: CatTheme) => string;
 }> = [
   {
     token: "bg",
@@ -152,6 +156,18 @@ const DEFS: Array<{
     source: (t) => (t === "latte" ? "mauve −5%" : "mauve"),
   },
   {
+    token: "review",
+    role: "Review / summary before an irreversible commit (setup step 06) — nothing else",
+    value: (t) => accent(t, "lavender"),
+    source: (t) => (t === "latte" ? "lavender −30%" : "lavender"),
+  },
+  {
+    token: "review-bg",
+    role: "Tinted background of the review step",
+    value: (t) => mix(cat(t, "base"), cat(t, "lavender"), t === "latte" ? 0.1 : 0.08),
+    source: (t) => `base + ${t === "latte" ? 10 : 8}% lavender`,
+  },
+  {
     token: "on-accent",
     role: "Text on a filled accent (primary/live/danger buttons, LIVE badge)",
     value: (t) => cat(t, t === "latte" ? "base" : "crust"),
@@ -225,32 +241,82 @@ const DEFS: Array<{
   },
 ];
 
+/**
+ * High-contrast theme: not a Catppuccin flavour. Pure black/white chrome and
+ * saturated accents; body text, muted text and accents reach ≥ 7:1 (WCAG AAA)
+ * on the panel, controls and focus are bold white/magenta.
+ */
+const HIGH_CONTRAST: Record<string, string> = {
+  bg: "#000000",
+  panel: "#000000",
+  sunken: "#141414",
+  hover: "#2a2a2a",
+  frame: "#bfbfbf",
+  control: "#ffffff",
+  text: "#ffffff",
+  muted: "#e6e6e6",
+  faint: "#b3b3b3",
+  primary: "#5cc8ff",
+  live: "#4cf08a",
+  warn: "#ffb84d",
+  danger: "#ff7070",
+  focus: "#ff5cff",
+  review: "#d2b4ff",
+  "review-bg": "#1a1028",
+  "on-accent": "#000000",
+  propose: "#ffe600",
+  "propose-text": "#ffe600",
+  decide: "#ff4040",
+  "decide-text": "#ff7070",
+  "seat-1": "#ffa64d",
+  "seat-2": "#5cc8ff",
+  "seat-3": "#4cf08a",
+  "seat-4": "#e09cff",
+  sea: "#001f3d",
+  land: "#3a3a3a",
+  "map-stroke": "#ffffff",
+};
+
 export const THEMES: Record<ThemeName, Record<string, string>> = {
   latte: Object.fromEntries(DEFS.map((d) => [d.token, d.value("latte")])),
   mocha: Object.fromEntries(DEFS.map((d) => [d.token, d.value("mocha")])),
+  contrast: Object.fromEntries(DEFS.map((d) => [d.token, HIGH_CONTRAST[d.token] ?? "#ff00ff"])),
 };
+
+export const THEME_LABEL: Record<ThemeName, string> = {
+  latte: "Latte (light)",
+  mocha: "Mocha (dark)",
+  contrast: "High contrast",
+};
+
+/** Text pairs that must reach WCAG AAA (7:1) in the high-contrast theme. */
+export const AAA_PAIRS: Array<[string, string]> = [
+  ["text", "panel"],
+  ["muted", "panel"],
+  ["primary", "panel"],
+  ["live", "panel"],
+  ["warn", "panel"],
+  ["danger", "panel"],
+  ["review", "review-bg"],
+  ["propose-text", "panel"],
+  ["decide-text", "panel"],
+];
 
 export const TOKEN_DOCS: TokenDoc[] = DEFS.map((d) => ({
   token: `--${d.token}`,
   role: d.role,
   latte: `${d.value("latte")} (${d.source("latte")})`,
   mocha: `${d.value("mocha")} (${d.source("mocha")})`,
+  contrast: THEMES.contrast[d.token]!,
 }));
-
-/** Non-colour per-theme values (CRT intensity). */
-export const THEME_EFFECTS: Record<ThemeName, { scanAlpha: number; glow: boolean }> = {
-  latte: { scanAlpha: 0.035, glow: false },
-  mocha: { scanAlpha: 0.15, glow: true },
-};
 
 export function themeCss(): string {
   return THEME_NAMES.map((t) => {
     const vars = Object.entries(THEMES[t])
       .map(([k, v]) => `--${k}:${v};`)
       .join("");
-    const fx = THEME_EFFECTS[t];
     // also on any element, so a block can preview the other theme (setup step 03)
-    return `:root[data-theme="${t}"],[data-theme="${t}"]{${vars}--scan-alpha:${fx.scanAlpha};--glow:${fx.glow ? 1 : 0};color-scheme:${t === "latte" ? "light" : "dark"};}`;
+    return `:root[data-theme="${t}"],[data-theme="${t}"]{${vars}color-scheme:${t === "latte" ? "light" : "dark"};}`;
   }).join("\n");
 }
 
@@ -289,6 +355,11 @@ export const CONTRAST_PAIRS: Array<[string, string, number]> = [
   ["warn", "panel", 4.5],
   ["danger", "panel", 4.5],
   ["focus", "panel", 3],
+  ["review", "panel", 4.5],
+  ["review", "review-bg", 4.5],
+  ["text", "review-bg", 4.5],
+  ["muted", "review-bg", 4.5],
+  ["on-accent", "review", 4.5],
   ["propose-text", "panel", 4.5],
   ["decide-text", "panel", 4.5],
   ["on-accent", "primary", 4.5],

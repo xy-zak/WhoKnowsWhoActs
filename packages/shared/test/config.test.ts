@@ -37,14 +37,23 @@ describe("session tags", () => {
 
 describe("player appearance", () => {
   it("defaults to Mocha with CRT on and is passed to every player", () => {
-    const log = readySession({ appearance: { playerTheme: "latte", playerCrt: false } });
+    const log = readySession({ appearance: { playerTheme: "latte", playerAnimations: false } });
     for (let seat = 1; seat <= 4; seat++) {
       expect(playerView(log.state, testScenario, seat, null, 0).appearance).toEqual({
         playerTheme: "latte",
-        playerCrt: false,
+        playerAnimations: false,
       });
     }
-    expect(parseSessionConfig({}).appearance).toEqual({ playerTheme: "mocha", playerCrt: true });
+    expect(parseSessionConfig({}).appearance).toEqual({ playerTheme: "mocha", playerAnimations: true });
+  });
+
+  it("upgrades the legacy appearance.playerCrt flag", () => {
+    expect(parseSessionConfig({ appearance: { playerTheme: "latte", playerCrt: false } }).appearance).toEqual(
+      {
+        playerTheme: "latte",
+        playerAnimations: false,
+      },
+    );
   });
 
   it("replays old SessionCreated events that still use `condition`", () => {

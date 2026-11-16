@@ -8,7 +8,7 @@ A **research game harness** for a four-player, map-based serious game played on 
 | **Player · game (Latte)** | **Player · game (Mocha)** |
 | ![Player game screen in Latte: status line with quota bars, propose/decide tools, the shared map with this player's own data and the inline confirm prompt](docs/img/player-game.png) | ![Player game screen in Mocha with CRT scanlines](docs/img/player-game-mocha.png) |
 
-*Screenshots use the fictional demo scenario and simulated players. The player theme is a per-session setting; the facilitator toggles their own with `T`.*
+*Screenshots use the fictional demo scenario and simulated players. The player theme is a per-session setting; the facilitator cycles their own with `T` (Latte → Mocha → High contrast).*
 
 ## What it does
 
@@ -19,11 +19,12 @@ A **research game harness** for a four-player, map-based serious game played on 
 - **Labels.** Each seat gets a knowledge type (`Ka`–`Kd`) and a power type (`Pa`–`Pd`), assigned manually or randomly in setup step 08 (the seed is logged). By default the K label selects the seat's map view.
 - **Every interaction is recorded** in an append-only, event-sourced log with server and clock-corrected client timestamps. Fine-grained UI telemetry is recorded too: hover, inspect, pan/zoom, tool choice, confirm/cancel, focus, idle, and state acknowledgements for exact reaction times.
 - **Facilitator manager**, organised in order of use: **[1] SETUP | LIVE · [2] REPLAY · [3] DATABASE**.
-  - **SETUP** is a 10-step wizard in popups (scenario → rounds → players → onboarding → tags → review & create → connect terminals → labels → key sheet → start), with a stepper so you always know where you are.
+  - **SETUP** is 10 steps stacked as a vertical accordion (scenario → rounds → players → onboarding → tags → review & create → connect clients → labels → key sheet → start). The current step is expanded; finished steps collapse into a one-line summary, so you always see where you are. The review step has its own colour.
   - After *Start onboarding* the tab flips to **LIVE**, and a green **● LIVE** indicator appears. LIVE has a lifecycle stepper, a NEXT panel with the next action, seats with quota bars, a composite map, player mirrors, a timeline, the event log, live telemetry, and wrap-up popups (takedown cards → export → close).
-  - **REPLAY** scrubs through any session; **DATABASE** holds exports, printables and takedown.
+  - **REPLAY** plays any session back at 1 s per action, pausing at each round end (about 2 minutes for a default session), or lets you step and scrub; **DATABASE** holds exports, printables and takedown.
 - **Intentional TUI aesthetic:**
-  - Catppuccin **Latte/Mocha** with contrast-tested tokens, **JetBrains Mono**, **Iconoir** icons, box-drawn panels, keyboard shortcuts, and subtle **CRT** effects. Reduced motion is respected.
+  - Catppuccin **Latte** and **Mocha** plus a **High contrast** theme (WCAG AAA text), with contrast-tested tokens, **JetBrains Mono**, **Iconoir** icons, box-drawn panels and keyboard shortcuts.
+  - CRT-style **animations** only (tab/screen switches, popups, connect/disconnect), no scanlines or glow; switchable, and off under reduced motion.
   - The rules every screen follows are in [AESTHETIC-RULES.md](docs/AESTHETIC-RULES.md).
 - **GDPR by design:**
   - in-game versioned consent, with the hash of the exact text shown

@@ -1,7 +1,7 @@
 import { type GameState, type Highlight, playerView, type Scenario, seatList } from "@wkwa/shared";
 import { useMemo, useState } from "react";
 import { MapLegend, MapView } from "../map/MapView";
-import { Button, Check, Panel, SeatDot, StatusTag } from "../ui";
+import { Button, Check, ConnTag, Panel, SeatDot, StatusTag } from "../ui";
 
 /** All views' information about one region, side by side. */
 function RegionComparison({
@@ -181,7 +181,6 @@ export function CompositeMap({
               nested
               title="Region"
               icon="review"
-              powerOn={false}
               actions={
                 <Button
                   iconOnly
@@ -246,13 +245,7 @@ export function PlayerMirrors({
                 {s.k && <span className="muted">{s.k}</span>}
                 {s.p && <span className="muted">{s.p}</span>}
                 <span className="spacer" />
-                {s.withdrawn ? (
-                  <StatusTag>withdrawn</StatusTag>
-                ) : s.connected ? (
-                  <StatusTag tone="live">online</StatusTag>
-                ) : (
-                  <StatusTag tone="danger">offline</StatusTag>
-                )}
+                <ConnTag connected={s.connected} withdrawn={s.withdrawn} />
               </div>
               <div style={{ height: 180 }}>
                 <MapView

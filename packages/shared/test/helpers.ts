@@ -101,6 +101,7 @@ export function readySession(configInput: SessionConfigInput = {}): EventLog {
       })),
       method: "manual",
       seed: null,
+      pairing: { mode: "aligned", id: null },
     },
     { actor: "facilitator" },
   );

@@ -44,7 +44,7 @@ export function keySheetHtml(store: Store, sessionId: string, study: StudyConfig
   <p>Session <strong>${esc(sessionId)}</strong> · created ${esc(row.created_wall.slice(0, 10))} · scenario ${esc(row.scenario_id)} v${esc(row.scenario_version)}</p>
   <div class="warn">CONFIDENTIAL — links participant codes to names. Store separately from all research data (e.g. locked drawer).
   Destroy (shred) on: ______________________ &nbsp; Destroyed on: ______________________ by: __________</div>
-  <table><thead><tr><th>Seat</th><th>Terminal</th><th>Participant code</th><th>Name (handwritten)</th><th>Notes</th></tr></thead>
+  <table><thead><tr><th>Seat</th><th>Client</th><th>Participant code</th><th>Name (handwritten)</th><th>Notes</th></tr></thead>
   <tbody>${lines || `<tr><td colspan="5">No seats bound yet.</td></tr>`}</tbody></table>
   <p style="font-size:.85rem">${esc(study.retention)}</p>
   </body></html>`;

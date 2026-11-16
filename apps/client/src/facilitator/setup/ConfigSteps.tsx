@@ -8,7 +8,7 @@ import {
 } from "@wkwa/shared";
 import { useEffect, useMemo, useState } from "react";
 import { MapView } from "../../map/MapView";
-import { Button, Callout, Check, Chip, Field, Icon, StatusTag, useConfirm } from "../../ui";
+import { Button, Callout, Check, Chip, Field, Icon, StatusTag, THEME_LABEL, useConfirm } from "../../ui";
 import type { FacilitatorConnection } from "../connection";
 import type { Draft } from "./draft";
 
@@ -279,11 +279,10 @@ export function PlayersStep({ d, upd }: { d: Draft; upd: Upd }) {
             <option value="manual">chosen per seat</option>
           </select>
         </Field>
-        <Check
-          label="Allow two seats to share a K or P label"
-          checked={c.allowDuplicateLabels}
-          onChange={(v) => setCfg(d, upd, { allowDuplicateLabels: v })}
-        />
+        <span className="hint">
+          K and P labels are assigned in step 08: each K once, P follows from the pairing (aligned or fully
+          dissociated D1–D6).
+        </span>
         <h3 style={{ marginTop: 8 }}>What players see</h3>
         <Check
           label="Which seat proposed / decided"
@@ -322,7 +321,7 @@ export function PlayersStep({ d, upd }: { d: Draft; upd: Upd }) {
           Identical on every player PC and recorded with the session (part of the experimental condition).
         </span>
         <div className="row">
-          {(["mocha", "latte"] as const).map((t) => (
+          {(["mocha", "latte", "contrast"] as const).map((t) => (
             <label key={t} className="check" style={{ alignItems: "center" }}>
               <input
                 type="radio"
@@ -342,17 +341,17 @@ export function PlayersStep({ d, upd }: { d: Draft; upd: Upd }) {
                   color: "var(--text)",
                 }}
               >
-                <Icon name={t === "mocha" ? "themeDark" : "themeLight"} />
-                {t === "mocha" ? "MOCHA (dark)" : "LATTE (light)"}
+                <Icon name={t === "mocha" ? "themeDark" : t === "latte" ? "themeLight" : "themeContrast"} />
+                {THEME_LABEL[t].toUpperCase()}
               </span>
             </label>
           ))}
         </div>
         <Check
-          label="CRT effects on player screens"
-          hint="Scanlines, glow and power-on animations (subtle). Always off for players whose OS requests reduced motion."
-          checked={c.appearance.playerCrt}
-          onChange={(v) => app({ playerCrt: v })}
+          label="Animations on player screens"
+          hint="Screen-switch, popup and connect/disconnect animations. No scanlines or glow. Always off for players whose OS requests reduced motion."
+          checked={c.appearance.playerAnimations}
+          onChange={(v) => app({ playerAnimations: v })}
         />
       </div>
     </div>
@@ -524,11 +523,7 @@ export function ReviewStep({
       "Overrides",
       Object.keys(c.roundOverrides).length ? `rounds ${Object.keys(c.roundOverrides).join(", ")}` : "none",
     ],
-    [
-      2,
-      "Seats",
-      `${c.seatCount} · view ${c.viewAssignment === "byKnowledgeType" ? "follows K" : "manual"} · duplicate labels ${yes(c.allowDuplicateLabels)}`,
-    ],
+    [2, "Seats", `${c.seatCount} · view ${c.viewAssignment === "byKnowledgeType" ? "follows K" : "manual"}`],
     [
       2,
       "Players see",
@@ -539,7 +534,7 @@ export function ReviewStep({
     [
       2,
       "Player screens",
-      `${c.appearance.playerTheme.toUpperCase()} · CRT ${c.appearance.playerCrt ? "on" : "off"}`,
+      `${c.appearance.playerTheme.toUpperCase()} · animations ${c.appearance.playerAnimations ? "on" : "off"}`,
     ],
     [
       3,

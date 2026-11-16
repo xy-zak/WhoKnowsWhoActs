@@ -15,10 +15,48 @@ interface Loaded {
   hashMatches: boolean;
 }
 
+/** Playback rhythm: every propose/decide action is shown for exactly this long. */
+export const MS_PER_ACTION = 1000;
+
+const isAction = (e: StoredEvent) => e.type === "ProposalMade" || e.type === "DecisionMade";
+
+/**
+ * Next playback position after `cursor` (= number of events applied): up to and
+ * including the next action, or up to the end of the round if it ends first.
+ * Everything between two actions (round starts, joins, notes…) is applied at once.
+ */
+export function nextBeat(events: StoredEvent[], cursor: number): { cursor: number; roundEnd: boolean } {
+  for (let j = cursor; j < events.length; j++) {
+    const e = events[j]!;
+    if (isAction(e)) return { cursor: j + 1, roundEnd: false };
+    if (e.type === "RoundCompleted") {
+      // include what follows directly (e.g. GameCompleted) up to the next round start or action
+      let k = j + 1;
+      while (k < events.length && events[k]!.type !== "RoundStarted" && !isAction(events[k]!)) k++;
+      return { cursor: k, roundEnd: true };
+    }
+  }
+  return { cursor: events.length, roundEnd: true };
+}
+
+/** Previous playback position: just after the action before the last applied one. */
+export function prevBeat(events: StoredEvent[], cursor: number): number {
+  let seen = 0;
+  for (let j = cursor - 1; j >= 0; j--) {
+    if (isAction(events[j]!) || events[j]!.type === "RoundCompleted") {
+      seen++;
+      if (seen === 2) return j + 1;
+    }
+  }
+  const first = events.findIndex(isAction);
+  return first < 0 ? 0 : first;
+}
+
 /**
  * Replay: the same reducer that runs the live game rebuilds the state at any
  * moment of a recorded session, so the composite and every player's view can
- * be inspected exactly as they were.
+ * be inspected exactly as they were. Playback is paced per action
+ * (MS_PER_ACTION each) and pauses at the end of every round.
  */
 export function Replay({
   conn,
@@ -31,8 +69,9 @@ export function Replay({
 }) {
   const [sessions, setSessions] = useState<Array<{ id: string; status: string; createdWall: string }>>([]);
   const [data, setData] = useState<Loaded | null>(null);
+  /** number of events applied (0 … events.length) */
   const [cursor, setCursor] = useState(0);
-  const [speed, setSpeed] = useState(0);
+  const [playing, setPlaying] = useState(false);
 
   useEffect(() => {
     conn
@@ -43,7 +82,7 @@ export function Replay({
   useEffect(() => {
     if (!sessionId) return;
     setData(null);
-    setSpeed(0);
+    setPlaying(false);
     Promise.all([
       conn.api<StoredEvent[]>(`/api/sessions/${sessionId}/events`),
       conn.api<StoredTelemetry[]>(`/api/sessions/${sessionId}/telemetry`),
@@ -51,36 +90,34 @@ export function Replay({
     ]).then(
       ([events, telemetry, sc]) => {
         setData({ sessionId, events, telemetry, scenario: sc.scenario, hashMatches: sc.hashMatches });
-        setCursor(events[0]?.serverTs ?? 0);
+        // start just before the first action: setup and round 1's start already applied
+        const first = events.findIndex(isAction);
+        setCursor(first < 0 ? events.length : first);
       },
       () => {},
     );
   }, [conn, sessionId]);
 
-  const start = data?.events[0]?.serverTs ?? 0;
+  const events = data?.events ?? [];
   const end = data?.events.at(-1)?.serverTs ?? 0;
+  const totalActions = useMemo(() => events.filter(isAction).length, [events]);
 
-  // playback
+  // playback: one action per MS_PER_ACTION; pause at each round end
   useEffect(() => {
-    if (!speed || !data) return;
-    const t = setInterval(() => {
-      setCursor((c) => {
-        const next = c + 100 * speed;
-        if (next >= end) {
-          setSpeed(0);
-          return end;
-        }
-        return next;
-      });
-    }, 100);
-    return () => clearInterval(t);
-  }, [speed, data, end]);
+    if (!playing || !data) return;
+    const t = setTimeout(() => {
+      if (cursor >= data.events.length) return setPlaying(false);
+      const b = nextBeat(data.events, cursor);
+      setCursor(b.cursor);
+      if (b.roundEnd) setPlaying(false);
+    }, MS_PER_ACTION);
+    return () => clearTimeout(t);
+  }, [playing, data, cursor]);
 
-  // the slider's value loses sub-millisecond precision: at the end, include everything
-  const upto = useMemo(
-    () => (data ? (cursor >= end - 1 ? data.events : data.events.filter((e) => e.serverTs <= cursor)) : []),
-    [data, cursor, end],
-  );
+  const upto = useMemo(() => events.slice(0, cursor), [events, cursor]);
+  const actionsShown = useMemo(() => upto.filter(isAction).length, [upto]);
+  /** time of the replayed moment (server clock), for hover positions and the timeline cursor */
+  const momentTs = upto.at(-1)?.serverTs ?? events[0]?.serverTs ?? 0;
   const state = useMemo(() => (data ? reduceEvents(upto) : null), [data, upto]);
   const presence = useMemo(() => {
     const p: Record<number, string | null> = {};
@@ -88,10 +125,10 @@ export function Replay({
     for (const t of data.telemetry) {
       if (t.type !== "region_hover") continue;
       const pl = t.payload as { regionId: string; durationMs: number };
-      if (t.clientTs - pl.durationMs <= cursor && cursor <= t.clientTs) p[t.seat] = pl.regionId;
+      if (t.clientTs - pl.durationMs <= momentTs && momentTs <= t.clientTs) p[t.seat] = pl.regionId;
     }
     return p;
-  }, [data, cursor]);
+  }, [data, momentTs]);
 
   if (!sessionId) {
     return (
@@ -137,9 +174,15 @@ export function Replay({
   const regionName = (id: string) => data.scenario.regions.find((r) => r.id === id)?.name ?? id;
   const current = upto.at(-1);
   const stepTo = (dir: 1 | -1) => {
-    const idx = upto.length - 1;
-    const target = data.events[Math.max(0, Math.min(data.events.length - 1, idx + dir))];
-    if (target) setCursor(target.serverTs);
+    setPlaying(false);
+    setCursor(dir === 1 ? nextBeat(data.events, cursor).cursor : prevBeat(data.events, cursor));
+  };
+  const play = () => {
+    if (cursor >= data.events.length) {
+      const first = data.events.findIndex(isAction);
+      setCursor(first < 0 ? 0 : first); // replay from the start
+    }
+    setPlaying(true);
   };
   const seats = seatList(state)
     .filter((s) => s.bound || s.withdrawn)
@@ -177,38 +220,41 @@ export function Replay({
             )}
           </div>
           <div className="row nowrap">
-            <Button iconOnly icon="back" title="Previous event" onClick={() => stepTo(-1)} />
-            {speed ? (
-              <Button iconOnly icon="pause" title="Pause playback" onClick={() => setSpeed(0)} />
+            <Button iconOnly icon="back" title="Previous action" onClick={() => stepTo(-1)} />
+            {playing ? (
+              <Button iconOnly icon="pause" title="Pause playback" onClick={() => setPlaying(false)} />
             ) : (
-              <Button iconOnly variant="primary" icon="start" title="Play" onClick={() => setSpeed(4)} />
+              <Button iconOnly variant="primary" icon="start" title="Play (1 s per action)" onClick={play} />
             )}
-            <Button iconOnly icon="next" title="Next event" onClick={() => stepTo(1)} />
-            <select
-              aria-label="Playback speed"
-              value={speed}
-              onChange={(e) => setSpeed(Number(e.target.value))}
-            >
-              <option value={0}>paused</option>
-              <option value={1}>1×</option>
-              <option value={4}>4×</option>
-              <option value={16}>16×</option>
-              <option value={64}>64×</option>
-            </select>
+            <Button iconOnly icon="next" title="Next action" onClick={() => stepTo(1)} />
             <input
               type="range"
               aria-label="Replay position"
-              min={start}
-              max={end}
-              step="any"
+              min={0}
+              max={events.length}
+              step={1}
               value={cursor}
-              onChange={(e) => setCursor(Number(e.target.value))}
+              onChange={(e) => {
+                setPlaying(false);
+                setCursor(Number(e.target.value));
+              }}
               style={{ flex: 1 }}
             />
             <span className="mono small">
-              {fmtDuration(cursor - start)} / {fmtDuration(end - start)}
+              action {actionsShown}/{totalActions} · {fmtDuration(actionsShown * MS_PER_ACTION)} /{" "}
+              {fmtDuration(totalActions * MS_PER_ACTION)}
             </span>
           </div>
+          <span className="hint">
+            Playback shows every action for {MS_PER_ACTION / 1000} s and pauses at the end of each round
+            (press play to continue). The slider moves event by event.
+            {!playing && state.phase === "round_complete" && cursor < events.length && (
+              <strong className="t-primary">
+                {" "}
+                Round {state.round} complete, press play for round {state.round + 1}.
+              </strong>
+            )}
+          </span>
           {current && (
             <div className="small">
               <span className="faint">#{current.seq}</span> <strong>{current.type}</strong>
@@ -226,9 +272,9 @@ export function Replay({
         }}
       >
         <CompositeMap scenario={data.scenario} state={state} presence={presence} />
-        <PlayerMirrors scenario={data.scenario} state={state} presence={presence} now={cursor} />
+        <PlayerMirrors scenario={data.scenario} state={state} presence={presence} now={momentTs} />
       </div>
-      <Timeline events={data.events} seats={seats} now={end} cursorTs={cursor} />
+      <Timeline events={data.events} seats={seats} now={end} cursorTs={momentTs} />
       <EventLog events={upto} state={state} regionName={regionName} highlightSeq={current?.seq} />
     </div>
   );

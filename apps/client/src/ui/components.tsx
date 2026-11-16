@@ -12,7 +12,6 @@ export function Panel({
   className = "",
   style,
   nested = false,
-  powerOn = true,
 }: {
   title?: string;
   icon?: IconName;
@@ -21,14 +20,9 @@ export function Panel({
   className?: string;
   style?: CSSProperties;
   nested?: boolean;
-  /** Play the CRT power-on animation when the panel appears. */
-  powerOn?: boolean;
 }) {
   return (
-    <section
-      className={`panel${nested ? " nested" : ""}${powerOn ? " power-on" : ""} ${className}`}
-      style={style}
-    >
+    <section className={`panel${nested ? " nested" : ""} ${className}`} style={style}>
       {title && (
         <span className="panel-title">
           {icon && <Icon name={icon} />}
@@ -98,15 +92,20 @@ export function StatusTag({
   children,
   solid = false,
   title,
+  className = "",
 }: {
   tone?: Tone;
   icon?: IconName;
   children: ReactNode;
   solid?: boolean;
   title?: string;
+  className?: string;
 }) {
   return (
-    <span className={`tag ${tone}${solid && tone === "live" ? " solid-live" : ""}`} title={title}>
+    <span
+      className={`tag ${tone}${solid && tone === "live" ? " solid-live" : ""} ${className}`}
+      title={title}
+    >
       {icon && <Icon name={icon} />}
       {children}
     </span>
@@ -260,5 +259,19 @@ export function Callout({
         <span>{children}</span>
       </span>
     </div>
+  );
+}
+
+/** [ONLINE] / [OFFLINE] tag that flickers (CRT) whenever the connection state changes. */
+export function ConnTag({ connected, withdrawn = false }: { connected: boolean; withdrawn?: boolean }) {
+  if (withdrawn) return <StatusTag>withdrawn</StatusTag>;
+  return connected ? (
+    <StatusTag key="on" tone="live" className="conn-flicker">
+      online
+    </StatusTag>
+  ) : (
+    <StatusTag key="off" tone="danger" icon="disconnected" className="conn-flicker">
+      offline
+    </StatusTag>
   );
 }

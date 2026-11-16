@@ -9,6 +9,8 @@ import {
   generateAnonymousId,
   initialState,
   type PayloadOf,
+  pairingName,
+  pairingText,
   parseSessionConfig,
   randomCrockford,
   reduceEvents,
@@ -131,6 +133,7 @@ export function exportSession(
       withdrawn: s.withdrawn,
       reconnects: s.reconnects,
       rejections: s.rejections,
+      pairing: final.labelPairing ? pairingName(final.labelPairing) : null,
     }));
   csv("players.csv", players);
 
@@ -307,6 +310,13 @@ export function exportSession(
         pausedMs: done?.payload.pausedMs ?? null,
       };
     }),
+    labelPairing: final.labelPairing
+      ? {
+          ...final.labelPairing,
+          name: pairingName(final.labelPairing),
+          pairs: pairingText(final.labelPairing),
+        }
+      : null,
     counts: {
       events: events.length,
       telemetry: telemetry.length,

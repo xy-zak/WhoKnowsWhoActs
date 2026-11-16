@@ -84,7 +84,7 @@ There is **no player-to-player channel**. Even the "highlight for all players" e
 
 | Namespace | Clients | Receives | May send |
 | --- | --- | --- | --- |
-| `/player` | the 4 player browsers (and unbound terminals) | own `PlayerView` only | `hello`, `clock:ping`, onboarding submissions, `intent`, `telemetry`, `presence` |
+| `/player` | the 4 player browsers (and unbound clients) | own `PlayerView` only | `hello`, `clock:ping`, onboarding submissions, `intent`, `telemetry`, `presence` |
 | `/facilitator` | the dashboard | full `GameState` of all seats (incl. participant codes), all views, live telemetry | session and seat commands, round control, revoke, broadcast, notes |
 
 ## 4. Ports, interfaces and configuration
@@ -118,11 +118,11 @@ sequenceDiagram
   B->>B: read terminalKey from localStorage (create a random one if missing)
   B->>S: connect to the player namespace
   B->>S: hello (terminalKey, seatToken null)
-  S->>S: map terminalKey to a terminal number (in memory)
+  S->>S: map terminalKey to a client number (in memory)
   S-->>B: ack (terminal 3, seat null)
   S-->>B: terminal (3)
-  B->>B: show "Terminal 3" in large type
-  S->>F: dashboard (terminal 3 connected, unbound)
+  B->>B: show "Client 3" in large type
+  S->>F: dashboard (client 3 connected, unbound)
   F->>S: seat:bind (terminal 3, seat 2)
   S->>S: generate participant code and bindingId
   S->>S: append SeatBound, then PlayerConnected
@@ -133,20 +133,20 @@ sequenceDiagram
   Note over B,S: telemetry stays off until this seat has given consent
 ```
 
-The facilitator matches the **Terminal N** shown on each physical screen to a seat on the dashboard. Binding generates the participant code; it is shown to the facilitator immediately (for the key sheet) and to the player only on the end screen.
+The facilitator matches the **Client N** shown on each physical screen to a seat on the dashboard. Binding generates the participant code; it is shown to the facilitator immediately (for the key sheet) and to the player only on the end screen.
 
 ## 6. Browser identity: terminal key and seat token
 
 | Value | Created by | Stored in | Lifetime | Contains personal data? |
 | --- | --- | --- | --- | --- |
 | `terminalKey` (32 hex chars) | browser, random | `localStorage` of that PC's browser | until browser data is cleared | No. It identifies the *PC/browser*, never logged with game data. |
-| Terminal number | server | server memory only | while the server runs (numbers may change after a restart) | No |
+| Client number (`terminal`) | server | server memory only | while the server runs (numbers may change after a restart) | No |
 | `seatToken` | server: `HMAC-SHA256(server_secret, "sessionId:seat:bindingId")` | `localStorage` key `wkwa.seat` (survives reloads and closed tabs) | while the binding exists | No. It is a capability, not an identifier. |
 | `server_secret` | server, random at DB creation | `meta` table of the encrypted DB | lifetime of the DB | No |
 
 The seat token is **derived, not stored**, so it stays valid across a server restart (same DB, same secret). Re-binding a seat creates a new `bindingId`, which invalidates the old token immediately.
 
-**Seat re-claim is token-only.** Terminal numbers only help the facilitator match screens to seats in the lobby. They are kept in server memory and can differ after a restart, so a browser gets its seat back solely by presenting a valid seat token.
+**Seat re-claim is token-only.** Client numbers only help the facilitator match screens to seats in the lobby. They are kept in server memory and can differ after a restart, so a browser gets its seat back solely by presenting a valid seat token.
 
 ## 7. Disconnects and reconnects
 
@@ -189,7 +189,7 @@ sequenceDiagram
   participant F as Facilitator dashboard
   S->>S: start, passphrase entered, DB opened
   B->>S: reconnect automatically, hello (terminalKey, seatToken)
-  S-->>B: ack (new terminal number, seat null, no session attached yet)
+  S-->>B: ack (new client number, seat null, no session attached yet)
   F->>S: session:resume (sessionId)
   S->>S: reduce the event log into GameState
   S->>B: rehello (broadcast)
@@ -233,7 +233,7 @@ Every client→server payload is validated with the zod schema listed here. Inva
 
 | Message | Payload | Ack (callback) | Logged as | Description |
 | --- | --- | --- | --- | --- |
-| `hello` | `{ terminalKey: string (pattern), seatToken: string \| null }` | `{ terminal: number, seat: number \| null }` | PlayerConnected (only if the seat token is valid) | First message after connecting. Identifies the browser (terminal) and, if present, re-claims a seat. |
+| `hello` | `{ terminalKey: string (pattern), seatToken: string \| null }` | `{ terminal: number, seat: number \| null }` | PlayerConnected (only if the seat token is valid) | First message after connecting. Identifies the browser (client) and, if present, re-claims a seat. |
 | `clock:ping` | `{ t0: number }` | `{ t0: number, serverTs: number }` | Result stored by the client as telemetry 'clock_sync' | Clock synchronisation sample (NTP-style). Sent 5× on connect and every 60 s. |
 | `consent:submit` | `{ formVersion: string, textSha256: string (pattern), answers: map<string, boolean>, durationMs: number 0–86400000, clientTs: number }` | `Ack` | ConsentRecorded | Answers of the consent form. |
 | `demographics:submit` | `{ formVersion: string, answers: map<string, string (≤ 64 chars)>, durationMs: number 0–86400000, clientTs: number }` | `Ack` | DemographicsSubmitted | Answers of the demographics questionnaire. |
@@ -246,7 +246,7 @@ Every client→server payload is validated with the zod schema listed here. Inva
 
 | Message | Payload | Logged as | Description |
 | --- | --- | --- | --- |
-| `terminal` | `{ terminal: number }` | — | Terminal number assigned to this browser (shown in large type while unassigned). |
+| `terminal` | `{ terminal: number }` | — | Client number assigned to this browser (shown in large type while unassigned). |
 | `bound` | `{ seat: number, sessionId: string, seatToken: string }` | — (SeatBound is logged when the facilitator binds) | This browser was bound to a seat; carries the reconnect token. |
 | `unbound` | `{ reason: string }` | — | The seat binding was removed (or the session ended); return to the waiting screen. |
 | `rehello` | `{}` | — | A session was (re)attached on the server; the client re-sends `hello` with its stored seat token so its seat is re-claimed. |
@@ -258,10 +258,10 @@ Every client→server payload is validated with the zod schema listed here. Inva
 | --- | --- | --- | --- | --- |
 | `session:create` | `{ scenarioId: string, config: SessionConfig, notes?: string (≤ 1000 chars) }` | `Ack<{ sessionId }>` | SessionCreated | Create a new session from a scenario and config. |
 | `session:resume` | `{ sessionId: string }` | `Ack` | — | Re-open an unfinished session (e.g. after a server restart). |
-| `seat:bind` | `{ terminal: integer ≥ 1, seat: integer 1–4 }` | `Ack<{ participantCode }>` | SeatBound, PlayerConnected | Bind a connected terminal to a seat; generates the participant code. |
+| `seat:bind` | `{ terminal: integer ≥ 1, seat: integer 1–4 }` | `Ack<{ participantCode }>` | SeatBound, PlayerConnected | Bind a connected client to a seat; generates the participant code. |
 | `seat:unbind` | `{ seat: integer 1–4, reason?: string (≤ 200 chars) }` | `Ack` | SeatUnbound | Remove a seat binding (lobby only). |
-| `labels:set` | `{ assignments: array<{ seat: integer 1–4, k: "Ka" \| "Kb" \| "Kc" \| "Kd", p: "Pa" \| "Pb" \| "Pc" \| "Pd", view?: string }> }` | `Ack` | LabelsAssigned (method = manual) | Set K/P labels (and view when viewAssignment = manual) for every seat. |
-| `labels:randomise` | `{}` | `Ack` | LabelsAssigned (method = random, with seed) | Randomly assign distinct K and P labels to the seats. |
+| `labels:set` | `{ assignments: array<{ seat: integer 1–4, k: "Ka" \| "Kb" \| "Kc" \| "Kd", view?: string }>, pairing?: { mode: "aligned" \| "dissociated", id: integer 1–6 \| null } }` | `Ack` | LabelsAssigned (method = manual) | Set the K label of every seat (and view when viewAssignment = manual) plus the K–P pairing (aligned or dissociated D1–D6); the server derives each P. |
+| `labels:randomise` | `{ pairing?: { mode: "aligned" \| "dissociated", id: integer 1–6 \| null }, shuffleK?: boolean }` | `Ack` | LabelsAssigned (method = random, with seed) | Shuffle which seat gets which K (optional) and apply a pairing; dissociated without a number picks D1–D6 at random. |
 | `onboarding:start` | `{}` | `Ack` | OnboardingStarted | Lock seats and send players to consent / demographics / briefing. |
 | `round:start` | `{}` | `Ack` | RoundStarted | Start the next round. |
 | `round:end` | `{}` | `Ack` | RoundCompleted (reason = facilitator) [+ GameCompleted after the last round] | Force-end the current round. |
@@ -279,7 +279,7 @@ Every client→server payload is validated with the zod schema listed here. Inva
 
 | Message | Payload | Logged as | Description |
 | --- | --- | --- | --- |
-| `dashboard` | `DashboardMsg` | — | Full session state (all seats incl. participant codes), connected terminals and live per-seat statistics. |
+| `dashboard` | `DashboardMsg` | — | Full session state (all seats incl. participant codes), connected clients and live per-seat statistics. |
 | `scenario` | `Scenario \| null` | — | The loaded scenario with ALL views (for the composite map). Sent when a session is loaded. |
 | `events` | `{ events: StoredEvent[], reset: boolean }` | — | New events for the live log (demographic answers redacted). The backlog is sent on connect. |
 | `telemetry:live` | `{ items: StoredTelemetry[] }` | — | Newly stored telemetry rows (chatty types such as state_received are omitted). |
@@ -351,7 +351,7 @@ The player PCs must trust the mkcert root CA (`mkcert -CAROOT` shows where it is
 - [ ] Firewall allows TCP `3000`
 - [ ] `npm start` → passphrase entered → server prints the player URL
 - [ ] Facilitator dashboard opens at `http://localhost:3000/facilitator`
-- [ ] Each player PC opens the player URL and shows **Terminal N**, and all 4 terminals appear on the dashboard
+- [ ] Each player PC opens the player URL and shows **Client N**, and all 4 clients appear on the dashboard
 - [ ] Optional: run `npm run bots -- --count 4` *before* participants arrive, for a full rehearsal on the real network
 - [ ] Player browsers in full-screen, notifications and screen savers off, power-saving sleep disabled
 
@@ -361,8 +361,8 @@ The player PCs must trust the mkcert root CA (`mkcert -CAROOT` shows where it is
 | --- | --- | --- |
 | Player PC: "This site can't be reached" | Wrong IP, firewall, or the server is bound to another interface | Check the URL printed by the server; open the firewall port; set `HOST=0.0.0.0` |
 | Works on the laptop, not on PCs | Wi-Fi client isolation (common on venue/guest networks) | Use your own router; disable "AP/client isolation" |
-| Terminal never appears on the dashboard | Page loaded from a cached or old URL; JavaScript blocked | Hard-reload (Ctrl+Shift+R); check the browser console |
-| Two PCs show the same terminal number | Same browser profile synced or copied (identical `localStorage`) | Clear site data on one PC and reload |
+| Client never appears on the dashboard | Page loaded from a cached or old URL; JavaScript blocked | Hard-reload (Ctrl+Shift+R); check the browser console |
+| Two PCs show the same client number | Same browser profile synced or copied (identical `localStorage`) | Clear site data on one PC and reload |
 | Repeated "Reconnecting…" | Wi-Fi power saving, weak signal | Use cables; disable power saving on the network adapter |
 | Large `rttMs` / clock offset jumps on the dashboard | Congested Wi-Fi, PC under load | Move closer to the router or use cables; close other apps |
 | Facilitator page says "forbidden" | Opened from another machine without `ADMIN_TOKEN` | Open it on the laptop via `localhost`, or set `ADMIN_TOKEN` |

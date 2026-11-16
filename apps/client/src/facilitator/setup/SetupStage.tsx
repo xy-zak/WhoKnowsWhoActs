@@ -1,5 +1,5 @@
-import { normaliseTags, type SessionConfig, seatList } from "@wkwa/shared";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { normaliseTags, pairingName, type SessionConfig, seatList } from "@wkwa/shared";
+import { type KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "../../net/store";
 import {
   Button,
@@ -8,15 +8,13 @@ import {
   Icon,
   type IconName,
   Panel,
-  Popup,
   StatusTag,
   type StepDef,
-  Stepper,
   useConfirm,
   useShortcuts,
 } from "../../ui";
 import type { FacilitatorConnection } from "../connection";
-import { BindEditor, LabelsEditor, labelsComplete, SeatsPanel } from "../seats";
+import { BindEditor, LabelsEditor, labelsComplete } from "../seats";
 import { inLobby } from "../stage";
 import {
   OnboardingStep,
@@ -40,19 +38,25 @@ import {
 
 /** The ten setup steps. 01–06 configure (no session yet); 07–10 prepare the created session (lobby). */
 export const SETUP_STEPS: Array<StepDef & { icon: IconName; title: string }> = [
-  { key: "scenario", label: "Scenario", title: "Choose the scenario", icon: "scenario" },
+  { key: "scenario", label: "Scenario", title: "Scenario", icon: "scenario" },
   { key: "rounds", label: "Rounds", title: "Rounds", icon: "rounds" },
   { key: "players", label: "Players", title: "Players & visibility", icon: "visibility" },
   { key: "onboarding", label: "Onboarding", title: "Onboarding", icon: "onboarding" },
   { key: "tags", label: "Tags", title: "Tags & notes", icon: "tag" },
   { key: "review", label: "Review", title: "Review & create", icon: "review" },
-  { key: "connect", label: "Connect", title: "Connect & bind terminals", icon: "terminal" },
+  { key: "connect", label: "Connect", title: "Connect & bind clients", icon: "client" },
   { key: "labels", label: "Labels", title: "Assign labels", icon: "labels" },
   { key: "keysheet", label: "Key sheet", title: "Print the key sheet", icon: "keysheet" },
   { key: "start", label: "Start", title: "Start onboarding", icon: "start" },
 ];
 const LAST_CONFIG = 5;
+const REVIEW = 5;
 
+/**
+ * SETUP: the ten steps as a vertical accordion. Exactly one step (the current
+ * one) is expanded; finished steps collapse into a one-line summary and can
+ * be reopened; steps 01–06 lock (■) once the session has been created.
+ */
 export function SetupStage({ conn }: { conn: FacilitatorConnection }) {
   const fs = useStore(conn.store);
   const confirm = useConfirm();
@@ -64,11 +68,19 @@ export function SetupStage({ conn }: { conn: FacilitatorConnection }) {
   const [scenarios, setScenarios] = useState<ScenarioInfo[]>([]);
   const [draft, setDraftState] = useState<Draft | null>(loadDraft);
   const [step, setStep] = useState<number>(() => (lobby ? 6 : (loadDraft()?.reached ?? 0)));
-  // auto-open the wizard, except right after a session ended (the facilitator may want DATABASE first)
-  const [open, setOpen] = useState(() => !(st && ["closed", "aborted"].includes(st.phase)));
   const [busy, setBusy] = useState(false);
   const [keySheet, setKeySheet] = useState(false);
   const [urls, setUrls] = useState<Array<{ url: string; iface: string }>>([]);
+  const stepRefs = useRef<Array<HTMLElement | null>>([]);
+  const didMount = useRef(false);
+
+  const upd = useCallback((patch: Partial<Draft>) => {
+    setDraftState((cur) => {
+      const next = { ...(cur ?? emptyDraft()), ...patch };
+      saveDraft(next);
+      return next;
+    });
+  }, []);
 
   useEffect(() => {
     conn.api<ScenarioInfo[]>("/api/scenarios").then(setScenarios, () => {});
@@ -89,18 +101,10 @@ export function SetupStage({ conn }: { conn: FacilitatorConnection }) {
       const first = scenarios.find((s) => !s.error);
       if (first) upd({ scenarioId: first.id });
     }
-  });
+  }, [draft, scenarios, upd]);
   useEffect(() => {
     if (sessionId) setKeySheet(keySheetConfirmed(sessionId));
   }, [sessionId]);
-
-  const upd = useCallback((patch: Partial<Draft>) => {
-    setDraftState((cur) => {
-      const next = { ...(cur ?? emptyDraft()), ...patch };
-      saveDraft(next);
-      return next;
-    });
-  }, []);
 
   /* derived step state */
   const allBound = lobby && seatList(st!).every((s) => s.bound);
@@ -113,6 +117,7 @@ export function SetupStage({ conn }: { conn: FacilitatorConnection }) {
     if (i === 8) return keySheet;
     return false;
   };
+  const locked = (i: number) => lobby && i <= LAST_CONFIG;
   const firstOpenLobbyStep = !allBound ? 6 : !labelled ? 7 : !keySheet ? 8 : 9;
   // when a session appears (created or resumed) jump to the lobby steps
   // biome-ignore lint/correctness/useExhaustiveDependencies: only when the attached lobby session changes
@@ -127,12 +132,7 @@ export function SetupStage({ conn }: { conn: FacilitatorConnection }) {
     switch (i) {
       case 0:
         return Boolean(draft?.scenarioId);
-      case 1:
-      case 2:
-      case 3:
-      case 4:
-        return true;
-      case 5:
+      case REVIEW:
         return "config" in final;
       case 6:
         return allBound;
@@ -146,10 +146,26 @@ export function SetupStage({ conn }: { conn: FacilitatorConnection }) {
   };
 
   const goTo = (i: number) => {
+    if (locked(i)) return;
     setStep(i);
-    setOpen(true);
     if (draft && i <= LAST_CONFIG && i > draft.reached) upd({ reached: i });
   };
+
+  // bring the expanded step into view and focus its first field (not on the first render)
+  // biome-ignore lint/correctness/useExhaustiveDependencies: on step change only
+  useEffect(() => {
+    if (!didMount.current) {
+      didMount.current = true;
+      return;
+    }
+    const el = stepRefs.current[step];
+    if (!el) return;
+    const smooth = !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    el.scrollIntoView({ block: "nearest", behavior: smooth ? "smooth" : "auto" });
+    el.querySelector<HTMLElement>(
+      ".acc-body input, .acc-body select, .acc-body textarea, .acc-foot .btn-primary",
+    )?.focus({ preventScroll: true });
+  }, [step]);
 
   const create = async () => {
     if (!draft || !("config" in final)) return;
@@ -180,14 +196,20 @@ export function SetupStage({ conn }: { conn: FacilitatorConnection }) {
   };
 
   const next = () => {
-    if (!canNext(step)) return;
-    if (step === LAST_CONFIG) return void create();
+    if (!canNext(step) || busy) return;
+    if (step === REVIEW) return void create();
     if (step === 9) return void startOnboarding();
     goTo(step + 1);
   };
   const back = () => {
     const minStep = lobby ? 6 : 0;
     if (step > minStep) goTo(step - 1);
+  };
+  const onBodyKey = (e: KeyboardEvent<HTMLDivElement>) => {
+    const t = e.target as HTMLElement;
+    if (e.key !== "Enter" || ["TEXTAREA", "BUTTON", "SELECT"].includes(t.tagName)) return;
+    e.preventDefault();
+    next();
   };
 
   const discard = async () => {
@@ -207,24 +229,70 @@ export function SetupStage({ conn }: { conn: FacilitatorConnection }) {
     }
   };
 
-  useShortcuts([{ key: "n", label: "resume setup", run: () => setOpen(true) }]);
+  useShortcuts([
+    {
+      key: "n",
+      label: "current step",
+      run: () => {
+        stepRefs.current[step]?.scrollIntoView({ block: "nearest" });
+        stepRefs.current[step]?.querySelector<HTMLElement>(".acc-foot .btn-primary")?.focus();
+      },
+    },
+  ]);
 
-  const def = SETUP_STEPS[step]!;
-  const stepper = (
-    <Stepper
-      steps={SETUP_STEPS}
-      current={step}
-      completed={done}
-      locked={(i) => lobby && i <= LAST_CONFIG}
-      onSelect={(i) => goTo(i)}
-    />
-  );
+  /* one-line summaries shown on collapsed steps */
+  const cfg = lobby ? st!.config : draft?.config;
+  const sc = scenarios.find((s) => s.id === (lobby ? st!.scenario?.id : draft?.scenarioId));
+  const summary = (i: number): string => {
+    if (!cfg) return "";
+    const r = cfg.defaultRound;
+    switch (i) {
+      case 0:
+        return sc ? `${sc.title} · ${sc.regionCount} regions · views ${sc.viewIds.join(" ")}` : "not chosen";
+      case 1:
+        return `${cfg.roundCount} rounds · propose ${r.quota.propose ?? "∞"} · decide ${r.quota.decide ?? "∞"}${r.timeLimitSec ? ` · ${r.timeLimitSec}s` : ""}`;
+      case 2:
+        return `${cfg.seatCount} seats · view ${cfg.viewAssignment === "byKnowledgeType" ? "follows K" : "manual"} · player screens ${cfg.appearance.playerTheme}${cfg.appearance.playerAnimations ? " + animations" : ""}`;
+      case 3:
+        return (
+          [
+            cfg.onboarding.consent && "consent",
+            cfg.onboarding.demographics && "demographics",
+            cfg.onboarding.briefing && "briefing",
+          ]
+            .filter(Boolean)
+            .join(" → ") || "no onboarding"
+        );
+      case 4: {
+        const tags = lobby ? cfg.tags : normaliseTags(draft?.tagsText ?? "");
+        return tags.length ? `tags: ${tags.join(", ")}` : "no tags";
+      }
+      case REVIEW:
+        return lobby ? `created · ${sessionId}` : "check everything, then create the session";
+      case 6:
+        return lobby
+          ? `${seatList(st!).filter((s) => s.bound).length}/${cfg.seatCount} seats bound`
+          : "after the session is created";
+      case 7:
+        return lobby && labelled
+          ? `${pairingName(st!.labelPairing)} · ${seatList(st!)
+              .map((s) => `${s.seat}:${s.k}/${s.p}`)
+              .join("  ")}`
+          : "K per seat; P from the pairing (aligned or dissociated D1–D6)";
+      case 8:
+        return keySheet ? "printed ✓" : "print, fill in names by hand, store separately";
+      case 9:
+        return "locks the seats and flips this tab to LIVE";
+      default:
+        return "";
+    }
+  };
 
-  /* ─── step bodies ─── */
-  const body = (() => {
-    if (step <= LAST_CONFIG && !draft) return <span className="muted">Loading defaults…</span>;
+  /* step bodies */
+  const body = (i: number) => {
+    if (i <= LAST_CONFIG && !draft) return <span className="muted cursor">Loading defaults</span>;
     const d = draft!;
-    switch (step) {
+    switch (i) {
       case 0:
         return <ScenarioStep conn={conn} d={d} upd={upd} scenarios={scenarios} />;
       case 1:
@@ -235,7 +303,7 @@ export function SetupStage({ conn }: { conn: FacilitatorConnection }) {
         return <OnboardingStep d={d} upd={upd} />;
       case 4:
         return <TagsStep d={d} upd={upd} />;
-      case 5:
+      case REVIEW:
         return (
           <ReviewStep
             d={d}
@@ -248,19 +316,20 @@ export function SetupStage({ conn }: { conn: FacilitatorConnection }) {
       case 6:
         return dash && lobby ? (
           <div className="col">
-            <Callout icon="terminal">
+            <Callout icon="client">
               On each player PC, open{" "}
               {urls.length ? (
-                urls.map((u, i) => (
+                urls.map((u, k) => (
                   <span key={u.url}>
-                    {i > 0 && " or "}
+                    {k > 0 && " or "}
                     <strong className="mono">{u.url}</strong> <span className="faint">({u.iface})</span>
                   </span>
                 ))
               ) : (
                 <strong>the player URL printed when the server started</strong>
               )}{" "}
-              in full-screen (F11). Then bind each terminal to a seat.
+              in full-screen (F11). Each one appears here as a numbered <strong>client</strong>; bind each
+              client to a seat.
             </Callout>
             <BindEditor conn={conn} dash={dash} />
           </div>
@@ -278,7 +347,6 @@ export function SetupStage({ conn }: { conn: FacilitatorConnection }) {
             <div className="row">
               <Button
                 icon="print"
-                variant="primary"
                 onClick={() =>
                   void conn.openPrintable(`/api/sessions/${sessionId}/print/keysheet`).catch(() => {})
                 }
@@ -311,7 +379,7 @@ export function SetupStage({ conn }: { conn: FacilitatorConnection }) {
                       `${seatList(st!).filter((s) => s.bound).length}/${st!.config.seatCount}`,
                     ],
                     [
-                      "Labels assigned",
+                      `Labels assigned (${pairingName(st!.labelPairing)})`,
                       labelled,
                       seatList(st!)
                         .map((s) => `${s.seat}:${s.k ?? "–"}/${s.p ?? "–"}`)
@@ -345,121 +413,112 @@ export function SetupStage({ conn }: { conn: FacilitatorConnection }) {
       default:
         return null;
     }
-  })();
+  };
 
-  const primaryLabel = step === LAST_CONFIG ? "Create session" : step === 9 ? "Start onboarding" : "Next";
-  const primaryIcon: IconName = step === LAST_CONFIG ? "create" : step === 9 ? "start" : "next";
-  const configOnly = step <= LAST_CONFIG && lobby; // config steps are locked once a session exists
+  const primary = (i: number): { label: string; icon: IconName } =>
+    i === REVIEW
+      ? { label: "Create session", icon: "create" }
+      : i === 9
+        ? { label: "Start onboarding", icon: "start" }
+        : { label: "Next", icon: "next" };
+  const blockedHint: Record<number, string> = {
+    6: "Bind every seat to continue.",
+    7: "Choose the pairing and save the labels to continue.",
+    8: "Tick the box to continue.",
+  };
 
   return (
     <div className="col" style={{ gap: "var(--s3)" }}>
       <Panel title="Session setup" icon="setup">
-        <div className="col">
-          {stepper}
-          <div className="row">
-            <span className="prompt strong t-primary">
-              ▶ STEP {String(step + 1).padStart(2, "0")}/10 · {def.title.toUpperCase()}
-            </span>
-            {!open && (
-              <Button variant="primary" icon="next" kbd="N" onClick={() => setOpen(true)}>
-                Resume step {step + 1}
-              </Button>
-            )}
-            <span className="spacer" />
-            {lobby && (
-              <Button variant="danger" icon="stop" onClick={() => void discard()}>
-                Discard session
-              </Button>
-            )}
-          </div>
-          {!lobby && st && ["closed", "aborted"].includes(st.phase) && (
-            <span className="small muted">
-              Previous session {st.sessionId} is {st.phase}. Its data is in DATABASE; configure the next one
-              here.
-            </span>
+        <div className="row">
+          <span className="strong t-primary">
+            ▶ STEP {String(step + 1).padStart(2, "0")}/10 · {SETUP_STEPS[step]!.title.toUpperCase()}
+          </span>
+          <span className="hint">
+            01–06 configure the session · 07–10 prepare the room · <kbd>Enter</kbd> next · <kbd>N</kbd>{" "}
+            current step
+          </span>
+          <span className="spacer" />
+          {lobby && (
+            <Button variant="danger" icon="stop" onClick={() => void discard()}>
+              Discard session
+            </Button>
           )}
         </div>
+        {!lobby && st && ["closed", "aborted"].includes(st.phase) && (
+          <p className="small muted" style={{ marginTop: "var(--s2)" }}>
+            Previous session {st.sessionId} is {st.phase}. Its data is in DATABASE; configure the next one
+            below.
+          </p>
+        )}
       </Panel>
 
-      {lobby && dash && <SeatsPanel conn={conn} dash={dash} scenario={fs.scenario} />}
-      {!lobby && draft && (
-        <Panel title="Draft" icon="review">
-          <div className="row small">
-            <StatusTag icon="scenario">{draft.scenarioId || "no scenario"}</StatusTag>
-            <StatusTag icon="rounds">
-              {draft.config.roundCount} rounds · P{draft.config.defaultRound.quota.propose ?? "∞"} D
-              {draft.config.defaultRound.quota.decide ?? "∞"}
-            </StatusTag>
-            <StatusTag icon="seats">{draft.config.seatCount} seats</StatusTag>
-            <StatusTag icon={draft.config.appearance.playerTheme === "mocha" ? "themeDark" : "themeLight"}>
-              players {draft.config.appearance.playerTheme}
-              {draft.config.appearance.playerCrt ? " + CRT" : ""}
-            </StatusTag>
-            {normaliseTags(draft.tagsText).map((t) => (
-              <StatusTag key={t} icon="tag">
-                {t}
-              </StatusTag>
-            ))}
-            <span className="hint">Saved in this browser until the session is created.</span>
-          </div>
-        </Panel>
-      )}
-
-      {open && !configOnly && (
-        <Popup
-          title={def.title}
-          icon={def.icon}
-          step={{ index: step, total: SETUP_STEPS.length }}
-          stepper={stepper}
-          focusKey={`${step}-${draft ? 1 : 0}-${scenarios.length}`}
-          width={step === 0 || step === 2 || step === 6 || step === 7 ? 900 : 760}
-          onClose={() => setOpen(false)}
-          onPrimary={canNext(step) && !busy ? next : undefined}
-          footer={
-            <>
-              <Button icon="back" disabled={step === 0 || (lobby && step === 6)} onClick={back}>
-                Back
-              </Button>
-              <span className="hint">Esc closes — progress is kept.</span>
-              <span className="spacer" />
-              <Button
-                variant="primary"
-                icon={primaryIcon}
-                kbd="Enter"
-                disabled={!canNext(step) || busy}
-                onClick={next}
+      <div className="accordion">
+        {SETUP_STEPS.map((def, i) => {
+          const isCurrent = i === step;
+          const isLocked = locked(i);
+          const isDone = !isCurrent && done(i);
+          const reachable =
+            !isLocked &&
+            (isDone ||
+              (!lobby && i <= (draft?.reached ?? 0)) ||
+              (lobby && i >= 6 && i <= firstOpenLobbyStep));
+          const state = isCurrent ? "current" : isDone ? "done" : "upcoming";
+          const glyph = isCurrent ? "▶" : isLocked ? "■" : isDone ? "✓" : "·";
+          const p = primary(i);
+          return (
+            <section
+              key={def.key}
+              ref={(el) => {
+                stepRefs.current[i] = el;
+              }}
+              className={`acc-step ${state}${i === REVIEW ? " review" : ""}${isLocked ? " locked" : ""}`}
+              data-step={def.key}
+            >
+              <button
+                type="button"
+                className="acc-head"
+                aria-expanded={isCurrent}
+                disabled={isCurrent || !reachable}
+                onClick={() => goTo(i)}
+                title={isLocked ? "Locked: the session has been created" : undefined}
               >
-                {primaryLabel}
-              </Button>
-            </>
-          }
-        >
-          {body}
-        </Popup>
-      )}
-      {open && configOnly && (
-        <Popup
-          title={def.title}
-          icon="lock"
-          step={{ index: step, total: SETUP_STEPS.length }}
-          stepper={stepper}
-          onClose={() => setOpen(false)}
-          footer={
-            <>
-              <span className="spacer" />
-              <Button variant="primary" icon="next" kbd="Enter" onClick={() => goTo(firstOpenLobbyStep)}>
-                Continue at step {firstOpenLobbyStep + 1}
-              </Button>
-            </>
-          }
-          onPrimary={() => goTo(firstOpenLobbyStep)}
-        >
-          <Callout icon="lock">
-            This session has been created; its configuration is locked and recorded in{" "}
-            <code>SessionCreated</code>.
-          </Callout>
-        </Popup>
-      )}
+                <span className="glyph">{glyph}</span>
+                <span className="num">{String(i + 1).padStart(2, "0")}</span>
+                <Icon name={isLocked ? "lock" : def.icon} />
+                <span className="title">{def.title}</span>
+                <span className="summary">{isCurrent ? "" : summary(i)}</span>
+                {isCurrent && (
+                  <StatusTag tone={i === REVIEW ? "neutral" : "primary"}>step {i + 1}/10</StatusTag>
+                )}
+                {isLocked && <StatusTag>locked</StatusTag>}
+              </button>
+              {isCurrent && (
+                // biome-ignore lint/a11y/noStaticElementInteractions: Enter anywhere in the step moves on (fields keep their own keys)
+                <div className="acc-body" onKeyDown={onBodyKey}>
+                  {body(i)}
+                  <div className="acc-foot">
+                    <Button icon="back" disabled={i === 0 || (lobby && i === 6)} onClick={back}>
+                      Back
+                    </Button>
+                    <span className="spacer" />
+                    {!canNext(i) && blockedHint[i] && <span className="hint">{blockedHint[i]}</span>}
+                    <Button
+                      variant="primary"
+                      icon={p.icon}
+                      kbd="Enter"
+                      disabled={!canNext(i) || busy}
+                      onClick={next}
+                    >
+                      {p.label}
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </section>
+          );
+        })}
+      </div>
     </div>
   );
 }

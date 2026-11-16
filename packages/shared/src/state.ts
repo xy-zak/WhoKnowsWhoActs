@@ -1,5 +1,5 @@
 import { type RoundSpec, type SessionConfig, SessionConfigSchema } from "./config";
-import type { ActionKind, KLabel, PLabel } from "./labels";
+import type { ActionKind, KLabel, LabelPairing, PLabel } from "./labels";
 
 export const PHASES = [
   "lobby",
@@ -63,6 +63,8 @@ export interface GameState {
   viewIds: string[];
   phase: Phase;
   onboardingSteps: OnboardingStep[];
+  /** K–P pairing of the latest label assignment (null before labels are assigned). */
+  labelPairing: LabelPairing | null;
   paused: boolean;
   pauseReason: "facilitator" | "disconnect" | null;
   pausedSince: number | null;
@@ -113,6 +115,7 @@ export function initialState(): GameState {
     viewIds: [],
     phase: "lobby",
     onboardingSteps: [],
+    labelPairing: null,
     paused: false,
     pauseReason: null,
     pausedSince: null,

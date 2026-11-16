@@ -54,7 +54,7 @@ const ConfirmPendingContext = createContext(false);
 /**
  * Modal popup: title bar (icon, UPPERCASE title, step counter, ✕), optional
  * stepper, scrollable body, footer. Focus is trapped inside; Esc closes;
- * Enter triggers the primary action. CRT power-on/off when enabled.
+ * Enter triggers the primary action. CRT power-on/off animation when enabled.
  */
 export function Popup({
   title,

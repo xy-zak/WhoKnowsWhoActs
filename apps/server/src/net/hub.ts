@@ -11,6 +11,7 @@ import {
   DemographicsSubmit,
   Empty,
   IntentMsg,
+  LabelsRandomise,
   LabelsSet,
   LIVE_TELEMETRY_TYPES,
   NoteMsg,
@@ -477,15 +478,15 @@ export class Hub {
       const entry = [...this.terminals.values()].find(
         (t) => t.terminal === msg.terminal && t.sockets.size > 0,
       );
-      if (!entry) throw new CommandError(`Terminal ${msg.terminal} is not connected`);
+      if (!entry) throw new CommandError(`Client ${msg.terminal} is not connected`);
       const seated = [...entry.sockets].map((x) => (x.data as PlayerSocketData).seat).find((x) => x);
       if (seated && seated !== msg.seat)
-        throw new CommandError(`Terminal ${msg.terminal} is already seat ${seated}`);
+        throw new CommandError(`Client ${msg.terminal} is already seat ${seated}`);
       return s().bindSeat(msg.terminal, msg.seat);
     });
     cmd("seat:unbind", SeatUnbind, (msg) => s().unbindSeat(msg.seat, msg.reason));
-    cmd("labels:set", LabelsSet, (msg) => s().setLabels(msg.assignments));
-    cmd("labels:randomise", Empty, () => s().randomiseLabels());
+    cmd("labels:set", LabelsSet, (msg) => s().setLabels(msg.assignments, msg.pairing));
+    cmd("labels:randomise", LabelsRandomise, (msg) => s().randomiseLabels(msg.pairing, msg.shuffleK));
     cmd("onboarding:start", Empty, () => s().startOnboarding());
     cmd("round:start", Empty, () => s().startRound("facilitator"));
     cmd("round:end", Empty, () => s().endRound());

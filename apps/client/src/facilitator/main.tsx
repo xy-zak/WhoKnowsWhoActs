@@ -6,7 +6,7 @@ import { App } from "./App";
 import { FacilitatorConnection } from "./connection";
 
 installThemeStyles();
-applyAppearance(prefsStore.get().theme, prefsStore.get().crt);
+applyAppearance(prefsStore.get().theme, prefsStore.get().animations);
 const conn = new FacilitatorConnection();
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

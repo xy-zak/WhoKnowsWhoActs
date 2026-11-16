@@ -73,7 +73,6 @@ export const SessionConfigSchema = z
       .enum(["byKnowledgeType", "manual"])
       .default("byKnowledgeType")
       .describe("How a seat's map view is chosen: from its K label, or set manually by the facilitator"),
-    allowDuplicateLabels: z.boolean().default(false).describe("Allow two seats to share a K or P label"),
     clearHighlightsEachRound: z
       .boolean()
       .default(true)
@@ -126,17 +125,19 @@ export const SessionConfigSchema = z
     appearance: z
       .object({
         playerTheme: z
-          .enum(["latte", "mocha"])
+          .enum(["latte", "mocha", "contrast"])
           .default("mocha")
           .describe(
-            "Colour theme of every player screen in this session (Catppuccin Latte = light, Mocha = dark)",
+            "Colour theme of every player screen in this session (Catppuccin Latte = light, Mocha = dark, contrast = high contrast)",
           ),
-        playerCrt: z
+        playerAnimations: z
           .boolean()
           .default(true)
-          .describe("Subtle CRT effects (scanlines, glow, power-on animations) on player screens"),
+          .describe(
+            "Animations on player screens (screen switches, popups, connect/disconnect); no static effects",
+          ),
       })
-      .default({ playerTheme: "mocha", playerCrt: true })
+      .default({ playerTheme: "mocha", playerAnimations: true })
       .describe("What player screens look like — identical for all seats and recorded with the session"),
   })
   .describe("Session configuration (stored verbatim in SessionCreated)");
@@ -175,6 +176,14 @@ export function parseSessionConfig(input: unknown): SessionConfig {
   if (!Array.isArray(obj.tags) && typeof obj.condition === "string") obj.tags = normaliseTags(obj.condition);
   if (Array.isArray(obj.tags)) obj.tags = normaliseTags(obj.tags as string[]);
   delete obj.condition;
+  // before v0.2 the animation switch was called `playerCrt`
+  if (obj.appearance && typeof obj.appearance === "object") {
+    const a = { ...(obj.appearance as Record<string, unknown>) };
+    if (a.playerAnimations === undefined && typeof a.playerCrt === "boolean")
+      a.playerAnimations = a.playerCrt;
+    delete a.playerCrt;
+    obj.appearance = a;
+  }
   return SessionConfigSchema.parse(obj);
 }
 

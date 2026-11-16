@@ -204,7 +204,6 @@ export function Game({ conn, view }: { conn: PlayerConnection; view: PlayerView 
           <Panel
             title={region ? region.name : "Area"}
             icon="scenario"
-            powerOn={false}
             actions={
               region ? (
                 <Button iconOnly variant="ghost" icon="close" title="Close" onClick={() => select(null)} />
@@ -307,7 +306,7 @@ export function Game({ conn, view }: { conn: PlayerConnection; view: PlayerView 
           </Panel>
           <OthersPanel view={view} />
           {view.broadcasts.length > 0 && (
-            <Panel title="Messages" icon="broadcast" powerOn={false}>
+            <Panel title="Messages" icon="broadcast">
               <div className="col">
                 {view.broadcasts
                   .slice()
@@ -355,7 +354,7 @@ function StatusLine({ view, conn }: { view: PlayerView; conn: PlayerConnection }
   }
   return (
     <div className="row panel" style={{ padding: "var(--s2) var(--s3)", marginTop: 0 }}>
-      <strong className="upper glow" style={{ fontSize: "var(--fs-title)" }}>
+      <strong className="upper" style={{ fontSize: "var(--fs-title)" }}>
         Round {view.round}/{view.roundCount}
       </strong>
       <span className="faint">│</span>
@@ -385,7 +384,7 @@ function StatusLine({ view, conn }: { view: PlayerView; conn: PlayerConnection }
 function OthersPanel({ view }: { view: PlayerView }) {
   if (view.others.length === 0) return null;
   return (
-    <Panel title="Other players" icon="seats" powerOn={false}>
+    <Panel title="Other players" icon="seats">
       <div className="col" style={{ gap: 4 }}>
         {view.others.map((o) => (
           <div key={o.seat} className="row nowrap small">

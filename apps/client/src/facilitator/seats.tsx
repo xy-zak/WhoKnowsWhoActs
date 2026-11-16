@@ -1,12 +1,17 @@
 import {
   type DashboardMsg,
+  DISSOCIATED_PAIRINGS,
   type GameState,
   isOnboardingComplete,
   K_LABELS,
   type KLabel,
+  type LabelPairing,
   nextOnboardingStep,
   P_LABELS,
-  type PLabel,
+  type PairingMode,
+  pairedP,
+  pairingName,
+  pairingText,
   quotaLimit,
   quotaUsed,
   type Scenario,
@@ -14,7 +19,18 @@ import {
 } from "@wkwa/shared";
 import { useEffect, useState } from "react";
 import { fmtDuration } from "../common/format";
-import { AsciiProgress, Button, Callout, Icon, Panel, SeatDot, StatusTag, useConfirm } from "../ui";
+import {
+  AsciiProgress,
+  Button,
+  Callout,
+  ConnTag,
+  Field,
+  Icon,
+  Panel,
+  SeatDot,
+  StatusTag,
+  useConfirm,
+} from "../ui";
 import type { FacilitatorConnection } from "./connection";
 
 function useNow(ms = 1000) {
@@ -26,7 +42,7 @@ function useNow(ms = 1000) {
   return now;
 }
 
-/* ─────────────────────────── Bind terminals → seats (setup step 7) ─────────────────────────── */
+/* ─────────────────────────── Bind clients → seats (setup step 7) ─────────────────────────── */
 
 export function BindEditor({ conn, dash }: { conn: FacilitatorConnection; dash: DashboardMsg }) {
   const st = dash.state!;
@@ -39,15 +55,15 @@ export function BindEditor({ conn, dash }: { conn: FacilitatorConnection; dash: 
         <StatusTag tone={bound === seats.length ? "live" : "warn"} icon="seats">
           {bound}/{seats.length} seats bound
         </StatusTag>
-        <StatusTag tone={free.length ? "primary" : "neutral"} icon="terminal">
-          {free.length} unassigned terminal{free.length === 1 ? "" : "s"}
+        <StatusTag tone={free.length ? "primary" : "neutral"} icon="client">
+          {free.length} unassigned client{free.length === 1 ? "" : "s"}
         </StatusTag>
       </div>
       <table className="grid">
         <thead>
           <tr>
             <th>Seat</th>
-            <th>Terminal</th>
+            <th>Client</th>
             <th>Participant code</th>
             <th />
           </tr>
@@ -63,16 +79,11 @@ export function BindEditor({ conn, dash }: { conn: FacilitatorConnection; dash: 
               <td>
                 {s.bound ? (
                   <span className="row nowrap">
-                    <Icon name="terminal" /> T{s.terminal}{" "}
-                    {s.connected ? (
-                      <StatusTag tone="live">online</StatusTag>
-                    ) : (
-                      <StatusTag tone="danger">offline</StatusTag>
-                    )}
+                    <Icon name="client" /> C{s.terminal} <ConnTag connected={s.connected} />
                   </span>
                 ) : (
                   <select
-                    aria-label={`Bind a terminal to seat ${s.seat}`}
+                    aria-label={`Bind a client to seat ${s.seat}`}
                     value=""
                     disabled={free.length === 0}
                     onChange={(e) =>
@@ -86,10 +97,10 @@ export function BindEditor({ conn, dash }: { conn: FacilitatorConnection; dash: 
                         .catch(() => {})
                     }
                   >
-                    <option value="">{free.length ? "bind terminal…" : "waiting for terminals…"}</option>
+                    <option value="">{free.length ? "bind client…" : "waiting for clients…"}</option>
                     {free.map((t) => (
                       <option key={t.terminal} value={t.terminal}>
-                        Terminal {t.terminal}
+                        Client {t.terminal}
                       </option>
                     ))}
                   </select>
@@ -116,9 +127,9 @@ export function BindEditor({ conn, dash }: { conn: FacilitatorConnection; dash: 
         </tbody>
       </table>
       {free.length === 0 && bound < seats.length && (
-        <Callout icon="terminal">
-          Open the player URL on each PC. Each screen shows its <strong>terminal number</strong> in large
-          type, then appears here.
+        <Callout icon="client">
+          Open the player URL on each PC. Each screen shows its <strong>client number</strong> in large type,
+          then appears here.
         </Callout>
       )}
     </div>
@@ -127,12 +138,49 @@ export function BindEditor({ conn, dash }: { conn: FacilitatorConnection; dash: 
 
 /* ─────────────────────────── Labels (setup step 8, and between rounds) ─────────────────────────── */
 
-type Draft = Record<number, { k: KLabel | ""; p: PLabel | ""; view: string }>;
+type Draft = Record<number, { k: KLabel | ""; view: string }>;
+type PairingChoice = { mode: PairingMode; id: number | null };
 
 export function labelsComplete(st: GameState): boolean {
-  return seatList(st).every((s) => s.k && s.p && s.view);
+  return seatList(st).every((s) => s.k && s.p && s.view) && st.labelPairing !== null;
 }
 
+/** 4×4 K×P matrix of a pairing; ■ = held by the same seat. Highlights the K labels in use. */
+export function PairingMatrix({ pairing, usedK }: { pairing: LabelPairing | null; usedK?: Set<string> }) {
+  return (
+    <table className="grid" style={{ width: "auto" }} aria-label="K–P pairing matrix">
+      <thead>
+        <tr>
+          <th>{pairing ? pairingName(pairing) : "—"}</th>
+          {P_LABELS.map((p) => (
+            <th key={p}>{p}</th>
+          ))}
+        </tr>
+      </thead>
+      <tbody>
+        {K_LABELS.map((k) => (
+          <tr key={k}>
+            <td className={usedK && !usedK.has(k) ? "faint" : "strong"}>{k}</td>
+            {P_LABELS.map((p) => {
+              const on = pairing ? pairedP(k, pairing) === p : false;
+              return (
+                <td key={p} className={on ? "t-primary strong" : "faint"} style={{ textAlign: "center" }}>
+                  {on ? "■" : "·"}
+                </td>
+              );
+            })}
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+/**
+ * K per seat + one of two pairing kinds. P is never chosen: it follows from
+ * the pairing — aligned (Ka–Pa …) or fully dissociated D1–D6 (see
+ * docs/DATA-TYPES.md § Label pairings).
+ */
 export function LabelsEditor({
   conn,
   st,
@@ -147,81 +195,136 @@ export function LabelsEditor({
   const seats = seatList(st);
   const manualView = st.config.viewAssignment === "manual";
   const fromState = (): Draft =>
-    Object.fromEntries(seats.map((s) => [s.seat, { k: s.k ?? "", p: s.p ?? "", view: s.view ?? "" }]));
+    Object.fromEntries(
+      seats.map((s, i) => [s.seat, { k: s.k ?? K_LABELS[i % K_LABELS.length]!, view: s.view ?? "" }]),
+    );
   const [draft, setDraft] = useState<Draft>(fromState);
-  const [dirty, setDirty] = useState(false);
-  const key = seats.map((s) => `${s.k}${s.p}${s.view}`).join("|");
+  const [pairing, setPairing] = useState<PairingChoice>(st.labelPairing ?? { mode: "aligned", id: null });
+  const [dirty, setDirty] = useState(st.labelPairing === null);
+  const key = `${seats.map((s) => `${s.k}${s.view}`).join("|")}|${pairingName(st.labelPairing)}`;
   // biome-ignore lint/correctness/useExhaustiveDependencies: re-sync when labels change on the server
   useEffect(() => {
-    if (!dirty) setDraft(fromState());
+    if (!dirty) {
+      setDraft(fromState());
+      if (st.labelPairing) setPairing(st.labelPairing);
+    }
   }, [key, dirty]);
 
-  const set = (seat: number, field: "k" | "p" | "view", v: string) => {
+  const setK = (seat: number, field: "k" | "view", v: string) => {
     setDirty(true);
     setDraft((d) => ({ ...d, [seat]: { ...d[seat]!, [field]: v } }));
   };
-  const dupes = (field: "k" | "p") => {
-    const vals = seats.map((s) => draft[s.seat]?.[field]).filter(Boolean);
-    return new Set(vals.filter((v, i) => vals.indexOf(v) !== i));
+  const setPair = (p: PairingChoice) => {
+    setDirty(true);
+    setPairing(p);
   };
-  const dk = st.config.allowDuplicateLabels ? new Set() : dupes("k");
-  const dp = st.config.allowDuplicateLabels ? new Set() : dupes("p");
-  const complete = seats.every(
-    (s) => draft[s.seat]?.k && draft[s.seat]?.p && (!manualView || draft[s.seat]?.view),
-  );
-  const valid = complete && dk.size === 0 && dp.size === 0;
+  const ks = seats.map((s) => draft[s.seat]?.k).filter(Boolean) as string[];
+  const dupes = new Set(ks.filter((v, i) => ks.indexOf(v) !== i));
+  const complete = seats.every((s) => draft[s.seat]?.k && (!manualView || draft[s.seat]?.view));
+  const valid = complete && dupes.size === 0;
+  const preview: LabelPairing | null =
+    pairing.mode === "aligned"
+      ? { mode: "aligned", id: null }
+      : pairing.id
+        ? { mode: "dissociated", id: pairing.id }
+        : null;
 
+  const done = () => {
+    setDirty(false);
+    onSaved?.();
+  };
   const save = () => {
     const assignments = seats.map((s) => ({
       seat: s.seat,
       k: draft[s.seat]!.k,
-      p: draft[s.seat]!.p,
       ...(manualView ? { view: draft[s.seat]!.view } : {}),
     }));
-    conn.cmd("labels:set", { assignments }, "Labels saved").then(
-      () => {
-        setDirty(false);
-        onSaved?.();
-      },
-      () => {},
-    );
+    conn.cmd("labels:set", { assignments, pairing }, "Labels saved").then(done, () => {});
   };
+  const shuffle = () =>
+    conn
+      .cmd("labels:randomise", { pairing, shuffleK: true }, "K shuffled across seats (seed logged)")
+      .then(done, () => {});
 
   return (
     <div className="col">
-      <div className="row">
-        <Button
-          icon="randomise"
-          onClick={() =>
-            conn.cmd("labels:randomise", {}, "Labels randomised (seed logged)").then(
-              () => {
-                setDirty(false);
-                onSaved?.();
-              },
-              () => {},
-            )
-          }
-        >
-          Randomise all
-        </Button>
-        <span className="hint">
-          {st.config.allowDuplicateLabels ? "Labels may repeat." : "Each K and each P label once."}{" "}
-          {manualView ? "Views are chosen per seat." : "The K label also selects the seat's map view."}
-        </span>
+      <div className="grid-2" style={{ alignItems: "start" }}>
+        <div className="col">
+          <span className="small upper muted">1 · K–P pairing</span>
+          <label className="check" style={{ alignItems: "center" }}>
+            <input
+              type="radio"
+              name="pairing-mode"
+              checked={pairing.mode === "aligned"}
+              onChange={() => setPair({ mode: "aligned", id: null })}
+            />
+            <span>
+              <strong>Aligned</strong> <span className="muted">— Ka–Pa · Kb–Pb · Kc–Pc · Kd–Pd</span>
+            </span>
+          </label>
+          <label className="check" style={{ alignItems: "center" }}>
+            <input
+              type="radio"
+              name="pairing-mode"
+              checked={pairing.mode === "dissociated"}
+              onChange={() => setPair({ mode: "dissociated", id: pairing.id ?? null })}
+            />
+            <span>
+              <strong>Dissociated</strong>{" "}
+              <span className="muted">— no seat holds the same letter, no two seats mirror each other</span>
+            </span>
+          </label>
+          {pairing.mode === "dissociated" && (
+            <Field
+              label="Which dissociative pairing (D1–D6)"
+              hint="The number is stored with the labels and in the exports."
+            >
+              <select
+                aria-label="Dissociative pairing"
+                value={pairing.id ?? ""}
+                onChange={(e) =>
+                  setPair({ mode: "dissociated", id: e.target.value ? Number(e.target.value) : null })
+                }
+              >
+                <option value="">random (D1–D6, seed logged)</option>
+                {DISSOCIATED_PAIRINGS.map((_, i) => {
+                  const p: LabelPairing = { mode: "dissociated", id: i + 1 };
+                  return (
+                    <option key={i} value={i + 1}>
+                      D{i + 1} · {pairingText(p)}
+                    </option>
+                  );
+                })}
+              </select>
+            </Field>
+          )}
+          {st.labelPairing && (
+            <span className="hint">
+              In force: <strong>{pairingName(st.labelPairing)}</strong> · {pairingText(st.labelPairing)}
+            </span>
+          )}
+        </div>
+        <div className="col">
+          <span className="small upper muted">Matrix {preview ? "" : "(chosen when saved)"}</span>
+          <PairingMatrix pairing={preview} usedK={new Set(ks)} />
+        </div>
       </div>
+
+      <span className="small upper muted">2 · Knowledge type per seat</span>
       <table className="grid">
         <thead>
           <tr>
             <th>Seat</th>
             <th>Knowledge (K)</th>
-            <th>Power (P)</th>
+            <th>Power (P) — from the pairing</th>
             <th>Map view</th>
           </tr>
         </thead>
         <tbody>
           {seats.map((s) => {
-            const d = draft[s.seat] ?? { k: "", p: "", view: "" };
+            const d = draft[s.seat] ?? { k: "", view: "" };
             const view = manualView ? d.view : d.k;
+            const p = d.k && preview ? pairedP(d.k as KLabel, preview) : null;
             return (
               <tr key={s.seat}>
                 <td>
@@ -233,34 +336,21 @@ export function LabelsEditor({
                   <select
                     aria-label={`K label of seat ${s.seat}`}
                     value={d.k}
-                    onChange={(e) => set(s.seat, "k", e.target.value)}
-                    style={dk.has(d.k) ? { borderColor: "var(--danger)" } : undefined}
+                    onChange={(e) => setK(s.seat, "k", e.target.value)}
+                    style={dupes.has(d.k) ? { borderColor: "var(--danger)" } : undefined}
                   >
-                    <option value="">–</option>
                     {K_LABELS.map((k) => (
                       <option key={k}>{k}</option>
                     ))}
                   </select>
                 </td>
-                <td>
-                  <select
-                    aria-label={`P label of seat ${s.seat}`}
-                    value={d.p}
-                    onChange={(e) => set(s.seat, "p", e.target.value)}
-                    style={dp.has(d.p) ? { borderColor: "var(--danger)" } : undefined}
-                  >
-                    <option value="">–</option>
-                    {P_LABELS.map((p) => (
-                      <option key={p}>{p}</option>
-                    ))}
-                  </select>
-                </td>
+                <td className="strong">{p ?? <span className="faint">random D1–D6</span>}</td>
                 <td className="small">
                   {manualView ? (
                     <select
                       aria-label={`View of seat ${s.seat}`}
                       value={d.view}
-                      onChange={(e) => set(s.seat, "view", e.target.value)}
+                      onChange={(e) => setK(s.seat, "view", e.target.value)}
                     >
                       <option value="">–</option>
                       {Object.keys(scenario?.views ?? {}).map((v) => (
@@ -278,12 +368,18 @@ export function LabelsEditor({
           })}
         </tbody>
       </table>
-      {(dk.size > 0 || dp.size > 0) && (
+      {dupes.size > 0 && (
         <Callout tone="danger" icon="warning">
-          Duplicate labels: {[...dk, ...dp].join(", ")}
+          Each K label can only be held by one seat: {[...dupes].join(", ")}
         </Callout>
       )}
       <div className="row">
+        <Button icon="randomise" onClick={shuffle}>
+          Shuffle K across seats
+        </Button>
+        <span className="hint">
+          {manualView ? "Views are chosen per seat." : "The K label also selects the seat's map view."}
+        </span>
         <span className="spacer" />
         <Button
           variant={dirty ? "primary" : "secondary"}
@@ -348,7 +444,7 @@ export function SeatsPanel({
           <thead>
             <tr>
               <th>Seat</th>
-              <th>Terminal</th>
+              <th>Client</th>
               <th>Code</th>
               <th>K</th>
               <th>P</th>
@@ -373,16 +469,8 @@ export function SeatsPanel({
                   <td>
                     {s.bound ? (
                       <span className="row nowrap">
-                        T{s.terminal}
-                        {s.withdrawn ? (
-                          <StatusTag>withdrawn</StatusTag>
-                        ) : s.connected ? (
-                          <StatusTag tone="live">online</StatusTag>
-                        ) : (
-                          <StatusTag tone="danger" icon="disconnected">
-                            offline
-                          </StatusTag>
-                        )}
+                        C{s.terminal}
+                        <ConnTag connected={s.connected} withdrawn={s.withdrawn} />
                       </span>
                     ) : (
                       <span className="faint">unbound</span>

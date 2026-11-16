@@ -896,9 +896,131 @@ table.grid tr.selected {
   place-items: center;
   padding: var(--s5);
 }
-.terminal-number {
+.client-number {
   font-size: clamp(64px, 16vw, 140px);
   font-weight: 700;
   line-height: 1;
   color: var(--primary);
+}
+
+/* ─── accordion (setup steps: one expanded at a time, stacked vertically) ─── */
+.accordion {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+}
+.acc-step {
+  background: var(--panel);
+  border: 1px solid var(--frame);
+  border-radius: var(--radius);
+  min-width: 0;
+}
+.acc-step.current {
+  border-color: var(--primary);
+  box-shadow: inset 3px 0 0 var(--primary);
+}
+.acc-head {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  font: inherit;
+  font-size: var(--fs-meta);
+  background: none;
+  border: none;
+  color: var(--text);
+  padding: var(--s2) var(--s3);
+  text-align: left;
+  cursor: pointer;
+}
+.acc-head:disabled {
+  cursor: default;
+}
+.acc-head:hover:not(:disabled) {
+  background: var(--hover);
+}
+.acc-head .glyph {
+  width: 1ch;
+  color: var(--muted);
+}
+.acc-head .num {
+  color: var(--muted);
+}
+.acc-head .title {
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+}
+.acc-head .summary {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: var(--fs-micro);
+}
+.acc-step.current .acc-head {
+  border-bottom: 1px dashed var(--frame);
+}
+.acc-step.current .acc-head .glyph,
+.acc-step.current .acc-head .num,
+.acc-step.current .acc-head .title {
+  color: var(--primary);
+}
+.acc-step.upcoming .acc-head .title,
+.acc-step.upcoming .acc-head .num {
+  color: var(--faint);
+}
+.acc-step.done .acc-head .glyph {
+  color: var(--live);
+}
+.acc-body {
+  padding: var(--s3) var(--s4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+}
+.acc-foot {
+  display: flex;
+  gap: var(--s2);
+  align-items: center;
+  border-top: 1px dashed var(--frame);
+  padding-top: var(--s3);
+}
+/* the review step has its own colour (--review), whatever its state */
+.acc-step.review {
+  border-color: var(--review);
+}
+.acc-step.review.current {
+  background: var(--review-bg);
+  box-shadow: inset 3px 0 0 var(--review);
+}
+.acc-step.review .acc-head .title,
+.acc-step.review .acc-head .num,
+.acc-step.review .acc-head .glyph {
+  color: var(--review);
+}
+.acc-step.review .callout {
+  border-left-color: var(--review);
+}
+/* expanding is ordinary UI motion (not a CRT effect): short fade/slide, none with reduced motion */
+@keyframes acc-open {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.acc-body {
+  animation: acc-open 160ms ease-out both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .acc-body {
+    animation: none;
+  }
 }
