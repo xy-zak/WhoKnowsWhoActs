@@ -1,10 +1,4 @@
-import {
-  checkSimulationConfig,
-  normaliseForPlayers,
-  normaliseTags,
-  parseSessionConfig,
-  type SessionConfig,
-} from "@wkwa/shared";
+import { checkSimulationConfig, normaliseTags, parseSessionConfig, type SessionConfig } from "@wkwa/shared";
 
 /** The session being configured (setup steps 1–6), kept in localStorage so nothing is lost on reload. */
 export interface Draft {
@@ -80,21 +74,22 @@ export function finalConfig(d: Draft): { config: SessionConfig } | { error: stri
     }
   }
   try {
-    const config = normaliseForPlayers(
-      parseSessionConfig({
-        ...d.config,
-        tags: normaliseTags(d.tagsText),
-        roundOverrides,
-        simulation: {
-          ...d.config.simulation,
-          params,
-          // overrides for seats that no longer exist (seat count lowered) are dropped
-          seatPolicies: Object.fromEntries(
-            Object.entries(d.config.simulation.seatPolicies).filter(([k]) => Number(k) <= d.config.seatCount),
-          ),
-        },
-      }),
-    );
+    // The facilitator's own choices: the server switches onboarding off for simulated players
+    // (normaliseForPlayers). Doing that here would carry "no consent" over into the next draft,
+    // which starts from this config, even after switching back to real participants.
+    const config = parseSessionConfig({
+      ...d.config,
+      tags: normaliseTags(d.tagsText),
+      roundOverrides,
+      simulation: {
+        ...d.config.simulation,
+        params,
+        // overrides for seats that no longer exist (seat count lowered) are dropped
+        seatPolicies: Object.fromEntries(
+          Object.entries(d.config.simulation.seatPolicies).filter(([k]) => Number(k) <= d.config.seatCount),
+        ),
+      },
+    });
     if (config.players === "simulated") {
       const problem = checkSimulationConfig(config.simulation, config.seatCount);
       if (problem) return { error: `${problem} (step 03 · Players)` };
