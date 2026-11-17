@@ -6,6 +6,7 @@ import {
   type ExportColumn,
   expandColumns,
   exportFile,
+  fakeSeats,
   generateAnonymousId,
   initialState,
   type PayloadOf,
@@ -134,6 +135,8 @@ export function exportSession(
       reconnects: s.reconnects,
       rejections: s.rejections,
       pairing: final.labelPairing ? pairingName(final.labelPairing) : null,
+      agent_policy: s.agent,
+      fake_player: s.fake,
     }));
   csv("players.csv", players);
 
@@ -317,6 +320,7 @@ export function exportSession(
           pairs: pairingText(final.labelPairing),
         }
       : null,
+    fakeSeats: fakeSeats(final),
     counts: {
       events: events.length,
       telemetry: telemetry.length,

@@ -64,9 +64,10 @@ export const EVENT_DEFS = {
   }),
 
   SessionNote: defineRecord({
-    summary: "Facilitator annotation (e.g. 'fire alarm', 'participant asked a question').",
-    trigger: "Facilitator adds a note on the dashboard.",
-    actors: ["facilitator"],
+    summary:
+      "Facilitator annotation (e.g. 'fire alarm', 'participant asked a question'), or a system note in a simulated session (e.g. an agent that stopped after errors).",
+    trigger: "Facilitator adds a note on the dashboard; the simulation runner when an agent policy fails.",
+    actors: ["facilitator", "system"],
     changesState: false,
     visibleTo: "Facilitator",
     dataClass: "non-personal",
@@ -81,8 +82,10 @@ export const EVENT_DEFS = {
   }),
 
   SeatBound: defineRecord({
-    summary: "A client (player browser) was assigned to a seat and a participant code was generated.",
-    trigger: "Facilitator binds a connected client to a seat in the lobby (setup step 07).",
+    summary:
+      "A client (player browser) was assigned to a seat and a participant code was generated. For a fake player (a test client the server created) no code is generated.",
+    trigger:
+      "Facilitator binds a connected client to a seat in the lobby (setup step 07), or adds a fake player to a seat there.",
     actors: ["facilitator"],
     changesState: true,
     visibleTo: "Facilitator; the bound player sees their seat",
@@ -98,8 +101,18 @@ export const EVENT_DEFS = {
           "Client number displayed on the player's screen (field kept as `terminal` for compatibility)",
         ),
       bindingId: z.string().describe("Random id of this binding (used to derive the reconnect token)"),
+      fake: z
+        .boolean()
+        .optional()
+        .describe(
+          "True if the client is a fake player: a test client the server created itself (no participant, no code, no onboarding). Absent in sessions recorded before fake players existed (= false)",
+        ),
+      fakePace: z
+        .enum(["normal", "fast"])
+        .optional()
+        .describe("Fake players only: pause between their actions ('normal' 1–4 s, 'fast' 0.1–0.3 s)"),
     }),
-    example: { seat: 2, terminal: 3, bindingId: "b-7KQ2M9" },
+    example: { seat: 2, terminal: 3, bindingId: "b-7KQ2M9", fake: false },
   }),
 
   SeatUnbound: defineRecord({
@@ -115,6 +128,35 @@ export const EVENT_DEFS = {
       reason: z.string().max(200).describe("Short reason"),
     }),
     example: { seat: 2, reason: "bound wrong client" },
+  }),
+
+  AgentBound: defineRecord({
+    summary:
+      "A simulated player (agent) took a seat. Simulated sessions only: the seat gets no participant code and no client.",
+    trigger: "Server, right after SessionCreated, once per seat of a simulated session.",
+    actors: ["system"],
+    changesState: true,
+    visibleTo: "Facilitator",
+    dataClass: "non-personal",
+    frequency: "1 per seat (simulated sessions only)",
+    payload: z.object({
+      seat: SeatSchema,
+      policy: z.string().describe("Id of the agent policy that plays this seat"),
+      policyVersion: z
+        .string()
+        .describe("Version of that policy's code (bumped whenever its behaviour changes)"),
+      params: z
+        .record(z.string(), z.unknown())
+        .describe("Effective policy parameters for this seat, defaults filled in"),
+      seed: z.string().describe("Seed of this agent's random number generator (session seed + seat number)"),
+    }),
+    example: {
+      seat: 1,
+      policy: "random",
+      policyVersion: "1",
+      params: { proposeBias: 0.5 },
+      seed: "7KQ2M9AB:1",
+    },
   }),
 
   LabelsAssigned: defineRecord({

@@ -22,11 +22,21 @@ export interface BotOptions {
   proposeBias?: number;
   /** Take propose/decide actions automatically during rounds (default true). Onboarding is always automatic. */
   autoPlay?: boolean;
+  /** Use this terminal key instead of a random one (the server registers fake players' keys before they connect). */
+  terminalKey?: string;
+  /** Re-claim a seat with this token on connect (fake players restored after a server restart). */
+  seatToken?: string | null;
+  /** Last clientSeq this seat already used (a restored player continues after it instead of resending 1, 2, …). */
+  clientSeqStart?: number;
+  /** Keep every received state and ack in memory (default true; tests read them). Off for long-lived fake players. */
+  record?: boolean;
+  /** Accept a self-signed certificate (the server connecting to itself over TLS). */
+  insecureTls?: boolean;
 }
 
 export class Bot {
   readonly socket: Socket;
-  readonly terminalKey = randomBytes(16).toString("hex");
+  readonly terminalKey: string;
   seatToken: string | null = null;
   terminal: number | null = null;
   seat: number | null = null;
@@ -40,7 +50,15 @@ export class Bot {
   private telemetryBuffer: TelemetryItem[] = [];
 
   constructor(private readonly opts: BotOptions) {
-    this.socket = io(`${opts.url}/player`, { transports: ["websocket"], reconnection: true, forceNew: true });
+    this.terminalKey = opts.terminalKey ?? randomBytes(16).toString("hex");
+    this.seatToken = opts.seatToken ?? null;
+    this.clientSeq = opts.clientSeqStart ?? 0;
+    this.socket = io(`${opts.url}/player`, {
+      transports: ["websocket"],
+      reconnection: true,
+      forceNew: true,
+      ...(opts.insecureTls ? { rejectUnauthorized: false } : {}),
+    });
     this.socket.on("connect", () => this.hello());
     this.socket.on("rehello", () => this.hello());
     this.socket.on("terminal", (m: { terminal: number }) => {
@@ -57,7 +75,7 @@ export class Bot {
     });
     this.socket.on("state", (v: PlayerView) => {
       this.view = v;
-      this.states.push(v);
+      if (opts.record !== false) this.states.push(v);
       opts.onState?.(v);
       if (opts.telemetry !== false) this.track("state_received", { seq: v.seq });
       this.schedule();
@@ -155,7 +173,7 @@ export class Bot {
       const o = v.onboarding;
       if (v.me.nextStep === "consent") {
         const answers = Object.fromEntries(o.consent.items.map((i) => [i.id, true]));
-        this.acks.push(
+        this.recordAck(
           await this.emit("consent:submit", {
             formVersion: o.consent.version,
             textSha256: o.consent.sha256,
@@ -171,7 +189,7 @@ export class Bot {
             q.options[Math.floor(Math.random() * q.options.length)]!.value,
           ]),
         );
-        this.acks.push(
+        this.recordAck(
           await this.emit("demographics:submit", {
             formVersion: o.demographics.version,
             answers,
@@ -180,7 +198,7 @@ export class Bot {
           }),
         );
       } else if (v.me.nextStep === "briefing") {
-        this.acks.push(
+        this.recordAck(
           await this.emit("briefing:ack", {
             textSha256: o.briefing.sha256,
             durationMs: 1000,
@@ -212,7 +230,7 @@ export class Bot {
           this.track("tool_select", { tool: kind });
           this.track("action_draft", { kind, regionId: region.id, outcome: "confirmed" });
         }
-        this.acks.push(
+        this.recordAck(
           await this.emit("intent", {
             clientSeq: ++this.clientSeq,
             kind,
@@ -225,6 +243,10 @@ export class Bot {
       }
     }
     return false;
+  }
+
+  private recordAck(ack: unknown) {
+    if (this.opts.record !== false) this.acks.push(ack);
   }
 
   stop() {

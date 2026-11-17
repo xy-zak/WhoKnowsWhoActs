@@ -67,10 +67,15 @@ export function keySheetHtml(store: Store, sessionId: string, study: StudyConfig
   const row = store.getSession(sessionId);
   if (!row) throw new Error("Unknown session");
   const state = reduceEvents(store.listEvents(sessionId));
-  const lines = seats(state)
-    .map(
-      (s) =>
-        `<tr><td>${s.seat}</td><td>${esc(s.terminal)}</td><td class="code">${esc(s.participantCode)}</td><td class="write" style="width:38%"></td><td class="write" style="width:22%"></td></tr>`,
+  // fake players (test clients the server created) are listed so the sheet covers every seat, but get no name
+  const shown = Object.values(state.seats)
+    .filter((s) => s.participantCode || (s.bound && s.fake))
+    .sort((a, b) => a.seat - b.seat);
+  const lines = shown
+    .map((s) =>
+      s.fake
+        ? `<tr><td>${s.seat}</td><td>${esc(s.terminal)}</td><td class="code">FAKE PLAYER</td><td colspan="2">— test client created by the server: no participant, no name —</td></tr>`
+        : `<tr><td>${s.seat}</td><td>${esc(s.terminal)}</td><td class="code">${esc(s.participantCode)}</td><td class="write" style="width:38%"></td><td class="write" style="width:22%"></td></tr>`,
     )
     .join("");
   return `<!doctype html><html><head><meta charset="utf-8"><title>Key sheet ${esc(sessionId)}</title><style>${embeddedFontCss()}${KEYSHEET_CSS}</style></head><body>

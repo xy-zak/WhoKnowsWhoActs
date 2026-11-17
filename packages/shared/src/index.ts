@@ -11,5 +11,6 @@ export * from "./rules/reducer";
 export * from "./rules/roundRules";
 export * from "./rules/validators";
 export * from "./scenario";
+export * from "./simulation";
 export * from "./state";
 export * from "./telemetry";

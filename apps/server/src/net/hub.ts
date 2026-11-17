@@ -10,6 +10,8 @@ import {
   type DashboardMsg,
   DemographicsSubmit,
   Empty,
+  FakeAdd,
+  type FakePlayerPace,
   IntentMsg,
   LabelsRandomise,
   LabelsSet,
@@ -29,6 +31,7 @@ import {
   SessionResume,
   type StoredEvent,
   type StoredTelemetry,
+  seatList,
   TelemetryBatch,
   type TelemetryItem,
   type TerminalInfo,
@@ -40,12 +43,17 @@ import type { ZodType } from "zod";
 import { loadOnboardingContent, type ScenarioLibrary } from "../content";
 import { getMeta } from "../db/database";
 import type { Store } from "../db/store";
+import type { SessionStores } from "../db/stores";
+import { FakePlayers } from "../fake/FakePlayers";
 import { nowTs } from "../runtime";
 import { CommandError, SessionManager } from "../session/SessionManager";
+import { SimulationRunner } from "../simulation/SimulationRunner";
 
 interface TerminalEntry {
   terminal: number;
   sockets: Set<Socket>;
+  /** A fake player this server created (decided by the server, never by the client). */
+  fake: boolean;
 }
 
 interface PlayerSocketData {
@@ -56,11 +64,14 @@ interface PlayerSocketData {
 
 export interface HubDeps {
   io: Server;
-  store: Store;
+  /** Participant and simulation databases; each session lives in exactly one. */
+  stores: SessionStores;
   scenarios: ScenarioLibrary;
   configDir: string;
   log: Logger;
   adminToken: string | null;
+  /** This server's own URL once it listens; fake players connect to it. */
+  selfUrl: () => Promise<string>;
 }
 
 const LOOPBACK = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"]);
@@ -104,6 +115,10 @@ export function redactEvent(ev: StoredEvent): StoredEvent {
  */
 export class Hub {
   session: SessionManager | null = null;
+  /** Plays the agents while a simulated session is attached. */
+  private runner: SimulationRunner | null = null;
+  /** Fake players (test clients) of the attached real session. */
+  private readonly fakes: FakePlayers;
   private terminals = new Map<string, TerminalEntry>();
   private nextTerminal = 1;
   private seatSockets = new Map<number, Socket>();
@@ -115,8 +130,10 @@ export class Hub {
   private readonly secret: string;
 
   constructor(private readonly deps: HubDeps) {
-    this.secret = getMeta(deps.store.db, "server_secret") ?? "";
+    // seat tokens only exist for real participants, so the participant database's secret signs them
+    this.secret = getMeta(deps.stores.real.db, "server_secret") ?? "";
     if (!this.secret) throw new Error("Database has no server secret");
+    this.fakes = new FakePlayers({ selfUrl: deps.selfUrl, log: deps.log });
     this.player = deps.io.of("/player");
     this.facilitator = deps.io.of("/facilitator");
     this.facilitator.use((socket, next) => {
@@ -134,9 +151,14 @@ export class Hub {
 
   /* ═════════════════════════ sessions ═════════════════════════ */
 
-  private sessionDeps(scenario: Scenario) {
+  /** The database of the attached session (participant database when none is attached). */
+  private get store(): Store {
+    return this.session?.store ?? this.deps.stores.real;
+  }
+
+  private sessionDeps(scenario: Scenario, store: Store) {
     return {
-      store: this.deps.store,
+      store,
       scenario,
       onboarding: loadOnboardingContent(this.deps.configDir),
       serverSecret: this.secret,
@@ -147,30 +169,39 @@ export class Hub {
 
   createSession(scenarioId: string, config: SessionConfig, notes: string): SessionManager {
     const scenario = this.deps.scenarios.load(scenarioId);
+    const store = this.deps.stores.of(config.players);
     this.detach("A new session was created");
     // this.session is null while creating, so the SessionCreated batch is delivered by afterAttach()
-    const created = SessionManager.create(this.sessionDeps(scenario), config, notes);
+    const created = SessionManager.create(this.sessionDeps(scenario, store), config, notes);
     this.session = created;
-    this.deps.log.info({ sessionId: created.sessionId, scenario: scenario.id }, "session created");
+    this.deps.log.info(
+      { sessionId: created.sessionId, scenario: scenario.id, players: config.players },
+      "session created",
+    );
     this.afterAttach();
     return created;
   }
 
   resumeSession(sessionId: string): SessionManager {
-    const row = this.deps.store.getSession(sessionId);
-    if (!row) throw new CommandError(`Unknown session ${sessionId}`);
+    const found = this.deps.stores.find(sessionId);
+    if (!found) throw new CommandError(`Unknown session ${sessionId}`);
+    const row = found.store.getSession(sessionId)!;
     const scenario = this.deps.scenarios.load(row.scenario_id);
     this.detach("Switching session");
-    const m = SessionManager.load(this.sessionDeps(scenario), sessionId);
+    const m = SessionManager.load(this.sessionDeps(scenario, found.store), sessionId);
     this.session = m;
     this.deps.log.info({ sessionId }, "session resumed");
     this.afterAttach();
     return m;
   }
 
-  /** Resume the most recent session that has not ended (used on server start). */
+  /** Resume the most recent session (of either database) that has not ended (used on server start). */
   autoResume() {
-    const s = this.deps.store.listSessions().find((x) => !["closed", "aborted"].includes(x.status));
+    const s = this.deps.stores
+      .all()
+      .flatMap((x) => x.store.listSessions())
+      .sort((a, b) => b.createdWall.localeCompare(a.createdWall))
+      .find((x) => !["closed", "aborted"].includes(x.status));
     if (s) {
       try {
         this.resumeSession(s.id);
@@ -181,6 +212,9 @@ export class Hub {
   }
 
   private detach(reason: string) {
+    this.runner?.dispose();
+    this.runner = null;
+    this.dropFakes();
     if (!this.session) return;
     this.session.dispose();
     this.session = null;
@@ -201,11 +235,117 @@ export class Hub {
     this.player.emit("rehello");
     this.facilitator.emit("scenario", m.scenario);
     this.facilitator.emit("events", {
-      events: this.deps.store.listEvents(m.sessionId).map(redactEvent),
+      events: this.store.listEvents(m.sessionId).map(redactEvent),
       reset: true,
     });
     this.facilitator.emit("telemetry:live", { items: [], reset: true });
     this.pushAll();
+    if (m.simulated) {
+      this.runner = new SimulationRunner(m, this.deps.log);
+      this.runner.sync();
+    }
+    this.restoreFakes(m);
+  }
+
+  /* ═════════════════════════ fake players ═════════════════════════ */
+
+  /**
+   * Real sessions, lobby only: start a fake player for each seat (default:
+   * every unbound seat) and bind it. Each one connects over the network like a
+   * browser; its seat is logged with `fake: true`, gets no participant code and
+   * skips onboarding.
+   */
+  async addFakePlayers(seatsIn: number[] | null, pace: FakePlayerPace): Promise<{ seats: number[] }> {
+    const m = this.session;
+    if (!m) throw new CommandError("No active session");
+    if (m.simulated) {
+      throw new CommandError(
+        "Fake players are for sessions with real players; a simulated session already has an agent in every seat",
+      );
+    }
+    if (m.state.phase !== "lobby") {
+      throw new CommandError(
+        "Fake players can only be added in the lobby (setup step 07), before onboarding",
+      );
+    }
+    const free = seatList(m.state)
+      .filter((s) => !s.bound)
+      .map((s) => s.seat);
+    const seats = seatsIn ?? free;
+    if (seats.length === 0) throw new CommandError("Every seat is already bound");
+    for (const seat of seats) {
+      if (!m.state.seats[seat]) throw new CommandError(`Seat ${seat} does not exist in this session`);
+      if (!free.includes(seat)) throw new CommandError(`Seat ${seat} is already bound; unbind it first`);
+    }
+    const added: number[] = [];
+    for (const seat of seats) {
+      const bot = await this.fakes.spawn({ pace, seat });
+      let terminal: number;
+      try {
+        terminal = await bot.waitForTerminal(5000);
+      } catch {
+        this.dropFake(bot.terminalKey);
+        throw new CommandError("A fake player could not connect to this server");
+      }
+      // the session may have changed while the fake player was connecting
+      if (this.session !== m || m.state.phase !== "lobby" || m.state.seats[seat]?.bound) {
+        this.dropFake(bot.terminalKey);
+        continue;
+      }
+      this.bindTerminal(terminal, seat, pace);
+      added.push(seat);
+    }
+    this.deps.log.info({ sessionId: m.sessionId, seats: added, pace }, "fake players added");
+    return { seats: added };
+  }
+
+  /**
+   * After a resume or restart, start the fake players of the session again
+   * (with the pace logged in their SeatBound); they re-claim their seats by token.
+   */
+  private restoreFakes(m: SessionManager) {
+    if (m.isFinal || m.state.phase === "game_complete") return;
+    const fake = seatList(m.state).filter((s) => s.bound && s.fake && !s.withdrawn);
+    if (fake.length === 0) return;
+    const pace = new Map<number, FakePlayerPace>();
+    for (const e of m.store.listEvents(m.sessionId)) {
+      if (e.type === "SeatBound" && e.payload.fake) pace.set(e.payload.seat, e.payload.fakePace ?? "normal");
+    }
+    for (const s of fake) {
+      const opts = {
+        pace: pace.get(s.seat) ?? "normal",
+        seat: s.seat,
+        seatToken: m.seatToken(s.seat),
+        clientSeqStart: m.nextClientSeq(s.seat) - 1,
+      };
+      void this.deps
+        .selfUrl()
+        .then(() => {
+          if (this.session === m && !m.isFinal) return this.fakes.spawn(opts);
+        })
+        .catch((e) => this.deps.log.error({ err: e, seat: s.seat }, "could not restore fake player"));
+    }
+  }
+
+  private dropFake(terminalKey: string) {
+    this.fakes.stop(terminalKey);
+    this.terminals.delete(terminalKey);
+  }
+
+  private dropFakes() {
+    for (const [key, entry] of this.terminals) if (entry.fake) this.terminals.delete(key);
+    this.fakes.stopAll();
+  }
+
+  /** Bind a connected client to a seat; fake players are recognised by their server-registered key. */
+  private bindTerminal(terminal: number, seat: number, fakePace?: FakePlayerPace) {
+    const m = this.session;
+    if (!m) throw new CommandError("No active session");
+    const entry = [...this.terminals.values()].find((t) => t.terminal === terminal && t.sockets.size > 0);
+    if (!entry) throw new CommandError(`Client ${terminal} is not connected`);
+    const seated = [...entry.sockets].map((x) => (x.data as PlayerSocketData).seat).find((x) => x);
+    if (seated && seated !== seat) throw new CommandError(`Client ${terminal} is already seat ${seated}`);
+    return m.bindSeat(terminal, seat, { fake: entry.fake, fakePace });
   }
 
   /* ═════════════════════════ fan-out ═════════════════════════ */
@@ -220,7 +360,12 @@ export class Hub {
         if (sock) queueMicrotask(() => this.claimSeat(sock, ev.payload.seat));
       } else if (ev.type === "SeatUnbound") {
         const sock = this.seatSockets.get(ev.payload.seat);
-        if (sock) {
+        const key = sock ? (sock.data as PlayerSocketData).terminalKey : undefined;
+        if (sock && key && this.fakes.isFake(key)) {
+          // a fake player only exists for its seat: unbinding it ends it
+          this.seatSockets.delete(ev.payload.seat);
+          this.dropFake(key);
+        } else if (sock) {
           sock.emit("unbound", { reason: ev.payload.reason });
           (sock.data as PlayerSocketData).seat = null;
           this.seatSockets.delete(ev.payload.seat);
@@ -229,7 +374,11 @@ export class Hub {
       }
     }
     this.facilitator.emit("events", { events: events.map(redactEvent), reset: false });
+    // closed or aborted: nothing left for fake players to do
+    if (m.isFinal && this.fakes.count > 0) this.dropFakes();
     this.pushAll();
+    // agents react to the new state (a round started, the game paused, …)
+    this.runner?.sync();
   }
 
   private pushAll() {
@@ -255,7 +404,7 @@ export class Hub {
     const terminals: TerminalInfo[] = [...this.terminals.values()]
       .map((t) => {
         const seated = [...t.sockets].map((x) => (x.data as PlayerSocketData).seat).find((x) => x);
-        return { terminal: t.terminal, connected: t.sockets.size > 0, seat: seated ?? null };
+        return { terminal: t.terminal, connected: t.sockets.size > 0, seat: seated ?? null, fake: t.fake };
       })
       .filter((t) => t.connected || t.seat !== null)
       .sort((a, b) => a.terminal - b.terminal);
@@ -313,7 +462,12 @@ export class Hub {
       clearTimeout(helloTimeout);
       let entry = this.terminals.get(msg.data.terminalKey);
       if (!entry) {
-        entry = { terminal: this.nextTerminal++, sockets: new Set() };
+        // only keys the server registered itself (FakePlayers) count as fake
+        entry = {
+          terminal: this.nextTerminal++,
+          sockets: new Set(),
+          fake: this.fakes.isFake(msg.data.terminalKey),
+        };
         this.terminals.set(msg.data.terminalKey, entry);
       }
       entry.sockets.add(sock);
@@ -401,7 +555,7 @@ export class Hub {
       if (it) items.push(it);
     }
     if (items.length === 0) return 0;
-    const stored = this.deps.store.insertTelemetry(
+    const stored = this.store.insertTelemetry(
       m.sessionId,
       seat,
       code,
@@ -438,7 +592,7 @@ export class Hub {
     const m = this.session;
     sock.emit("scenario", m?.scenario ?? null);
     sock.emit("events", {
-      events: m ? this.deps.store.listEvents(m.sessionId).map(redactEvent) : [],
+      events: m ? this.store.listEvents(m.sessionId).map(redactEvent) : [],
       reset: true,
     });
     sock.emit("telemetry:live", { items: this.liveTelemetry, reset: true });
@@ -450,13 +604,18 @@ export class Hub {
         if (!msg.success)
           return ack?.({ ok: false, error: `Invalid message: ${msg.error.issues[0]?.message ?? ""}` });
         if (needsSession && !this.session) return ack?.({ ok: false, error: "No active session" });
-        try {
-          const data = fn(msg.data);
-          ack?.({ ok: true, data });
-        } catch (e) {
+        const fail = (e: unknown) => {
           if (e instanceof CommandError) return ack?.({ ok: false, error: e.message });
           this.deps.log.error({ err: e, msg: name }, "facilitator command failed");
           ack?.({ ok: false, error: (e as Error).message ?? "Server error" });
+        };
+        try {
+          const data = fn(msg.data);
+          // some commands (fake:add) wait for network clients
+          if (data instanceof Promise) data.then((d) => ack?.({ ok: true, data: d }), fail);
+          else ack?.({ ok: true, data });
+        } catch (e) {
+          fail(e);
         }
       });
     };
@@ -474,20 +633,13 @@ export class Hub {
       (msg) => ({ sessionId: this.resumeSession(msg.sessionId).sessionId }),
       false,
     );
-    cmd("seat:bind", SeatBind, (msg) => {
-      const entry = [...this.terminals.values()].find(
-        (t) => t.terminal === msg.terminal && t.sockets.size > 0,
-      );
-      if (!entry) throw new CommandError(`Client ${msg.terminal} is not connected`);
-      const seated = [...entry.sockets].map((x) => (x.data as PlayerSocketData).seat).find((x) => x);
-      if (seated && seated !== msg.seat)
-        throw new CommandError(`Client ${msg.terminal} is already seat ${seated}`);
-      return s().bindSeat(msg.terminal, msg.seat);
-    });
+    cmd("seat:bind", SeatBind, (msg) => this.bindTerminal(msg.terminal, msg.seat));
+    cmd("fake:add", FakeAdd, (msg) => this.addFakePlayers(msg.seats, msg.pace));
     cmd("seat:unbind", SeatUnbind, (msg) => s().unbindSeat(msg.seat, msg.reason));
     cmd("labels:set", LabelsSet, (msg) => s().setLabels(msg.assignments, msg.pairing));
     cmd("labels:randomise", LabelsRandomise, (msg) => s().randomiseLabels(msg.pairing, msg.shuffleK));
     cmd("onboarding:start", Empty, () => s().startOnboarding());
+    cmd("simulation:start", Empty, () => s().startSimulation());
     cmd("round:start", Empty, () => s().startRound("facilitator"));
     cmd("round:end", Empty, () => s().endRound());
     cmd("game:pause", Empty, () => s().pause());
@@ -519,6 +671,8 @@ export class Hub {
   }
 
   close() {
+    this.runner?.dispose();
+    this.dropFakes();
     this.session?.dispose();
     if (this.statsTimer) clearTimeout(this.statsTimer);
   }

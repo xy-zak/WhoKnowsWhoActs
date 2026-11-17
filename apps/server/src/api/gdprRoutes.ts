@@ -1,6 +1,9 @@
+import type { PlayerMode } from "@wkwa/shared";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import type { AppContext } from "../app";
 import { loadOnboardingContent } from "../content";
+import type { Store } from "../db/store";
+import { exportsDirFor } from "../db/stores";
 import { deleteSession, listSessionDeletions } from "../gdpr/deleteSession";
 import { eraseParticipant, listErasures, lookupParticipant, parseCodeOrThrow } from "../gdpr/erase";
 import { exportSession, listExports } from "../gdpr/exporter";
@@ -8,39 +11,60 @@ import { cardSeats, keySheetHtml, takedownCardPdf } from "../gdpr/print";
 
 type Guard = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
 
-/** Export, erasure, anonymisation and print routes (facilitator-only). */
+/**
+ * Export, erasure, anonymisation and print routes (facilitator-only).
+ * Session routes work on whichever database holds the session; participant
+ * look-up and erasure, key sheets and takedown cards exist only for the
+ * participant database (simulated sessions have no participants).
+ */
 export function registerGdprApi(ctx: AppContext, guard: Guard) {
-  const { app, store, scenarios, runtime, hub } = ctx;
+  const { app, store, stores, scenarios, runtime, hub } = ctx;
   const opts = { preHandler: guard };
-  const deps = { store, scenarios, exportsDir: runtime.exportsDir };
 
-  const sessionOr404 = (id: string, reply: FastifyReply) => {
-    if (!store.getSession(id)) {
-      reply.code(404).send({ error: "Unknown session" });
-      return false;
+  type Found = { players: PlayerMode; store: Store };
+  const sessionOr404 = (id: string, reply: FastifyReply): Found | null => {
+    const found = stores.find(id);
+    if (!found) reply.code(404).send({ error: "Unknown session" });
+    return found;
+  };
+  const exportDeps = (f: Found) => ({
+    store: f.store,
+    scenarios,
+    exportsDir: exportsDirFor(runtime.exportsDir, f.players),
+  });
+  /** Key sheets and takedown cards only exist for sessions with participants. */
+  const participantSessionOr4xx = (id: string, reply: FastifyReply): Found | null => {
+    const found = sessionOr404(id, reply);
+    if (found?.players === "simulated") {
+      reply
+        .code(400)
+        .send({ error: "Simulated sessions have no participants: no key sheet or takedown cards." });
+      return null;
     }
-    return true;
+    return found;
   };
 
   app.post<{ Params: { id: string } }>("/api/sessions/:id/export", opts, async (req, reply) => {
-    if (!sessionOr404(req.params.id, reply)) return;
-    return exportSession(deps, req.params.id, "standard");
+    const found = sessionOr404(req.params.id, reply);
+    if (!found) return;
+    return exportSession(exportDeps(found), req.params.id, "standard");
   });
 
   app.post<{ Params: { id: string } }>("/api/sessions/:id/anonymise", opts, async (req, reply) => {
-    if (!sessionOr404(req.params.id, reply)) return;
-    return exportSession(deps, req.params.id, "anonymised");
+    const found = sessionOr404(req.params.id, reply);
+    if (!found) return;
+    return exportSession(exportDeps(found), req.params.id, "anonymised");
   });
 
   app.get<{ Params: { id: string } }>("/api/sessions/:id/print/keysheet", opts, async (req, reply) => {
-    if (!sessionOr404(req.params.id, reply)) return;
+    if (!participantSessionOr4xx(req.params.id, reply)) return;
     const study = loadOnboardingContent(runtime.configDir).study;
     reply.type("text/html").send(keySheetHtml(store, req.params.id, study));
   });
 
   /** Seats that have a takedown card (i.e. a participant code). */
   app.get<{ Params: { id: string } }>("/api/sessions/:id/cards", opts, async (req, reply) => {
-    if (!sessionOr404(req.params.id, reply)) return;
+    if (!participantSessionOr4xx(req.params.id, reply)) return;
     return { seats: cardSeats(store, req.params.id) };
   });
 
@@ -49,7 +73,7 @@ export function registerGdprApi(ctx: AppContext, guard: Guard) {
     "/api/sessions/:id/cards/:seat",
     opts,
     async (req, reply) => {
-      if (!sessionOr404(req.params.id, reply)) return;
+      if (!participantSessionOr4xx(req.params.id, reply)) return;
       const seat = Number(req.params.seat);
       const study = loadOnboardingContent(runtime.configDir).study;
       try {
@@ -76,7 +100,8 @@ export function registerGdprApi(ctx: AppContext, guard: Guard) {
     opts,
     async (req, reply) => {
       const id = req.params.id;
-      if (!sessionOr404(id, reply)) return;
+      const found = sessionOr404(id, reply);
+      if (!found) return;
       if ((req.body?.confirm ?? "").trim() !== id) {
         return reply.code(400).send({ error: "Confirmation does not match the session id" });
       }
@@ -87,8 +112,8 @@ export function registerGdprApi(ctx: AppContext, guard: Guard) {
           .send({ error: "This session is still running. Close or abort it first, then delete it." });
       }
       hub.release(id);
-      const r = deleteSession(store, id, {
-        exportsDir: runtime.exportsDir,
+      const r = deleteSession(found.store, id, {
+        exportsDir: exportsDirFor(runtime.exportsDir, found.players),
         deleteExports: req.body?.deleteExports === true,
         note: req.body?.note ?? "",
       });
@@ -97,7 +122,9 @@ export function registerGdprApi(ctx: AppContext, guard: Guard) {
     },
   );
 
-  app.get("/api/session-deletions", opts, async () => listSessionDeletions(store));
+  app.get("/api/session-deletions", opts, async () =>
+    stores.all().flatMap(({ players, store: s }) => listSessionDeletions(s).map((d) => ({ ...d, players }))),
+  );
 
   app.get<{ Params: { code: string } }>("/api/participants/:code", opts, async (req, reply) => {
     try {
@@ -139,5 +166,10 @@ export function registerGdprApi(ctx: AppContext, guard: Guard) {
   );
 
   app.get("/api/erasures", opts, async () => listErasures(store));
-  app.get("/api/exports", opts, async () => listExports(store));
+  app.get("/api/exports", opts, async () =>
+    stores
+      .all()
+      .flatMap(({ players, store: s }) => listExports(s).map((x) => ({ ...x, players })))
+      .sort((a, b) => b.createdWall.localeCompare(a.createdWall)),
+  );
 }

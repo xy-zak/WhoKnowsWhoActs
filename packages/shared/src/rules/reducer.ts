@@ -37,6 +37,7 @@ export function applyEvent(state: GameState, ev: StoredEvent): GameState {
     case "SeatBound": {
       const s = seatOf(ev.payload.seat);
       if (!s) break;
+      const fake = ev.payload.fake === true;
       Object.assign(s, emptySeat(s.seat), {
         k: s.k,
         p: s.p,
@@ -46,6 +47,9 @@ export function applyEvent(state: GameState, ev: StoredEvent): GameState {
         terminal: ev.payload.terminal,
         bindingId: ev.payload.bindingId,
         bindingSeq: ev.seq,
+        // a fake player is nobody: no consent is asked or recorded
+        fake,
+        consent: fake ? "skipped" : "pending",
       });
       break;
     }
@@ -53,6 +57,22 @@ export function applyEvent(state: GameState, ev: StoredEvent): GameState {
       const s = seatOf(ev.payload.seat);
       if (!s) break;
       Object.assign(s, emptySeat(s.seat), { k: s.k, p: s.p, view: s.view });
+      break;
+    }
+    case "AgentBound": {
+      const s = seatOf(ev.payload.seat);
+      if (!s) break;
+      // an agent is always "there": bound and connected, with no participant code or client
+      Object.assign(s, emptySeat(s.seat), {
+        k: s.k,
+        p: s.p,
+        view: s.view,
+        bound: true,
+        bindingSeq: ev.seq,
+        agent: ev.payload.policy,
+        connected: true,
+        everConnected: true,
+      });
       break;
     }
     case "LabelsAssigned":

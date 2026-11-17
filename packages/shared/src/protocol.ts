@@ -74,6 +74,25 @@ export const SessionCreate = z.object({
 });
 export const SessionResume = z.object({ sessionId: z.string() });
 export const SeatBind = z.object({ terminal: z.number().int().min(1), seat: SeatSchema });
+
+/** Pause between a fake player's actions (ms). */
+export const FAKE_PLAYER_PACES = {
+  normal: { minDelayMs: 1000, maxDelayMs: 4000, label: "Normal · 1–4 s" },
+  fast: { minDelayMs: 100, maxDelayMs: 300, label: "Fast · 0.1–0.3 s" },
+} as const;
+export type FakePlayerPace = keyof typeof FAKE_PLAYER_PACES;
+
+export const FakeAdd = z.object({
+  seats: z
+    .array(SeatSchema)
+    .nullable()
+    .default(null)
+    .describe("Seats to give a fake player; null = every seat that is still unbound"),
+  pace: z
+    .enum(["normal", "fast"])
+    .default("normal")
+    .describe("Pause between a fake player's actions: normal 1–4 s, fast 0.1–0.3 s"),
+});
 export const SeatUnbind = z.object({ seat: SeatSchema, reason: z.string().max(200).default("facilitator") });
 /** K per seat + pairing; the server derives each P from the pairing (P is never chosen freely). */
 export const LabelsSet = z.object({
@@ -233,10 +252,11 @@ export const MESSAGES: Record<string, MessageDef> = {
   "session:create": {
     namespace: "/facilitator",
     direction: "client→server",
-    description: "Create a new session from a scenario and config.",
+    description:
+      "Create a new session from a scenario and config. With players = 'simulated' it goes into the simulation database and every seat gets an agent.",
     schema: SessionCreate,
     ack: "Ack<{ sessionId }>",
-    logged: "SessionCreated",
+    logged: "SessionCreated [+ AgentBound per seat when simulated]",
   },
   "session:resume": {
     namespace: "/facilitator",
@@ -249,10 +269,20 @@ export const MESSAGES: Record<string, MessageDef> = {
   "seat:bind": {
     namespace: "/facilitator",
     direction: "client→server",
-    description: "Bind a connected client to a seat; generates the participant code.",
+    description:
+      "Bind a connected client to a seat; generates the participant code (real sessions only: simulated seats are taken by agents).",
     schema: SeatBind,
     ack: "Ack<{ participantCode }>",
     logged: "SeatBound, PlayerConnected",
+  },
+  "fake:add": {
+    namespace: "/facilitator",
+    direction: "client→server",
+    description:
+      "Real sessions, lobby only: the server starts fake players (test clients that connect over the network like a browser) and binds them to the given seats. They skip onboarding, get no participant code and propose/decide at random.",
+    schema: FakeAdd,
+    ack: "Ack<{ seats }>",
+    logged: "SeatBound (fake = true), PlayerConnected",
   },
   "seat:unbind": {
     namespace: "/facilitator",
@@ -287,6 +317,15 @@ export const MESSAGES: Record<string, MessageDef> = {
     schema: Empty,
     ack: "Ack",
     logged: "OnboardingStarted",
+  },
+  "simulation:start": {
+    namespace: "/facilitator",
+    direction: "client→server",
+    description:
+      "Simulated sessions only: start the game with the agents (no onboarding) and begin round 1; the agents then play by their policies.",
+    schema: Empty,
+    ack: "Ack",
+    logged: "OnboardingStarted (no steps), RoundStarted",
   },
   "round:start": {
     namespace: "/facilitator",
@@ -422,6 +461,8 @@ export interface TerminalInfo {
   terminal: number;
   connected: boolean;
   seat: number | null;
+  /** A fake player the server created (not a person's browser). */
+  fake: boolean;
 }
 
 export interface SeatLiveStats {

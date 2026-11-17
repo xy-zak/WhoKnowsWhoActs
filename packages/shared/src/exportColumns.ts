@@ -160,6 +160,13 @@ export const EXPORT_FILES: ExportFileDef[] = [
         source: "last LabelsAssigned.pairing",
       },
       {
+        name: "fakeSeats",
+        type: "json",
+        description:
+          "Seats played by fake players (test clients the server created, not participants), e.g. [1, 3]; [] when every seat was a participant or an agent",
+        source: "SeatBound.fake",
+      },
+      {
         name: "counts",
         type: "json",
         description: "{ events, telemetry, actions, players } row counts in this export",
@@ -171,7 +178,8 @@ export const EXPORT_FILES: ExportFileDef[] = [
     file: "players.csv",
     format: "csv",
     rowUnit: "one row per seat that was bound at the end of the session",
-    description: "Who sat where, with which labels, and their onboarding status.",
+    description:
+      "Who sat where, with which labels, and their onboarding status; which seats were fake players; which agent policy played each seat in a simulated session.",
     dataClass: "pseudonymous",
     columns: [
       SESSION_ID,
@@ -244,6 +252,20 @@ export const EXPORT_FILES: ExportFileDef[] = [
         description:
           "K–P pairing in force at the end: 'aligned' or 'D1'…'D6' (fully dissociated, see the pairing table)",
         source: "last LabelsAssigned.pairing",
+      },
+      {
+        name: "agent_policy",
+        type: "string",
+        description:
+          "Simulated sessions: id of the agent policy that played the seat (version, parameters and seed are in AgentBound). Empty for real participants",
+        source: "AgentBound.policy",
+      },
+      {
+        name: "fake_player",
+        type: "bool01",
+        description:
+          "1 if the seat was played by a fake player: a test client the server created (not a participant; no code, no onboarding). Leave these rows out of analyses of participants",
+        source: "SeatBound.fake",
       },
     ],
   },

@@ -1,7 +1,7 @@
 import os from "node:os";
-import path from "node:path";
 import { createApp } from "./app";
 import { WrongPassphraseError } from "./db/database";
+import { DB_FILES, dbFile as dbFileOf } from "./db/stores";
 import { obtainPassphrase } from "./passphrase";
 import { harnessVersion, runtimeFromEnv } from "./runtime";
 
@@ -19,7 +19,8 @@ async function main() {
   const runtime = runtimeFromEnv();
   const hv = harnessVersion();
   console.log(`\nWho Knows, Who Acts? harness v${hv.version} (${hv.gitCommit})\n`);
-  const dbFile = path.join(runtime.dataDir, "wkwa.db");
+  // the participant database decides the passphrase prompt; the simulation database shares it
+  const dbFile = dbFileOf(runtime.dataDir, "real");
   let ctx: Awaited<ReturnType<typeof createApp>> | undefined;
   for (let attempt = 1; !ctx; attempt++) {
     const pass = await obtainPassphrase(dbFile);
@@ -45,8 +46,11 @@ async function main() {
   }
   if (addrs.length === 0) console.log("   (no LAN interface found — check your network connection)");
   console.log(` Data directory: ${runtime.dataDir}`);
+  console.log(`   ${DB_FILES.real} (participants) · ${DB_FILES.simulated} (simulations)`);
   if (ctx.hub.session)
-    console.log(` Resumed session: ${ctx.hub.session.sessionId} (${ctx.hub.session.state.phase})`);
+    console.log(
+      ` Resumed ${ctx.hub.session.simulated ? "simulated " : ""}session: ${ctx.hub.session.sessionId} (${ctx.hub.session.state.phase})`,
+    );
   console.log("────────────────────────────────────────────────────────\n");
 
   const shutdown = async () => {

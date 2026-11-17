@@ -70,12 +70,43 @@ export function isValidParticipantCode(input: string): boolean {
   return normaliseParticipantCode(input) === input;
 }
 
-/** Session ids: `S-YYYYMMDD-XXXX` (date of creation + 4 random chars). Not personal data. */
-export function generateSessionId(now = new Date()): string {
+/** Prefix of simulated sessions' ids, so they can never be mistaken for sessions with participants. */
+export const SIMULATED_SESSION_PREFIX = "SIM-";
+
+/**
+ * Session ids: `S-YYYYMMDD-XXXX` (date of creation + 4 random chars), or
+ * `SIM-YYYYMMDD-XXXX` for a simulated session. Not personal data.
+ */
+export function generateSessionId(now = new Date(), players: "real" | "simulated" = "real"): string {
   const y = now.getUTCFullYear();
   const m = String(now.getUTCMonth() + 1).padStart(2, "0");
   const d = String(now.getUTCDate()).padStart(2, "0");
-  return `S-${y}${m}${d}-${randomCrockford(4)}`;
+  const prefix = players === "simulated" ? SIMULATED_SESSION_PREFIX : "S-";
+  return `${prefix}${y}${m}${d}-${randomCrockford(4)}`;
+}
+
+export function isSimulatedSessionId(id: string): boolean {
+  return id.startsWith(SIMULATED_SESSION_PREFIX);
+}
+
+/**
+ * Small deterministic PRNG (string seed → numbers in [0, 1)). Used wherever a
+ * random choice must be reproducible from a logged seed: label assignments
+ * and simulated players.
+ */
+export function seededRandom(seed: string): () => number {
+  let h = 1779033703 ^ seed.length;
+  for (let i = 0; i < seed.length; i++) {
+    h = Math.imul(h ^ seed.charCodeAt(i), 3432918353);
+    h = (h << 13) | (h >>> 19);
+  }
+  let a = h >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
 }
 
 /** Anonymous ids used in anonymised exports: `A-XXXXXX`. */

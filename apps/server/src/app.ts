@@ -1,4 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
+import type { AddressInfo } from "node:net";
 import path from "node:path";
 import fastifyStatic from "@fastify/static";
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
@@ -6,8 +7,9 @@ import type { Logger } from "pino";
 import { Server } from "socket.io";
 import { registerApi } from "./api/routes";
 import { ScenarioLibrary } from "./content";
-import { type DB, openDatabase } from "./db/database";
+import { type DB, openDatabase, WrongPassphraseError } from "./db/database";
 import { Store } from "./db/store";
+import { DB_FILES, dbFile, SessionStores } from "./db/stores";
 import { createLogger } from "./logger";
 import { Hub, isLoopback, tokenMatches } from "./net/hub";
 import type { RuntimeOptions } from "./runtime";
@@ -16,8 +18,14 @@ export interface AppContext {
   app: FastifyInstance;
   io: Server;
   hub: Hub;
+  /** The participant database (data/wkwa.db). */
   store: Store;
   db: DB;
+  /** The simulation database (data/wkwa-sim.db): simulated sessions only, no personal data. */
+  simStore: Store;
+  simDb: DB;
+  /** Both databases; `stores.find(id)` says which one holds a session. */
+  stores: SessionStores;
   log: Logger;
   runtime: RuntimeOptions;
   scenarios: ScenarioLibrary;
@@ -33,8 +41,24 @@ export async function createApp(
 ): Promise<AppContext> {
   const log =
     opts.logger ?? createLogger(runtime.dataDir, { stdout: runtime.logToStdout, level: runtime.logLevel });
-  const db = openDatabase(path.join(runtime.dataDir, "wkwa.db"), passphrase);
+  const db = openDatabase(dbFile(runtime.dataDir, "real"), passphrase);
+  let simDb: DB;
+  try {
+    // same passphrase: one secret to manage; created on first start next to the participant database
+    simDb = openDatabase(dbFile(runtime.dataDir, "simulated"), passphrase);
+  } catch (e) {
+    db.close();
+    if (e instanceof WrongPassphraseError) {
+      throw new Error(
+        `The simulation database (${DB_FILES.simulated}) does not open with this passphrase, although ${DB_FILES.real} does. ` +
+          "Both use the same passphrase: if only one was rekeyed, rekey the other with `npm run cli -- rekey --sim` (or without --sim).",
+      );
+    }
+    throw e;
+  }
   const store = new Store(db);
+  const simStore = new Store(simDb);
+  const stores = new SessionStores(store, simStore);
   const scenarios = new ScenarioLibrary(runtime.scenariosDir);
 
   const https =
@@ -50,13 +74,26 @@ export async function createApp(
   }) as unknown as FastifyInstance;
 
   const io = new Server(app.server, { serveClient: false, maxHttpBufferSize: 1e6 });
+  /** Where fake players (test clients the server creates) connect: this server, over loopback when possible. */
+  const selfUrl = () =>
+    new Promise<string>((resolve) => {
+      const make = () => {
+        const port = (app.server.address() as AddressInfo).port;
+        const any = runtime.host === "0.0.0.0" || runtime.host === "::";
+        const host = any ? "127.0.0.1" : runtime.host.includes(":") ? `[${runtime.host}]` : runtime.host;
+        resolve(`${https ? "https" : "http"}://${host}:${port}`);
+      };
+      if (app.server.listening) make();
+      else app.server.once("listening", make);
+    });
   const hub = new Hub({
     io,
-    store,
+    stores,
     scenarios,
     configDir: runtime.configDir,
     log,
     adminToken: runtime.adminToken,
+    selfUrl,
   });
 
   const isFacilitator = (req: FastifyRequest) => {
@@ -79,6 +116,9 @@ export async function createApp(
     hub,
     store,
     db,
+    simStore,
+    simDb,
+    stores,
     log,
     runtime,
     scenarios,
@@ -88,6 +128,7 @@ export async function createApp(
       io.close();
       await app.close();
       db.close();
+      simDb.close();
     },
   };
 

@@ -35,6 +35,74 @@ export const RoundSpecSchema = z
   .describe("What counts as a round");
 export type RoundSpec = z.infer<typeof RoundSpecSchema>;
 
+/* ─────────────────────────── Players: real or simulated ─────────────────────────── */
+
+/**
+ * Who plays a session. `real`: participants on player PCs (consent, participant
+ * codes, client binding; stored in the participant database). `simulated`:
+ * in-process agents driven by a policy (no consent, codes or clients; stored
+ * in the separate simulation database).
+ */
+export const PLAYER_MODES = ["real", "simulated"] as const;
+export type PlayerMode = (typeof PLAYER_MODES)[number];
+
+/** Id of an agent policy in the simulation registry (packages/shared/src/simulation/). */
+export const PolicyIdSchema = z
+  .string()
+  .regex(/^[a-z][a-z0-9-]*$/, "Policy ids are lowercase letters, digits and dashes")
+  .max(40);
+
+export const SIMULATION_DEFAULTS = {
+  policy: "random",
+  seatPolicies: {},
+  params: {},
+  seed: null,
+  minDelayMs: 800,
+  maxDelayMs: 2500,
+};
+
+export const SimulationConfigSchema = z
+  .object({
+    policy: PolicyIdSchema.default("random").describe(
+      "Agent policy every simulated seat uses unless overridden (see ARCHITECTURE.md § Simulated players)",
+    ),
+    seatPolicies: z
+      .record(z.string().regex(/^\d+$/), PolicyIdSchema)
+      .default({})
+      .describe("Per-seat policy overrides keyed by seat number, e.g. { '2': 'idle' }"),
+    params: z
+      .record(PolicyIdSchema, z.record(z.string(), z.unknown()))
+      .default({})
+      .describe(
+        "Policy parameters keyed by policy id, e.g. { 'random': { 'proposeBias': 0.7 } }; each policy checks and completes its own",
+      ),
+    seed: z
+      .string()
+      .min(1)
+      .max(40)
+      .nullable()
+      .default(null)
+      .describe(
+        "Seed for the agents' random choices; null = a random seed is drawn when the session is created and stored here",
+      ),
+    minDelayMs: z
+      .number()
+      .int()
+      .min(0)
+      .max(600_000)
+      .default(800)
+      .describe("Shortest pause before an agent's turn (ms); 0 and 0 = as fast as possible"),
+    maxDelayMs: z
+      .number()
+      .int()
+      .min(0)
+      .max(600_000)
+      .default(2500)
+      .describe("Longest pause before an agent's turn (ms)"),
+  })
+  .describe("Simulated players (used only when players = 'simulated')");
+export type SimulationConfig = z.infer<typeof SimulationConfigSchema>;
+
 /* ─────────────────────────── Session config ─────────────────────────── */
 
 export const MAX_TAGS = 20;
@@ -42,6 +110,13 @@ export const MAX_TAG_LENGTH = 40;
 
 export const SessionConfigSchema = z
   .object({
+    players: z
+      .enum(PLAYER_MODES)
+      .default("real")
+      .describe(
+        "Who plays: 'real' = participants on player PCs (consent, codes, client binding; participant database); 'simulated' = in-process agents (no consent, codes or clients; simulation database)",
+      ),
+    simulation: SimulationConfigSchema.default(SIMULATION_DEFAULTS),
     seatCount: z
       .number()
       .int()
@@ -164,6 +239,20 @@ export function parseSessionConfig(input: unknown): SessionConfig {
   // (`appearance`); they are now each screen's own accessibility choice and never part of the config.
   delete obj.appearance;
   return SessionConfigSchema.parse(obj);
+}
+
+/**
+ * What a simulated session actually runs with: no onboarding (agents cannot
+ * consent or answer questionnaires) and no pause on disconnect (agents never
+ * disconnect). A no-op for real sessions.
+ */
+export function normaliseForPlayers(config: SessionConfig): SessionConfig {
+  if (config.players !== "simulated") return config;
+  return {
+    ...config,
+    onboarding: { consent: false, demographics: false, briefing: false },
+    pauseOnDisconnect: false,
+  };
 }
 
 /** Effective round spec for round `n` (1-based). */

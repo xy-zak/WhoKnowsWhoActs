@@ -34,6 +34,10 @@ export interface SeatState {
   rejections: number;
   withdrawn: boolean;
   lastActionTs: number | null;
+  /** Id of the agent policy playing this seat (simulated sessions); null for a real participant. */
+  agent: string | null;
+  /** Played by a fake player: a test client the server created (no participant, no code, no onboarding). */
+  fake: boolean;
 }
 
 export interface ActionRecord {
@@ -102,6 +106,8 @@ export function emptySeat(seat: number): SeatState {
     rejections: 0,
     withdrawn: false,
     lastActionTs: null,
+    agent: null,
+    fake: false,
   };
 }
 
@@ -140,12 +146,26 @@ export function seatList(state: GameState): SeatState[] {
   return Object.values(state.seats).sort((a, b) => a.seat - b.seat);
 }
 
+/** Is this a session with simulated players (agents) instead of participants? */
+export function isSimulated(state: GameState): boolean {
+  return state.config.players === "simulated";
+}
+
 /** Seats taking part in the game: bound and not withdrawn. */
 export function activeSeats(state: GameState): SeatState[] {
   return seatList(state).filter((s) => s.bound && !s.withdrawn);
 }
 
+/** Seats bound to fake players (test clients the server created), in seat order. */
+export function fakeSeats(state: GameState): number[] {
+  return seatList(state)
+    .filter((s) => s.bound && s.fake)
+    .map((s) => s.seat);
+}
+
+/** Fake players and agents have no onboarding: there is nobody to inform or ask. */
 export function isOnboardingComplete(state: GameState, seat: SeatState): boolean {
+  if (seat.fake || seat.agent) return true;
   const steps = state.onboardingSteps;
   if (steps.includes("consent") && seat.consent !== "given") return false;
   if (steps.includes("demographics") && !seat.demographics) return false;
@@ -155,6 +175,7 @@ export function isOnboardingComplete(state: GameState, seat: SeatState): boolean
 
 /** The next onboarding step a seat still has to do (null = done). */
 export function nextOnboardingStep(state: GameState, seat: SeatState): OnboardingStep | null {
+  if (seat.fake || seat.agent) return null;
   if (state.onboardingSteps.includes("consent") && seat.consent !== "given") return "consent";
   if (state.onboardingSteps.includes("demographics") && !seat.demographics) return "demographics";
   if (state.onboardingSteps.includes("briefing") && !seat.briefing) return "briefing";

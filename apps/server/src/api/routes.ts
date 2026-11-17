@@ -13,7 +13,7 @@ type Guard = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
 
 /** REST API for the facilitator dashboard (all routes facilitator-only). */
 export function registerApi(ctx: AppContext, guard: Guard) {
-  const { app, store, scenarios, hub } = ctx;
+  const { app, stores, scenarios, hub } = ctx;
   const opts = { preHandler: guard };
 
   app.get("/api/health", async () => ({
@@ -57,14 +57,22 @@ export function registerApi(ctx: AppContext, guard: Guard) {
     return SessionConfigSchema.parse(raw);
   });
 
-  app.get("/api/sessions", opts, async () => store.listSessions());
+  /** Sessions of both databases, newest first; `players` says which database each one is in. */
+  app.get("/api/sessions", opts, async () =>
+    stores
+      .all()
+      .flatMap(({ players, store }) => store.listSessions().map((s) => ({ ...s, players })))
+      .sort((a, b) => b.createdWall.localeCompare(a.createdWall)),
+  );
 
   app.get<{ Params: { id: string } }>("/api/sessions/:id", opts, async (req, reply) => {
-    const row = store.getSession(req.params.id);
-    if (!row) return reply.code(404).send({ error: "Unknown session" });
-    const events = store.listEvents(row.id);
+    const found = stores.find(req.params.id);
+    if (!found) return reply.code(404).send({ error: "Unknown session" });
+    const row = found.store.getSession(req.params.id)!;
+    const events = found.store.listEvents(row.id);
     return {
       session: row,
+      players: found.players,
       state: reduceEvents(events),
       eventCount: events.length,
       attached: hub.session?.sessionId === row.id,
@@ -73,16 +81,18 @@ export function registerApi(ctx: AppContext, guard: Guard) {
 
   /** Event log of a session (demographic answers redacted), for replay and inspection. */
   app.get<{ Params: { id: string } }>("/api/sessions/:id/events", opts, async (req, reply) => {
-    if (!store.getSession(req.params.id)) return reply.code(404).send({ error: "Unknown session" });
-    return store.listEvents(req.params.id).map(redactEvent);
+    const found = stores.find(req.params.id);
+    if (!found) return reply.code(404).send({ error: "Unknown session" });
+    return found.store.listEvents(req.params.id).map(redactEvent);
   });
 
   app.get<{ Params: { id: string }; Querystring: { afterId?: string; limit?: string } }>(
     "/api/sessions/:id/telemetry",
     opts,
     async (req, reply) => {
-      if (!store.getSession(req.params.id)) return reply.code(404).send({ error: "Unknown session" });
-      return store.listTelemetry(req.params.id, {
+      const found = stores.find(req.params.id);
+      if (!found) return reply.code(404).send({ error: "Unknown session" });
+      return found.store.listTelemetry(req.params.id, {
         afterId: Number(req.query.afterId ?? 0),
         limit: Math.min(Number(req.query.limit ?? 100_000), 1_000_000),
       });
@@ -90,7 +100,7 @@ export function registerApi(ctx: AppContext, guard: Guard) {
   );
 
   app.get<{ Params: { id: string } }>("/api/sessions/:id/scenario", opts, async (req, reply) => {
-    const row = store.getSession(req.params.id);
+    const row = stores.find(req.params.id)?.store.getSession(req.params.id);
     if (!row) return reply.code(404).send({ error: "Unknown session" });
     const scenario = scenarios.load(row.scenario_id);
     return { scenario, hashMatches: scenario.hash === row.scenario_hash };

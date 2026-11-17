@@ -6,6 +6,7 @@ import { CROCKFORD, normaliseParticipantCode } from "./ids";
 import { DISSOCIATED_PAIRINGS, K_LABELS, type LabelPairing, P_LABELS, pairedP, pairingPerm } from "./labels";
 import type { DataClass, RecordMeta } from "./meta";
 import { MESSAGES, type MessageDef } from "./protocol";
+import { BUILT_IN_POLICIES } from "./simulation/policies";
 import {
   TELEMETRY_DEFS,
   TELEMETRY_TYPES,
@@ -445,6 +446,45 @@ export function renderConfigTable(): string {
   );
 }
 
+/* ─────────────────────────── Simulated players ─────────────────────────── */
+
+/** Parameter rows of an agent policy (name, type, default, description), for docs and the setup screen. */
+export function policyParamRows(policy: { params: z.ZodType }): FieldRow[] {
+  return flattenFields(toJS(policy.params, "input"), 2);
+}
+
+/** The built-in agent policies and their parameters (`simulation.params.<id>`). */
+export function renderSimulationPolicies(): string {
+  const out: string[] = [
+    table(
+      ["Policy", "Version", "Name", "What it does"],
+      BUILT_IN_POLICIES.map((p) => [code(p.id), p.version, p.name, p.description]),
+    ),
+  ];
+  for (const p of BUILT_IN_POLICIES) {
+    const rows = policyParamRows(p);
+    out.push(
+      "",
+      `**${code(p.id)} parameters** (${code(`simulation.params.${p.id}`)}):${rows.length ? "" : " none."}`,
+    );
+    if (rows.length) {
+      out.push(
+        "",
+        table(
+          ["Parameter", "Type", "Default", "Description"],
+          rows.map((r) => [
+            code(r.name),
+            code(r.type),
+            r.defaultValue === undefined ? "—" : code(JSON.stringify(r.defaultValue)),
+            r.description || "—",
+          ]),
+        ),
+      );
+    }
+  }
+  return out.join("\n");
+}
+
 /* ─────────────────────────── Message catalogue ─────────────────────────── */
 
 function messagePayload(m: MessageDef): string {
@@ -671,6 +711,7 @@ export const GENERATED_BLOCKS: Record<string, () => string> = {
   "export-columns": renderExportColumns,
   "message-catalogue": renderMessageCatalogue,
   "data-class-summary": renderDataClassSummary,
+  "simulation-policies": renderSimulationPolicies,
 };
 
 const BLOCK_RE = /<!-- BEGIN GENERATED: ([a-z0-9-]+) -->[\s\S]*?<!-- END GENERATED: \1 -->/g;

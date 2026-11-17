@@ -2,12 +2,15 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import {
   type ActionKind,
   activeSeats,
+  agentSeed,
   applyEvent,
+  checkSimulationConfig,
   DEFAULT_VALIDATORS,
   DISSOCIATED_PAIRINGS,
   type GameState,
   generateParticipantCode,
   generateSessionId,
+  getPolicy,
   initialState,
   isOnboardingComplete,
   K_LABELS,
@@ -15,6 +18,7 @@ import {
   type LabelPairing,
   type NewEvent,
   nextOnboardingStep,
+  normaliseForPlayers,
   type OnboardingContent,
   type OnboardingStep,
   type PayloadOf,
@@ -23,6 +27,7 @@ import {
   quotaLimit,
   quotaUsed,
   randomCrockford,
+  resolvePolicyParams,
   roundActiveMs,
   roundRemainingMs,
   roundSpecFor,
@@ -31,6 +36,8 @@ import {
   type SessionConfig,
   type StoredEvent,
   seatList,
+  seatPolicyId,
+  seededRandom,
   type Validator,
   validateIntent,
 } from "@wkwa/shared";
@@ -91,11 +98,33 @@ export class SessionManager {
   get onboarding(): OnboardingContent {
     return this.deps.onboarding;
   }
+  /** The database this session lives in (participant or simulation database). */
+  get store(): Store {
+    return this.deps.store;
+  }
+  /** Played by agents instead of participants? */
+  get simulated(): boolean {
+    return this.state.config.players === "simulated";
+  }
 
   /* ═════════════════════════ lifecycle ═════════════════════════ */
 
+  /**
+   * Create a session. A simulated session (config.players = "simulated") gets
+   * a `SIM-` id, no onboarding, a logged seed, and one agent per seat
+   * (`AgentBound`); `deps.store` must then be the simulation database.
+   */
   static create(deps: SessionDeps, input: SessionConfig, notes: string): SessionManager {
-    const config = parseSessionConfig(input); // normalises tags
+    let config = normaliseForPlayers(parseSessionConfig(input)); // normalises tags
+    const simulated = config.players === "simulated";
+    if (simulated) {
+      const problem = checkSimulationConfig(config.simulation, config.seatCount);
+      if (problem) throw new CommandError(problem);
+      // the effective seed is part of the logged config, so every run can be repeated
+      if (!config.simulation.seed) {
+        config = { ...config, simulation: { ...config.simulation, seed: randomCrockford(8) } };
+      }
+    }
     for (const k of K_LABELS) {
       if (config.viewAssignment === "byKnowledgeType" && !deps.scenario.views[k]) {
         throw new CommandError(
@@ -103,7 +132,7 @@ export class SessionManager {
         );
       }
     }
-    const sessionId = generateSessionId();
+    const sessionId = generateSessionId(new Date(), config.players);
     const m = new SessionManager(sessionId, deps);
     const hv = harnessVersion();
     deps.store.insertSession({
@@ -119,7 +148,7 @@ export class SessionManager {
       harness_version: hv.version,
       git_commit: hv.gitCommit,
     });
-    m.run(() =>
+    m.run(() => {
       m.append({
         type: "SessionCreated",
         actorKind: "facilitator",
@@ -136,9 +165,31 @@ export class SessionManager {
           harness: hv,
           notes,
         },
-      }),
-    );
+      });
+      if (simulated) m.bindAgents();
+    });
     return m;
+  }
+
+  /** Put one agent in every seat (simulated sessions; called once, at creation). */
+  private bindAgents() {
+    const sim = this.state.config.simulation;
+    for (const s of seatList(this.state)) {
+      const policy = getPolicy(seatPolicyId(sim, s.seat));
+      if (!policy) throw new CommandError(`Unknown policy for seat ${s.seat}`);
+      this.append({
+        type: "AgentBound",
+        actorKind: "system",
+        seat: s.seat,
+        payload: {
+          seat: s.seat,
+          policy: policy.id,
+          policyVersion: policy.version,
+          params: resolvePolicyParams(policy, sim.params[policy.id]),
+          seed: agentSeed(sim.seed ?? "", s.seat),
+        },
+      });
+    }
   }
 
   /** Rebuild a session from its event log (e.g. after a server restart). */
@@ -158,8 +209,8 @@ export class SessionManager {
         "scenario files changed since the session was created",
       );
     }
-    // connection status is not meaningful across restarts
-    for (const s of seatList(m.state)) s.connected = false;
+    // connection status is not meaningful across restarts (agents are always there)
+    for (const s of seatList(m.state)) if (!s.agent) s.connected = false;
     m.armTimers();
     return m;
   }
@@ -248,8 +299,24 @@ export class SessionManager {
     return seatList(this.state).find((s) => s.bound && s.terminal === terminal)?.seat ?? null;
   }
 
-  bindSeat(terminal: number, seat: number): { participantCode: string } {
+  private requireReal(what: string) {
+    if (this.simulated)
+      throw new CommandError(`${what} is not possible in a simulated session: agents take every seat`);
+  }
+
+  /**
+   * Bind a connected client to a seat. A real client gets a new participant
+   * code. A fake player (a test client the server created, `fake: true`) gets
+   * none: it is not a participant, so it never appears on the key sheet, on a
+   * takedown card or in an erasure.
+   */
+  bindSeat(
+    terminal: number,
+    seat: number,
+    opts: { fake?: boolean; fakePace?: "normal" | "fast" } = {},
+  ): { participantCode: string | null; fake: boolean } {
     return this.run(() => {
+      this.requireReal("Binding a client");
       this.requirePhase("lobby");
       const s = this.requireSeat(seat);
       if (s.bound) {
@@ -261,22 +328,33 @@ export class SessionManager {
           payload: { seat, reason: "replaced" },
         });
       }
-      let code = generateParticipantCode();
-      const inSession = new Set(seatList(this.state).map((x) => x.participantCode));
-      while (inSession.has(code) || this.deps.store.codeExists(code)) code = generateParticipantCode();
+      const fake = opts.fake === true;
+      let code: string | null = null;
+      if (!fake) {
+        code = generateParticipantCode();
+        const inSession = new Set(seatList(this.state).map((x) => x.participantCode));
+        while (inSession.has(code) || this.deps.store.codeExists(code)) code = generateParticipantCode();
+      }
       this.append({
         type: "SeatBound",
         actorKind: "facilitator",
         seat,
         participantCode: code,
-        payload: { seat, terminal, bindingId: `b-${randomCrockford(6)}` },
+        payload: {
+          seat,
+          terminal,
+          bindingId: `b-${randomCrockford(6)}`,
+          fake,
+          ...(fake ? { fakePace: opts.fakePace ?? "normal" } : {}),
+        },
       });
-      return { participantCode: code };
+      return { participantCode: code, fake };
     });
   }
 
   unbindSeat(seat: number, reason: string) {
     this.run(() => {
+      this.requireReal("Unbinding a seat");
       this.requirePhase("lobby");
       const s = this.requireSeat(seat);
       if (!s.bound) throw new CommandError(`Seat ${seat} is not bound`);
@@ -378,6 +456,19 @@ export class SessionManager {
       if (o.demographics) steps.push("demographics");
       if (o.briefing) steps.push("briefing");
       this.append({ type: "OnboardingStarted", actorKind: "facilitator", payload: { steps } });
+    });
+  }
+
+  /**
+   * Simulated sessions: lock the seats and start round 1 in one step. There is
+   * no onboarding (OnboardingStarted is logged with no steps); from then on
+   * the agents play and rounds advance as configured.
+   */
+  startSimulation() {
+    this.run(() => {
+      if (!this.simulated) throw new CommandError("Not a simulated session: start onboarding instead");
+      this.startOnboarding();
+      this.startRound("facilitator");
     });
   }
 
@@ -516,6 +607,14 @@ export class SessionManager {
 
   note(text: string) {
     this.run(() => this.append({ type: "SessionNote", actorKind: "facilitator", payload: { text } }));
+  }
+
+  /** A note written by the server itself (e.g. the simulation runner stopping a failing agent). */
+  systemNote(text: string) {
+    this.run(() => {
+      if (this.isFinal) return;
+      this.append({ type: "SessionNote", actorKind: "system", payload: { text: text.slice(0, 500) } });
+    });
   }
 
   withdraw(seat: number) {
@@ -702,6 +801,11 @@ export class SessionManager {
 
   /* ═════════════════════════ intents ═════════════════════════ */
 
+  /** The next unused clientSeq of a seat (for intents that do not come from a browser, i.e. agents). */
+  nextClientSeq(seat: number): number {
+    return (this.lastClientSeq.get(seat) ?? 0) + 1;
+  }
+
   intent(
     seat: number,
     msg: { clientSeq: number; kind: ActionKind; regionId: string; clientTs: number },
@@ -835,18 +939,5 @@ export class SessionManager {
   }
 }
 
-/** Small deterministic PRNG so random label assignments are reproducible from their logged seed. */
-export function seededRandom(seed: string): () => number {
-  let h = 1779033703 ^ seed.length;
-  for (let i = 0; i < seed.length; i++) {
-    h = Math.imul(h ^ seed.charCodeAt(i), 3432918353);
-    h = (h << 13) | (h >>> 19);
-  }
-  let a = h >>> 0;
-  return () => {
-    a = (a + 0x6d2b79f5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
+/** Re-exported from @wkwa/shared (moved there so simulated players use the same PRNG). */
+export { seededRandom };

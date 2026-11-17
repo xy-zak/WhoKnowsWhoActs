@@ -36,6 +36,8 @@ export interface SessionSummary {
   notes: string;
   eventCount: number;
   telemetryCount: number;
+  /** Seats bound to fake players (test clients the server created) at the end of the log; [] = none. */
+  fakeSeats: number[];
 }
 
 interface EventRow {
@@ -143,6 +145,7 @@ export class Store {
          FROM sessions s ORDER BY s.created_wall DESC`,
       )
       .all() as Array<SessionRow & { event_count: number; telemetry_count: number }>;
+    const fakes = this.fakeSeatsBySession();
     return rows.map((r) => ({
       id: r.id,
       createdWall: r.created_wall,
@@ -154,7 +157,36 @@ export class Store {
       notes: r.notes,
       eventCount: r.event_count,
       telemetryCount: r.telemetry_count,
+      fakeSeats: fakes.get(r.id) ?? [],
     }));
+  }
+
+  /** Which seats of each session are bound to a fake player, from its SeatBound / SeatUnbound events. */
+  private fakeSeatsBySession(): Map<string, number[]> {
+    const rows = this.db
+      .prepare(
+        `SELECT session_id, type, payload_json FROM events
+         WHERE type IN ('SeatBound', 'SeatUnbound') ORDER BY session_id, seq`,
+      )
+      .all() as Array<{ session_id: string; type: string; payload_json: string }>;
+    const bound = new Map<string, Map<number, boolean>>();
+    for (const r of rows) {
+      const p = JSON.parse(r.payload_json) as { seat: number; fake?: boolean };
+      const seats = bound.get(r.session_id) ?? new Map<number, boolean>();
+      bound.set(r.session_id, seats);
+      if (r.type === "SeatBound") seats.set(p.seat, p.fake === true);
+      else seats.delete(p.seat);
+    }
+    const out = new Map<string, number[]>();
+    for (const [id, seats] of bound) {
+      const fake = [...seats].filter(([, f]) => f).map(([seat]) => seat);
+      if (fake.length)
+        out.set(
+          id,
+          fake.sort((a, b) => a - b),
+        );
+    }
+    return out;
   }
 
   /* ─────────── events ─────────── */
