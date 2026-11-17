@@ -15,6 +15,8 @@ A **research game harness** for a four-player, map-based serious game played on 
 - **Hub-and-spoke LAN game.** Four browsers connect to one server (the facilitator's laptop), and every message passes through it. No internet is needed; all assets are bundled.
 - **Same outline, different knowledge.** Every player sees the same map regions, but each gets a different dataset (*view*) for them. The server enforces this: a player's browser never receives another player's data. The facilitator sees the **composite** of all views and live mirrors of every player's screen.
 - **Propose and decide.** *Propose* highlights a region for everyone (amber, hatched); *decide* marks it in a second colour (red). Both pass through a confirmation step.
+- **Real or simulated players.** In setup step 03 the facilitator chooses *real participants* or *simulated players*. Simulated sessions are played by agents inside the server, following pluggable **policies** (the rules are added in `packages/shared/src/simulation/`). They skip consent, client binding, participant codes and the key sheet, can run in real time or as fast as possible, repeat exactly from a logged seed, and are stored in a **separate simulation database** (`data/wkwa-sim.db`).
+- **Fake players for testing.** In a session with real players, the server can fill seats with *fake players* (setup step 07): test clients that connect like a browser and play at random. They skip consent and the questionnaire, get no participant code, and are marked fake in the log and the exports (`fake_player`, `fakeSeats`). Try a session alone with three fake players and yourself on the fourth seat.
 - **Rounds.** Default: 3 rounds, and a round ends when every player has made 5 proposals and 5 decisions. Rounds can be changed per session (quotas, unlimited, time limits, facilitator-ended rounds, per-round overrides) and extended in code (pluggable round rules and validators).
 - **Labels.** Each seat gets a knowledge type (`Ka`–`Kd`) and a power type (`Pa`–`Pd`), assigned manually or randomly in setup step 08 (the seed is logged). By default the K label selects the seat's map view.
 - **Every interaction is recorded** in an append-only, event-sourced log with server and clock-corrected client timestamps. Fine-grained UI telemetry is recorded too: hover, inspect, pan/zoom, tool choice, confirm/cancel, focus, idle, and state acknowledgements for exact reaction times.
@@ -51,7 +53,7 @@ npm start            # asks for (or creates) the database passphrase
 - Facilitator manager: open `http://localhost:3000/facilitator` **on the server laptop**. The SETUP wizard opens automatically.
 - Players: open one of the `http://<laptop-ip>:3000/` URLs printed at start-up.
 
-Try it alone: walk the SETUP wizard in the manager, then run `npm run bots -- --count 3` and play the fourth seat yourself in another browser window. Alternatively, `npm run bots -- --count 4 --auto` plays a whole session by itself.
+Try it alone: walk the SETUP wizard in the manager, and in step 07 click **Fill empty seats with fake players** after binding your own browser window to one seat. Alternatively, `npm run bots -- --count 4 --auto` plays a whole session by itself. Or choose **Simulated players** in setup step 03: agents fill every seat and play while you watch LIVE.
 
 For real sessions, follow the **[session runbook](docs/SESSION-RUNBOOK.md)**.
 
@@ -62,8 +64,8 @@ For real sessions, follow the **[session runbook](docs/SESSION-RUNBOOK.md)**.
 | `npm start` | Run the server (serves the built clients). Env: `PORT`, `HOST`, `WKWA_DATA_DIR`, `WKWA_EXPORTS_DIR`, `ADMIN_TOKEN`, `TLS_CERT`/`TLS_KEY` (see [NETWORKING.md](docs/NETWORKING.md)) |
 | `npm run dev` | Development mode: server with auto-restart, plus Vite with hot reload on `http://localhost:5173` (separate dev database) |
 | `npm run build` | Build the player and facilitator clients |
-| `npm run bots -- [--count N] [--auto]` | Simulated players (and optionally an automatic facilitator) |
-| `npm run cli -- <command>` | Data management: `sessions`, `lookup`, `export`, `anonymise`, `erase`, `erasures`, `backup`, `rekey`, `verify` |
+| `npm run bots -- [--count N] [--auto]` | External test players that connect like browsers (and optionally an automatic facilitator), e.g. for load tests. They are **not** marked in the data: for rehearsals use **fake players** (setup step 07); for agents choose *Simulated players* (step 03). |
+| `npm run cli -- <command> [--sim]` | Data management: `sessions`, `lookup`, `export`, `anonymise`, `erase`, `erasures`, `backup`, `rekey`, `verify`; `--sim` works on the simulation database |
 | `npm test` | Unit and integration tests (rules, full bot games, GDPR guarantees, docs drift) |
 | `npm run test:e2e` | Playwright: a full game through the real UI with 4 player browsers, plus a render check of every diagram |
 | `npm run docs:generate` | Regenerate the schema-derived parts of `docs/` |
@@ -85,7 +87,7 @@ Each document has a change log (date, commit, change, reason) in [docs/changelog
 ## Repository layout
 
 ```
-packages/shared/   schemas (zod), event reducer, rules, projections, doc generators — used by server and clients
+packages/shared/   schemas (zod), event reducer, rules, projections, agent policies, doc generators — used by server and clients
 apps/server/       Fastify + Socket.IO server, encrypted store, session manager, REST API, GDPR tooling, CLI, bots
 apps/client/       React/Vite: design system (ui/), player app (/) and facilitator manager (/facilitator)
 config/            study info, consent, demographics, briefing, default session settings (placeholders!)
@@ -99,6 +101,7 @@ e2e/               Playwright tests
 The harness is meant to be extended. See [ARCHITECTURE.md § 12 Extension guide](docs/ARCHITECTURE.md#12-extension-guide). In short:
 
 - **Your map and data:** add `scenarios/<id>/` with an SVG outline (one `<path id>` per region) and one view per K label.
+- **Simulated players:** write agent policies in `packages/shared/src/simulation/policies.ts` (template at the top of the file; see ARCHITECTURE.md § 14).
 - **Rules:** add validators (`packages/shared/src/rules/validators.ts`), e.g. "decide only on proposed regions" or rules that depend on power type, and add round rules (`roundRules.ts`).
 - **New actions or data:** add event or telemetry types in `packages/shared/src/events.ts` / `telemetry.ts`, with their documentation metadata, then run `npm run docs:generate`.
 

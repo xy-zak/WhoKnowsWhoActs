@@ -220,6 +220,9 @@ The sizes below are the **Small** (default) text size. **Large** steps every tok
 | `client` | `Computer` | A client: a connected player browser / PC |
 | `bind` | `UserPlus` | Bind a client to a seat |
 | `withdraw` | `UserXmark` | Withdraw a participant / unbind a seat |
+| `agent` | `Cpu` | A simulated player (agent) in a seat |
+| `simulation` | `Flask` | Simulated session, simulation database |
+| `fake` | `TestTube` | A fake player: a test client the server created, not a participant |
 | `labels` | `Label` | K/P labels |
 | `randomise` | `DiceFive` | Shuffle K labels across seats / random pairing |
 | `connected` | `Wifi` | Connected |
@@ -324,7 +327,10 @@ Use a panel, not a popup, for anything that should stay visible while working. *
   - `Enter` in a step moves to the next one; `N` jumps to the current step. The draft survives reloads.
 - **Live:** a lifecycle stepper `ONBOARDING → ROUND 1 → … → ROUND N → WRAP-UP`, plus a **NEXT** panel with the single next action and its key (`N`).
 - **Players:** a stepper `CONSENT → ABOUT YOU → BRIEFING → READY` during onboarding, and a status line (round, quotas, timer) during the game.
-- **Stepper glyphs:** `✓` done · `▶` current · `·` upcoming · `■` locked.
+- **Stepper glyphs:** `✓` done · `▶` current · `·` upcoming · `■` locked · `–` skipped (a step a simulated session does not need: 04 onboarding and 09 key sheet; shown muted, not green, with a dotted border in the wayfinder).
+- **Simulated sessions** are marked, never coloured: a neutral **`[SIMULATION]`** tag with the *simulation* icon (flask) in the top bar, the setup wayfinder and the LIVE session panel, and the *agent* icon (chip) wherever a seat is played by an agent. No accent colour is reserved for them (§ 2.2), so green still only means "running / OK".
+- **Fake players** (test clients in a real session) are marked the same way: a neutral **`[FAKE]`** tag with the *fake* icon (test tube) on their seat, in the mirrors and the bind step, **`[FAKE PLAYERS ×N]`** in the top bar, and `fake ×N` on the session in DATABASE.
+- **Sub-tabs** inside a page (DATABASE: *Participants* | *Simulations*) use the same `tab` style as the top bar, in a `subtabs` row under it.
 
 ## 9. Motion and animations
 

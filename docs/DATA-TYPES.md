@@ -53,7 +53,7 @@ Related documents: [DATA-MANAGEMENT.md](DATA-MANAGEMENT.md) (why the data is col
 
 ## Storage model
 
-All tables live in one SQLCipher-encrypted SQLite file (`data/wkwa.db`).
+All tables live in one SQLCipher-encrypted SQLite file per kind of session: **`data/wkwa.db`** for sessions with participants and **`data/wkwa-sim.db`** for simulated sessions (agents instead of people; see [ARCHITECTURE.md § 14](ARCHITECTURE.md#14-simulated-players)). Both files have exactly the schema below and the same passphrase. In the simulation database, `participant_code` is always empty, the `telemetry` and `erasures` tables stay empty, and session ids start with `SIM-`.
 
 ```mermaid
 erDiagram
@@ -66,7 +66,7 @@ erDiagram
     TEXT value
   }
   sessions {
-    TEXT id PK "S-YYYYMMDD-XXXX"
+    TEXT id PK "S-YYYYMMDD-XXXX or SIM-YYYYMMDD-XXXX"
     TEXT created_wall
     TEXT scenario_id
     TEXT scenario_version
@@ -84,7 +84,7 @@ erDiagram
   events {
     TEXT session_id PK, FK
     INTEGER seq PK
-    TEXT type
+    TEXT type "indexed (schema v5)"
     TEXT actor_kind
     INTEGER seat
     TEXT participant_code "indexed, the only place codes are stored"
@@ -145,7 +145,7 @@ Columns shared by every event row:
 | --- | --- | --- | --- |
 | `session_id` | `sessionId` | `string` | Session id, e.g. S-20261116-7KQ2 |
 | `seq` | `seq` | `integer ≥ 1` | Position in the session's event log (1, 2, 3, …; gaps only after erasure) |
-| `type` | `type` | `"SessionCreated" \| "SessionNote" \| "SeatBound" \| "SeatUnbound" \| "LabelsAssigned" \| "OnboardingStarted" \| "ConsentRecorded" \| "DemographicsSubmitted" \| "BriefingAcknowledged" \| "PlayerConnected" \| "PlayerDisconnected" \| "RoundStarted" \| "ProposalMade" \| "DecisionMade" \| "IntentRejected" \| "ActionRevoked" \| "RoundCompleted" \| "GamePaused" \| "GameResumed" \| "FacilitatorBroadcast" \| "ParticipantWithdrawn" \| "GameCompleted" \| "SessionClosed" \| "SessionAborted"` | Event type |
+| `type` | `type` | `"SessionCreated" \| "SessionNote" \| "SeatBound" \| "SeatUnbound" \| "AgentBound" \| "LabelsAssigned" \| "OnboardingStarted" \| "ConsentRecorded" \| "DemographicsSubmitted" \| "BriefingAcknowledged" \| "PlayerConnected" \| "PlayerDisconnected" \| "RoundStarted" \| "ProposalMade" \| "DecisionMade" \| "IntentRejected" \| "ActionRevoked" \| "RoundCompleted" \| "GamePaused" \| "GameResumed" \| "FacilitatorBroadcast" \| "ParticipantWithdrawn" \| "GameCompleted" \| "SessionClosed" \| "SessionAborted"` | Event type |
 | `actor_kind` | `actorKind` | `"player" \| "facilitator" \| "system"` | Who caused the event |
 | `seat` | `seat` | `integer 1–4 \| null` | Seat the event is about/caused by (null for session-level events) |
 | `participant_code` | `participantCode` | `string \| null` | Pseudonymous participant code of that seat — the ONLY place codes are stored |
@@ -166,9 +166,10 @@ Columns shared by every event row:
 | Type | Summary | Caused by | Changes state | Data class | Typical frequency |
 | --- | --- | --- | --- | --- | --- |
 | [`SessionCreated`](#sessioncreated) | A new session was created with a scenario and configuration. | facilitator | yes | non-personal | 1 per session |
-| [`SessionNote`](#sessionnote) | Facilitator annotation (e.g. 'fire alarm', 'participant asked a question'). | facilitator | no | non-personal | 0–n per session |
-| [`SeatBound`](#seatbound) | A client (player browser) was assigned to a seat and a participant code was generated. | facilitator | yes | pseudonymous | 1 per seat (more if re-bound) |
+| [`SessionNote`](#sessionnote) | Facilitator annotation (e.g. 'fire alarm', 'participant asked a question'), or a system note in a simulated session (e.g. an agent that stopped after errors). | facilitator, system | no | non-personal | 0–n per session |
+| [`SeatBound`](#seatbound) | A client (player browser) was assigned to a seat and a participant code was generated. For a fake player (a test client the server created) no code is generated. | facilitator | yes | pseudonymous | 1 per seat (more if re-bound) |
 | [`SeatUnbound`](#seatunbound) | A seat binding was removed before the game started. | facilitator | yes | pseudonymous | rare |
+| [`AgentBound`](#agentbound) | A simulated player (agent) took a seat. Simulated sessions only: the seat gets no participant code and no client. | system | yes | non-personal | 1 per seat (simulated sessions only) |
 | [`LabelsAssigned`](#labelsassigned) | Knowledge-type, power-type and map view were (re)assigned to seats, with the K–P pairing used. | facilitator | yes | pseudonymous | 1–n per session |
 | [`OnboardingStarted`](#onboardingstarted) | Seats are locked; players move to the consent / demographics / briefing screens. | facilitator | yes | non-personal | 1 per session |
 | [`ConsentRecorded`](#consentrecorded) | Participant answered the in-game consent form. | player | yes | pseudonymous · sensitive | 1 per seat |
@@ -242,6 +243,15 @@ A new session was created with a scenario and configuration.
   "clientSeq": null,
   "payload": {
     "config": {
+      "players": "real",
+      "simulation": {
+        "policy": "random",
+        "seatPolicies": {},
+        "params": {},
+        "seed": null,
+        "minDelayMs": 800,
+        "maxDelayMs": 2500
+      },
       "seatCount": 4,
       "roundCount": 3,
       "defaultRound": {
@@ -300,12 +310,12 @@ A new session was created with a scenario and configuration.
 
 ### `SessionNote`
 
-Facilitator annotation (e.g. 'fire alarm', 'participant asked a question').
+Facilitator annotation (e.g. 'fire alarm', 'participant asked a question'), or a system note in a simulated session (e.g. an agent that stopped after errors).
 
 |  |  |
 | --- | --- |
-| **Trigger** | Facilitator adds a note on the dashboard. |
-| **Caused by** | facilitator |
+| **Trigger** | Facilitator adds a note on the dashboard; the simulation runner when an agent policy fails. |
+| **Caused by** | facilitator, system |
 | **Changes game state** | no |
 | **Visible to** | Facilitator |
 | **Data class** | non-personal |
@@ -342,11 +352,11 @@ Facilitator annotation (e.g. 'fire alarm', 'participant asked a question').
 
 ### `SeatBound`
 
-A client (player browser) was assigned to a seat and a participant code was generated.
+A client (player browser) was assigned to a seat and a participant code was generated. For a fake player (a test client the server created) no code is generated.
 
 |  |  |
 | --- | --- |
-| **Trigger** | Facilitator binds a connected client to a seat in the lobby (setup step 07). |
+| **Trigger** | Facilitator binds a connected client to a seat in the lobby (setup step 07), or adds a fake player to a seat there. |
 | **Caused by** | facilitator |
 | **Changes game state** | yes |
 | **Visible to** | Facilitator; the bound player sees their seat |
@@ -360,6 +370,8 @@ A client (player browser) was assigned to a seat and a participant code was gene
 | `seat` | `integer 1–4` | Seat number (1–4) within the session |
 | `terminal` | `integer ≥ 1` | Client number displayed on the player's screen (field kept as `terminal` for compatibility) |
 | `bindingId` | `string` | Random id of this binding (used to derive the reconnect token) |
+| `fake` | `boolean` | True if the client is a fake player: a test client the server created itself (no participant, no code, no onboarding). Absent in sessions recorded before fake players existed (= false) |
+| `fakePace` | `"normal" \| "fast"` | Fake players only: pause between their actions ('normal' 1–4 s, 'fast' 0.1–0.3 s) |
 
 <details><summary>Example row</summary>
 
@@ -379,7 +391,8 @@ A client (player browser) was assigned to a seat and a participant code was gene
   "payload": {
     "seat": 2,
     "terminal": 3,
-    "bindingId": "b-7KQ2M9"
+    "bindingId": "b-7KQ2M9",
+    "fake": false
   }
 }
 ```
@@ -424,6 +437,58 @@ A seat binding was removed before the game started.
   "payload": {
     "seat": 2,
     "reason": "bound wrong client"
+  }
+}
+```
+
+</details>
+
+### `AgentBound`
+
+A simulated player (agent) took a seat. Simulated sessions only: the seat gets no participant code and no client.
+
+|  |  |
+| --- | --- |
+| **Trigger** | Server, right after SessionCreated, once per seat of a simulated session. |
+| **Caused by** | system |
+| **Changes game state** | yes |
+| **Visible to** | Facilitator |
+| **Data class** | non-personal |
+| **Typical frequency** | 1 per seat (simulated sessions only) |
+
+**Payload**
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `seat` | `integer 1–4` | Seat number (1–4) within the session |
+| `policy` | `string` | Id of the agent policy that plays this seat |
+| `policyVersion` | `string` | Version of that policy's code (bumped whenever its behaviour changes) |
+| `params` | `object` | Effective policy parameters for this seat, defaults filled in |
+| `seed` | `string` | Seed of this agent's random number generator (session seed + seat number) |
+
+<details><summary>Example row</summary>
+
+```json
+{
+  "sessionId": "S-20261116-7KQ2",
+  "seq": 42,
+  "type": "AgentBound",
+  "actorKind": "system",
+  "seat": 1,
+  "participantCode": null,
+  "round": 0,
+  "serverTs": 1794826000000.512,
+  "serverWall": "2026-11-16T10:46:40.000Z",
+  "clientTs": null,
+  "clientSeq": null,
+  "payload": {
+    "seat": 1,
+    "policy": "random",
+    "policyVersion": "1",
+    "params": {
+      "proposeBias": 0.5
+    },
+    "seed": "7KQ2M9AB:1"
   }
 }
 ```
@@ -1995,6 +2060,14 @@ Stored verbatim in `SessionCreated.config` and in `sessions.config_json`. Defaul
 
 | Setting | Type | Default | Description |
 | --- | --- | --- | --- |
+| `players` | `"real" \| "simulated"` | `"real"` | Who plays: 'real' = participants on player PCs (consent, codes, client binding; participant database); 'simulated' = in-process agents (no consent, codes or clients; simulation database) |
+| `simulation` | `object` | — | Simulated players (used only when players = 'simulated') |
+| `simulation.policy` | `string (≤ 40 chars, pattern)` | `"random"` | Agent policy every simulated seat uses unless overridden (see ARCHITECTURE.md § Simulated players) |
+| `simulation.seatPolicies` | `map<string, string (≤ 40 chars, pattern)>` | — | Per-seat policy overrides keyed by seat number, e.g. { '2': 'idle' } |
+| `simulation.params` | `map<string, object>` | — | Policy parameters keyed by policy id, e.g. { 'random': { 'proposeBias': 0.7 } }; each policy checks and completes its own |
+| `simulation.seed` | `string (≤ 40 chars) \| null` | `null` | Seed for the agents' random choices; null = a random seed is drawn when the session is created and stored here |
+| `simulation.minDelayMs` | `integer 0–600000` | `800` | Shortest pause before an agent's turn (ms); 0 and 0 = as fast as possible |
+| `simulation.maxDelayMs` | `integer 0–600000` | `2500` | Longest pause before an agent's turn (ms) |
 | `seatCount` | `integer 1–4` | `4` | Number of player seats (4 for real sessions; fewer for pilots) |
 | `roundCount` | `integer 1–20` | `3` | Number of rounds in the game |
 | `defaultRound` | `object` | — | Round definition used for every round unless overridden |
@@ -2168,11 +2241,12 @@ Session metadata: configuration, scenario, software version and a per-round summ
 | `harness` | json | { version, gitCommit } of the harness software | SessionCreated.harness |
 | `rounds` | json | [{ round, startedWall, endedWall, reason, durationMs, pausedMs }] per played round | RoundStarted + RoundCompleted |
 | `labelPairing` | json | { mode, id, name, pairs } of the final label assignment: aligned, or fully dissociated D1–D6 (see the pairing table), e.g. { mode: 'dissociated', id: 6, name: 'D6', pairs: 'Ka–Pd Kb–Pc Kc–Pa Kd–Pb' } | last LabelsAssigned.pairing |
+| `fakeSeats` | json | Seats played by fake players (test clients the server created, not participants), e.g. [1, 3]; [] when every seat was a participant or an agent | SeatBound.fake |
 | `counts` | json | { events, telemetry, actions, players } row counts in this export | computed |
 
 #### `players.csv`
 
-Who sat where, with which labels, and their onboarding status. _Unit:_ one row per seat that was bound at the end of the session. _Data class:_ pseudonymous.
+Who sat where, with which labels, and their onboarding status; which seats were fake players; which agent policy played each seat in a simulated session. _Unit:_ one row per seat that was bound at the end of the session. _Data class:_ pseudonymous.
 
 | Column | Type | Description | Source |
 | --- | --- | --- | --- |
@@ -2191,6 +2265,8 @@ Who sat where, with which labels, and their onboarding status. _Unit:_ one row p
 | `reconnects` | integer | Number of reconnections during the session | PlayerConnected.reconnect |
 | `rejections` | integer | Number of rejected propose/decide attempts | IntentRejected |
 | `pairing` | string | K–P pairing in force at the end: 'aligned' or 'D1'…'D6' (fully dissociated, see the pairing table) | last LabelsAssigned.pairing |
+| `agent_policy` | string | Simulated sessions: id of the agent policy that played the seat (version, parameters and seed are in AgentBound). Empty for real participants | AgentBound.policy |
+| `fake_player` | bool01 | 1 if the seat was played by a fake player: a test client the server created (not a participant; no code, no onboarding). Leave these rows out of analyses of participants | SeatBound.fake |
 
 #### `actions.csv`
 

@@ -15,6 +15,8 @@ Background: [ARCHITECTURE.md](ARCHITECTURE.md) (how it works) · [NETWORKING.md]
 5. [After the session](#5-after-the-session)
 6. [When something goes wrong](#6-when-something-goes-wrong)
 7. [Printable checklist](#7-printable-checklist)
+8. [Simulated sessions](#8-simulated-sessions)
+9. [Testing without people: fake players](#9-testing-without-people-fake-players)
 
 ## 1. Overview
 
@@ -24,7 +26,7 @@ The facilitator manager has three tabs, in order of use:
 | --- | --- |
 | **[1] SETUP / LIVE** | One tab with two faces. **SETUP** walks you through ten steps, stacked as collapsible panels (an accordion): the current step is open, finished steps collapse into a one-line summary. After *Start onboarding* the tab flips to **LIVE**, and a green **● LIVE** indicator appears in the top bar; click it to come back from any tab. |
 | **[2] REPLAY** | Watch any recorded session again. Play shows every propose/decide action for 1 s and pauses at the end of each round (about 2 minutes for a default session of 3 × 4 × 10 actions); the slider and ⏮/⏭ move event by event or action by action. |
-| **[3] DATABASE** | Sessions (resume, replay, export, key sheet, takedown-card PDFs, **delete**), exports, takedown/erasure, erasure and deletion registers. Hover any button to see what it does. |
+| **[3] DATABASE** | Sessions (resume, replay, export, key sheet, takedown-card PDFs, **delete**), exports, takedown/erasure, erasure and deletion registers. A switch at the top picks **Participants** (`data/wkwa.db`) or **Simulations** (`data/wkwa-sim.db`). Hover any button to see what it does. |
 
 ```mermaid
 flowchart TD
@@ -41,7 +43,7 @@ flowchart TD
   W --> D["DATABASE: move the export to institutional storage<br/>lock away the key sheet, back up"]
 ```
 
-**Wayfinding.** In SETUP, a blue bar pinned to the top of the page shows the current step (`▶ STEP 03/10 · PLAYERS & VISIBILITY`) and a strip of all ten steps, even when you scroll; click a finished step to reopen it. Each step's header shows `✓` done · `▶` current · `·` upcoming · `■` locked plus a summary; the two commit points, review & create (06) and start onboarding (10), are coloured lavender. Wrap-up popups show `STEP nn/NN`. In LIVE, the **NEXT** panel always shows the single next action, and `N` does it.
+**Wayfinding.** In SETUP, a blue bar pinned to the top of the page shows the current step (`▶ STEP 03/10 · PLAYERS & VISIBILITY`) and a strip of all ten steps, even when you scroll; click a finished step to reopen it. Each step's header shows `✓` done · `▶` current · `·` upcoming · `■` locked · `–` skipped (simulated sessions) plus a summary; the two commit points, review & create (06) and start onboarding (10), are coloured lavender. Wrap-up popups show `STEP nn/NN`. In LIVE, the **NEXT** panel always shows the single next action, and `N` does it.
 
 **Keyboard.** `1` `2` `3` switch tabs, `N` next action, `P` pause/resume, `D` display settings, `T` colours (Latte → Mocha → High contrast), `F` font (JetBrains Mono → OpenDyslexic → System font), `S` text size (Small ↔ Large), `A` animations on/off, `?` help. In a setup step `Enter` moves to the next step; in popups `Enter` is the primary action and `Esc` closes. The setup draft is kept in your browser.
 
@@ -85,7 +87,7 @@ Approximate timing: 30 min setup, about 10 min onboarding, the rounds, 10 min wr
 | --- | --- |
 | **01 Scenario** | The map and datasets. Use the preview's view selector to check each view. |
 | **02 Rounds** | Number of rounds, rule (quotas or facilitator-ended), quotas per player, optional time limit, how the next round starts, per-round overrides. |
-| **03 Players & visibility** | Seats, how map views are assigned and what players see about each other. Display settings (colours, font, text size, animations) are **not** set here: each participant chooses them with the **DISPLAY** button on their screen, and they are not recorded. |
+| **03 Players & visibility** | **Who plays:** *Real participants* (the normal case) or *Simulated players* (agents; see [§ 8](#8-simulated-sessions)). Then seats, how map views are assigned and what players see about each other. Display settings (colours, font, text size, animations) are **not** set here: each participant chooses them with the **DISPLAY** button on their screen, and they are not recorded. |
 | **04 Onboarding** | Consent, demographics, briefing. Turning consent off asks for confirmation: only for tests without participants. |
 | **05 Tags & notes** | Comma-separated **tags** (e.g. `pilot, condition-A`). They label the session in DATABASE and the exports. **Never use names.** |
 | **06 Review & create** | One summary of everything, with *Edit* links. **CREATE SESSION** writes it into `SessionCreated`; steps 01–06 are then locked (■). |
@@ -96,7 +98,7 @@ The draft is kept in your browser until you create the session, so a reload lose
 
 | Step | What to do |
 | --- | --- |
-| **07 Connect & bind** | The step shows the player URL(s). Open it on each PC in full-screen (F11); each screen shows **CLIENT N**. Bind each client to a seat. The step is done when it shows `[4/4 seats bound]`. |
+| **07 Connect & bind** | The step shows the player URL(s). Open it on each PC in full-screen (F11); each screen shows **CLIENT N**. Bind each client to a seat. The step is done when it shows `[4/4 seats bound]`. For a test without people, use **Fake player** or **Fill empty seats with fake players** instead ([§ 9](#9-testing-without-people-fake-players)). |
 | **08 Labels** | 1 · Choose the **K–P pairing**: *Aligned* (Ka–Pa, Kb–Pb …) or *Dissociated* — one of the six fully dissociative pairings D1–D6 (no seat holds the same letter, no two seats mirror each other), or *random* (seed logged). The 4×4 matrix shows the result. 2 · Choose which seat gets which **K** (seat order by default, or *Shuffle K across seats*). **P is derived from the pairing**, never chosen per seat. *Save labels*. The pairing number is stored with the labels and in the exports; see [DATA-TYPES.md § Label pairings](DATA-TYPES.md#label-pairings). With view assignment "follows K", the K label also selects the seat's map data. |
 | **09 Key sheet** | *Print key sheet*, then tick "printed and stored separately". Write names on it **by hand** as participants arrive; names never go into the software. |
 | **10 Start onboarding** | A final checklist. **Seat the participants first**, then *START ONBOARDING*. Seats lock, players go to consent → about you → briefing, and the tab flips to **LIVE**. |
@@ -188,3 +190,60 @@ Debrief participants as your protocol requires.
 - [ ] Wrap-up 2: export → moved to institutional storage → local copy deleted
 - [ ] Wrap-up 3: session closed; server stopped
 - [ ] Key sheet locked away; backup made; decliners erased (if applicable)
+
+## 8. Simulated sessions
+
+A simulated session is played by **agents** (software players) instead of participants. Use it to try out rules, round settings and analysis scripts without people. The agents' rules are their *policies* (see [ARCHITECTURE.md § 14](ARCHITECTURE.md#14-simulated-players)); for now there are two baselines, `random` and `idle`. Nobody needs to be in the room and no player PCs are needed.
+
+```mermaid
+flowchart TD
+  A["npm start<br/>same passphrase"] --> S1["01 Scenario · 02 Rounds"]
+  S1 --> S3["03 Players: choose Simulated players<br/>policy per seat, pace, seed"]
+  S3 --> S4["04 Onboarding: skipped –"] --> S5["05 Tags · 06 Review and CREATE<br/>→ simulation database, id SIM-…"]
+  S5 --> S7["07 Simulated players<br/>an agent in every seat"] --> S8["08 Labels"] --> S9["09 Key sheet: skipped –"] --> S10["10 Start simulation"]
+  S10 --> L["LIVE: the agents play<br/>pause, end round, start next round as usual"]
+  L --> W["Wrap-up: 1 export → exports/simulations/, 2 close"]
+  W --> D["DATABASE › Simulations: replay, export, delete"]
+```
+
+| Step | What is different |
+| --- | --- |
+| **03 Players** | Choose **Simulated players**. Pick the **policy** for every seat (and, if you like, a different one per seat), the **pause** before each agent's turn (*Watchable* 0.8–2.5 s, *Quick*, *As fast as possible*, or custom), and a **seed**. Leave the seed empty to draw one; it is logged either way. Policy parameters go in the JSON box (the table under it lists them). |
+| **04 Onboarding** | Skipped (`–`): agents have no consent, demographics or briefing. |
+| **06 Review & create** | Shows *simulated* and *simulation database*. The session id starts with `SIM-`. |
+| **07 Simulated players** | Nothing to do: every seat already has an agent. No URLs, clients or participant codes. |
+| **08 Labels** | As usual. The agents see their own K/P labels only if the session shows them to players. |
+| **09 Key sheet** | Skipped (`–`): no participants. |
+| **10 Start simulation** | Locks the seats and starts round 1 at once; the tab flips to **LIVE**, with a **SIMULATION** tag in the top bar. |
+
+In **LIVE** everything works as in a real session: the composite map, the mirrors (what each agent sees), pause/resume, end round, revoke, withdraw a seat (the agent stops), edit labels between rounds. The next round starts by your click or automatically, as set in step 02. If a policy keeps failing, its agent stops and a note in the event log says why. **Wrap-up** has two popups: export (to `exports/simulations/`) and close. There are no takedown cards.
+
+**Repeating a run.** With the pause set to *As fast as possible* (0 s), the same seed, settings and policy versions repeat exactly the same game. With longer pauses the agents' choices still follow the seed, but who acts first can vary slightly.
+
+**Afterwards.** Simulated sessions hold no personal data. Find them under *DATABASE → Simulations*; erasure, key sheets and cards do not exist there. From the command line, add `--sim`: `npm run cli -- sessions --sim`, `npm run cli -- export --sim --session SIM-…`.
+
+`npm run bots` is something else: bots are test players for **real** sessions. They connect like browsers, go through binding and consent, and are stored in the participant database.
+
+## 9. Testing without people: fake players
+
+To try a **real** session (consent screens, binding, LIVE, wrap-up, exports) without a group of people, let the server create **fake players**. A fake player is a test client that connects to the server like a player's browser and proposes and decides at random. You can mix them with real browsers, for example three fake players and yourself on the fourth seat.
+
+| Step | What to do |
+| --- | --- |
+| **03 Players** | Keep *Real participants*. |
+| **07 Connect & bind** | Choose the pace (*Normal* 1–4 s between actions, or *Fast* 0.1–0.3 s). Click **Fake player** next to a seat, or **Fill empty seats with fake players**. Fake seats show `[FAKE]` and *none (fake player)* instead of a code. Bind any real browsers as usual. |
+| **09 Key sheet** | Fake seats are printed as *FAKE PLAYER*, with no name. If every seat is fake, the step is skipped (`–`). |
+| **10 Start onboarding** | Fake players skip consent, demographics and briefing and are ready at once. Real players onboard as usual. |
+| **LIVE** | The top bar shows **FAKE PLAYERS ×N**; seats and mirrors show `[FAKE]`. Start the rounds as usual; fake players act on their own. |
+| **Wrap-up** | Takedown cards only for real participants (no card step at all if every seat is fake). Export and close as usual. |
+
+What the data says:
+
+- The session is stored in the participant database, like any real session. DATABASE shows it with a `fake ×N` tag, and `npm run cli -- sessions` lists the fake seats.
+- In the log, each fake seat's `SeatBound` has `fake: true`. In exports, `players.csv` has `fake_player = 1` for those seats and `session.json` has `fakeSeats`.
+- Fake players have **no participant code**, no consent record, no demographic answers and no telemetry. Nothing about them is made up.
+- **Delete pure test sessions** afterwards (*DATABASE → Delete*), or leave out the rows with `fake_player = 1` in analyses.
+
+Fake players can only be added in the lobby, and only in sessions with real players (a simulated session already has agents). Unbinding a fake seat ends that fake player. After a server restart, the fake players come back by themselves and re-claim their seats. If a round was paused because they lost the connection, press **RESUME**.
+
+`npm run bots` still exists, but its bots go through consent and the questionnaire with made-up answers and are **not** marked in the data. Use fake players instead.

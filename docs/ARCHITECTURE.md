@@ -21,6 +21,7 @@ Related documents: [NETWORKING.md](NETWORKING.md) (network and protocol), [DATA-
 11. [Persistence, recovery and reproducibility](#11-persistence-recovery-and-reproducibility)
 12. [Extension guide](#12-extension-guide)
 13. [Testing strategy and bots](#13-testing-strategy-and-bots)
+14. [Simulated players](#14-simulated-players)
 
 ---
 
@@ -38,6 +39,7 @@ The harness is the **infrastructure** for a 4-player, turn-based, map-interactio
 | Facilitator dashboard, composite view, replay | Game-specific dashboard widgets |
 | Complete event + telemetry logging, exports, codebook | Analysis scripts |
 | GDPR tooling: consent, pseudonymisation, encryption, erasure | Ethics approval, consent text, retention policy |
+| Simulated players: pluggable agent policies, a runner, a separate simulation database | The rules the agents follow (their policies) |
 
 Design principles:
 
@@ -51,7 +53,7 @@ Design principles:
 
 | Term | Meaning |
 | --- | --- |
-| **Session** | One play-through with 4 participants, identified by `S-YYYYMMDD-XXXX`. |
+| **Session** | One play-through with 4 participants, identified by `S-YYYYMMDD-XXXX`, or with 4 agents (a *simulated session*), identified by `SIM-YYYYMMDD-XXXX`. |
 | **Client** | A player browser that connected to the server, shown as "Client N" until it is bound. In events, exports and the protocol the number is stored in fields named `terminal` (e.g. `SeatBound.terminal`, `players.csv.terminal`), kept for compatibility. |
 | **Seat** | One of the 4 player positions (1–4). A client is *bound* to a seat by the facilitator. |
 | **Participant code** | Random pseudonymous id (`WK-XXXX-XXXX-C`) generated when a seat is bound. Used for takedown requests. |
@@ -67,6 +69,11 @@ Design principles:
 | **Round rule** | Plug-in that decides what counts as a round and when it is complete. |
 | **Validator** | Plug-in that accepts or rejects an intent (a game-design hook). |
 | **Composite** | The facilitator's overlay of all four views on one map. |
+| **Fake player** | A test client the server creates itself in a session with real players (setup step 07). It connects over the network like a browser and plays at random, but its seat is logged as fake, gets no participant code and skips onboarding. |
+| **Simulated session** | A session where software agents play every seat instead of people (setup step 03: *Simulated players*). |
+| **Agent** | The simulated player in one seat. It sees what a player of that seat would see and acts through the same rules. |
+| **Agent policy** | The code that decides what an agent does on its turn (`PlayerPolicy`, § 14). The rules for simulations are written as policies. |
+| **Simulation database** | `data/wkwa-sim.db`: where simulated sessions are stored, separate from the participant database `data/wkwa.db`. |
 
 ## 3. System overview
 
@@ -84,11 +91,13 @@ flowchart LR
       NET["net<br/>Socket.IO namespaces<br/>player and facilitator"]
       API["api<br/>REST endpoints"]
       SM["SessionManager<br/>validate, append, reduce, broadcast"]
+      SIM["SimulationRunner<br/>agents of a simulated session"]
       RULES["rules engine (shared)<br/>validators, round rules,<br/>reducer, projections"]
       STORE["db<br/>eventStore, telemetryStore"]
       GDPR["export and gdpr<br/>CSV/JSON, codebook,<br/>erase, anonymise, print"]
     end
-    DB[("data/wkwa.db<br/>SQLCipher-encrypted")]
+    DB[("data/wkwa.db<br/>participants<br/>SQLCipher-encrypted")]
+    SDB[("data/wkwa-sim.db<br/>simulations<br/>SQLCipher-encrypted")]
     EXP(["exports/ folder"])
   end
   P1 <-->|WebSocket| NET
@@ -98,11 +107,14 @@ flowchart LR
   F <-->|WebSocket| NET
   F -->|HTTP| API
   NET --> SM
+  SIM -->|"intents, like a player"| SM
+  SIM <-->|"playerView, policies"| RULES
   SM <--> RULES
   SM --> STORE
   API --> GDPR
   API --> STORE
   STORE --> DB
+  STORE -->|"simulated sessions"| SDB
   GDPR --> EXP
 ```
 
@@ -114,7 +126,9 @@ flowchart LR
 | `api` | Fastify REST | Session listing, exports, printables (key sheet page, takedown-card PDFs), erasure, session deletion. |
 | `SessionManager` | TypeScript | Owns the live `GameState`. Turns intents and commands into events, appends them, then pushes projections. |
 | Rules engine | `packages/shared` (pure TS) | Validators, round rules, reducer, projections. The server, the client (replay) and the tests share the same code. |
-| `db` | better-sqlite3-multiple-ciphers | Encrypted SQLite (SQLCipher). Append-only `events`, `telemetry`, plus `sessions`, `erasures`, `exports`, `meta`. |
+| `db` | better-sqlite3-multiple-ciphers | Encrypted SQLite (SQLCipher). Append-only `events`, `telemetry`, plus `sessions`, `erasures`, `exports`, `meta`. Two files with the same schema and passphrase: the participant database and the simulation database (`SessionStores` knows which session is where). |
+| `FakePlayers` | TypeScript + socket.io-client | Starts and stops the fake players of a real session: network clients of this same server whose terminal keys the server registers before they connect, so their seats are marked fake. |
+| `SimulationRunner` | TypeScript | Plays the agents of an attached simulated session: gives each agent a turn, asks its policy for an action and passes it to `SessionManager.intent` (§ 14). |
 | `export` / `gdpr` | TypeScript | CSV/JSON exports with a generated codebook, anonymisation, erasure, backups, printable key sheet and cards. |
 
 ## 4. Code layout
@@ -129,9 +143,11 @@ flowchart TB
     S3["rules<br/>reducer, validators, roundRules"]
     S4["projections<br/>playerView, facilitatorView"]
     S5["docgen, exportColumns"]
+    S6["simulation<br/>PlayerPolicy, registry,<br/>built-in policies"]
     S3 --> S2
     S4 --> S3
     S5 --> S2
+    S6 --> S4
   end
   server["apps/server<br/>Fastify, Socket.IO, SQLCipher, CLI, bots"] --> shared
   client["apps/client<br/>React, Vite<br/>player page + facilitator page"] --> shared
@@ -150,8 +166,9 @@ flowchart TB
 | `packages/shared/src/state.ts` | `GameState` and derived helpers |
 | `packages/shared/src/rules/` | `reducer.ts`, `validators.ts`, `roundRules.ts` |
 | `packages/shared/src/projections.ts` | `playerView`, `facilitatorView` |
+| `packages/shared/src/simulation/` | `policy.ts` (the `PlayerPolicy` interface, registry, helpers for writing policies), `policies.ts` (built-in policies `random` and `idle`) |
 | `packages/shared/src/docgen.ts`, `exportColumns.ts` | Documentation and codebook generation; export file contract |
-| `apps/server/src/` | `index.ts` (boot), `cli.ts`, `app.ts`, `content.ts` (scenario/config loading), `db/` (SQLCipher, store), `session/SessionManager.ts`, `net/hub.ts` (Socket.IO), `api/` (REST), `gdpr/` (exporter, erasure, print pages), `tools/` (bots) |
+| `apps/server/src/` | `index.ts` (boot), `cli.ts`, `app.ts`, `content.ts` (scenario/config loading), `db/` (SQLCipher, store, `stores.ts`: participant and simulation database), `session/SessionManager.ts`, `simulation/SimulationRunner.ts` (agents), `fake/FakePlayers.ts` (fake players), `net/hub.ts` (Socket.IO), `api/` (REST), `gdpr/` (exporter, erasure, print pages), `tools/` (bots) |
 | `apps/client/src/ui/` | Design system: `tokens.ts` (Catppuccin Latte/Mocha → semantic colour tokens, contrast-tested), `theme.css` (TUI base styles), `crt.css` (subtle CRT layer), components (`Panel`, `Button`, `Popup`, `useConfirm`, `Stepper`, `StatusTag`, `AsciiProgress`, …), `Icon.tsx` + `icons.ts` (semantic Iconoir icons), `prefs.ts` + `DisplaySettings.tsx` (per-browser display settings: colours, font, text size, animations). Rules: [AESTHETIC-RULES.md](AESTHETIC-RULES.md) |
 | `apps/client/src/facilitator/` | Manager shell (`App.tsx`: top bar, LIVE indicator, tabs, status bar, shortcuts), `setup/` (10-step wizard), `live/` (lifecycle, NEXT, tools, wrap-up), `seats.tsx`, `Composite.tsx`, `EventLog.tsx`, `Timeline.tsx`, `Replay.tsx`, `Database.tsx` |
 | `apps/client/src/player/` | Player screens (waiting, onboarding with stepper, game, end) and the DISPLAY panel; display settings are per browser (`ui/prefs.ts`), never from or to the server |
@@ -239,11 +256,17 @@ stateDiagram-v2
 
 When the facilitator ends the game early, the server records `RoundCompleted` (reason `facilitator`) followed by `GameCompleted` (reason `facilitator`).
 
+A **simulated session** (§ 14) follows the same phases. Its seats are filled by agents when it is created, and *Start simulation* records `OnboardingStarted` with no steps and `RoundStarted` for round 1 in one command, so the `onboarding` phase lasts zero time.
+
 ## 7. Seat onboarding
 
 ```mermaid
 stateDiagram-v2
   [*] --> unbound
+  unbound --> agent: AgentBound (simulated session, at creation)
+  agent --> playing: RoundStarted
+  unbound --> fake: SeatBound with fake true (no code)
+  fake --> playing: RoundStarted
   unbound --> bound: SeatBound (code generated)
   bound --> unbound: SeatUnbound (lobby only)
   bound --> consent: OnboardingStarted
@@ -268,6 +291,8 @@ stateDiagram-v2
 - If a player **declines** consent, the seat is blocked and the facilitator is alerted. Round 1 cannot start until every active seat is ready. The decliner's remaining records can be erased afterwards (see [DATA-MANAGEMENT.md § 7](DATA-MANAGEMENT.md#7-consent-design)).
 - A **withdrawn** seat is excluded from round completion and its intents are rejected (`seat_inactive`).
 - *Unbound → bound* happens only in the lobby. Once onboarding has started, seats are locked.
+- A **fake player** (a test client the server created, § 13) goes *unbound → fake*: `SeatBound` with `fake: true` and no participant code. It skips consent, demographics and briefing, so no answers are ever made up, and counts as ready as soon as onboarding starts.
+- In a **simulated session** every seat goes *unbound → agent* when the session is created (`AgentBound`). Agents have no participant code and no onboarding, and a browser can never be bound to their seats.
 
 ## 8. Projections: who sees what
 
@@ -345,6 +370,7 @@ Clients estimate their clock offset with an NTP-style exchange (5 samples on con
 ## 11. Persistence, recovery and reproducibility
 
 - The **event log is the database of record.** `GameState` is never persisted; it is rebuilt from the log whenever a session is loaded.
+- **Two database files.** Sessions with participants live in `data/wkwa.db`, simulated sessions in `data/wkwa-sim.db` (same schema, same passphrase). Every API call and *Resume* finds the right file from the session id.
 - **Server restart:** start the server again, enter the passphrase, then use *Resume* on the dashboard (`session:resume`). The server broadcasts `rehello`, and every player browser re-claims its seat with the reconnect token stored in `localStorage` (see [NETWORKING.md § 7](NETWORKING.md#7-disconnects-and-reconnects)). Durations keep counting from the logged timestamps.
 - **Reproducibility:** `SessionCreated` stores the full effective configuration, the scenario id, version and **SHA-256 hash**, and the harness version and git commit. Together with the event log, that is enough to replay exactly what every participant saw.
 - **Encryption at rest:** the SQLite file is encrypted with SQLCipher. The passphrase is typed at start-up and never stored (see [DATA-MANAGEMENT.md](DATA-MANAGEMENT.md#9-encryption-and-key-management)).
@@ -360,6 +386,14 @@ The harness is meant to be extended once the game design is settled. For each ex
 3. Add a unit test in `packages/shared/test/rules.test.ts`.
 
 Labels are available in the state (`state.seats[seat].k` / `.p`), so rules like "power type `Pa` may decide twice as often" are validators too.
+
+### Add an agent policy (simulated players)
+
+1. Write a policy with `definePolicy({ id, version, name, description, params, act })` in `packages/shared/src/simulation/policies.ts` (a commented template is at the top of the file). `act(view, ctx)` gets the seat's `PlayerView` and returns `{ kind, regionId }` or `null`.
+2. Add it to `BUILT_IN_POLICIES` in the same file. It then appears in setup step 03.
+3. Use `ctx.random()` for every random choice (never `Math.random()`), and `ctx.memory` for anything to remember between turns.
+4. Add a unit test in `packages/shared/test/simulation.test.ts` and run `npm run docs:generate` (§ 14 lists every policy and its parameters).
+5. Bump `version` whenever the behaviour changes. Each seat logs the version it ran with in `AgentBound`.
 
 ### Add a round rule
 
@@ -421,9 +455,26 @@ scenarios/<id>/
 | Documentation | Vitest + `npm run docs:check` | Generated blocks are up to date; every event, telemetry type and message is documented |
 | Server integration | Vitest + `socket.io-client` bots | A full 3-round game with 4 bots on a temporary encrypted DB: event counts, rejections, reconnect + auto-pause, intent deduplication, revoke, resume from the log, **no cross-view data leakage**, no codes in payloads, IP-free logs |
 | GDPR | Vitest | Wrong passphrase fails; no plaintext codes in the DB file; export files match `EXPORT_FILES` column by column; anonymised exports contain no codes; erasure removes every row, adds the register entry and never reuses seq numbers; backups are encrypted; rekey works; data folders are git-ignored |
-| Browser | Playwright (`npm run test:e2e`) | Facilitator page + 4 real player browsers through binding → consent → demographics → briefing → a round of propose/decide → end screen with code → export → replay (fresh temporary DB per run); every Mermaid diagram in the docs parses and renders |
+| Fake players | Vitest (`apps/server/test/fake.test.ts`) | Fake players in a real session: seats logged as fake without codes, no consent or demographics recorded for them, they play a full round over the network, `fake_player` / `fakeSeats` in exports, FAKE PLAYER on the key sheet and no takedown card, refused outside the lobby and in simulated sessions, a browser can never count as fake, restored after a server restart with their pace |
+| Simulated players | Vitest (`packages/shared/test/simulation.test.ts`, `apps/server/test/simulation.test.ts`) | Policy registry and parameters, the random policy's quotas and seed, agents see only their own view; a full simulated game in the simulation database only, no participant codes or consent, a run repeats exactly from its seed, per-seat policies, a failing policy is stopped and noted, simulation exports, resume after a restart |
+| Browser | Playwright (`npm run test:e2e`) | Facilitator page + 4 real player browsers through binding → consent → demographics → briefing → a round of propose/decide → end screen with code → export → replay (fresh temporary DB per run); a simulated session through setup (no binding or key sheet) → LIVE → export → DATABASE › Simulations; a real session with one browser and three fake players → round → wrap-up (one takedown card) → marked in DATABASE; every Mermaid diagram in the docs parses and renders |
 
-**Bots** (`npm run bots -- --count 3`) are simulated players. They connect like real browsers, complete onboarding and propose/decide at random within their quotas. Use them to rehearse a session alone: run 3 bots, play the fourth seat yourself, and watch the dashboard.
+Three kinds of non-human players exist, for different purposes:
+
+| | Bots (`npm run bots`) | Fake players | Simulated players (agents) |
+| --- | --- | --- | --- |
+| Started by | a separate command | the server, from setup step 07 | the server, when a simulated session is created |
+| Connect over the network | yes, like a browser | yes, like a browser (loopback) | no, they run inside the server |
+| Session type | real | real | simulated |
+| Onboarding | consent, demographics, briefing (made-up answers) | skipped | none |
+| Participant code | yes (`WK-…`) | none | none |
+| Marked in the data | **no**: indistinguishable from a person | `SeatBound.fake`, `players.csv` `fake_player`, `session.json` `fakeSeats` | `AgentBound`, simulation database |
+| Stored in | participant database | participant database | simulation database |
+| Use | load tests, `--auto` rehearsals | trying a real session without a group of people | testing game rules with policies |
+
+Prefer fake players over bots for rehearsals: their data is marked, and no consent or demographic answers are invented.
+
+**Bots** (`npm run bots -- --count 3`) are test players for **real** sessions. They connect like real browsers, complete onboarding and propose/decide at random within their quotas. Use them to rehearse a session alone: run 3 bots, play the fourth seat yourself, and watch the dashboard. They are not the same as **simulated players** (§ 14): bots test the network path of a real session and are stored in the participant database, while agents run inside the server, follow a policy and are stored in the simulation database.
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
@@ -434,3 +485,105 @@ scenarios/<id>/
 | `--seats` | `4` | Seat count of the session `--auto` creates |
 | `--round-pause` | `3000` | Pause (ms) `--auto` waits between rounds |
 | `--admin-token` | – | `ADMIN_TOKEN` when the server is on another machine |
+
+## 14. Simulated players
+
+A **simulated session** is played by software **agents** instead of people. The facilitator chooses *Simulated players* in setup step 03; consent, client binding, participant codes and the key sheet are then skipped, and the session is stored in the **simulation database** (`data/wkwa-sim.db`, see [DATA-MANAGEMENT.md § 17](DATA-MANAGEMENT.md#17-simulated-sessions-and-the-simulation-database)).
+
+The rules the agents follow are not designed yet. The harness provides the frame for them: a small interface (`PlayerPolicy`), a registry, a runner that plays the agents, and two baseline policies.
+
+### How an agent takes a turn
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant T as Timer (pause from minDelayMs to maxDelayMs)
+  participant RUN as SimulationRunner
+  participant P as Agent policy (seat 2)
+  participant SM as SessionManager
+  participant DB as Simulation database
+  participant F as Facilitator dashboard
+  T->>RUN: seat 2's turn
+  RUN->>RUN: round active, not paused, seat active?
+  RUN->>P: act(playerView of seat 2, context)
+  alt returns an action
+    P-->>RUN: propose R07
+    RUN->>SM: intent(seat 2, propose R07), like a player's click
+    SM->>SM: same validators and quotas
+    SM->>DB: append ProposalMade or IntentRejected
+    SM-->>RUN: ack
+    RUN->>P: onFeedback(accepted or rejected) [optional]
+    SM->>F: push dashboard
+  else returns null (pass)
+    P-->>RUN: null
+  end
+  RUN->>T: schedule seat 2's next turn
+```
+
+- **Same information as a person.** The policy gets the seat's `PlayerView`: the projection a player's browser would receive (§ 8), with only its own view's data. Information asymmetry between seats holds for agents too.
+- **Same rules as a person.** An agent cannot change the state; it can only return one action per turn, which goes through `SessionManager.intent`, the validators and quotas, and is logged with the same event types (`ProposalMade`, `DecisionMade`, `IntentRejected`). Facilitator controls (pause, end round, revoke, withdraw, labels) work as in a real session.
+- **Turns.** While a round is running and not paused, each agent gets a turn after a pause drawn between `simulation.minDelayMs` and `maxDelayMs`. After a pass (or an error) it is asked again after at least 250 ms. Rounds end by the round rule as usual; later rounds start by the facilitator or automatically (`roundAdvance`).
+- **Errors.** If a policy throws three times in a row, its agent stops and a `SessionNote` (actor `system`) records why. The rest of the session carries on.
+
+### Lifecycle of a simulated session
+
+```mermaid
+flowchart LR
+  C["session:create<br/>players = simulated"] --> E1["SessionCreated<br/>config with seed"]
+  E1 --> E2["AgentBound × seats<br/>policy, version, params, seed"]
+  E2 --> L["LabelsAssigned<br/>(step 08, as usual)"]
+  L --> S["simulation:start"]
+  S --> E3["OnboardingStarted (no steps)<br/>RoundStarted 1"]
+  E3 --> R["agents play<br/>rounds as configured"]
+  R --> G["GameCompleted"]
+  G --> X["export to exports/simulations/<br/>SessionClosed"]
+```
+
+### Reproducibility
+
+| What | Where it is logged |
+| --- | --- |
+| Policy, its version and effective parameters per seat | `AgentBound` |
+| Session seed (drawn at creation when left empty) | `SessionCreated.config.simulation.seed` |
+| Seed of one agent | `AgentBound.seed` = session seed + `:` + seat |
+| Pause range | `SessionCreated.config.simulation` |
+
+Each agent's random choices come from its own seeded stream (`ctx.random`); the pauses use a separate stream, so the pace never changes the choices. With both pauses set to **0** the agents take turns in a fixed seat order, and a run with the same seed, settings and policy versions **repeats exactly** (a test checks this). With real-time pauses the choices are still seeded, but which agent acts first can depend on timer precision. After a server restart the agents continue with fresh streams and empty memory.
+
+### Writing a policy
+
+```ts
+export const cautiousPolicy = definePolicy({
+  id: "cautious",
+  version: "1",
+  name: "Cautious",
+  description: "What it does, in one or two sentences.",
+  params: z.object({ threshold: z.number().min(0).max(1).default(0.3).describe("…") }),
+  act(view, ctx) {
+    if (!canAct(view)) return null;            // round running, not paused, not withdrawn
+    // view.content: this seat's own data · view.highlights: what is on the map
+    // ctx.params, ctx.random(), ctx.memory, kindsWithQuota(view), pick(list, ctx.random)
+    return null;                               // or { kind: "propose", regionId: "R07" }
+  },
+});
+```
+
+See [§ 12 Add an agent policy](#add-an-agent-policy-simulated-players) for where to register it. The table below is generated from the registered built-in policies.
+
+<!-- BEGIN GENERATED: simulation-policies -->
+<!-- Generated by `npm run docs:generate` from packages/shared — do not edit by hand. -->
+
+| Policy | Version | Name | What it does |
+| --- | --- | --- | --- |
+| `random` | 1 | Random | Baseline. On each turn it proposes or decides on a uniformly random region while it has quota left. It ignores what its map view shows. |
+| `idle` | 1 | Idle | Never acts. Use it for a seat that only watches, or to test time limits and rounds the facilitator ends. |
+
+**`random` parameters** (`simulation.params.random`):
+
+| Parameter | Type | Default | Description |
+| --- | --- | --- | --- |
+| `proposeBias` | `number 0–1` | `0.5` | Chance of proposing rather than deciding when both are still possible |
+
+**`idle` parameters** (`simulation.params.idle`): none.
+
+<!-- END GENERATED: simulation-policies -->

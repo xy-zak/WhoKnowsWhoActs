@@ -26,6 +26,8 @@ Field-level detail of every logged record is in [DATA-TYPES.md](DATA-TYPES.md).
 14. [Risk assessment (DPIA-style)](#14-risk-assessment-dpia-style)
 15. [Checklist for the ethics committee / privacy officer](#15-checklist-for-the-ethics-committee--privacy-officer)
 16. [Command reference](#16-command-reference)
+17. [Simulated sessions and the simulation database](#17-simulated-sessions-and-the-simulation-database)
+18. [Fake players in real sessions](#18-fake-players-in-real-sessions)
 
 ---
 
@@ -37,6 +39,8 @@ Field-level detail of every logged record is in [DATA-TYPES.md](DATA-TYPES.md).
 - **Takedown:** quoting the code (or giving a name, which is looked up on the key sheet) lets the researcher erase every record of that participant with a single command.
 - **Not collected:** names, e-mail addresses, IP addresses, device or browser details, pointer traces, free text, audio/video.
 - **Publication:** only anonymised exports (codes replaced by unlinkable ids, after the key sheet is destroyed).
+- **Test sessions:** *fake players* (test clients the server creates) can fill seats of a real session; they are marked fake, get no code and no made-up consent or answers (§ 18).
+- **Simulations:** sessions played by software agents instead of people go into a **separate database** (`data/wkwa-sim.db`, same encryption and passphrase). They contain no personal data and never mix with participants' data (§ 17).
 
 ## 2. Roles and legal basis
 
@@ -70,6 +74,8 @@ Field-level detail of every logged record is in [DATA-TYPES.md](DATA-TYPES.md).
 | Export register / manifest | Server | Know which exports contain a participant | Pseudonymous (hashes) | `exports`, `manifest.json` | As long as the exports exist |
 | Server log | Server | Debugging | Non-personal (no IPs, no payloads, no query strings) | `data/logs/server.log` | Delete after the study |
 | **Real name** | Researcher, by hand | Find the code if a participant loses their card | **Personal** | **Paper key sheet only** | Until the key destruction date |
+| Fake players: which seats were played by a test client the server created, and their pace; their actions | Server (setup step 07) | Try a real session without a group of people | Non-personal (no human involved; **no code, no consent, no answers**) | Participant database, flagged: `SeatBound.fake`, `players.csv` `fake_player`, `session.json` `fakeSeats` | With the session it belongs to (§ 18) |
+| Simulated sessions: agent policy, version, parameters and seed per seat; the agents' actions and timings | Server (simulation runner) | Test game rules and analyses on synthetic play | Non-personal (no human involved) | **Simulation database** `data/wkwa-sim.db` (`events`, `sessions`); exports in `exports/simulations/` | As the research needs (§ 17) |
 
 ## 4. Data flow and trust boundaries
 
@@ -84,15 +90,21 @@ flowchart LR
   end
   subgraph Z3["Zone 3: facilitator laptop<br/>full-disk encryption recommended"]
     MEM["Server memory<br/>live game state"]
-    DB[("data/wkwa.db<br/>SQLCipher AES-256")]
+    DB[("data/wkwa.db<br/>participants<br/>SQLCipher AES-256")]
+    AG["Simulation runner<br/>agents, no people"]
+    SDB[("data/wkwa-sim.db<br/>simulations<br/>same cipher and passphrase")]
     LOG["server.log<br/>no IPs, no payloads"]
     EXP["exports/<br/>plaintext CSV and JSON<br/>pseudonymised"]
+    SEXP["exports/simulations/<br/>no personal data"]
   end
   subgraph Z4["Zone 4: institutional storage"]
     RDS["Research drive<br/>access-controlled"]
     ARCH["Archive or repository<br/>anonymised exports only"]
   end
   UI --> WS --> MEM --> DB
+  AG --> MEM
+  MEM -->|"simulated sessions only"| SDB
+  SDB --> SEXP
   MEM --> LOG
   DB -->|"standard export"| EXP
   EXP -->|"manual copy, then delete local copy"| RDS
@@ -166,6 +178,7 @@ stateDiagram-v2
 - **Nothing behavioural before consent.** The client only switches on telemetry once consent is given, and the server *also* drops any telemetry batch from a seat whose consent status is not `given` (or `skipped`, if the consent step is disabled). Before consent, only operational events exist for a seat: `SeatBound`, `PlayerConnected` / `PlayerDisconnected`, plus the session-level `LabelsAssigned` and `OnboardingStarted`.
 - **Declining.** If any required item is unticked, the player sees a thank-you screen and cannot continue. The seat is flagged on the dashboard and round 1 cannot start. What remains for that code is the operational events above plus `ConsentRecorded` with `consented: false`. **Recommended:** after the session, erase the decliner's code (manager *DATABASE → 3 · Takedown / erasure*, or `npm run cli -- erase --code …`) unless your ethics committee wants decline records kept; then replace the participant or run the session with fewer seats.
 - **Withdrawal during the session.** The facilitator marks the seat as withdrawn (`ParticipantWithdrawn`). From then on, the seat's intents are rejected and it is excluded from round completion. Whether data collected *before* withdrawal is kept or erased follows the consent text. To erase it, run the erasure procedure.
+- **Fake players skip consent.** A fake player is a test client the server created itself (§ 18), not a person, so it gets no consent screen and no `ConsentRecorded` is made up for it. Only the server can create one: its client key is registered on the server before it connects, and a browser cannot claim to be fake. A real participant can therefore never be moved past the consent screen this way.
 - **Changing the text:** edit `consent.md` / `consent.json` and **bump `version`**.
 
 ## 8. Data minimisation decisions
@@ -189,11 +202,11 @@ Facilitator notes and broadcasts are free text written by the researcher: **neve
 | Aspect | Design |
 | --- | --- |
 | Algorithm | SQLCipher 4 format (AES-256, PBKDF2-HMAC-SHA512 key derivation), via `better-sqlite3-multiple-ciphers` (`cipher=sqlcipher`, `legacy=4`) |
-| Scope | The whole database file, including the WAL journal. Telemetry, events, codes and the server secret are all inside. |
-| Passphrase entry | Typed at a hidden prompt on `npm start`. Never written to disk, logs or config. `WKWA_DB_PASSPHRASE` exists **only for development and automated tests**. |
+| Scope | The whole database file, including the WAL journal. Telemetry, events, codes and the server secret are all inside. The simulation database (`data/wkwa-sim.db`) is encrypted the same way. |
+| Passphrase entry | Typed at a hidden prompt on `npm start`. Never written to disk, logs or config. `WKWA_DB_PASSPHRASE` exists **only for development and automated tests**. One passphrase opens both databases: the participant database and the simulation database. |
 | Deleted data | `PRAGMA secure_delete=ON` overwrites deleted content. Erasure also runs a WAL checkpoint and `VACUUM`. |
 | Wrong passphrase | The server refuses to start ("file is not a database"). |
-| Change the passphrase | `npm run cli -- rekey` (asks for the old and the new passphrase) |
+| Change the passphrase | `npm run cli -- rekey` (asks for the old and the new passphrase). It changes **both** databases, so they keep sharing one passphrase; the server refuses to start if they differ. |
 | Backups | `npm run cli -- backup --out FILE` writes an **encrypted** copy (same passphrase). Store backups on institutional storage. |
 | Integrity check | `npm run cli -- verify` (opens the DB, checks the schema and event sequences) |
 | **Lost passphrase** | **The data cannot be recovered. There is no backdoor.** Keep the passphrase in a password manager, and/or in a sealed envelope held by the supervisor. |
@@ -277,6 +290,7 @@ Register entries hold only hashes, so keep the takedown correspondence (or a lis
 | --- | --- | --- | --- | --- |
 | Standard | `npm run cli -- export --session S-…` or *Export* button | `exports/<sessionId>/<exportId>/` | participant codes | Analysis by the research team |
 | Anonymised | `npm run cli -- anonymise --session S-…` | `exports/<sessionId>/anon-<id>/` | random `A-XXXXXX`, **mapping discarded** | Archiving / open data / sharing |
+| Simulation | `npm run cli -- export --sim --session SIM-…` or *Export* (DATABASE → Simulations) | `exports/simulations/<sessionId>/<exportId>/` | none (agents have no code; `players.csv` names the agent policy) | Testing rules and analysis scripts |
 
 Each export folder contains `session.json`, `players.csv`, `actions.csv`, `events.csv`, `telemetry.csv`, `consent.csv`, `demographics.csv`, `manifest.json` and a generated **`codebook.md`** that describes every file and column (see [DATA-TYPES.md § Export files](DATA-TYPES.md#export-files)). `events.csv` never contains demographic answers; those are only in `demographics.csv`, so the event log can be shared without them.
 
@@ -299,6 +313,7 @@ Each export folder contains `session.json`, `players.csv`, `actions.csv`, `event
 | Anonymised exports | Per institutional policy (often 10 years) | Repository policy |
 | Server log | End of the data collection period | Delete `data/logs/` |
 | Erasure register | As long as any DB copy or backup exists | Deleted with the DB |
+| Simulation database and its exports | As long as useful; no personal data, so no GDPR retention limit | Delete sessions in DATABASE → Simulations, or the file `data/wkwa-sim.db` |
 
 ## 13. Personal-data classes per record type
 
@@ -311,7 +326,7 @@ Generated from the metadata of each record type (see [DATA-TYPES.md](DATA-TYPES.
 | --- | --- | --- |
 | pseudonymous · sensitive | `ConsentRecorded`, `DemographicsSubmitted` | — |
 | pseudonymous | `SeatBound`, `SeatUnbound`, `LabelsAssigned`, `BriefingAcknowledged`, `PlayerConnected`, `PlayerDisconnected`, `ProposalMade`, `DecisionMade`, `IntentRejected`, `ActionRevoked` | `screen_view`, `region_hover`, `region_inspect`, `map_view_change`, `tool_select`, `action_draft`, `focus_change`, `visibility_change`, `idle`, `state_received` |
-| non-personal | `SessionCreated`, `SessionNote`, `OnboardingStarted`, `RoundStarted`, `RoundCompleted`, `GamePaused`, `GameResumed`, `FacilitatorBroadcast`, `ParticipantWithdrawn`, `GameCompleted`, `SessionClosed`, `SessionAborted` | `clock_sync` |
+| non-personal | `SessionCreated`, `SessionNote`, `AgentBound`, `OnboardingStarted`, `RoundStarted`, `RoundCompleted`, `GamePaused`, `GameResumed`, `FacilitatorBroadcast`, `ParticipantWithdrawn`, `GameCompleted`, `SessionClosed`, `SessionAborted` | `clock_sync` |
 
 <!-- END GENERATED: data-class-summary -->
 
@@ -335,6 +350,10 @@ Likelihood (L) and impact (I): low / medium / high, after mitigation.
 | 12 | Backup restore brings back erased data | L | M | Erasure register; re-apply procedure (§ 10); prefer deleting old backups |
 | 13 | Logs leak personal data | L | L | Request serializer logs method and path only (no IP, host, query string, user agent); payloads never logged |
 | 14 | Software bug corrupts or loses events | L | M | Append-only log; `verify` command; backups; tests of full games |
+| 15 | Simulated data mistaken for, or mixed with, participant data (research validity) | L | H | Separate database file and export folder; `SIM-` session ids; `players` setting and `AgentBound` events in the log; agents cannot take a client's seat and browsers cannot take an agent's |
+| 16 | A participant ends up in a simulated session (no consent shown) | L | M | Simulated seats are filled by agents at creation, so no client can be bound; the setup screen and LIVE show **SIMULATION**; `verify --sim` reports any participant code in the simulation database |
+| 17 | Fake-player test data analysed as participant data (research validity) | L | H | Every fake seat is flagged in the log (`SeatBound.fake`), in `players.csv` (`fake_player`) and `session.json` (`fakeSeats`); fake seats have no participant code; DATABASE, LIVE and the CLI show the sessions and seats with fake players. Filter on `fake_player = 0`, or delete test sessions |
+| 18 | Consent skipped for a real person by marking them fake | L | H | Only clients the server started itself count as fake (keys registered server-side); the flag can never come from a browser |
 
 ## 15. Checklist for the ethics committee / privacy officer
 
@@ -357,11 +376,11 @@ Likelihood (L) and impact (I): low / medium / high, after mitigation.
 
 ## 16. Command reference
 
-All commands prompt for the database passphrase.
+All commands prompt for the database passphrase. Add `--sim` to work on the simulation database instead (`sessions`, `export`, `delete-session`, `deletions`, `backup`, `verify`); the participant commands (`lookup`, `erase`, `erasures`) refuse it.
 
 | Command | Purpose |
 | --- | --- |
-| `npm run cli -- sessions` | List sessions |
+| `npm run cli -- sessions [--sim]` | List sessions (of the simulation database with `--sim`) |
 | `npm run cli -- lookup --code C` | Find sessions and row counts for a participant code |
 | `npm run cli -- export --session S` | Standard (pseudonymised) export |
 | `npm run cli -- anonymise --session S` | Anonymised export |
@@ -370,5 +389,49 @@ All commands prompt for the database passphrase.
 | `npm run cli -- delete-session --session S [--yes] [--delete-exports]` | Delete an entire session (typed confirmation unless `--yes`) |
 | `npm run cli -- deletions` | Show the session-deletion register |
 | `npm run cli -- backup --out FILE` | Encrypted backup copy of the DB |
-| `npm run cli -- rekey` | Change the DB passphrase |
-| `npm run cli -- verify` | Integrity check |
+| `npm run cli -- rekey` | Change the passphrase of both databases |
+| `npm run cli -- verify [--sim]` | Integrity check (with `--sim`: also checks that no participant code is in the simulation database) |
+
+## 17. Simulated sessions and the simulation database
+
+The facilitator can choose **simulated players** in setup step 03. Software agents then play every seat (see [ARCHITECTURE.md § 14](ARCHITECTURE.md#14-simulated-players)). No person takes part, so a simulated session collects **no personal data**:
+
+| Real session | Simulated session |
+| --- | --- |
+| Clients are bound to seats; each seat gets a participant code `WK-…` | Each seat gets an agent (`AgentBound`); no client, **no participant code** |
+| Consent, demographics, briefing | None (the onboarding settings are switched off) |
+| Key sheet, takedown cards, erasure | Not applicable (DATABASE hides them; the API refuses them) |
+| UI telemetry from the browser | None: agents send no telemetry |
+| `data/wkwa.db`, `exports/` | `data/wkwa-sim.db`, `exports/simulations/` |
+| Session id `S-YYYYMMDD-XXXX` | Session id `SIM-YYYYMMDD-XXXX` |
+
+```mermaid
+flowchart TB
+  SETUP["Setup step 03<br/>players: real or simulated"] -->|real| R["SessionManager<br/>clients, consent, codes"]
+  SETUP -->|simulated| S["SessionManager<br/>agents in every seat"]
+  R --> RDB[("data/wkwa.db<br/>participant database")]
+  S --> SDB[("data/wkwa-sim.db<br/>simulation database")]
+  RDB --> GDPR["GDPR tooling<br/>look-up, erasure,<br/>key sheet, cards"]
+  RDB --> REXP["exports/"]
+  SDB --> SEXP["exports/simulations/"]
+```
+
+Why a separate database, not a flag in the same one:
+
+- **Research validity.** Synthetic sessions can never be counted as participant sessions by mistake: they are in another file, have another id prefix and are exported to another folder.
+- **Data protection.** The participant database, its backups and its retention stay exactly as described in this document. The simulation database can be kept, shared or deleted without touching participants' data.
+- **Same safeguards anyway.** The simulation database uses the same schema, encryption and passphrase, so the same tools work on it (`--sim`), and nothing changes if a simulation is ever run on a laptop that also holds real data.
+
+The agents only see what a player of their seat would see (the same server-side projection), and every action they take is logged with the same event types as a person's. A simulated session can be replayed and exported like any other.
+
+## 18. Fake players in real sessions
+
+To try a session with real players when no group of people is present, the facilitator can let the server create **fake players** in setup step 07 (*Fake player* per seat, or *Fill empty seats with fake players*). A fake player is a test client: it connects to the server over the network exactly like a player's browser and proposes and decides at random. It is not a person:
+
+- **Marked in the data.** Its seat is logged with `SeatBound.fake = true` (and the pace it played at). Exports carry the mark in `players.csv` (`fake_player = 1`) and `session.json` (`fakeSeats`); DATABASE shows the session with a `fake ×N` tag, the CLI's `sessions` lists the fake seats, and LIVE shows **FAKE PLAYERS ×N**.
+- **No participant code.** It never appears in a participant look-up, an erasure or on a takedown card. The key sheet lists the seat as *FAKE PLAYER* with no name.
+- **No made-up consent or answers.** Onboarding is skipped for its seat, so the participant database never holds a consent record or demographic answers of someone who does not exist.
+- **No telemetry.** Fake players send no interface telemetry.
+- **Same database.** The session stays in the participant database: it is a real session, possibly with real participants in the other seats. Delete pure test sessions afterwards (DATABASE → Delete), or leave the marked rows out of analyses.
+
+Only the server can make a client fake (see § 7), so a participant's browser can never be treated as one.

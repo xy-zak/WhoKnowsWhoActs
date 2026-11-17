@@ -137,6 +137,27 @@ sequenceDiagram
 
 The facilitator matches the **Client N** shown on each physical screen to a seat on the dashboard. Binding generates the participant code; it is shown to the facilitator immediately (for the key sheet) and to the player only on the end screen.
 
+**Fake players.** In setup step 07 the facilitator can let the server create *fake players* for empty seats (`fake:add`). The server starts a socket.io client inside its own process, which connects to its own `/player` namespace over the loopback interface (or the configured `HOST`) and goes through exactly the steps in the diagram above. Before that client connects, the server registers its random terminal key, so the hub marks its client as fake (the dashboard's client list shows `fake: true`) and its `SeatBound` carries `fake: true` and no participant code. Fake players skip onboarding and send no telemetry. After a server restart the server starts them again; they re-claim their seats with their seat tokens, like a reloaded browser.
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant F as Facilitator dashboard
+  participant H as Hub (server)
+  participant FP as Fake player (client inside the server process)
+  F->>H: fake:add (seats null = every empty seat, pace fast)
+  H->>H: register a random terminal key as fake
+  H->>FP: start socket.io client with that key
+  FP->>H: connect to /player over loopback, hello (terminalKey)
+  H-->>FP: terminal (7), client marked fake
+  H->>H: SeatBound (seat 3, terminal 7, fake true, no code), PlayerConnected
+  H-->>FP: bound, state (PlayerView)
+  H-->>F: ack (seats [1, 2, 3]), dashboard
+  Note over FP,H: during rounds: intent messages like a browser, at random
+```
+
+A **simulated session** has no binding at all: its seats are taken by agents that run inside the server (`AgentBound`, see [ARCHITECTURE.md § 14](ARCHITECTURE.md#14-simulated-players)). They send no messages over the network, and `seat:bind` is refused. Player browsers that connect meanwhile stay on the waiting screen. The facilitator starts the game with `simulation:start` instead of `onboarding:start`.
+
 ## 6. Browser identity: terminal key and seat token
 
 | Value | Created by | Stored in | Lifetime | Contains personal data? |
@@ -258,13 +279,15 @@ Every client→server payload is validated with the zod schema listed here. Inva
 
 | Message | Payload | Ack (callback) | Logged as | Description |
 | --- | --- | --- | --- | --- |
-| `session:create` | `{ scenarioId: string, config: SessionConfig, notes?: string (≤ 1000 chars) }` | `Ack<{ sessionId }>` | SessionCreated | Create a new session from a scenario and config. |
+| `session:create` | `{ scenarioId: string, config: SessionConfig, notes?: string (≤ 1000 chars) }` | `Ack<{ sessionId }>` | SessionCreated [+ AgentBound per seat when simulated] | Create a new session from a scenario and config. With players = 'simulated' it goes into the simulation database and every seat gets an agent. |
 | `session:resume` | `{ sessionId: string }` | `Ack` | — | Re-open an unfinished session (e.g. after a server restart). |
-| `seat:bind` | `{ terminal: integer ≥ 1, seat: integer 1–4 }` | `Ack<{ participantCode }>` | SeatBound, PlayerConnected | Bind a connected client to a seat; generates the participant code. |
+| `seat:bind` | `{ terminal: integer ≥ 1, seat: integer 1–4 }` | `Ack<{ participantCode }>` | SeatBound, PlayerConnected | Bind a connected client to a seat; generates the participant code (real sessions only: simulated seats are taken by agents). |
+| `fake:add` | `{ seats?: array<integer 1–4> \| null, pace?: "normal" \| "fast" }` | `Ack<{ seats }>` | SeatBound (fake = true), PlayerConnected | Real sessions, lobby only: the server starts fake players (test clients that connect over the network like a browser) and binds them to the given seats. They skip onboarding, get no participant code and propose/decide at random. |
 | `seat:unbind` | `{ seat: integer 1–4, reason?: string (≤ 200 chars) }` | `Ack` | SeatUnbound | Remove a seat binding (lobby only). |
 | `labels:set` | `{ assignments: array<{ seat: integer 1–4, k: "Ka" \| "Kb" \| "Kc" \| "Kd", view?: string }>, pairing?: { mode: "aligned" \| "dissociated", id: integer 1–6 \| null } }` | `Ack` | LabelsAssigned (method = manual) | Set the K label of every seat (and view when viewAssignment = manual) plus the K–P pairing (aligned or dissociated D1–D6); the server derives each P. |
 | `labels:randomise` | `{ pairing?: { mode: "aligned" \| "dissociated", id: integer 1–6 \| null }, shuffleK?: boolean }` | `Ack` | LabelsAssigned (method = random, with seed) | Shuffle which seat gets which K (optional) and apply a pairing; dissociated without a number picks D1–D6 at random. |
 | `onboarding:start` | `{}` | `Ack` | OnboardingStarted | Lock seats and send players to consent / demographics / briefing. |
+| `simulation:start` | `{}` | `Ack` | OnboardingStarted (no steps), RoundStarted | Simulated sessions only: start the game with the agents (no onboarding) and begin round 1; the agents then play by their policies. |
 | `round:start` | `{}` | `Ack` | RoundStarted | Start the next round. |
 | `round:end` | `{}` | `Ack` | RoundCompleted (reason = facilitator) [+ GameCompleted after the last round] | Force-end the current round. |
 | `game:pause` | `{}` | `Ack` | GamePaused | Pause the active round. |
@@ -293,7 +316,7 @@ Server→client payload types are TypeScript interfaces in `packages/shared/src/
 
 ## 10. REST API
 
-Used by the dashboard's data pages and by scripts. **Localhost-only** unless `ADMIN_TOKEN` is set; then send `Authorization: Bearer <token>`.
+Used by the dashboard's data pages and by scripts. **Localhost-only** unless `ADMIN_TOKEN` is set; then send `Authorization: Bearer <token>`. Routes with `:id` find the session in whichever database holds it. Participant look-up and erasure only search the participant database.
 
 | Method | Path | Purpose |
 | --- | --- | --- |
@@ -302,22 +325,22 @@ Used by the dashboard's data pages and by scripts. **Localhost-only** unless `AD
 | `GET` | `/api/scenarios/:id` | Full scenario (outline + all views) for the setup preview |
 | `GET` | `/api/server-info` | Player URLs on this machine's LAN interfaces (setup step "Connect & bind") |
 | `GET` | `/api/config/session-defaults` | Default session configuration for the setup form (`config/session.default.json`, validated) |
-| `GET` | `/api/sessions` | All sessions with status |
-| `GET` | `/api/sessions/:id` | One session (metadata + reduced state) |
+| `GET` | `/api/sessions` | All sessions of both databases with status, newest first; `players` is `"real"` (participant database) or `"simulated"` (simulation database); `fakeSeats` lists seats played by fake players |
+| `GET` | `/api/sessions/:id` | One session (metadata + reduced state + `players`) |
 | `GET` | `/api/sessions/:id/events` | Full event log (for replay); demographic answers redacted |
 | `GET` | `/api/sessions/:id/telemetry` | Telemetry rows of the session (`?afterId=&limit=` for paging) |
 | `GET` | `/api/sessions/:id/scenario` | Scenario of the session (all views) + whether its files still match the recorded hash (replay) |
-| `POST` | `/api/sessions/:id/export` | Write a standard (pseudonymised) export to `exports/` |
+| `POST` | `/api/sessions/:id/export` | Write a standard (pseudonymised) export to `exports/` (simulated sessions: to `exports/simulations/`) |
 | `POST` | `/api/sessions/:id/anonymise` | Write an anonymised export to `exports/` |
-| `GET` | `/api/sessions/:id/print/keysheet` | Printable key sheet (seat → code, blank name column) |
-| `GET` | `/api/sessions/:id/cards` | Seats that have a takedown card |
+| `GET` | `/api/sessions/:id/print/keysheet` | Printable key sheet (seat → code, blank name column). 400 for a simulated session. |
+| `GET` | `/api/sessions/:id/cards` | Seats that have a takedown card. 400 for a simulated session. |
 | `GET` | `/api/sessions/:id/cards/:seat` | One takedown card as a PDF (A6, JetBrains Mono), downloaded as `takedown-card-<session>-seat<n>.pdf` |
 | `POST` | `/api/sessions/:id/delete` | Delete the entire session. Body `{ "confirm": "<session id>", "deleteExports"?: true }`. Refused (409) while it is running. |
-| `GET` | `/api/session-deletions` | Session-deletion register |
+| `GET` | `/api/session-deletions` | Session-deletion registers of both databases (`players` per entry) |
 | `GET` | `/api/participants/:code` | Look up a participant code (typos tolerated): sessions and row counts, exports containing it, earlier erasures |
 | `POST` | `/api/participants/:code/erase` | Erase all data of a code. Body `{ "confirm": "<code>", "note"?: "…" }` must repeat the code. Refused (409) while the participant is in a session that is still running. |
 | `GET` | `/api/erasures` | Erasure register |
-| `GET` | `/api/exports` | Export register |
+| `GET` | `/api/exports` | Export registers of both databases (`players` per entry) |
 
 ## 11. Security on the LAN
 
@@ -327,6 +350,7 @@ Used by the dashboard's data pages and by scripts. **Localhost-only** unless `AD
 | Remote facilitator access needed (e.g. a second laptop) | Set a long random `ADMIN_TOKEN`. The dashboard sends it as a bearer header and in the socket `auth` payload. Do not put it in URLs (URLs can end up in logs and browser history). |
 | A player reads other players' data via browser devtools | Not possible: the server never sends another view's content to a player (see [ARCHITECTURE.md § 8](ARCHITECTURE.md#8-projections-who-sees-what)). |
 | A player forges messages (e.g. acting for another seat) | The seat comes from the server-side socket binding, never from the payload. Every payload is schema-validated, and rules are enforced on the server. |
+| A browser pretends to be a fake player to skip consent | Not possible: a client is fake only if the server registered its terminal key before starting it. Nothing a client sends can set the flag. |
 | Eavesdropping on the LAN | Without TLS, traffic (game actions, consent and demographic answers, all pseudonymised) crosses the LAN **in plaintext**. Mitigate with a dedicated network you control, and/or enable TLS. |
 | Rogue devices on the network | Use WPA2/3 with a password only you know, or wired connections; switch off the router's WAN. |
 
