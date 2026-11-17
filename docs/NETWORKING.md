@@ -1,5 +1,7 @@
 # Networking
 
+*Change log: [NETWORKING-CHANGELOG.md](changelog/NETWORKING-CHANGELOG.md)*
+
 This document covers how the harness uses the network: the physical setup on session day, the logical hub-and-spoke design, how browsers are identified and reconnect, how clocks are synchronised, every message that crosses the wire, and how the LAN is secured.
 
 Related documents: [ARCHITECTURE.md](ARCHITECTURE.md), [DATA-MANAGEMENT.md](DATA-MANAGEMENT.md), [DATA-TYPES.md](DATA-TYPES.md).

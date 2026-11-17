@@ -1,5 +1,7 @@
 # Data types: everything the server logs
 
+*Change log: [DATA-TYPES-CHANGELOG.md](changelog/DATA-TYPES-CHANGELOG.md)*
+
 This is the field-level catalogue of every record the harness stores. It answers **"what exactly is being recorded, when, and about whom?"** Use it when writing the ethics application, the analysis scripts or the methods chapter.
 
 Most tables below are **generated from the schemas** in `packages/shared` (`npm run docs:generate`). The same definitions validate the data at runtime and produce the `codebook.md` inside every export, so this document cannot silently drift from what is actually logged. A test fails if it is out of date.

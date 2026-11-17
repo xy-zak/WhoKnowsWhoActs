@@ -1,5 +1,7 @@
 # Aesthetic rules
 
+*Change log: [AESTHETIC-RULES-CHANGELOG.md](changelog/AESTHETIC-RULES-CHANGELOG.md)*
+
 The rules every screen of *Who Knows, Who Acts?* follows: the facilitator manager and the player screens alike. They keep the interface **intentional and consistent**: a calm terminal (TUI) look with Catppuccin colours (plus a high-contrast theme), JetBrains Mono, Iconoir icons and CRT-style animations. When you add UI, follow these rules and go through the [checklist](#11-checklist-for-new-ui).
 
 Implementation: `apps/client/src/ui/`. That folder holds the tokens, base stylesheet, animation layer (`crt.css`) and components. Components must use the semantic tokens, components and icons defined there, **never raw colours, ad-hoc fonts or direct icon imports**.

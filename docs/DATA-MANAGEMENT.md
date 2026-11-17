@@ -1,5 +1,7 @@
 # Data management and data protection
 
+*Change log: [DATA-MANAGEMENT-CHANGELOG.md](changelog/DATA-MANAGEMENT-CHANGELOG.md)*
+
 This document explains what research data the harness collects, why, where it is stored, how participants are pseudonymised, how a takedown request is handled (even years later), and which risks remain. It is written to support a data management plan (DMP), an ethics application and the thesis methods chapter.
 
 > **Guidance, not legal advice.** The design follows common GDPR practice for academic research. The legal basis, retention period and storage locations must be confirmed with your institution's ethics committee and privacy officer. See the [checklist](#15-checklist-for-the-ethics-committee--privacy-officer). Placeholders such as `[N years]` must be filled in in `config/study.json` and `config/consent.md`.

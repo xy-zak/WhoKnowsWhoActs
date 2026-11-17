@@ -80,6 +80,8 @@ For real sessions, follow the **[session runbook](docs/SESSION-RUNBOOK.md)**.
 | [SESSION-RUNBOOK.md](docs/SESSION-RUNBOOK.md) | Step by step for running a session (setup wizard, LIVE, wrap-up), plus troubleshooting |
 | [AESTHETIC-RULES.md](docs/AESTHETIC-RULES.md) | Colour tokens and reserved meanings, typography, icons, panels, popups, wayfinding, CRT/motion, keyboard, checklist for new UI |
 
+Each document has a change log (date, commit, change, reason) in [docs/changelog/](docs/changelog/README.md), maintained with the `/update-docs` skill.
+
 ## Repository layout
 
 ```
