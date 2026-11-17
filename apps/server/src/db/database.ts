@@ -14,7 +14,7 @@ export class WrongPassphraseError extends Error {
   }
 }
 
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 
 /** A migration is SQL, or a function for data changes that need JavaScript. */
 const MIGRATIONS: Record<number, string | ((db: DB) => void)> = {
@@ -116,6 +116,10 @@ const MIGRATIONS: Record<number, string | ((db: DB) => void)> = {
       exports_json     TEXT NOT NULL,
       note             TEXT NOT NULL DEFAULT ''
     );
+  `,
+  // v5: find seat bindings (e.g. fake players for the session list) without scanning every event
+  5: `
+    CREATE INDEX events_type ON events(type, session_id, seq);
   `,
 };
 

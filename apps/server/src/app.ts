@@ -21,10 +21,7 @@ export interface AppContext {
   /** The participant database (data/wkwa.db). */
   store: Store;
   db: DB;
-  /** The simulation database (data/wkwa-sim.db): simulated sessions only, no personal data. */
-  simStore: Store;
-  simDb: DB;
-  /** Both databases; `stores.find(id)` says which one holds a session. */
+  /** Both databases (`stores.simulated` = data/wkwa-sim.db); `stores.find(id)` says which one holds a session. */
   stores: SessionStores;
   log: Logger;
   runtime: RuntimeOptions;
@@ -57,8 +54,7 @@ export async function createApp(
     throw e;
   }
   const store = new Store(db);
-  const simStore = new Store(simDb);
-  const stores = new SessionStores(store, simStore);
+  const stores = new SessionStores(store, new Store(simDb));
   const scenarios = new ScenarioLibrary(runtime.scenariosDir);
 
   const https =
@@ -116,8 +112,6 @@ export async function createApp(
     hub,
     store,
     db,
-    simStore,
-    simDb,
     stores,
     log,
     runtime,

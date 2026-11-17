@@ -1,7 +1,8 @@
 import { type GameState, type Highlight, playerView, type Scenario, seatList } from "@wkwa/shared";
 import { useMemo, useState } from "react";
 import { MapLegend, MapView } from "../map/MapView";
-import { Button, Check, ConnTag, Panel, SeatDot, StatusTag } from "../ui";
+import { Button, Check, Panel, SeatDot, StatusTag } from "../ui";
+import { OccupantTags } from "./seats";
 
 /** All views' information about one region, side by side. */
 function RegionComparison({
@@ -245,16 +246,7 @@ export function PlayerMirrors({
                 {s.k && <span className="muted">{s.k}</span>}
                 {s.p && <span className="muted">{s.p}</span>}
                 <span className="spacer" />
-                {s.agent ? (
-                  <StatusTag icon="agent" title={`Agent: ${s.agent}`}>
-                    {s.withdrawn ? "withdrawn" : "agent"}
-                  </StatusTag>
-                ) : (
-                  <>
-                    {s.fake && <StatusTag icon="fake">fake</StatusTag>}
-                    <ConnTag connected={s.connected} withdrawn={s.withdrawn} />
-                  </>
-                )}
+                <OccupantTags seat={s} />
               </div>
               <div style={{ height: 180 }}>
                 <MapView

@@ -49,6 +49,7 @@ export function applyEvent(state: GameState, ev: StoredEvent): GameState {
         bindingSeq: ev.seq,
         // a fake player is nobody: no consent is asked or recorded
         fake,
+        fakePace: fake ? (ev.payload.fakePace ?? "normal") : null,
         consent: fake ? "skipped" : "pending",
       });
       break;
@@ -69,7 +70,12 @@ export function applyEvent(state: GameState, ev: StoredEvent): GameState {
         view: s.view,
         bound: true,
         bindingSeq: ev.seq,
-        agent: ev.payload.policy,
+        agent: {
+          policy: ev.payload.policy,
+          policyVersion: ev.payload.policyVersion,
+          params: ev.payload.params,
+          seed: ev.payload.seed,
+        },
         connected: true,
         everConnected: true,
       });

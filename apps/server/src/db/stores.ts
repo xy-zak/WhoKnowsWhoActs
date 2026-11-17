@@ -1,6 +1,6 @@
 import path from "node:path";
 import type { PlayerMode } from "@wkwa/shared";
-import type { Store } from "./store";
+import type { SessionRow, SessionSummary, Store } from "./store";
 
 /** File names of the two databases in the data directory. */
 export const DB_FILES: Record<PlayerMode, string> = {
@@ -33,17 +33,37 @@ export class SessionStores {
     return players === "simulated" ? this.simulated : this.real;
   }
 
-  /** Which database holds this session? */
-  find(sessionId: string): { players: PlayerMode; store: Store } | null {
-    if (this.real.getSession(sessionId)) return { players: "real", store: this.real };
-    if (this.simulated.getSession(sessionId)) return { players: "simulated", store: this.simulated };
-    return null;
-  }
-
   all(): Array<{ players: PlayerMode; store: Store }> {
     return [
       { players: "real", store: this.real },
       { players: "simulated", store: this.simulated },
     ];
+  }
+
+  /** Which database holds this session (and its row)? */
+  find(sessionId: string): { players: PlayerMode; store: Store; row: SessionRow } | null {
+    for (const { players, store } of this.all()) {
+      const row = store.getSession(sessionId);
+      if (row) return { players, store, row };
+    }
+    return null;
+  }
+
+  /** Rows from both databases, each tagged with the database it came from. */
+  collect<T>(fn: (store: Store) => T[]): Array<T & { players: PlayerMode }> {
+    return this.all().flatMap(({ players, store }) => fn(store).map((x) => ({ ...x, players })));
+  }
+
+  /** Sessions of both databases, newest first. */
+  listSessions(): Array<SessionSummary & { players: PlayerMode }> {
+    return this.collect((s) => s.listSessions()).sort((a, b) => b.createdWall.localeCompare(a.createdWall));
+  }
+
+  /** The most recently created session (of either database) that has not ended. */
+  latestUnfinished(): { id: string; createdWall: string } | null {
+    const rows = this.all()
+      .map(({ store }) => store.latestUnfinishedSession())
+      .filter((r) => r !== null);
+    return rows.sort((a, b) => b.createdWall.localeCompare(a.createdWall))[0] ?? null;
   }
 }

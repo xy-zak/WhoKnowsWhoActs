@@ -51,7 +51,7 @@ describe("fake players (real sessions)", () => {
 
   it("stores the session in the participant database", () => {
     expect(srv.ctx.store.getSession(sessionId)).toBeDefined();
-    expect(srv.ctx.simStore.getSession(sessionId)).toBeUndefined();
+    expect(srv.ctx.stores.simulated.getSession(sessionId)).toBeUndefined();
   });
 
   it("logs which seats are fake, with no participant code for them", () => {

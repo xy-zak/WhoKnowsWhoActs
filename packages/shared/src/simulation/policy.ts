@@ -1,7 +1,7 @@
 import type { z } from "zod";
 import { PolicyIdSchema, type SimulationConfig } from "../config";
 import { ACTION_KINDS, type ActionKind } from "../labels";
-import type { PlayerView } from "../projections";
+import { type PlayerView, quotaLeft } from "../projections";
 
 /* ═══════════════════════════════════════════════════════════════════════════
  * SIMULATED PLAYERS — the contract between the harness and an agent policy.
@@ -155,8 +155,7 @@ export function canAct(view: PlayerView): boolean {
 
 /** Actions of `kind` this seat may still take this round (Infinity when unlimited). */
 export function actionsLeft(view: PlayerView, kind: ActionKind): number {
-  const q = view.me.quota[kind];
-  return q.limit === null ? Number.POSITIVE_INFINITY : Math.max(0, q.limit - q.used);
+  return quotaLeft(view.me.quota[kind]);
 }
 
 /** Action kinds with quota left this round. */

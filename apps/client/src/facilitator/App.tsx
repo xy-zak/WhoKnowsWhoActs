@@ -1,3 +1,4 @@
+import { fakeSeats, isSimulated } from "@wkwa/shared";
 import { useEffect, useState } from "react";
 import { fmtDuration } from "../common/format";
 import { useStore } from "../net/store";
@@ -100,9 +101,9 @@ export function App({ conn }: { conn: FacilitatorConnection }) {
 
   const online = st ? Object.values(st.seats).filter((s) => s.connected).length : 0;
   const bound = st ? Object.values(st.seats).filter((s) => s.bound).length : 0;
-  const simulated = st?.config.players === "simulated";
+  const simulated = st ? isSimulated(st) : false;
   const agents = st ? Object.values(st.seats).filter((s) => s.agent && !s.withdrawn).length : 0;
-  const fakes = st ? Object.values(st.seats).filter((s) => s.bound && s.fake).length : 0;
+  const fakes = st ? fakeSeats(st).length : 0;
 
   return (
     <div className="app-shell col" style={{ gap: "var(--s2)" }}>

@@ -1,13 +1,12 @@
-import type { PlayerMode } from "@wkwa/shared";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import type { AppContext } from "../app";
 import { loadOnboardingContent } from "../content";
-import type { Store } from "../db/store";
 import { exportsDirFor } from "../db/stores";
 import { deleteSession, listSessionDeletions } from "../gdpr/deleteSession";
 import { eraseParticipant, listErasures, lookupParticipant, parseCodeOrThrow } from "../gdpr/erase";
 import { exportSession, listExports } from "../gdpr/exporter";
 import { cardSeats, keySheetHtml, takedownCardPdf } from "../gdpr/print";
+import { sessionOr404 } from "./sessionLookup";
 
 type Guard = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
 
@@ -21,12 +20,7 @@ export function registerGdprApi(ctx: AppContext, guard: Guard) {
   const { app, store, stores, scenarios, runtime, hub } = ctx;
   const opts = { preHandler: guard };
 
-  type Found = { players: PlayerMode; store: Store };
-  const sessionOr404 = (id: string, reply: FastifyReply): Found | null => {
-    const found = stores.find(id);
-    if (!found) reply.code(404).send({ error: "Unknown session" });
-    return found;
-  };
+  type Found = NonNullable<ReturnType<typeof sessionOr404>>;
   const exportDeps = (f: Found) => ({
     store: f.store,
     scenarios,
@@ -34,7 +28,7 @@ export function registerGdprApi(ctx: AppContext, guard: Guard) {
   });
   /** Key sheets and takedown cards only exist for sessions with participants. */
   const participantSessionOr4xx = (id: string, reply: FastifyReply): Found | null => {
-    const found = sessionOr404(id, reply);
+    const found = sessionOr404(stores, id, reply);
     if (found?.players === "simulated") {
       reply
         .code(400)
@@ -45,13 +39,13 @@ export function registerGdprApi(ctx: AppContext, guard: Guard) {
   };
 
   app.post<{ Params: { id: string } }>("/api/sessions/:id/export", opts, async (req, reply) => {
-    const found = sessionOr404(req.params.id, reply);
+    const found = sessionOr404(stores, req.params.id, reply);
     if (!found) return;
     return exportSession(exportDeps(found), req.params.id, "standard");
   });
 
   app.post<{ Params: { id: string } }>("/api/sessions/:id/anonymise", opts, async (req, reply) => {
-    const found = sessionOr404(req.params.id, reply);
+    const found = sessionOr404(stores, req.params.id, reply);
     if (!found) return;
     return exportSession(exportDeps(found), req.params.id, "anonymised");
   });
@@ -100,7 +94,7 @@ export function registerGdprApi(ctx: AppContext, guard: Guard) {
     opts,
     async (req, reply) => {
       const id = req.params.id;
-      const found = sessionOr404(id, reply);
+      const found = sessionOr404(stores, id, reply);
       if (!found) return;
       if ((req.body?.confirm ?? "").trim() !== id) {
         return reply.code(400).send({ error: "Confirmation does not match the session id" });
@@ -122,9 +116,7 @@ export function registerGdprApi(ctx: AppContext, guard: Guard) {
     },
   );
 
-  app.get("/api/session-deletions", opts, async () =>
-    stores.all().flatMap(({ players, store: s }) => listSessionDeletions(s).map((d) => ({ ...d, players }))),
-  );
+  app.get("/api/session-deletions", opts, async () => stores.collect(listSessionDeletions));
 
   app.get<{ Params: { code: string } }>("/api/participants/:code", opts, async (req, reply) => {
     try {
@@ -167,9 +159,6 @@ export function registerGdprApi(ctx: AppContext, guard: Guard) {
 
   app.get("/api/erasures", opts, async () => listErasures(store));
   app.get("/api/exports", opts, async () =>
-    stores
-      .all()
-      .flatMap(({ players, store: s }) => listExports(s).map((x) => ({ ...x, players })))
-      .sort((a, b) => b.createdWall.localeCompare(a.createdWall)),
+    stores.collect(listExports).sort((a, b) => b.createdWall.localeCompare(a.createdWall)),
   );
 }

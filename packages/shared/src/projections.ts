@@ -25,6 +25,11 @@ export interface QuotaStatus {
   limit: number | null;
 }
 
+/** Actions still allowed by a quota (Infinity when unlimited). */
+export function quotaLeft(q: QuotaStatus): number {
+  return q.limit === null ? Number.POSITIVE_INFINITY : Math.max(0, q.limit - q.used);
+}
+
 export interface Highlight {
   seq: number;
   kind: ActionKind;

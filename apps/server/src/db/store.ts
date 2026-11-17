@@ -189,6 +189,17 @@ export class Store {
     return out;
   }
 
+  /** The most recently created session that has not ended (for resuming after a restart). */
+  latestUnfinishedSession(): { id: string; createdWall: string } | null {
+    const row = this.db
+      .prepare(
+        `SELECT id, created_wall FROM sessions WHERE status NOT IN ('closed', 'aborted')
+         ORDER BY created_wall DESC LIMIT 1`,
+      )
+      .get() as { id: string; created_wall: string } | undefined;
+    return row ? { id: row.id, createdWall: row.created_wall } : null;
+  }
+
   /* ─────────── events ─────────── */
 
   private allocSeq(sessionId: string): number {

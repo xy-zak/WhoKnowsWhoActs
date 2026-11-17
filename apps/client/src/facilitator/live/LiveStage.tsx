@@ -1,7 +1,9 @@
 import {
   fakeSeats,
   type GameState,
+  hasParticipants,
   isOnboardingComplete,
+  isSimulated,
   nextOnboardingStep,
   pairingName,
   pairingText,
@@ -46,7 +48,7 @@ function useNow(ms = 1000) {
 /* ─────────────────────────── lifecycle (order of events) ─────────────────────────── */
 
 function lifecycle(st: GameState): { steps: StepDef[]; current: number; done: (i: number) => boolean } {
-  const simulated = st.config.players === "simulated";
+  const simulated = isSimulated(st);
   const steps: StepDef[] = [
     simulated ? { key: "onboarding", label: "Agents" } : { key: "onboarding", label: "Onboarding" },
   ];
@@ -161,12 +163,11 @@ function NextPanel({
       </Button>
     );
   } else if (st.phase === "game_complete") {
-    prompt =
-      st.config.players === "simulated"
-        ? "Simulation complete. Wrap up: export → close."
-        : seatList(st).some((s) => s.participantCode)
-          ? "Game complete. Players see their participant code. Wrap up: takedown cards → export → close."
-          : "Game complete (fake players only). Wrap up: export → close.";
+    prompt = isSimulated(st)
+      ? "Simulation complete. Wrap up: export → close."
+      : hasParticipants(st)
+        ? "Game complete. Players see their participant code. Wrap up: takedown cards → export → close."
+        : "Game complete (fake players only). Wrap up: export → close.";
     action = onWrapUp;
     primary = (
       <Button variant="primary" size="lg" icon="next" kbd="N" onClick={onWrapUp}>
@@ -345,10 +346,9 @@ const WRAP_STEPS: StepDef[] = [
 ];
 
 function WrapUp({ conn, st, onClose }: { conn: FacilitatorConnection; st: GameState; onClose: () => void }) {
-  const simulated = st.config.players === "simulated";
-  // no participant codes (simulated session, or fake players only): no takedown cards
-  const noCards = simulated || seatList(st).every((s) => !s.participantCode);
-  const steps = noCards ? WRAP_STEPS.filter((s) => s.key !== "cards") : WRAP_STEPS;
+  const simulated = isSimulated(st);
+  // no participants (agents or fake players only): no takedown cards
+  const steps = hasParticipants(st) ? WRAP_STEPS : WRAP_STEPS.filter((s) => s.key !== "cards");
   const [step, setStep] = useState(0);
   const [cardsDone, setCardsDone] = useState(false);
   const [exported, setExported] = useState<string | null>(null);
@@ -525,7 +525,7 @@ export function LiveStage({ conn }: { conn: FacilitatorConnection }) {
               paused
             </StatusTag>
           )}
-          {st.config.players === "simulated" && (
+          {isSimulated(st) && (
             <StatusTag
               icon="simulation"
               title={`Agents: ${policySummary(st.config.simulation, st.config.seatCount)} · pause ${paceText(st.config.simulation)} · seed ${st.config.simulation.seed}`}

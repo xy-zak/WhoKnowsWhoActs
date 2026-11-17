@@ -1,5 +1,12 @@
 import { randomBytes } from "node:crypto";
-import type { Ack, ActionKind, DashboardMsg, PlayerView, StoredEvent, TelemetryItem } from "@wkwa/shared";
+import {
+  type Ack,
+  type DashboardMsg,
+  type PlayerView,
+  randomPolicy,
+  type StoredEvent,
+  type TelemetryItem,
+} from "@wkwa/shared";
 import { io, type Socket } from "socket.io-client";
 
 /**
@@ -207,36 +214,24 @@ export class Bot {
         );
       }
       return true;
-    } else if (v.phase === "round_active" && !v.paused && !v.me.withdrawn && this.opts.autoPlay !== false) {
-      const left = (k: ActionKind) => {
-        const q = v.me.quota[k];
-        return q.limit === null ? Number.POSITIVE_INFINITY : q.limit - q.used;
-      };
-      const kinds = (["propose", "decide"] as const).filter((k) => left(k) > 0);
-      if (kinds.length > 0) {
-        const kind =
-          kinds.length === 2
-            ? Math.random() < (this.opts.proposeBias ?? 0.5)
-              ? "propose"
-              : "decide"
-            : kinds[0]!;
-        const regions = v.map.regions;
-        const region = regions[Math.floor(Math.random() * regions.length)]!;
+    } else if (this.opts.autoPlay !== false) {
+      // the same random play as the `random` agent policy of simulated sessions
+      const action = randomPolicy.act(v, {
+        seat: v.me.seat,
+        params: { proposeBias: this.opts.proposeBias ?? 0.5 },
+        random: Math.random,
+        memory: {},
+        now: Date.now(),
+      });
+      if (action) {
+        const { kind, regionId } = action;
         if (this.opts.telemetry !== false) {
-          this.track("region_hover", {
-            regionId: region.id,
-            durationMs: 200 + Math.round(Math.random() * 800),
-          });
+          this.track("region_hover", { regionId, durationMs: 200 + Math.round(Math.random() * 800) });
           this.track("tool_select", { tool: kind });
-          this.track("action_draft", { kind, regionId: region.id, outcome: "confirmed" });
+          this.track("action_draft", { kind, regionId, outcome: "confirmed" });
         }
         this.recordAck(
-          await this.emit("intent", {
-            clientSeq: ++this.clientSeq,
-            kind,
-            regionId: region.id,
-            clientTs: Date.now(),
-          }),
+          await this.emit("intent", { clientSeq: ++this.clientSeq, kind, regionId, clientTs: Date.now() }),
         );
         await this.flushTelemetry();
         return true;

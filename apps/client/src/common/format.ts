@@ -15,7 +15,3 @@ export function fmtTime(ts: number | null | undefined): string {
 export function quotaText(q: { used: number; limit: number | null }): string {
   return q.limit === null ? `${q.used}` : `${q.used}/${q.limit}`;
 }
-
-export function remaining(q: { used: number; limit: number | null }): number {
-  return q.limit === null ? Number.POSITIVE_INFINITY : Math.max(0, q.limit - q.used);
-}

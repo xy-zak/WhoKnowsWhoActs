@@ -8,6 +8,7 @@ import type { AppContext } from "../app";
 import { redactEvent } from "../net/hub";
 import { harnessVersion } from "../runtime";
 import { registerGdprApi } from "./gdprRoutes";
+import { sessionOr404 } from "./sessionLookup";
 
 type Guard = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
 
@@ -58,31 +59,25 @@ export function registerApi(ctx: AppContext, guard: Guard) {
   });
 
   /** Sessions of both databases, newest first; `players` says which database each one is in. */
-  app.get("/api/sessions", opts, async () =>
-    stores
-      .all()
-      .flatMap(({ players, store }) => store.listSessions().map((s) => ({ ...s, players })))
-      .sort((a, b) => b.createdWall.localeCompare(a.createdWall)),
-  );
+  app.get("/api/sessions", opts, async () => stores.listSessions());
 
   app.get<{ Params: { id: string } }>("/api/sessions/:id", opts, async (req, reply) => {
-    const found = stores.find(req.params.id);
-    if (!found) return reply.code(404).send({ error: "Unknown session" });
-    const row = found.store.getSession(req.params.id)!;
-    const events = found.store.listEvents(row.id);
+    const found = sessionOr404(stores, req.params.id, reply);
+    if (!found) return;
+    const events = found.store.listEvents(found.row.id);
     return {
-      session: row,
+      session: found.row,
       players: found.players,
       state: reduceEvents(events),
       eventCount: events.length,
-      attached: hub.session?.sessionId === row.id,
+      attached: hub.session?.sessionId === found.row.id,
     };
   });
 
   /** Event log of a session (demographic answers redacted), for replay and inspection. */
   app.get<{ Params: { id: string } }>("/api/sessions/:id/events", opts, async (req, reply) => {
-    const found = stores.find(req.params.id);
-    if (!found) return reply.code(404).send({ error: "Unknown session" });
+    const found = sessionOr404(stores, req.params.id, reply);
+    if (!found) return;
     return found.store.listEvents(req.params.id).map(redactEvent);
   });
 
@@ -90,8 +85,8 @@ export function registerApi(ctx: AppContext, guard: Guard) {
     "/api/sessions/:id/telemetry",
     opts,
     async (req, reply) => {
-      const found = stores.find(req.params.id);
-      if (!found) return reply.code(404).send({ error: "Unknown session" });
+      const found = sessionOr404(stores, req.params.id, reply);
+      if (!found) return;
       return found.store.listTelemetry(req.params.id, {
         afterId: Number(req.query.afterId ?? 0),
         limit: Math.min(Number(req.query.limit ?? 100_000), 1_000_000),
@@ -100,8 +95,9 @@ export function registerApi(ctx: AppContext, guard: Guard) {
   );
 
   app.get<{ Params: { id: string } }>("/api/sessions/:id/scenario", opts, async (req, reply) => {
-    const row = stores.find(req.params.id)?.store.getSession(req.params.id);
-    if (!row) return reply.code(404).send({ error: "Unknown session" });
+    const found = sessionOr404(stores, req.params.id, reply);
+    if (!found) return;
+    const row = found.row;
     const scenario = scenarios.load(row.scenario_id);
     return { scenario, hashMatches: scenario.hash === row.scenario_hash };
   });

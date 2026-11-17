@@ -1,6 +1,6 @@
-import type { ActionKind, PlayerView } from "@wkwa/shared";
+import { type ActionKind, type PlayerView, quotaLeft } from "@wkwa/shared";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { fmtDuration, quotaText, remaining } from "../common/format";
+import { fmtDuration, quotaText } from "../common/format";
 import { MapLegend, MapView } from "../map/MapView";
 import { AsciiProgress, Button, Icon, Panel, Popup, SeatDot, StatusTag } from "../ui";
 import type { PlayerConnection } from "./connection";
@@ -17,7 +17,7 @@ export function Game({ conn, view }: { conn: PlayerConnection; view: PlayerView 
 
   const active = view.phase === "round_active" && !view.paused;
   const q = view.me.quota;
-  const canDo = (k: ActionKind) => active && remaining(q[k]) > 0;
+  const canDo = (k: ActionKind) => active && quotaLeft(q[k]) > 0;
 
   const setTool = useCallback(
     (t: ActionKind | null) => {

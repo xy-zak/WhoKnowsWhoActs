@@ -103,6 +103,22 @@ export const SimulationConfigSchema = z
   .describe("Simulated players (used only when players = 'simulated')");
 export type SimulationConfig = z.infer<typeof SimulationConfigSchema>;
 
+/* ─────────────────────────── Fake players ─────────────────────────── */
+
+/** Pause between a fake player's actions (ms). Fake players are test clients the server creates. */
+export const FAKE_PLAYER_PACES = {
+  normal: { minDelayMs: 1000, maxDelayMs: 4000, label: "Normal · 1–4 s" },
+  fast: { minDelayMs: 100, maxDelayMs: 300, label: "Fast · 0.1–0.3 s" },
+} as const;
+export type FakePlayerPace = keyof typeof FAKE_PLAYER_PACES;
+export const FakePaceSchema = z
+  .enum(Object.keys(FAKE_PLAYER_PACES) as [FakePlayerPace, ...FakePlayerPace[]])
+  .describe(
+    `Pause between a fake player's actions: ${Object.entries(FAKE_PLAYER_PACES)
+      .map(([k, v]) => `'${k}' ${v.label.split(" · ")[1]}`)
+      .join(", ")}`,
+  );
+
 /* ─────────────────────────── Session config ─────────────────────────── */
 
 export const MAX_TAGS = 20;

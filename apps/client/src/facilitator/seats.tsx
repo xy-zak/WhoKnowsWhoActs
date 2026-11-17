@@ -3,8 +3,10 @@ import {
   DISSOCIATED_PAIRINGS,
   FAKE_PLAYER_PACES,
   type FakePlayerPace,
+  fakeSeats,
   type GameState,
   isOnboardingComplete,
+  isSimulated,
   K_LABELS,
   type KLabel,
   type LabelPairing,
@@ -17,6 +19,7 @@ import {
   quotaLimit,
   quotaUsed,
   type Scenario,
+  type SeatState,
   seatList,
 } from "@wkwa/shared";
 import { useEffect, useState } from "react";
@@ -45,6 +48,29 @@ function useNow(ms = 1000) {
   return now;
 }
 
+/* ─────────────────────────── Who holds a seat ─────────────────────────── */
+
+/** Status tags of a seat's occupant: an agent, or a client (connection state) that may be a fake player. */
+export function OccupantTags({ seat: s }: { seat: SeatState }) {
+  if (s.agent) {
+    return (
+      <StatusTag icon="agent" title={`Agent: ${policyLabel(s.agent.policy)}`}>
+        {s.withdrawn ? "withdrawn" : "agent"}
+      </StatusTag>
+    );
+  }
+  return (
+    <>
+      <ConnTag connected={s.connected} withdrawn={s.withdrawn} />
+      {s.fake && (
+        <StatusTag icon="fake" title="Fake player: a test client the server created">
+          fake
+        </StatusTag>
+      )}
+    </>
+  );
+}
+
 /* ─────────────────────────── Bind clients → seats (setup step 7) ─────────────────────────── */
 
 export function BindEditor({ conn, dash }: { conn: FacilitatorConnection; dash: DashboardMsg }) {
@@ -52,7 +78,7 @@ export function BindEditor({ conn, dash }: { conn: FacilitatorConnection; dash: 
   const seats = seatList(st);
   const free = dash.terminals.filter((t) => t.connected && t.seat === null);
   const bound = seats.filter((s) => s.bound).length;
-  const fakes = seats.filter((s) => s.bound && s.fake).length;
+  const fakes = fakeSeats(st).length;
   const unbound = seats.filter((s) => !s.bound).length;
   const [pace, setPace] = useState<FakePlayerPace>("normal");
   const [busy, setBusy] = useState(false);
@@ -104,8 +130,7 @@ export function BindEditor({ conn, dash }: { conn: FacilitatorConnection; dash: 
               <td>
                 {s.bound ? (
                   <span className="row nowrap">
-                    <Icon name="client" /> C{s.terminal} <ConnTag connected={s.connected} />
-                    {s.fake && <StatusTag icon="fake">fake</StatusTag>}
+                    <Icon name="client" /> C{s.terminal} <OccupantTags seat={s} />
                   </span>
                 ) : (
                   <span className="row nowrap">
@@ -210,7 +235,6 @@ export function BindEditor({ conn, dash }: { conn: FacilitatorConnection; dash: 
 /* ─────────────────────────── Agents (setup step 7 of a simulated session) ─────────────────────────── */
 
 export function AgentsTable({ st }: { st: GameState }) {
-  const sim = st.config.simulation;
   return (
     <table className="grid">
       <thead>
@@ -232,13 +256,13 @@ export function AgentsTable({ st }: { st: GameState }) {
             <td>
               {s.agent ? (
                 <span className="row nowrap">
-                  <Icon name="agent" /> {policyLabel(s.agent)}
+                  <Icon name="agent" /> {policyLabel(s.agent.policy)}
                 </span>
               ) : (
                 <span className="faint">—</span>
               )}
             </td>
-            <td className="mono small">{sim.seed ? `${sim.seed}:${s.seat}` : "—"}</td>
+            <td className="mono small">{s.agent?.seed ?? "—"}</td>
             <td className="faint small">none (simulated)</td>
           </tr>
         ))}
@@ -523,7 +547,7 @@ export function SeatsPanel({
   const pLim = quotaLimit(st, "propose");
   const dLim = quotaLimit(st, "decide");
   const final = ["closed", "aborted"].includes(st.phase);
-  const simulated = st.config.players === "simulated";
+  const simulated = isSimulated(st);
 
   const withdraw = async (seat: number) => {
     if (
@@ -581,20 +605,16 @@ export function SeatsPanel({
                     </span>
                   </td>
                   <td>
-                    {s.agent ? (
-                      <span className="row nowrap" title={policyLabel(s.agent)}>
-                        <Icon name="agent" /> {s.agent}
-                        {s.withdrawn && <StatusTag>withdrawn</StatusTag>}
-                      </span>
-                    ) : s.bound ? (
+                    {s.bound ? (
                       <span className="row nowrap">
-                        C{s.terminal}
-                        <ConnTag connected={s.connected} withdrawn={s.withdrawn} />
-                        {s.fake && (
-                          <StatusTag icon="fake" title="Fake player: a test client the server created">
-                            fake
-                          </StatusTag>
+                        {s.agent ? (
+                          <>
+                            <Icon name="agent" /> {s.agent.policy}
+                          </>
+                        ) : (
+                          `C${s.terminal}`
                         )}
+                        <OccupantTags seat={s} />
                       </span>
                     ) : (
                       <span className="faint">unbound</span>

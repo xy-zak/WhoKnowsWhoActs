@@ -1,4 +1,4 @@
-import { type RoundSpec, type SessionConfig, SessionConfigSchema } from "./config";
+import { type FakePlayerPace, type RoundSpec, type SessionConfig, SessionConfigSchema } from "./config";
 import type { ActionKind, KLabel, LabelPairing, PLabel } from "./labels";
 
 export const PHASES = [
@@ -14,6 +14,14 @@ export type Phase = (typeof PHASES)[number];
 
 export type ConsentStatus = "pending" | "given" | "declined" | "skipped";
 export type OnboardingStep = "consent" | "demographics" | "briefing";
+
+/** The agent playing a seat of a simulated session, as logged in `AgentBound`. */
+export interface AgentSeat {
+  policy: string;
+  policyVersion: string;
+  params: Record<string, unknown>;
+  seed: string;
+}
 
 export interface SeatState {
   seat: number;
@@ -34,10 +42,12 @@ export interface SeatState {
   rejections: number;
   withdrawn: boolean;
   lastActionTs: number | null;
-  /** Id of the agent policy playing this seat (simulated sessions); null for a real participant. */
-  agent: string | null;
+  /** The agent playing this seat (simulated sessions); null for a real participant or a fake player. */
+  agent: AgentSeat | null;
   /** Played by a fake player: a test client the server created (no participant, no code, no onboarding). */
   fake: boolean;
+  /** Pace of the fake player (null unless `fake`). */
+  fakePace: FakePlayerPace | null;
 }
 
 export interface ActionRecord {
@@ -108,6 +118,7 @@ export function emptySeat(seat: number): SeatState {
     lastActionTs: null,
     agent: null,
     fake: false,
+    fakePace: null,
   };
 }
 
@@ -163,9 +174,19 @@ export function fakeSeats(state: GameState): number[] {
     .map((s) => s.seat);
 }
 
+/** A seat held (or to be held) by a person: not a fake player and not an agent. */
+export function isParticipant(seat: SeatState): boolean {
+  return !seat.fake && !seat.agent;
+}
+
+/** Is any bound seat held by a real participant (who has a code, a key-sheet line and a takedown card)? */
+export function hasParticipants(state: GameState): boolean {
+  return seatList(state).some((s) => s.bound && isParticipant(s));
+}
+
 /** Fake players and agents have no onboarding: there is nobody to inform or ask. */
 export function isOnboardingComplete(state: GameState, seat: SeatState): boolean {
-  if (seat.fake || seat.agent) return true;
+  if (!isParticipant(seat)) return true;
   const steps = state.onboardingSteps;
   if (steps.includes("consent") && seat.consent !== "given") return false;
   if (steps.includes("demographics") && !seat.demographics) return false;
@@ -175,7 +196,7 @@ export function isOnboardingComplete(state: GameState, seat: SeatState): boolean
 
 /** The next onboarding step a seat still has to do (null = done). */
 export function nextOnboardingStep(state: GameState, seat: SeatState): OnboardingStep | null {
-  if (seat.fake || seat.agent) return null;
+  if (!isParticipant(seat)) return null;
   if (state.onboardingSteps.includes("consent") && seat.consent !== "given") return "consent";
   if (state.onboardingSteps.includes("demographics") && !seat.demographics) return "demographics";
   if (state.onboardingSteps.includes("briefing") && !seat.briefing) return "briefing";

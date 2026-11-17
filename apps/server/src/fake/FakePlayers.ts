@@ -32,10 +32,6 @@ export class FakePlayers {
     return terminalKey !== undefined && this.bots.has(terminalKey);
   }
 
-  get count(): number {
-    return this.bots.size;
-  }
-
   /**
    * Start one fake player. Its key is registered before the socket connects,
    * so its `hello` is already recognised as fake. With a seat token it

@@ -7,12 +7,14 @@ import {
   checkSimulationConfig,
   DEFAULT_VALIDATORS,
   DISSOCIATED_PAIRINGS,
+  type FakePlayerPace,
   type GameState,
   generateParticipantCode,
   generateSessionId,
   getPolicy,
   initialState,
   isOnboardingComplete,
+  isSimulated,
   K_LABELS,
   type KLabel,
   type LabelPairing,
@@ -104,7 +106,7 @@ export class SessionManager {
   }
   /** Played by agents instead of participants? */
   get simulated(): boolean {
-    return this.state.config.players === "simulated";
+    return isSimulated(this.state);
   }
 
   /* ═════════════════════════ lifecycle ═════════════════════════ */
@@ -313,7 +315,7 @@ export class SessionManager {
   bindSeat(
     terminal: number,
     seat: number,
-    opts: { fake?: boolean; fakePace?: "normal" | "fast" } = {},
+    opts: { fake?: boolean; fakePace?: FakePlayerPace } = {},
   ): { participantCode: string | null; fake: boolean } {
     return this.run(() => {
       this.requireReal("Binding a client");
@@ -938,6 +940,3 @@ export class SessionManager {
     }
   }
 }
-
-/** Re-exported from @wkwa/shared (moved there so simulated players use the same PRNG). */
-export { seededRandom };

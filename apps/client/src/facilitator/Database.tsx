@@ -1,4 +1,4 @@
-import { normaliseParticipantCode } from "@wkwa/shared";
+import { isSimulatedSessionId, normaliseParticipantCode, type PlayerMode } from "@wkwa/shared";
 import { useCallback, useEffect, useState } from "react";
 import {
   Button,
@@ -15,12 +15,10 @@ import {
 } from "../ui";
 import type { FacilitatorConnection } from "./connection";
 
-type Players = "real" | "simulated";
-
 interface SessionSummary {
   id: string;
   /** Which database the session is in. */
-  players: Players;
+  players: PlayerMode;
   createdWall: string;
   updatedWall: string;
   scenarioId: string;
@@ -31,16 +29,17 @@ interface SessionSummary {
   eventCount: number;
   telemetryCount: number;
   /** Seats played by fake players (test clients the server created). */
-  fakeSeats?: number[];
+  fakeSeats: number[];
 }
 interface ExportResult {
+  /** Database of the exported session (set here, from the session row). */
+  players: PlayerMode;
   exportId: string;
   kind: string;
   dir: string;
   files: Array<{ name: string; rows: number }>;
 }
 interface ExportRow {
-  players?: Players;
   id: string;
   sessionId: string;
   kind: string;
@@ -54,7 +53,6 @@ interface Lookup {
   previouslyErased: Array<{ executedWall: string }>;
 }
 interface Deletion {
-  players?: Players;
   id: number;
   sessionId: string;
   deletedWall: string;
@@ -82,7 +80,10 @@ const STATUS_TONE: Record<string, "live" | "warn" | "danger" | "neutral" | "prim
   aborted: "danger",
 };
 
-const DATABASES: Array<{ id: Players; icon: "seats" | "simulation"; label: string; file: string }> = [
+/** Register rows of both databases, each tagged with its database by the server. */
+type InDb<T> = T & { players: PlayerMode };
+
+const DATABASES: Array<{ id: PlayerMode; icon: "seats" | "simulation"; label: string; file: string }> = [
   { id: "real", icon: "seats", label: "Participants", file: "data/wkwa.db" },
   { id: "simulated", icon: "simulation", label: "Simulations", file: "data/wkwa-sim.db" },
 ];
@@ -105,29 +106,31 @@ export function Database({
   onResumed: () => void;
 }) {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
-  const [exports, setExports] = useState<ExportRow[]>([]);
+  const [exports, setExports] = useState<InDb<ExportRow>[]>([]);
   const [erasures, setErasures] = useState<Erasure[]>([]);
   const [lastExport, setLastExport] = useState<ExportResult | null>(null);
   const [filter, setFilter] = useState("");
   const [cardsFor, setCardsFor] = useState<string | null>(null);
-  const [deletions, setDeletions] = useState<Deletion[]>([]);
-  const [db, setDb] = useState<Players>(() => (attachedId?.startsWith("SIM-") ? "simulated" : "real"));
+  const [deletions, setDeletions] = useState<InDb<Deletion>[]>([]);
+  const [db, setDb] = useState<PlayerMode>(() =>
+    attachedId && isSimulatedSessionId(attachedId) ? "simulated" : "real",
+  );
   const simulated = db === "simulated";
   const confirm = useConfirm();
   const refresh = useCallback(() => {
     conn.api<SessionSummary[]>("/api/sessions").then(setSessions, () => {});
-    conn.api<ExportRow[]>("/api/exports").then(setExports, () => {});
+    conn.api<InDb<ExportRow>[]>("/api/exports").then(setExports, () => {});
     conn.api<Erasure[]>("/api/erasures").then(setErasures, () => {});
-    conn.api<Deletion[]>("/api/session-deletions").then(setDeletions, () => {});
+    conn.api<InDb<Deletion>[]>("/api/session-deletions").then(setDeletions, () => {});
   }, [conn]);
   useEffect(refresh, [refresh]);
 
-  const doExport = async (id: string, kind: "export" | "anonymise") => {
+  const doExport = async (s: SessionSummary, kind: "export" | "anonymise") => {
     const r = await conn
-      .api<ExportResult>(`/api/sessions/${id}/${kind}`, { method: "POST" })
+      .api<Omit<ExportResult, "players">>(`/api/sessions/${s.id}/${kind}`, { method: "POST" })
       .catch(() => null);
     if (r) {
-      setLastExport(r);
+      setLastExport({ ...r, players: s.players });
       conn.toast(`${r.kind} export written`);
       refresh();
     }
@@ -174,17 +177,18 @@ export function Database({
     refresh();
   };
 
-  const inDb = sessions.filter((s) => (s.players ?? "real") === db);
+  const ofDb = <T extends { players: PlayerMode }>(rows: T[], d: PlayerMode = db) =>
+    rows.filter((x) => x.players === d);
+  const inDb = ofDb(sessions);
   const shown = inDb.filter(
     (s) =>
       !filter ||
       s.id.toLowerCase().includes(filter.toLowerCase()) ||
       s.tags.some((t) => t.toLowerCase().includes(filter.toLowerCase())),
   );
-  const exportsShown = exports.filter((x) => (x.players ?? "real") === db);
-  const deletionsShown = deletions.filter((x) => (x.players ?? "real") === db);
-  const lastExportShown =
-    lastExport && lastExport.dir.includes("simulations") === simulated ? lastExport : null;
+  const exportsShown = ofDb(exports);
+  const deletionsShown = ofDb(deletions);
+  const lastExportShown = lastExport?.players === db ? lastExport : null;
 
   return (
     <div className="col" style={{ gap: "var(--s3)" }}>
@@ -199,7 +203,7 @@ export function Database({
               onClick={() => setDb(d.id)}
             >
               <Icon name={d.icon} />
-              {d.label} · {sessions.filter((s) => (s.players ?? "real") === d.id).length}
+              {d.label} · {ofDb(sessions, d.id).length}
               <span className="faint">{d.file}</span>
             </button>
           ))}
@@ -260,12 +264,12 @@ export function Database({
                     </td>
                     <td>
                       <span className="row" style={{ gap: 4 }}>
-                        {(s.fakeSeats?.length ?? 0) > 0 && (
+                        {s.fakeSeats.length > 0 && (
                           <StatusTag
                             icon="fake"
-                            title={`Seat ${s.fakeSeats!.join(", ")} played by fake players (test clients, not participants)`}
+                            title={`Seat ${s.fakeSeats.join(", ")} played by fake players (test clients, not participants)`}
                           >
-                            fake ×{s.fakeSeats!.length}
+                            fake ×{s.fakeSeats.length}
                           </StatusTag>
                         )}
                         {s.tags.map((t) => (
@@ -307,7 +311,7 @@ export function Database({
                               ? "Write an export (CSV + JSON + codebook) of this simulation to exports/simulations/. No personal data."
                               : "Write a pseudonymised export (CSV + JSON + codebook) with participant codes, for analysis. Store it on institutional storage."
                           }
-                          onClick={() => void doExport(s.id, "export")}
+                          onClick={() => void doExport(s, "export")}
                         >
                           Export
                         </Button>
@@ -317,7 +321,7 @@ export function Database({
                               size="sm"
                               icon="anonymise"
                               tip="Write an anonymised export: participant codes replaced by random ids, mapping discarded. For publishing or archiving."
-                              onClick={() => void doExport(s.id, "anonymise")}
+                              onClick={() => void doExport(s, "anonymise")}
                             >
                               Anonymised
                             </Button>

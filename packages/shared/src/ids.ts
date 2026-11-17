@@ -1,3 +1,5 @@
+import type { PlayerMode } from "./config";
+
 /**
  * Pseudonymous identifiers.
  *
@@ -77,7 +79,7 @@ export const SIMULATED_SESSION_PREFIX = "SIM-";
  * Session ids: `S-YYYYMMDD-XXXX` (date of creation + 4 random chars), or
  * `SIM-YYYYMMDD-XXXX` for a simulated session. Not personal data.
  */
-export function generateSessionId(now = new Date(), players: "real" | "simulated" = "real"): string {
+export function generateSessionId(now = new Date(), players: PlayerMode = "real"): string {
   const y = now.getUTCFullYear();
   const m = String(now.getUTCMonth() + 1).padStart(2, "0");
   const d = String(now.getUTCDate()).padStart(2, "0");

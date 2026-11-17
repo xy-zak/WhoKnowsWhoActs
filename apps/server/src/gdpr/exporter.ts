@@ -135,7 +135,7 @@ export function exportSession(
       reconnects: s.reconnects,
       rejections: s.rejections,
       pairing: final.labelPairing ? pairingName(final.labelPairing) : null,
-      agent_policy: s.agent,
+      agent_policy: s.agent?.policy ?? null,
       fake_player: s.fake,
     }));
   csv("players.csv", players);

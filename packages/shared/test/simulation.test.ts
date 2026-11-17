@@ -115,12 +115,12 @@ describe("agent policy registry", () => {
 });
 
 describe("AgentBound in the reducer", () => {
-  it("binds an agent without participant code or client, always connected", () => {
+  it("binds an agent (policy, version, params, seed) without participant code or client, always connected", () => {
     const st = simulatedSession().state;
     for (const s of Object.values(st.seats)) {
       expect(s).toMatchObject({
         bound: true,
-        agent: "random",
+        agent: { policy: "random", policyVersion: "1", params: { proposeBias: 0.5 }, seed: `S:${s.seat}` },
         participantCode: null,
         terminal: null,
         connected: true,

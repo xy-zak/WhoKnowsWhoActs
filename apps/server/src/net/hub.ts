@@ -52,8 +52,6 @@ import { SimulationRunner } from "../simulation/SimulationRunner";
 interface TerminalEntry {
   terminal: number;
   sockets: Set<Socket>;
-  /** A fake player this server created (decided by the server, never by the client). */
-  fake: boolean;
 }
 
 interface PlayerSocketData {
@@ -185,8 +183,7 @@ export class Hub {
   resumeSession(sessionId: string): SessionManager {
     const found = this.deps.stores.find(sessionId);
     if (!found) throw new CommandError(`Unknown session ${sessionId}`);
-    const row = found.store.getSession(sessionId)!;
-    const scenario = this.deps.scenarios.load(row.scenario_id);
+    const scenario = this.deps.scenarios.load(found.row.scenario_id);
     this.detach("Switching session");
     const m = SessionManager.load(this.sessionDeps(scenario, found.store), sessionId);
     this.session = m;
@@ -197,11 +194,7 @@ export class Hub {
 
   /** Resume the most recent session (of either database) that has not ended (used on server start). */
   autoResume() {
-    const s = this.deps.stores
-      .all()
-      .flatMap((x) => x.store.listSessions())
-      .sort((a, b) => b.createdWall.localeCompare(a.createdWall))
-      .find((x) => !["closed", "aborted"].includes(x.status));
+    const s = this.deps.stores.latestUnfinished();
     if (s) {
       try {
         this.resumeSession(s.id);
@@ -277,43 +270,40 @@ export class Hub {
       if (!m.state.seats[seat]) throw new CommandError(`Seat ${seat} does not exist in this session`);
       if (!free.includes(seat)) throw new CommandError(`Seat ${seat} is already bound; unbind it first`);
     }
+    // connect them all at once, then bind in seat order
+    const bots = await Promise.all(seats.map((seat) => this.fakes.spawn({ pace, seat })));
+    const terminals = await Promise.allSettled(bots.map((b) => b.waitForTerminal(5000)));
     const added: number[] = [];
-    for (const seat of seats) {
-      const bot = await this.fakes.spawn({ pace, seat });
-      let terminal: number;
-      try {
-        terminal = await bot.waitForTerminal(5000);
-      } catch {
+    let failed = false;
+    seats.forEach((seat, i) => {
+      const bot = bots[i]!;
+      const t = terminals[i]!;
+      // the session may have changed while the fake players were connecting
+      const stale = this.session !== m || m.state.phase !== "lobby" || m.state.seats[seat]?.bound;
+      if (t.status === "rejected" || stale) {
+        failed ||= t.status === "rejected";
         this.dropFake(bot.terminalKey);
-        throw new CommandError("A fake player could not connect to this server");
+        return;
       }
-      // the session may have changed while the fake player was connecting
-      if (this.session !== m || m.state.phase !== "lobby" || m.state.seats[seat]?.bound) {
-        this.dropFake(bot.terminalKey);
-        continue;
-      }
-      this.bindTerminal(terminal, seat, pace);
+      this.bindTerminal(t.value, seat, pace);
       added.push(seat);
-    }
+    });
+    if (failed && added.length === 0)
+      throw new CommandError("A fake player could not connect to this server");
     this.deps.log.info({ sessionId: m.sessionId, seats: added, pace }, "fake players added");
     return { seats: added };
   }
 
   /**
    * After a resume or restart, start the fake players of the session again
-   * (with the pace logged in their SeatBound); they re-claim their seats by token.
+   * (at the pace logged in their SeatBound); they re-claim their seats by token.
    */
   private restoreFakes(m: SessionManager) {
     if (m.isFinal || m.state.phase === "game_complete") return;
-    const fake = seatList(m.state).filter((s) => s.bound && s.fake && !s.withdrawn);
-    if (fake.length === 0) return;
-    const pace = new Map<number, FakePlayerPace>();
-    for (const e of m.store.listEvents(m.sessionId)) {
-      if (e.type === "SeatBound" && e.payload.fake) pace.set(e.payload.seat, e.payload.fakePace ?? "normal");
-    }
-    for (const s of fake) {
+    for (const s of seatList(m.state)) {
+      if (!s.bound || !s.fake || s.withdrawn) continue;
       const opts = {
-        pace: pace.get(s.seat) ?? "normal",
+        pace: s.fakePace ?? "normal",
         seat: s.seat,
         seatToken: m.seatToken(s.seat),
         clientSeqStart: m.nextClientSeq(s.seat) - 1,
@@ -333,19 +323,23 @@ export class Hub {
   }
 
   private dropFakes() {
-    for (const [key, entry] of this.terminals) if (entry.fake) this.terminals.delete(key);
+    for (const key of this.terminals.keys()) if (this.fakes.isFake(key)) this.terminals.delete(key);
     this.fakes.stopAll();
   }
 
-  /** Bind a connected client to a seat; fake players are recognised by their server-registered key. */
+  /**
+   * Bind a connected client to a seat. Only clients whose key the server
+   * registered itself (FakePlayers) are bound as fake; a browser never can be.
+   */
   private bindTerminal(terminal: number, seat: number, fakePace?: FakePlayerPace) {
     const m = this.session;
     if (!m) throw new CommandError("No active session");
-    const entry = [...this.terminals.values()].find((t) => t.terminal === terminal && t.sockets.size > 0);
-    if (!entry) throw new CommandError(`Client ${terminal} is not connected`);
+    const [key, entry] =
+      [...this.terminals].find(([, t]) => t.terminal === terminal && t.sockets.size > 0) ?? [];
+    if (!key || !entry) throw new CommandError(`Client ${terminal} is not connected`);
     const seated = [...entry.sockets].map((x) => (x.data as PlayerSocketData).seat).find((x) => x);
     if (seated && seated !== seat) throw new CommandError(`Client ${terminal} is already seat ${seated}`);
-    return m.bindSeat(terminal, seat, { fake: entry.fake, fakePace });
+    return m.bindSeat(terminal, seat, { fake: this.fakes.isFake(key), fakePace });
   }
 
   /* ═════════════════════════ fan-out ═════════════════════════ */
@@ -375,8 +369,12 @@ export class Hub {
     }
     this.facilitator.emit("events", { events: events.map(redactEvent), reset: false });
     // closed or aborted: nothing left for fake players to do
-    if (m.isFinal && this.fakes.count > 0) this.dropFakes();
-    this.pushAll();
+    if (m.isFinal) this.dropFakes();
+    if (this.runner) {
+      // agents can act many times a second: send the full dashboard at most every 100 ms
+      this.pushPlayers();
+      this.schedulePush(100);
+    } else this.pushAll();
     // agents react to the new state (a round started, the game paused, …)
     this.runner?.sync();
   }
@@ -401,10 +399,15 @@ export class Hub {
 
   dashboard(): DashboardMsg {
     const m = this.session;
-    const terminals: TerminalInfo[] = [...this.terminals.values()]
-      .map((t) => {
+    const terminals: TerminalInfo[] = [...this.terminals]
+      .map(([key, t]) => {
         const seated = [...t.sockets].map((x) => (x.data as PlayerSocketData).seat).find((x) => x);
-        return { terminal: t.terminal, connected: t.sockets.size > 0, seat: seated ?? null, fake: t.fake };
+        return {
+          terminal: t.terminal,
+          connected: t.sockets.size > 0,
+          seat: seated ?? null,
+          fake: this.fakes.isFake(key),
+        };
       })
       .filter((t) => t.connected || t.seat !== null)
       .sort((a, b) => a.terminal - b.terminal);
@@ -423,13 +426,13 @@ export class Hub {
     this.facilitator.emit("dashboard", this.dashboard());
   }
 
-  /** Throttled dashboard refresh for telemetry-driven stats changes. */
-  private schedulePush() {
+  /** Throttled dashboard refresh (telemetry-driven stats changes; agents' actions). */
+  private schedulePush(ms = 1000) {
     if (this.statsTimer) return;
     this.statsTimer = setTimeout(() => {
       this.statsTimer = null;
       this.facilitator.emit("dashboard", this.dashboard());
-    }, 1000);
+    }, ms);
   }
 
   /* ═════════════════════════ players ═════════════════════════ */
@@ -462,12 +465,7 @@ export class Hub {
       clearTimeout(helloTimeout);
       let entry = this.terminals.get(msg.data.terminalKey);
       if (!entry) {
-        // only keys the server registered itself (FakePlayers) count as fake
-        entry = {
-          terminal: this.nextTerminal++,
-          sockets: new Set(),
-          fake: this.fakes.isFake(msg.data.terminalKey),
-        };
+        entry = { terminal: this.nextTerminal++, sockets: new Set() };
         this.terminals.set(msg.data.terminalKey, entry);
       }
       entry.sockets.add(sock);

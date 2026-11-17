@@ -69,7 +69,7 @@ describe("simulated players", () => {
 
   it("plays a whole default game with agents: 3 rounds, 120 actions", () => {
     expect(sessionId).toMatch(/^SIM-\d{8}-[0-9A-Z]{4}$/);
-    const events = srv.ctx.simStore.listEvents(sessionId);
+    const events = srv.ctx.stores.simulated.listEvents(sessionId);
     expect(actionsOf(events)).toHaveLength(120);
     expect(events.filter((e) => e.type === "RoundCompleted").map((e) => e.payload)).toMatchObject([
       { round: 1, reason: "quota_met" },
@@ -80,14 +80,14 @@ describe("simulated players", () => {
   });
 
   it("stores the session only in the simulation database", () => {
-    expect(srv.ctx.simStore.getSession(sessionId)).toBeDefined();
+    expect(srv.ctx.stores.simulated.getSession(sessionId)).toBeDefined();
     expect(srv.ctx.store.getSession(sessionId)).toBeUndefined();
     expect(srv.ctx.store.listSessions()).toHaveLength(0);
     expect(existsSync(path.join(srv.runtime.dataDir, "wkwa-sim.db"))).toBe(true);
   });
 
   it("logs one AgentBound per seat and skips binding, consent and participant codes", () => {
-    const events = srv.ctx.simStore.listEvents(sessionId);
+    const events = srv.ctx.stores.simulated.listEvents(sessionId);
     const bound = events.filter((e) => e.type === "AgentBound");
     expect(bound.map((e) => e.payload)).toEqual(
       [1, 2, 3, 4].map((seat) => ({
@@ -127,14 +127,14 @@ describe("simulated players", () => {
   it("repeats exactly from the same seed (zero pauses)", async () => {
     const again = await runSimulation(fac, { seed: "TESTSEED" });
     const other = await runSimulation(fac, { seed: "OTHERSEED" });
-    const a = actionsOf(srv.ctx.simStore.listEvents(sessionId));
-    expect(actionsOf(srv.ctx.simStore.listEvents(again))).toEqual(a);
-    expect(actionsOf(srv.ctx.simStore.listEvents(other))).not.toEqual(a);
+    const a = actionsOf(srv.ctx.stores.simulated.listEvents(sessionId));
+    expect(actionsOf(srv.ctx.stores.simulated.listEvents(again))).toEqual(a);
+    expect(actionsOf(srv.ctx.stores.simulated.listEvents(other))).not.toEqual(a);
   }, 30_000);
 
   it("draws and logs a seed when none is given", async () => {
     const id = await runSimulation(fac);
-    const created = srv.ctx.simStore.listEvents(id)[0]!;
+    const created = srv.ctx.stores.simulated.listEvents(id)[0]!;
     const seed = created.type === "SessionCreated" ? created.payload.config.simulation.seed : null;
     expect(seed).toMatch(/^[0-9A-Z]{8}$/);
   }, 30_000);
@@ -154,7 +154,7 @@ describe("simulated players", () => {
     expect(srv.ctx.hub.session!.state.phase).toBe("round_active");
     await fac.cmd("round:end");
     await fac.cmd("game:end");
-    const events = srv.ctx.simStore.listEvents(id);
+    const events = srv.ctx.stores.simulated.listEvents(id);
     expect(events.filter((e) => e.type === "AgentBound").map((e) => e.payload.policy)).toEqual([
       "random",
       "idle",
@@ -201,7 +201,7 @@ describe("simulated players", () => {
     await fac.cmd("labels:randomise");
     await fac.cmd("simulation:start");
     await fac.waitForDashboard((d) => (d.state?.notes.length ?? 0) > 0, 10_000);
-    const note = srv.ctx.simStore.listEvents(id).find((e) => e.type === "SessionNote")!;
+    const note = srv.ctx.stores.simulated.listEvents(id).find((e) => e.type === "SessionNote")!;
     expect(note.actorKind).toBe("system");
     expect(note.type === "SessionNote" && note.payload.text).toMatch(/seat 1 .*test-broken.*boom/);
     await fac.cmd("game:end");

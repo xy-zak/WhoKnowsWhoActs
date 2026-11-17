@@ -1,10 +1,9 @@
 import {
-  ACTION_KINDS,
-  type ActionKind,
   type AgentAction,
   type AgentContext,
   type AgentFeedback,
   getPolicy,
+  IntentMsg,
   type PlayerPolicy,
   playerView,
   seatList,
@@ -40,7 +39,8 @@ interface Agent {
  * paused). On a turn the agent's policy sees exactly what a player of that
  * seat would see (`playerView`) and may return one action, which goes through
  * `SessionManager.intent` like a real player's click: same validators, same
- * quotas, same events.
+ * quotas, same events. The agents' policies, parameters and seeds come from
+ * the seat state (`AgentBound`).
  *
  * Reproducibility: the policy's random numbers come from the seed logged in
  * `AgentBound`. With both delays 0 the agents take turns in a fixed seat
@@ -54,42 +54,30 @@ export class SimulationRunner {
   constructor(
     private readonly session: SessionManager,
     private readonly log: Logger,
-    private readonly clock: () => number = nowTs,
   ) {
     const st = session.state;
     // A session resumed after round 1 started gets fresh streams (seed@seq), not a replay of the old ones.
     const suffix = st.round > 0 ? `@${st.lastSeq}` : "";
-    const bound = session.store
-      .listEvents(session.sessionId)
-      .filter((e) => e.type === "AgentBound")
-      .map(
-        (e) =>
-          e.payload as {
-            seat: number;
-            policy: string;
-            policyVersion: string;
-            params: Record<string, unknown>;
-            seed: string;
-          },
-      );
-    for (const b of bound) {
-      const policy = getPolicy(b.policy);
+    for (const s of seatList(st)) {
+      if (!s.agent) continue;
+      const { policy: id, policyVersion, params, seed } = s.agent;
+      const policy = getPolicy(id);
       if (!policy) {
-        log.error({ seat: b.seat, policy: b.policy }, "agent policy no longer exists; seat stays idle");
+        log.error({ seat: s.seat, policy: id }, "agent policy no longer exists; seat stays idle");
         continue;
       }
-      if (policy.version !== b.policyVersion) {
+      if (policy.version !== policyVersion) {
         log.warn(
-          { seat: b.seat, policy: b.policy, logged: b.policyVersion, current: policy.version },
+          { seat: s.seat, policy: id, logged: policyVersion, current: policy.version },
           "agent policy changed since the session was created",
         );
       }
-      this.agents.set(b.seat, {
-        seat: b.seat,
+      this.agents.set(s.seat, {
+        seat: s.seat,
         policy,
-        params: b.params,
-        random: seededRandom(`${b.seed}${suffix}`),
-        timing: seededRandom(`${b.seed}${suffix}:timing`),
+        params,
+        random: seededRandom(`${seed}${suffix}`),
+        timing: seededRandom(`${seed}${suffix}:timing`),
         memory: {},
         timer: null,
         busy: false,
@@ -115,11 +103,6 @@ export class SimulationRunner {
   dispose() {
     this.disposed = true;
     for (const a of this.agents.values()) this.clear(a);
-  }
-
-  /** For tests and the dashboard: which agents are currently stopped after errors. */
-  stoppedSeats(): number[] {
-    return [...this.agents.values()].filter((a) => a.stopped).map((a) => a.seat);
   }
 
   /* ─────────────────────────── internals ─────────────────────────── */
@@ -156,7 +139,7 @@ export class SimulationRunner {
     let acted = false;
     let failed = false;
     try {
-      const now = this.clock();
+      const now = nowTs();
       const view = playerView(this.session.state, this.session.scenario, a.seat, null, now);
       const ctx = this.context(a, now);
       let action: AgentAction | null;
@@ -212,11 +195,10 @@ export class SimulationRunner {
   }
 }
 
+/** Agents' actions are checked like a browser's intent message (same kinds, same region id limits). */
+const ActionShape = IntentMsg.pick({ kind: true, regionId: true });
+
 function checkAction(action: AgentAction) {
-  if (!ACTION_KINDS.includes(action.kind as ActionKind)) {
-    throw new Error(`policy returned an unknown action kind '${String(action.kind)}'`);
-  }
-  if (typeof action.regionId !== "string" || action.regionId.length === 0) {
-    throw new Error("policy returned an action without a regionId");
-  }
+  const r = ActionShape.safeParse(action);
+  if (!r.success) throw new Error(`policy returned an invalid action: ${r.error.issues[0]?.message ?? ""}`);
 }

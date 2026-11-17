@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { RoundSpecSchema, SessionConfigSchema } from "./config";
+import { FakePaceSchema, RoundSpecSchema, SessionConfigSchema } from "./config";
 import {
   ActionKindSchema,
   KLabelSchema,
@@ -107,10 +107,9 @@ export const EVENT_DEFS = {
         .describe(
           "True if the client is a fake player: a test client the server created itself (no participant, no code, no onboarding). Absent in sessions recorded before fake players existed (= false)",
         ),
-      fakePace: z
-        .enum(["normal", "fast"])
-        .optional()
-        .describe("Fake players only: pause between their actions ('normal' 1–4 s, 'fast' 0.1–0.3 s)"),
+      fakePace: FakePaceSchema.optional().describe(
+        "Fake players only: pause between their actions ('normal' 1–4 s, 'fast' 0.1–0.3 s)",
+      ),
     }),
     example: { seat: 2, terminal: 3, bindingId: "b-7KQ2M9", fake: false },
   }),

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { SessionConfigSchema } from "./config";
+import { FakePaceSchema, SessionConfigSchema } from "./config";
 import { ActionKindSchema, KLabelSchema, SeatSchema } from "./labels";
 import { TelemetryItemSchema } from "./telemetry";
 
@@ -75,23 +75,13 @@ export const SessionCreate = z.object({
 export const SessionResume = z.object({ sessionId: z.string() });
 export const SeatBind = z.object({ terminal: z.number().int().min(1), seat: SeatSchema });
 
-/** Pause between a fake player's actions (ms). */
-export const FAKE_PLAYER_PACES = {
-  normal: { minDelayMs: 1000, maxDelayMs: 4000, label: "Normal · 1–4 s" },
-  fast: { minDelayMs: 100, maxDelayMs: 300, label: "Fast · 0.1–0.3 s" },
-} as const;
-export type FakePlayerPace = keyof typeof FAKE_PLAYER_PACES;
-
 export const FakeAdd = z.object({
   seats: z
     .array(SeatSchema)
     .nullable()
     .default(null)
     .describe("Seats to give a fake player; null = every seat that is still unbound"),
-  pace: z
-    .enum(["normal", "fast"])
-    .default("normal")
-    .describe("Pause between a fake player's actions: normal 1–4 s, fast 0.1–0.3 s"),
+  pace: FakePaceSchema.default("normal"),
 });
 export const SeatUnbind = z.object({ seat: SeatSchema, reason: z.string().max(200).default("facilitator") });
 /** K per seat + pairing; the server derives each P from the pairing (P is never chosen freely). */
