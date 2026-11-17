@@ -2,6 +2,12 @@
 
 History of [SESSION-RUNBOOK.md](../SESSION-RUNBOOK.md). Newest first. How entries are written: [README.md](README.md).
 
+### 2026-11-17 · `a4ddecd` · Document simulated and fake players
+
+- **Type:** Feature
+- **Change:** New § 8 *Simulated sessions* and § 9 *Testing without people: fake players* describe both procedures step by step, with a flowchart, what the data records and how to clean up afterwards. The overview mentions the DATABASE switch and the `–` glyph for skipped steps, and steps 03 and 07 point to the new sections.
+- **Reason:** Facilitators need a procedure for each new mode. Fake players replace `npm run bots` for rehearsals because their data is marked as fake.
+
 ### 2026-11-16 · `a8c3221` · Rename to "Who Knows, Who Acts?"; per-screen display settings; card PDFs; session deletion
 
 - **Type:** Feature

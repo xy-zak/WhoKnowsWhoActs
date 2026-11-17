@@ -2,6 +2,12 @@
 
 History of [DATA-MANAGEMENT.md](../DATA-MANAGEMENT.md). Newest first. How entries are written: [README.md](README.md).
 
+### 2026-11-17 · `a4ddecd` · Document simulated and fake players
+
+- **Type:** Risk mitigation
+- **Change:** New § 17 describes the separate simulation database (`data/wkwa-sim.db`, same encryption and passphrase). New § 18 covers fake players, which are marked in the data and get no participant code, consent record or questionnaire answers. The summary, data inventory, data-flow diagram, consent design, encryption, exports, retention, risk table (risks 15–18) and command reference (`--sim`) were updated to match.
+- **Reason:** Synthetic and test data must never be mistaken for participants' data (research validity), and an ethics reviewer needs to see that neither feature invents consent or personal data.
+
 ### 2026-11-16 · `a8c3221` · Rename to "Who Knows, Who Acts?"; per-screen display settings; card PDFs; session deletion
 
 - **Type:** Feature

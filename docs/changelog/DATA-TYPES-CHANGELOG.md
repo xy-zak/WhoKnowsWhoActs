@@ -2,6 +2,12 @@
 
 History of [DATA-TYPES.md](../DATA-TYPES.md). Newest first. How entries are written: [README.md](README.md).
 
+### 2026-11-17 · `a4ddecd` · Document simulated and fake players
+
+- **Type:** Feature
+- **Change:** The generated sections add the `AgentBound` event, `fake` and `fakePace` on `SeatBound`, the `players` and `simulation` session settings, the `agent_policy` and `fake_player` columns of `players.csv`, and `fakeSeats` in `session.json`. The storage model describes the second database file for simulations and the new index on `events.type` (schema version 5, i.e. the fifth layout of the database).
+- **Reason:** Every new field is documented, so analysts can tell simulated sessions and fake seats apart from participants.
+
 ### 2026-11-16 · `a8c3221` · Rename to "Who Knows, Who Acts?"; per-screen display settings; card PDFs; session deletion
 
 - **Type:** Feature

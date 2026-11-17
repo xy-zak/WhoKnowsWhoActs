@@ -2,6 +2,12 @@
 
 History of [AESTHETIC-RULES.md](../AESTHETIC-RULES.md). Newest first. How entries are written: [README.md](README.md).
 
+### 2026-11-17 · `a4ddecd` · Document simulated and fake players
+
+- **Type:** Feature
+- **Change:** § 8 adds the `–` glyph for skipped setup steps, the neutral `[SIMULATION]` and `[FAKE]` markers, and sub-tabs inside a page. The generated icon table adds `agent`, `simulation` and `fake`.
+- **Reason:** New interface states must follow the rule that colour carries meaning, so they are marked with neutral tags and icons rather than a new colour.
+
 ### 2026-11-16 · `a8c3221` · Rename to "Who Knows, Who Acts?"; per-screen display settings; card PDFs; session deletion
 
 - **Type:** Feature

@@ -524,6 +524,7 @@ sequenceDiagram
 - **Same rules as a person.** An agent cannot change the state; it can only return one action per turn, which goes through `SessionManager.intent`, the validators and quotas, and is logged with the same event types (`ProposalMade`, `DecisionMade`, `IntentRejected`). Facilitator controls (pause, end round, revoke, withdraw, labels) work as in a real session.
 - **Turns.** While a round is running and not paused, each agent gets a turn after a pause drawn between `simulation.minDelayMs` and `maxDelayMs`. After a pass (or an error) it is asked again after at least 250 ms. Rounds end by the round rule as usual; later rounds start by the facilitator or automatically (`roundAdvance`).
 - **Errors.** If a policy throws three times in a row, its agent stops and a `SessionNote` (actor `system`) records why. The rest of the session carries on.
+- **Dashboard.** Agents can act many times a second, so while they play the server sends the facilitator's full `dashboard` at most every 100 ms. New events still reach the event log one batch at a time.
 
 ### Lifecycle of a simulated session
 

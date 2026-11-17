@@ -2,6 +2,12 @@
 
 History of [NETWORKING.md](../NETWORKING.md). Newest first. How entries are written: [README.md](README.md).
 
+### 2026-11-17 · `a4ddecd` · Document simulated and fake players
+
+- **Type:** Feature
+- **Change:** § 5 explains that simulated sessions have no client binding, and that fake players are network clients the server starts itself (new sequence diagram). The generated message catalogue adds `simulation:start` and `fake:add`, the REST table covers both databases (`players`, `fakeSeats`), and the security table says a browser cannot pretend to be a fake player.
+- **Reason:** Both features change what the facilitator sends and what the API returns, and skipping consent must only be possible for clients the server created.
+
 ### 2026-11-16 · `a8c3221` · Rename to "Who Knows, Who Acts?"; per-screen display settings; card PDFs; session deletion
 
 - **Type:** Feature

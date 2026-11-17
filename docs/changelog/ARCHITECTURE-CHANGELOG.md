@@ -2,6 +2,20 @@
 
 History of [ARCHITECTURE.md](../ARCHITECTURE.md). Newest first. How entries are written: [README.md](README.md).
 
+## Unreleased
+
+### Not yet committed · documents `7ca658f`
+
+- **Type:** Feature
+- **Change:** § 14 gets a **Dashboard** bullet: while agents play, the facilitator's full dashboard is sent at most every 100 ms, and events still arrive one batch at a time.
+- **Reason:** Commit `7ca658f` throttled these updates because agents can act many times a second; the document now says so.
+
+### 2026-11-17 · `a4ddecd` · Document simulated and fake players
+
+- **Type:** Feature
+- **Change:** A new § 14 *Simulated players* explains how software agents play a session: a diagram of one agent turn, the lifecycle of a simulated session, a reproducibility table and a generated table of the built-in policies. The glossary, overview and code-layout diagrams, the seat state machine (new paths for agents and fake players), the extension guide ("Add an agent policy") and § 13 (a table comparing bots, fake players and simulated agents) were updated.
+- **Reason:** Sessions can now be played by agents whose rules are still to be designed, or tested with fake players. The document describes the frame those rules plug into and when to use which kind of non-human player.
+
 ### 2026-11-16 · `a8c3221` · Rename to "Who Knows, Who Acts?"; per-screen display settings; card PDFs; session deletion
 
 - **Type:** Feature
