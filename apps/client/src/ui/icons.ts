@@ -37,6 +37,12 @@ export const ICON_TABLE = {
   client: { iconoir: "Computer", meaning: "A client: a connected player browser / PC" },
   bind: { iconoir: "UserPlus", meaning: "Bind a client to a seat" },
   withdraw: { iconoir: "UserXmark", meaning: "Withdraw a participant / unbind a seat" },
+  agent: { iconoir: "Cpu", meaning: "A simulated player (agent) in a seat" },
+  simulation: { iconoir: "Flask", meaning: "Simulated session, simulation database" },
+  fake: {
+    iconoir: "TestTube",
+    meaning: "A fake player: a test client the server created, not a participant",
+  },
   labels: { iconoir: "Label", meaning: "K/P labels" },
   randomise: { iconoir: "DiceFive", meaning: "Shuffle K labels across seats / random pairing" },
   connected: { iconoir: "Wifi", meaning: "Connected" },

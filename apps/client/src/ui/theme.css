@@ -1035,6 +1035,11 @@ table.grid tr.selected {
 .acc-step.accent .callout {
   border-left-color: var(--review);
 }
+/* a step a simulated session does not need (glyph –): finished, but not "done" in green */
+.acc-step.done.skipped .acc-head .glyph,
+.acc-step.done.skipped .acc-head .title {
+  color: var(--muted);
+}
 /* expanding is ordinary UI motion (not a CRT effect): short fade/slide, none with reduced motion */
 @keyframes acc-open {
   from {
@@ -1195,6 +1200,13 @@ table.grid tr.selected {
 .wayfinder-strip button.done,
 .wayfinder-strip button.locked {
   border-style: solid;
+}
+.wayfinder-strip button.done.skipped {
+  border-style: dotted;
+}
+/* a second row of tabs inside a page (DATABASE: participants | simulations) */
+.subtabs {
+  border-bottom: 1px solid var(--frame);
 }
 .wayfinder-strip button.current {
   background: var(--on-accent);

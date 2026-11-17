@@ -32,7 +32,9 @@ export function summarise(ev: StoredEvent, regionName: (id: string) => string): 
     case "LabelsAssigned":
       return `${ev.payload.assignments.map((a) => `${a.seat}:${a.k}/${a.p}`).join(" ")} (${ev.payload.method})`;
     case "SeatBound":
-      return `terminal ${ev.payload.terminal} → seat ${ev.payload.seat}`;
+      return `client ${ev.payload.terminal} → seat ${ev.payload.seat}${ev.payload.fake ? ` (FAKE player, ${ev.payload.fakePace ?? "normal"} pace)` : ""}`;
+    case "AgentBound":
+      return `agent ${ev.payload.policy} v${ev.payload.policyVersion} → seat ${ev.payload.seat} (seed ${ev.payload.seed})`;
     case "ConsentRecorded":
       return ev.payload.consented ? "consent given" : "consent DECLINED";
     case "DemographicsSubmitted":

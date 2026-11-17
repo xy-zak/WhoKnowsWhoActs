@@ -1,15 +1,33 @@
 import {
+  getPolicy,
+  listPolicies,
   MAX_TAG_LENGTH,
   MAX_TAGS,
   normaliseTags,
+  type PlayerMode,
+  policyParamRows,
   type RoundSpec,
   type Scenario,
   type SessionConfig,
+  type SimulationConfig,
+  seatPolicyId,
 } from "@wkwa/shared";
 import { useEffect, useMemo, useState } from "react";
 import { MapView } from "../../map/MapView";
-import { Button, Callout, Check, Chip, Field, Icon, StatusTag, useConfirm } from "../../ui";
+import {
+  Button,
+  Callout,
+  Check,
+  Chip,
+  Field,
+  Icon,
+  type IconName,
+  SeatDot,
+  StatusTag,
+  useConfirm,
+} from "../../ui";
 import type { FacilitatorConnection } from "../connection";
+import { PACES, paceId, paceText, policySummary } from "../simulation";
 import type { Draft } from "./draft";
 
 export interface ScenarioInfo {
@@ -249,81 +267,330 @@ export function RoundsStep({ d, upd }: { d: Draft; upd: Upd }) {
 
 /* ─── 03 PLAYERS & VISIBILITY ─── */
 
-export function PlayersStep({ d, upd }: { d: Draft; upd: Upd }) {
+const PLAYER_MODES: Array<{ id: PlayerMode; icon: IconName; title: string; text: string }> = [
+  {
+    id: "real",
+    icon: "seats",
+    title: "Real participants",
+    text: "People on the player PCs. Consent, participant codes, client binding and the key sheet, as usual. Stored in the participant database (data/wkwa.db).",
+  },
+  {
+    id: "simulated",
+    icon: "agent",
+    title: "Simulated players",
+    text: "An agent plays every seat, following a policy. No consent, codes, clients or key sheet. Stored in the separate simulation database (data/wkwa-sim.db).",
+  },
+];
+
+function PlayerModeChoice({ d, upd }: { d: Draft; upd: Upd }) {
+  const mode = d.config.players;
+  return (
+    <div className="col">
+      <h3>Who plays</h3>
+      <table className="grid">
+        <tbody>
+          {PLAYER_MODES.map((m) => (
+            <tr
+              key={m.id}
+              className={mode === m.id ? "selected" : ""}
+              onClick={() => setCfg(d, upd, { players: m.id })}
+              style={{ cursor: "pointer" }}
+            >
+              <td style={{ width: 24 }}>
+                <input
+                  type="radio"
+                  name="players"
+                  aria-label={m.title}
+                  checked={mode === m.id}
+                  onChange={() => setCfg(d, upd, { players: m.id })}
+                />
+              </td>
+              <td>
+                <strong>
+                  <Icon name={m.icon} /> {m.title}
+                </strong>
+                <div className="small muted">{m.text}</div>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/** Agent policies, pace, seed and parameters (only when players are simulated). */
+function SimulationSettings({ d, upd }: { d: Draft; upd: Upd }) {
   const c = d.config;
-  const vis = (patch: Partial<SessionConfig["visibility"]>) =>
-    setCfg(d, upd, { visibility: { ...c.visibility, ...patch } });
+  const sim = c.simulation;
+  const set = (patch: Partial<SimulationConfig>) => setCfg(d, upd, { simulation: { ...sim, ...patch } });
+  const policies = listPolicies();
+  const main = getPolicy(sim.policy);
+  const pace = paceId(sim);
+  const used = [...new Set(Array.from({ length: c.seatCount }, (_, i) => seatPolicyId(sim, i + 1)))];
+  let paramsOk = true;
+  try {
+    JSON.parse(d.simParamsText.trim() || "{}");
+  } catch {
+    paramsOk = false;
+  }
+  const setSeat = (seat: number, id: string) => {
+    const seatPolicies = { ...sim.seatPolicies };
+    if (id) seatPolicies[String(seat)] = id;
+    else delete seatPolicies[String(seat)];
+    set({ seatPolicies });
+  };
   return (
     <div className="grid-2" style={{ alignItems: "start" }}>
       <div className="col">
-        <h3>Seats &amp; labels</h3>
-        <Field label="Seats" hint="4 for real sessions; fewer for pilots.">
-          <input
-            type="number"
-            min={1}
-            max={4}
-            value={c.seatCount}
-            onChange={(e) => setCfg(d, upd, { seatCount: Math.min(4, Math.max(1, Number(e.target.value))) })}
-          />
-        </Field>
-        <Field label="Map view per seat">
-          <select
-            value={c.viewAssignment}
-            onChange={(e) =>
-              setCfg(d, upd, { viewAssignment: e.target.value as SessionConfig["viewAssignment"] })
-            }
-          >
-            <option value="byKnowledgeType">follows the K label (Ka → view Ka)</option>
-            <option value="manual">chosen per seat</option>
+        <h3>
+          <Icon name="agent" /> Agents
+        </h3>
+        <Field label="Policy for every seat" hint={main?.description}>
+          <select value={sim.policy} onChange={(e) => set({ policy: e.target.value })}>
+            {policies.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name} ({p.id} v{p.version})
+              </option>
+            ))}
           </select>
         </Field>
+        <table className="grid">
+          <tbody>
+            {Array.from({ length: c.seatCount }, (_, i) => i + 1).map((seat) => (
+              <tr key={seat}>
+                <td style={{ width: 90 }}>
+                  <span className="row nowrap">
+                    <SeatDot seat={seat} /> <strong>SEAT {seat}</strong>
+                  </span>
+                </td>
+                <td>
+                  <select
+                    aria-label={`Policy of seat ${seat}`}
+                    value={sim.seatPolicies[String(seat)] ?? ""}
+                    onChange={(e) => setSeat(seat, e.target.value)}
+                  >
+                    <option value="">same as every seat ({sim.policy})</option>
+                    {policies.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name} ({p.id})
+                      </option>
+                    ))}
+                  </select>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
         <span className="hint">
-          K and P labels are assigned in step 08: each K once, P follows from the pairing (aligned or fully
-          dissociated D1–D6).
+          Policies live in <code>packages/shared/src/simulation/policies.ts</code>. The rules for simulated
+          players are added there.
         </span>
-        <h3 style={{ marginTop: 8 }}>What players see</h3>
-        <Check
-          label="Which seat proposed / decided"
-          checked={c.visibility.showActorToPlayers}
-          onChange={(v) => vis({ showActorToPlayers: v })}
-        />
-        <Check
-          label="Their own K/P labels"
-          checked={c.visibility.showOwnLabels}
-          onChange={(v) => vis({ showOwnLabels: v })}
-        />
-        <Check
-          label="Other seats' K/P labels"
-          checked={c.visibility.showOtherLabelsToPlayers}
-          onChange={(v) => vis({ showOtherLabelsToPlayers: v })}
-        />
-        <Check
-          label="Other seats' quota progress"
-          checked={c.visibility.showOthersProgress}
-          onChange={(v) => vis({ showOthersProgress: v })}
-        />
-        <Check
-          label="Clear highlights at the start of each round"
-          checked={c.clearHighlightsEachRound}
-          onChange={(v) => setCfg(d, upd, { clearHighlightsEachRound: v })}
-        />
-        <Check
-          label="Pause automatically when a player disconnects"
-          checked={c.pauseOnDisconnect}
-          onChange={(v) => setCfg(d, upd, { pauseOnDisconnect: v })}
-        />
       </div>
       <div className="col">
-        <h3>Player screens</h3>
-        <Callout icon="display">
-          Display settings are <strong>each participant's own choice</strong>, made on their screen with the{" "}
-          <strong>DISPLAY</strong> button (bottom right): colours (Latte, Mocha, High contrast), font
-          (JetBrains Mono, OpenDyslexic, System font), text size (Small, Large) and animations (on/off).
-        </Callout>
-        <span className="hint">
-          They are accessibility settings, so they stay on that PC and are never sent to the server or
-          recorded. Animations are always off when the PC's OS asks for reduced motion.
-        </span>
+        <h3>
+          <Icon name="clock" /> Pace &amp; seed
+        </h3>
+        <Field
+          label="Pause before each agent's turn"
+          hint="Watch it live in LIVE, or run it as fast as possible."
+        >
+          <span className="row nowrap">
+            <select
+              value={pace}
+              onChange={(e) => {
+                const p = PACES.find((x) => x.id === e.target.value);
+                if (p) set({ minDelayMs: p.min, maxDelayMs: p.max });
+              }}
+            >
+              {PACES.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.label}
+                </option>
+              ))}
+              <option value="custom">Custom…</option>
+            </select>
+            {pace === "custom" && (
+              <>
+                <input
+                  type="number"
+                  min={0}
+                  step={100}
+                  aria-label="Shortest pause (ms)"
+                  style={{ width: 80 }}
+                  value={sim.minDelayMs}
+                  onChange={(e) => set({ minDelayMs: Math.max(0, Number(e.target.value)) })}
+                />
+                –
+                <input
+                  type="number"
+                  min={0}
+                  step={100}
+                  aria-label="Longest pause (ms)"
+                  style={{ width: 80 }}
+                  value={sim.maxDelayMs}
+                  onChange={(e) => set({ maxDelayMs: Math.max(0, Number(e.target.value)) })}
+                />
+                ms
+              </>
+            )}
+          </span>
+        </Field>
+        <Field
+          label="Seed"
+          hint="The agents' random choices follow the seed. At 0 s a run with the same seed and settings repeats exactly. Empty = drawn at random when the session is created (and logged)."
+        >
+          <input
+            type="text"
+            maxLength={40}
+            value={sim.seed ?? ""}
+            onChange={(e) => set({ seed: e.target.value.trim() || null })}
+            placeholder="random"
+          />
+        </Field>
+        <details>
+          <summary className="small upper">Policy parameters (JSON)</summary>
+          <textarea
+            rows={4}
+            aria-label="Policy parameters (JSON)"
+            style={{ width: "100%", marginTop: 6 }}
+            value={d.simParamsText}
+            onChange={(e) => upd({ simParamsText: e.target.value })}
+            placeholder={'{ "random": { "proposeBias": 0.7 } }'}
+          />
+          {!paramsOk && <span className="small t-danger">Not valid JSON.</span>}
+          <table className="grid">
+            <tbody>
+              {used.flatMap((id) => {
+                const p = getPolicy(id);
+                const rows = p ? policyParamRows(p) : [];
+                return rows.length === 0
+                  ? [
+                      <tr key={id}>
+                        <td className="mono small">{id}</td>
+                        <td colSpan={2} className="faint small">
+                          no parameters
+                        </td>
+                      </tr>,
+                    ]
+                  : rows.map((r) => (
+                      <tr key={`${id}.${r.name}`}>
+                        <td className="mono small">
+                          {id}.{r.name}
+                        </td>
+                        <td className="mono small">
+                          {r.defaultValue === undefined ? "" : JSON.stringify(r.defaultValue)}
+                        </td>
+                        <td className="small">{r.description}</td>
+                      </tr>
+                    ));
+              })}
+            </tbody>
+          </table>
+        </details>
+      </div>
+    </div>
+  );
+}
+
+export function PlayersStep({ d, upd }: { d: Draft; upd: Upd }) {
+  const c = d.config;
+  const simulated = c.players === "simulated";
+  const vis = (patch: Partial<SessionConfig["visibility"]>) =>
+    setCfg(d, upd, { visibility: { ...c.visibility, ...patch } });
+  return (
+    <div className="col" style={{ gap: "var(--s3)" }}>
+      <PlayerModeChoice d={d} upd={upd} />
+      {simulated && <SimulationSettings d={d} upd={upd} />}
+      <div className="grid-2" style={{ alignItems: "start" }}>
+        <div className="col">
+          <h3>Seats &amp; labels</h3>
+          <Field label="Seats" hint="4 for real sessions; fewer for pilots.">
+            <input
+              type="number"
+              min={1}
+              max={4}
+              value={c.seatCount}
+              onChange={(e) =>
+                setCfg(d, upd, { seatCount: Math.min(4, Math.max(1, Number(e.target.value))) })
+              }
+            />
+          </Field>
+          <Field label="Map view per seat">
+            <select
+              value={c.viewAssignment}
+              onChange={(e) =>
+                setCfg(d, upd, { viewAssignment: e.target.value as SessionConfig["viewAssignment"] })
+              }
+            >
+              <option value="byKnowledgeType">follows the K label (Ka → view Ka)</option>
+              <option value="manual">chosen per seat</option>
+            </select>
+          </Field>
+          <span className="hint">
+            K and P labels are assigned in step 08: each K once, P follows from the pairing (aligned or fully
+            dissociated D1–D6).
+          </span>
+          <h3 style={{ marginTop: 8 }}>What players see</h3>
+          <Check
+            label="Which seat proposed / decided"
+            checked={c.visibility.showActorToPlayers}
+            onChange={(v) => vis({ showActorToPlayers: v })}
+          />
+          <Check
+            label="Their own K/P labels"
+            checked={c.visibility.showOwnLabels}
+            onChange={(v) => vis({ showOwnLabels: v })}
+          />
+          <Check
+            label="Other seats' K/P labels"
+            checked={c.visibility.showOtherLabelsToPlayers}
+            onChange={(v) => vis({ showOtherLabelsToPlayers: v })}
+          />
+          <Check
+            label="Other seats' quota progress"
+            checked={c.visibility.showOthersProgress}
+            onChange={(v) => vis({ showOthersProgress: v })}
+          />
+          <Check
+            label="Clear highlights at the start of each round"
+            checked={c.clearHighlightsEachRound}
+            onChange={(v) => setCfg(d, upd, { clearHighlightsEachRound: v })}
+          />
+          {!simulated && (
+            <Check
+              label="Pause automatically when a player disconnects"
+              checked={c.pauseOnDisconnect}
+              onChange={(v) => setCfg(d, upd, { pauseOnDisconnect: v })}
+            />
+          )}
+        </div>
+        <div className="col">
+          {simulated ? (
+            <>
+              <h3>What agents see</h3>
+              <Callout icon="agent">
+                An agent sees exactly what a player of its seat would see: its own map view, the highlights
+                and what the settings on the left allow. Its actions go through the same rules and quotas and
+                are logged like a player's.
+              </Callout>
+            </>
+          ) : (
+            <>
+              <h3>Player screens</h3>
+              <Callout icon="display">
+                Display settings are <strong>each participant's own choice</strong>, made on their screen with
+                the <strong>DISPLAY</strong> button (bottom right): colours (Latte, Mocha, High contrast),
+                font (JetBrains Mono, OpenDyslexic, System font), text size (Small, Large) and animations
+                (on/off).
+              </Callout>
+              <span className="hint">
+                They are accessibility settings, so they stay on that PC and are never sent to the server or
+                recorded. Animations are always off when the PC's OS asks for reduced motion.
+              </span>
+            </>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -334,6 +601,14 @@ export function PlayersStep({ d, upd }: { d: Draft; upd: Upd }) {
 export function OnboardingStep({ d, upd }: { d: Draft; upd: Upd }) {
   const confirm = useConfirm();
   const o = d.config.onboarding;
+  if (d.config.players === "simulated") {
+    return (
+      <Callout icon="agent">
+        Simulated players skip onboarding: there is no consent, demographics or briefing for agents. These
+        settings apply to sessions with real participants (step 03).
+      </Callout>
+    );
+  }
   const set = (patch: Partial<SessionConfig["onboarding"]>) =>
     setCfg(d, upd, { onboarding: { ...o, ...patch } });
   return (
@@ -471,6 +746,7 @@ export function ReviewStep({
   const sc = scenarios.find((s) => s.id === d.scenarioId);
   const c = config ?? d.config;
   const r = c.defaultRound;
+  const simulated = c.players === "simulated";
   const yes = (b: boolean) => (b ? "yes" : "no");
   const rows: Array<[number, string, string]> = [
     [0, "Scenario", sc ? `${sc.title} (${sc.id} v${sc.version})` : "— not chosen —"],
@@ -494,6 +770,20 @@ export function ReviewStep({
       "Overrides",
       Object.keys(c.roundOverrides).length ? `rounds ${Object.keys(c.roundOverrides).join(", ")}` : "none",
     ],
+    [
+      2,
+      "Players",
+      simulated
+        ? `simulated · ${policySummary(c.simulation, c.seatCount)} · pause ${paceText(c.simulation)} · seed ${c.simulation.seed ?? "random (logged)"}`
+        : "real participants",
+    ],
+    [
+      2,
+      "Database",
+      simulated
+        ? "simulation database (data/wkwa-sim.db), session id SIM-…"
+        : "participant database (data/wkwa.db)",
+    ],
     [2, "Seats", `${c.seatCount} · view ${c.viewAssignment === "byKnowledgeType" ? "follows K" : "manual"}`],
     [
       2,
@@ -501,18 +791,24 @@ export function ReviewStep({
       `actors ${yes(c.visibility.showActorToPlayers)} · own labels ${yes(c.visibility.showOwnLabels)} · others' labels ${yes(c.visibility.showOtherLabelsToPlayers)} · others' progress ${yes(c.visibility.showOthersProgress)}`,
     ],
     [2, "Highlights", c.clearHighlightsEachRound ? "cleared each round" : "kept across rounds"],
-    [2, "Disconnect", c.pauseOnDisconnect ? "auto-pause" : "keep playing"],
-    [2, "Player screens", "display settings: each player's own choice (not recorded)"],
+    ...(simulated
+      ? []
+      : ([
+          [2, "Disconnect", c.pauseOnDisconnect ? "auto-pause" : "keep playing"],
+          [2, "Player screens", "display settings: each player's own choice (not recorded)"],
+        ] as Array<[number, string, string]>)),
     [
       3,
       "Onboarding",
-      [
-        c.onboarding.consent && "consent",
-        c.onboarding.demographics && "demographics",
-        c.onboarding.briefing && "briefing",
-      ]
-        .filter(Boolean)
-        .join(" → ") || "none",
+      simulated
+        ? "none (simulated players)"
+        : [
+            c.onboarding.consent && "consent",
+            c.onboarding.demographics && "demographics",
+            c.onboarding.briefing && "briefing",
+          ]
+            .filter(Boolean)
+            .join(" → ") || "none",
     ],
     [4, "Tags", c.tags.length ? c.tags.join(", ") : "none"],
     [4, "Notes", d.notes || "—"],
@@ -536,11 +832,12 @@ export function ReviewStep({
           ))}
         </tbody>
       </table>
-      {!c.onboarding.consent && (
+      {!simulated && !c.onboarding.consent && (
         <StatusTag tone="danger" icon="warning">
           consent disabled
         </StatusTag>
       )}
+      {simulated && <StatusTag icon="simulation">simulated players · simulation database</StatusTag>}
       {error ? (
         <Callout tone="danger" icon="error">
           {error}

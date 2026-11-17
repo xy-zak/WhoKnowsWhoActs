@@ -1,4 +1,5 @@
 import {
+  fakeSeats,
   type GameState,
   isOnboardingComplete,
   nextOnboardingStep,
@@ -30,6 +31,7 @@ import { CompositeMap, PlayerMirrors } from "../Composite";
 import type { FacilitatorConnection } from "../connection";
 import { EventLog, TelemetryFeed } from "../EventLog";
 import { LabelsEditor, SeatsPanel } from "../seats";
+import { paceText, policySummary } from "../simulation";
 import { Timeline } from "../Timeline";
 
 function useNow(ms = 1000) {
@@ -44,7 +46,10 @@ function useNow(ms = 1000) {
 /* ─────────────────────────── lifecycle (order of events) ─────────────────────────── */
 
 function lifecycle(st: GameState): { steps: StepDef[]; current: number; done: (i: number) => boolean } {
-  const steps: StepDef[] = [{ key: "onboarding", label: "Onboarding" }];
+  const simulated = st.config.players === "simulated";
+  const steps: StepDef[] = [
+    simulated ? { key: "onboarding", label: "Agents" } : { key: "onboarding", label: "Onboarding" },
+  ];
   for (let r = 1; r <= st.config.roundCount; r++) steps.push({ key: `r${r}`, label: `Round ${r}` });
   steps.push({ key: "wrapup", label: "Wrap-up" });
   const last = steps.length - 1;
@@ -156,7 +161,12 @@ function NextPanel({
       </Button>
     );
   } else if (st.phase === "game_complete") {
-    prompt = "Game complete. Players see their participant code. Wrap up: takedown cards → export → close.";
+    prompt =
+      st.config.players === "simulated"
+        ? "Simulation complete. Wrap up: export → close."
+        : seatList(st).some((s) => s.participantCode)
+          ? "Game complete. Players see their participant code. Wrap up: takedown cards → export → close."
+          : "Game complete (fake players only). Wrap up: export → close.";
     action = onWrapUp;
     primary = (
       <Button variant="primary" size="lg" icon="next" kbd="N" onClick={onWrapUp}>
@@ -335,11 +345,17 @@ const WRAP_STEPS: StepDef[] = [
 ];
 
 function WrapUp({ conn, st, onClose }: { conn: FacilitatorConnection; st: GameState; onClose: () => void }) {
+  const simulated = st.config.players === "simulated";
+  // no participant codes (simulated session, or fake players only): no takedown cards
+  const noCards = simulated || seatList(st).every((s) => !s.participantCode);
+  const steps = noCards ? WRAP_STEPS.filter((s) => s.key !== "cards") : WRAP_STEPS;
   const [step, setStep] = useState(0);
   const [cardsDone, setCardsDone] = useState(false);
   const [exported, setExported] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const id = st.sessionId!;
+  const key = steps[step]!.key;
+  const last = steps.length - 1;
   const doExport = async () => {
     setBusy(true);
     const r = await conn
@@ -348,22 +364,22 @@ function WrapUp({ conn, st, onClose }: { conn: FacilitatorConnection; st: GameSt
     setBusy(false);
     if (r) {
       setExported(r.dir);
-      conn.toast("Standard export written");
+      conn.toast(simulated ? "Simulation export written" : "Standard export written");
     }
   };
-  const canNext = step === 0 ? cardsDone : step === 1 ? Boolean(exported) : true;
+  const canNext = key === "cards" ? cardsDone : key === "export" ? Boolean(exported) : true;
   const next = () => {
     if (!canNext) return;
-    if (step < 2) setStep(step + 1);
+    if (step < last) setStep(step + 1);
     else void conn.cmd("session:close", {}, "Session closed").then(onClose, () => {});
   };
   return (
     <Popup
-      title={WRAP_STEPS[step]!.label}
-      icon={step === 0 ? "cards" : step === 1 ? "export" : "archive"}
-      step={{ index: step, total: 3 }}
+      title={steps[step]!.label}
+      icon={key === "cards" ? "cards" : key === "export" ? "export" : "archive"}
+      step={{ index: step, total: steps.length }}
       stepper={
-        <Stepper steps={WRAP_STEPS} current={step} completed={(i) => i < step} onSelect={(i) => setStep(i)} />
+        <Stepper steps={steps} current={step} completed={(i) => i < step} onSelect={(i) => setStep(i)} />
       }
       onClose={onClose}
       onPrimary={canNext && !busy ? next : undefined}
@@ -375,17 +391,17 @@ function WrapUp({ conn, st, onClose }: { conn: FacilitatorConnection; st: GameSt
           <span className="spacer" />
           <Button
             variant="primary"
-            icon={step === 2 ? "archive" : "next"}
+            icon={key === "close" ? "archive" : "next"}
             kbd="Enter"
             disabled={!canNext || busy}
             onClick={next}
           >
-            {step === 2 ? "Close session" : "Next"}
+            {key === "close" ? "Close session" : "Next"}
           </Button>
         </>
       }
     >
-      {step === 0 && (
+      {key === "cards" && (
         <div className="col">
           <p>
             Each player's screen now shows their participant code. Hand every participant the takedown card of
@@ -423,9 +439,13 @@ function WrapUp({ conn, st, onClose }: { conn: FacilitatorConnection; st: GameSt
           <Check label="Cards are handed out." checked={cardsDone} onChange={setCardsDone} />
         </div>
       )}
-      {step === 1 && (
+      {key === "export" && (
         <div className="col">
-          <p>Write the standard (pseudonymised) export of this session for analysis.</p>
+          <p>
+            {simulated
+              ? "Write the export of this simulation (no personal data) to exports/simulations/."
+              : "Write the standard (pseudonymised) export of this session for analysis."}
+          </p>
           <div className="row">
             <Button variant="primary" icon="export" disabled={busy} onClick={() => void doExport()}>
               Export session
@@ -433,18 +453,27 @@ function WrapUp({ conn, st, onClose }: { conn: FacilitatorConnection; st: GameSt
           </div>
           {exported && (
             <Callout tone="live" icon="ok">
-              Written to <code>{exported}</code>. Move it to institutional storage and delete the local copy.
+              Written to <code>{exported}</code>.
+              {simulated ? "" : " Move it to institutional storage and delete the local copy."}
             </Callout>
           )}
         </div>
       )}
-      {step === 2 && (
+      {key === "close" && (
         <div className="col">
-          <p>
-            Closing archives the session: no further events except erasure markers. Players keep their end
-            screen until the next session.
-          </p>
-          <Callout icon="keysheet">Lock the key sheet away, separate from the data.</Callout>
+          {simulated ? (
+            <p>
+              Closing archives the simulation. It stays in the simulation database (DATABASE → Simulations).
+            </p>
+          ) : (
+            <>
+              <p>
+                Closing archives the session: no further events except erasure markers. Players keep their end
+                screen until the next session.
+              </p>
+              <Callout icon="keysheet">Lock the key sheet away, separate from the data.</Callout>
+            </>
+          )}
         </div>
       )}
     </Popup>
@@ -494,6 +523,23 @@ export function LiveStage({ conn }: { conn: FacilitatorConnection }) {
           {st.paused && (
             <StatusTag tone="warn" icon="pause">
               paused
+            </StatusTag>
+          )}
+          {st.config.players === "simulated" && (
+            <StatusTag
+              icon="simulation"
+              title={`Agents: ${policySummary(st.config.simulation, st.config.seatCount)} · pause ${paceText(st.config.simulation)} · seed ${st.config.simulation.seed}`}
+            >
+              simulation · {policySummary(st.config.simulation, st.config.seatCount)} · seed{" "}
+              {st.config.simulation.seed}
+            </StatusTag>
+          )}
+          {fakeSeats(st).length > 0 && (
+            <StatusTag
+              icon="fake"
+              title="Fake players: test clients the server created (no participant, no code, no onboarding)"
+            >
+              fake players · seat {fakeSeats(st).join(", ")}
             </StatusTag>
           )}
           {st.labelPairing && (

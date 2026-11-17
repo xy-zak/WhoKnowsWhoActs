@@ -1,6 +1,8 @@
 import {
   type DashboardMsg,
   DISSOCIATED_PAIRINGS,
+  FAKE_PLAYER_PACES,
+  type FakePlayerPace,
   type GameState,
   isOnboardingComplete,
   K_LABELS,
@@ -32,6 +34,7 @@ import {
   useConfirm,
 } from "../ui";
 import type { FacilitatorConnection } from "./connection";
+import { policyLabel } from "./simulation";
 
 function useNow(ms = 1000) {
   const [now, setNow] = useState(Date.now());
@@ -49,6 +52,20 @@ export function BindEditor({ conn, dash }: { conn: FacilitatorConnection; dash: 
   const seats = seatList(st);
   const free = dash.terminals.filter((t) => t.connected && t.seat === null);
   const bound = seats.filter((s) => s.bound).length;
+  const fakes = seats.filter((s) => s.bound && s.fake).length;
+  const unbound = seats.filter((s) => !s.bound).length;
+  const [pace, setPace] = useState<FakePlayerPace>("normal");
+  const [busy, setBusy] = useState(false);
+  const addFakes = (seatsToFill: number[] | null) => {
+    setBusy(true);
+    void conn
+      .cmd<{ seats: number[] }>("fake:add", { seats: seatsToFill, pace })
+      .then(
+        (r) => conn.toast(`Fake player${r.seats.length === 1 ? "" : "s"} in seat ${r.seats.join(", ")}`),
+        () => {},
+      )
+      .finally(() => setBusy(false));
+  };
   return (
     <div className="col">
       <div className="row">
@@ -58,6 +75,14 @@ export function BindEditor({ conn, dash }: { conn: FacilitatorConnection; dash: 
         <StatusTag tone={free.length ? "primary" : "neutral"} icon="client">
           {free.length} unassigned client{free.length === 1 ? "" : "s"}
         </StatusTag>
+        {fakes > 0 && (
+          <StatusTag
+            icon="fake"
+            title="Test clients the server created: no participant, no code, no onboarding"
+          >
+            {fakes} fake player{fakes === 1 ? "" : "s"}
+          </StatusTag>
+        )}
       </div>
       <table className="grid">
         <thead>
@@ -80,33 +105,52 @@ export function BindEditor({ conn, dash }: { conn: FacilitatorConnection; dash: 
                 {s.bound ? (
                   <span className="row nowrap">
                     <Icon name="client" /> C{s.terminal} <ConnTag connected={s.connected} />
+                    {s.fake && <StatusTag icon="fake">fake</StatusTag>}
                   </span>
                 ) : (
-                  <select
-                    aria-label={`Bind a client to seat ${s.seat}`}
-                    value=""
-                    disabled={free.length === 0}
-                    onChange={(e) =>
-                      e.target.value &&
-                      void conn
-                        .cmd(
-                          "seat:bind",
-                          { terminal: Number(e.target.value), seat: s.seat },
-                          `Seat ${s.seat} bound`,
-                        )
-                        .catch(() => {})
-                    }
-                  >
-                    <option value="">{free.length ? "bind client…" : "waiting for clients…"}</option>
-                    {free.map((t) => (
-                      <option key={t.terminal} value={t.terminal}>
-                        Client {t.terminal}
-                      </option>
-                    ))}
-                  </select>
+                  <span className="row nowrap">
+                    <select
+                      aria-label={`Bind a client to seat ${s.seat}`}
+                      value=""
+                      disabled={free.length === 0}
+                      onChange={(e) =>
+                        e.target.value &&
+                        void conn
+                          .cmd(
+                            "seat:bind",
+                            { terminal: Number(e.target.value), seat: s.seat },
+                            `Seat ${s.seat} bound`,
+                          )
+                          .catch(() => {})
+                      }
+                    >
+                      <option value="">{free.length ? "bind client…" : "waiting for clients…"}</option>
+                      {free.map((t) => (
+                        <option key={t.terminal} value={t.terminal}>
+                          Client {t.terminal}
+                          {t.fake ? " (fake)" : ""}
+                        </option>
+                      ))}
+                    </select>
+                    <Button
+                      size="sm"
+                      icon="fake"
+                      disabled={busy}
+                      tip={`Let the server create a fake player for seat ${s.seat}: a test client that connects like a browser, skips consent and the questionnaire, gets no participant code and proposes/decides at random.`}
+                      onClick={() => addFakes([s.seat])}
+                    >
+                      Fake player
+                    </Button>
+                  </span>
                 )}
               </td>
-              <td className="mono">{s.participantCode ?? <span className="faint">—</span>}</td>
+              <td className="mono">
+                {s.fake ? (
+                  <span className="faint">none (fake player)</span>
+                ) : (
+                  (s.participantCode ?? <span className="faint">—</span>)
+                )}
+              </td>
               <td style={{ textAlign: "right" }}>
                 {s.bound && (
                   <Button
@@ -132,7 +176,74 @@ export function BindEditor({ conn, dash }: { conn: FacilitatorConnection; dash: 
           then appears here.
         </Callout>
       )}
+      <div className="row">
+        <Icon name="fake" />
+        <span className="small upper muted">Testing without people</span>
+        <select
+          aria-label="Fake player pace"
+          value={pace}
+          onChange={(e) => setPace(e.target.value as FakePlayerPace)}
+        >
+          {(Object.keys(FAKE_PLAYER_PACES) as FakePlayerPace[]).map((p) => (
+            <option key={p} value={p}>
+              {FAKE_PLAYER_PACES[p].label}
+            </option>
+          ))}
+        </select>
+        <Button
+          icon="fake"
+          disabled={busy || unbound === 0}
+          tip="Fill every unbound seat with a fake player (test client). They are logged as fake and stored with this session in the participant database."
+          onClick={() => addFakes(null)}
+        >
+          Fill empty seats with fake players
+        </Button>
+        <span className="hint">
+          Fake players are test clients the server creates: they connect like a browser, skip consent and the
+          questionnaire, get no participant code and are marked fake in the log and the exports.
+        </span>
+      </div>
     </div>
+  );
+}
+
+/* ─────────────────────────── Agents (setup step 7 of a simulated session) ─────────────────────────── */
+
+export function AgentsTable({ st }: { st: GameState }) {
+  const sim = st.config.simulation;
+  return (
+    <table className="grid">
+      <thead>
+        <tr>
+          <th>Seat</th>
+          <th>Agent policy</th>
+          <th>Seed</th>
+          <th>Client / code</th>
+        </tr>
+      </thead>
+      <tbody>
+        {seatList(st).map((s) => (
+          <tr key={s.seat}>
+            <td>
+              <span className="row nowrap">
+                <SeatDot seat={s.seat} /> <strong>SEAT {s.seat}</strong>
+              </span>
+            </td>
+            <td>
+              {s.agent ? (
+                <span className="row nowrap">
+                  <Icon name="agent" /> {policyLabel(s.agent)}
+                </span>
+              ) : (
+                <span className="faint">—</span>
+              )}
+            </td>
+            <td className="mono small">{sim.seed ? `${sim.seed}:${s.seat}` : "—"}</td>
+            <td className="faint small">none (simulated)</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
   );
 }
 
@@ -412,12 +523,15 @@ export function SeatsPanel({
   const pLim = quotaLimit(st, "propose");
   const dLim = quotaLimit(st, "decide");
   const final = ["closed", "aborted"].includes(st.phase);
+  const simulated = st.config.players === "simulated";
 
   const withdraw = async (seat: number) => {
     if (
       await confirm({
         title: `Withdraw seat ${seat}`,
-        message: (
+        message: simulated ? (
+          <p>The agent stops playing. Rounds complete without this seat from now on (logged).</p>
+        ) : (
           <>
             <p>
               The participant stops taking part. Their intents are rejected from now on and rounds complete
@@ -444,7 +558,7 @@ export function SeatsPanel({
           <thead>
             <tr>
               <th>Seat</th>
-              <th>Client</th>
+              <th>{simulated ? "Agent" : "Client"}</th>
               <th>Code</th>
               <th>K</th>
               <th>P</th>
@@ -467,10 +581,20 @@ export function SeatsPanel({
                     </span>
                   </td>
                   <td>
-                    {s.bound ? (
+                    {s.agent ? (
+                      <span className="row nowrap" title={policyLabel(s.agent)}>
+                        <Icon name="agent" /> {s.agent}
+                        {s.withdrawn && <StatusTag>withdrawn</StatusTag>}
+                      </span>
+                    ) : s.bound ? (
                       <span className="row nowrap">
                         C{s.terminal}
                         <ConnTag connected={s.connected} withdrawn={s.withdrawn} />
+                        {s.fake && (
+                          <StatusTag icon="fake" title="Fake player: a test client the server created">
+                            fake
+                          </StatusTag>
+                        )}
                       </span>
                     ) : (
                       <span className="faint">unbound</span>
@@ -483,8 +607,10 @@ export function SeatsPanel({
                     {s.view ? (scenario?.views[s.view]?.name ?? s.view) : <span className="faint">–</span>}
                   </td>
                   <td className="small">
-                    {st.phase === "lobby" || !s.bound ? (
+                    {st.phase === "lobby" || !s.bound || s.agent ? (
                       <span className="faint">—</span>
+                    ) : s.fake ? (
+                      <StatusTag icon="fake">skipped (fake)</StatusTag>
                     ) : s.consent === "declined" ? (
                       <StatusTag tone="danger" icon="warning">
                         declined

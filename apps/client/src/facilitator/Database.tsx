@@ -15,8 +15,12 @@ import {
 } from "../ui";
 import type { FacilitatorConnection } from "./connection";
 
+type Players = "real" | "simulated";
+
 interface SessionSummary {
   id: string;
+  /** Which database the session is in. */
+  players: Players;
   createdWall: string;
   updatedWall: string;
   scenarioId: string;
@@ -26,6 +30,8 @@ interface SessionSummary {
   notes: string;
   eventCount: number;
   telemetryCount: number;
+  /** Seats played by fake players (test clients the server created). */
+  fakeSeats?: number[];
 }
 interface ExportResult {
   exportId: string;
@@ -34,6 +40,7 @@ interface ExportResult {
   files: Array<{ name: string; rows: number }>;
 }
 interface ExportRow {
+  players?: Players;
   id: string;
   sessionId: string;
   kind: string;
@@ -47,6 +54,7 @@ interface Lookup {
   previouslyErased: Array<{ executedWall: string }>;
 }
 interface Deletion {
+  players?: Players;
   id: number;
   sessionId: string;
   deletedWall: string;
@@ -74,9 +82,16 @@ const STATUS_TONE: Record<string, "live" | "warn" | "danger" | "neutral" | "prim
   aborted: "danger",
 };
 
+const DATABASES: Array<{ id: Players; icon: "seats" | "simulation"; label: string; file: string }> = [
+  { id: "real", icon: "seats", label: "Participants", file: "data/wkwa.db" },
+  { id: "simulated", icon: "simulation", label: "Simulations", file: "data/wkwa-sim.db" },
+];
+
 /**
  * DATABASE tab, in order of use: 1 sessions (resume · replay · export · print)
  * → 2 exports register → 3 takedown / erasure → 4 erasure register → 5 session deletions.
+ * A switch at the top picks the participant or the simulation database;
+ * takedown and erasure only exist for participants.
  */
 export function Database({
   conn,
@@ -96,6 +111,8 @@ export function Database({
   const [filter, setFilter] = useState("");
   const [cardsFor, setCardsFor] = useState<string | null>(null);
   const [deletions, setDeletions] = useState<Deletion[]>([]);
+  const [db, setDb] = useState<Players>(() => (attachedId?.startsWith("SIM-") ? "simulated" : "real"));
+  const simulated = db === "simulated";
   const confirm = useConfirm();
   const refresh = useCallback(() => {
     conn.api<SessionSummary[]>("/api/sessions").then(setSessions, () => {});
@@ -157,17 +174,44 @@ export function Database({
     refresh();
   };
 
-  const shown = sessions.filter(
+  const inDb = sessions.filter((s) => (s.players ?? "real") === db);
+  const shown = inDb.filter(
     (s) =>
       !filter ||
       s.id.toLowerCase().includes(filter.toLowerCase()) ||
       s.tags.some((t) => t.toLowerCase().includes(filter.toLowerCase())),
   );
+  const exportsShown = exports.filter((x) => (x.players ?? "real") === db);
+  const deletionsShown = deletions.filter((x) => (x.players ?? "real") === db);
+  const lastExportShown =
+    lastExport && lastExport.dir.includes("simulations") === simulated ? lastExport : null;
 
   return (
     <div className="col" style={{ gap: "var(--s3)" }}>
+      <div className="row">
+        <nav className="tabs subtabs" aria-label="Database">
+          {DATABASES.map((d) => (
+            <button
+              key={d.id}
+              type="button"
+              className={`tab${db === d.id ? " active" : ""}`}
+              aria-pressed={db === d.id}
+              onClick={() => setDb(d.id)}
+            >
+              <Icon name={d.icon} />
+              {d.label} · {sessions.filter((s) => (s.players ?? "real") === d.id).length}
+              <span className="faint">{d.file}</span>
+            </button>
+          ))}
+        </nav>
+        <span className="hint">
+          {simulated
+            ? "Simulated sessions: agents only, no personal data. Exports go to exports/simulations/."
+            : "Sessions with real participants (pseudonymised personal data)."}
+        </span>
+      </div>
       <Panel
-        title={`1 · Sessions · ${sessions.length}`}
+        title={`1 · ${simulated ? "Simulated sessions" : "Sessions"} · ${inDb.length}`}
         icon="database"
         actions={
           <Button size="sm" icon="refresh" tip="Reload the session list and registers" onClick={refresh}>
@@ -216,6 +260,14 @@ export function Database({
                     </td>
                     <td>
                       <span className="row" style={{ gap: 4 }}>
+                        {(s.fakeSeats?.length ?? 0) > 0 && (
+                          <StatusTag
+                            icon="fake"
+                            title={`Seat ${s.fakeSeats!.join(", ")} played by fake players (test clients, not participants)`}
+                          >
+                            fake ×{s.fakeSeats!.length}
+                          </StatusTag>
+                        )}
                         {s.tags.map((t) => (
                           <Chip key={t}>{t}</Chip>
                         ))}
@@ -250,37 +302,47 @@ export function Database({
                         <Button
                           size="sm"
                           icon="export"
-                          tip="Write a pseudonymised export (CSV + JSON + codebook) with participant codes, for analysis. Store it on institutional storage."
+                          tip={
+                            simulated
+                              ? "Write an export (CSV + JSON + codebook) of this simulation to exports/simulations/. No personal data."
+                              : "Write a pseudonymised export (CSV + JSON + codebook) with participant codes, for analysis. Store it on institutional storage."
+                          }
                           onClick={() => void doExport(s.id, "export")}
                         >
                           Export
                         </Button>
-                        <Button
-                          size="sm"
-                          icon="anonymise"
-                          tip="Write an anonymised export: participant codes replaced by random ids, mapping discarded. For publishing or archiving."
-                          onClick={() => void doExport(s.id, "anonymise")}
-                        >
-                          Anonymised
-                        </Button>
-                        <Button
-                          size="sm"
-                          icon="keysheet"
-                          tip="Open the printable key sheet (seat → code, names written by hand). Print it; don't save it."
-                          onClick={() =>
-                            void conn.openPrintable(`/api/sessions/${s.id}/print/keysheet`).catch(() => {})
-                          }
-                        >
-                          Key sheet
-                        </Button>
-                        <Button
-                          size="sm"
-                          icon="cards"
-                          tip="Download each participant's takedown card as its own PDF (one per seat)."
-                          onClick={() => setCardsFor(s.id)}
-                        >
-                          Cards
-                        </Button>
+                        {!simulated && (
+                          <>
+                            <Button
+                              size="sm"
+                              icon="anonymise"
+                              tip="Write an anonymised export: participant codes replaced by random ids, mapping discarded. For publishing or archiving."
+                              onClick={() => void doExport(s.id, "anonymise")}
+                            >
+                              Anonymised
+                            </Button>
+                            <Button
+                              size="sm"
+                              icon="keysheet"
+                              tip="Open the printable key sheet (seat → code, names written by hand). Print it; don't save it."
+                              onClick={() =>
+                                void conn
+                                  .openPrintable(`/api/sessions/${s.id}/print/keysheet`)
+                                  .catch(() => {})
+                              }
+                            >
+                              Key sheet
+                            </Button>
+                            <Button
+                              size="sm"
+                              icon="cards"
+                              tip="Download each participant's takedown card as its own PDF (one per seat)."
+                              onClick={() => setCardsFor(s.id)}
+                            >
+                              Cards
+                            </Button>
+                          </>
+                        )}
                         <Button
                           size="sm"
                           variant="danger"
@@ -300,27 +362,29 @@ export function Database({
                 {shown.length === 0 && (
                   <tr>
                     <td colSpan={8} className="faint">
-                      {sessions.length
+                      {inDb.length
                         ? "No session matches the filter."
-                        : "No sessions yet — create one in SETUP."}
+                        : simulated
+                          ? "No simulations yet — choose 'Simulated players' in SETUP step 03."
+                          : "No sessions yet — create one in SETUP."}
                     </td>
                   </tr>
                 )}
               </tbody>
             </table>
           </div>
-          {lastExport && (
+          {lastExportShown && (
             <Callout
-              tone={lastExport.kind === "standard" ? "warn" : "live"}
-              icon={lastExport.kind === "standard" ? "export" : "anonymise"}
+              tone={lastExportShown.kind === "standard" && !simulated ? "warn" : "live"}
+              icon={lastExportShown.kind === "standard" ? "export" : "anonymise"}
             >
               <strong>
-                {lastExport.kind} export {lastExport.exportId}
+                {simulated ? "simulation" : lastExportShown.kind} export {lastExportShown.exportId}
               </strong>{" "}
-              → <code>{lastExport.dir}</code>
+              → <code>{lastExportShown.dir}</code>
               <br />
-              {lastExport.files.map((f) => `${f.name} (${f.rows})`).join(" · ")}
-              {lastExport.kind === "standard" && (
+              {lastExportShown.files.map((f) => `${f.name} (${f.rows})`).join(" · ")}
+              {lastExportShown.kind === "standard" && !simulated && (
                 <>
                   <br />
                   Contains pseudonymised personal data: move it to institutional storage and delete the local
@@ -333,28 +397,37 @@ export function Database({
       </Panel>
 
       <div className="grid-2" style={{ alignItems: "start" }}>
-        <ErasurePanel conn={conn} onDone={refresh} />
+        {simulated ? (
+          <Panel title="Takedown / erasure" icon="erase">
+            <Callout icon="simulation">
+              The simulation database holds no participants, so there is nothing to look up or erase. Delete a
+              whole simulation from the session list instead.
+            </Callout>
+          </Panel>
+        ) : (
+          <ErasurePanel conn={conn} onDone={refresh} />
+        )}
         <div className="col">
-          <Panel title={`2 · Exports · ${exports.length}`} icon="register">
+          <Panel title={`2 · Exports · ${exportsShown.length}`} icon="register">
             <div style={{ maxHeight: 260, overflow: "auto" }}>
               <table className="grid">
                 <tbody>
-                  {exports.map((x) => (
+                  {exportsShown.map((x) => (
                     <tr key={x.id}>
                       <td className="mono small">{x.id}</td>
                       <td>
                         <StatusTag
-                          tone={x.kind === "anonymised" ? "live" : "warn"}
+                          tone={x.kind === "anonymised" || x.players === "simulated" ? "live" : "warn"}
                           icon={x.kind === "anonymised" ? "anonymise" : "export"}
                         >
-                          {x.kind}
+                          {x.players === "simulated" ? "simulation" : x.kind}
                         </StatusTag>
                       </td>
                       <td className="mono small">{x.sessionId}</td>
                       <td className="small">{when(x.createdWall)}</td>
                     </tr>
                   ))}
-                  {exports.length === 0 && (
+                  {exportsShown.length === 0 && (
                     <tr>
                       <td className="faint">No exports yet.</td>
                     </tr>
@@ -363,14 +436,17 @@ export function Database({
               </table>
             </div>
           </Panel>
-          <Panel title={`5 · Session deletions · ${deletions.length}`} icon="register">
+          <Panel
+            title={`${simulated ? 3 : 5} · Session deletions · ${deletionsShown.length}`}
+            icon="register"
+          >
             <div className="col">
               <span className="hint">
                 Deleted sessions, kept to re-apply a deletion after restoring an older backup.
               </span>
               <table className="grid">
                 <tbody>
-                  {deletions.map((d) => (
+                  {deletionsShown.map((d) => (
                     <tr key={d.id}>
                       <td className="mono small">{d.sessionId}</td>
                       <td className="small">{when(d.deletedWall)}</td>
@@ -379,7 +455,7 @@ export function Database({
                       </td>
                     </tr>
                   ))}
-                  {deletions.length === 0 && (
+                  {deletionsShown.length === 0 && (
                     <tr>
                       <td className="faint">None.</td>
                     </tr>
@@ -388,44 +464,46 @@ export function Database({
               </table>
             </div>
           </Panel>
-          <Panel title={`4 · Erasure register · ${erasures.length}`} icon="register">
-            <div className="col">
-              <span className="hint">
-                Only SHA-256 hashes of erased codes, to re-apply erasures after restoring a backup.
-              </span>
-              <table className="grid">
-                <thead>
-                  <tr>
-                    <th>#</th>
-                    <th>Executed</th>
-                    <th>Code hash</th>
-                    <th>Rows</th>
-                    <th>Note</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {erasures.map((e) => (
-                    <tr key={e.id}>
-                      <td>{e.id}</td>
-                      <td className="small">{when(e.executedWall)}</td>
-                      <td className="mono small">{e.codeSha256.slice(0, 12)}…</td>
-                      <td className="small">
-                        {e.rows.events} ev · {e.rows.telemetry} tel
-                      </td>
-                      <td className="small">{e.note}</td>
-                    </tr>
-                  ))}
-                  {erasures.length === 0 && (
+          {!simulated && (
+            <Panel title={`4 · Erasure register · ${erasures.length}`} icon="register">
+              <div className="col">
+                <span className="hint">
+                  Only SHA-256 hashes of erased codes, to re-apply erasures after restoring a backup.
+                </span>
+                <table className="grid">
+                  <thead>
                     <tr>
-                      <td colSpan={5} className="faint">
-                        Empty.
-                      </td>
+                      <th>#</th>
+                      <th>Executed</th>
+                      <th>Code hash</th>
+                      <th>Rows</th>
+                      <th>Note</th>
                     </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </Panel>
+                  </thead>
+                  <tbody>
+                    {erasures.map((e) => (
+                      <tr key={e.id}>
+                        <td>{e.id}</td>
+                        <td className="small">{when(e.executedWall)}</td>
+                        <td className="mono small">{e.codeSha256.slice(0, 12)}…</td>
+                        <td className="small">
+                          {e.rows.events} ev · {e.rows.telemetry} tel
+                        </td>
+                        <td className="small">{e.note}</td>
+                      </tr>
+                    ))}
+                    {erasures.length === 0 && (
+                      <tr>
+                        <td colSpan={5} className="faint">
+                          Empty.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </Panel>
+          )}
         </div>
       </div>
       {cardsFor && <CardsPopup conn={conn} sessionId={cardsFor} onClose={() => setCardsFor(null)} />}

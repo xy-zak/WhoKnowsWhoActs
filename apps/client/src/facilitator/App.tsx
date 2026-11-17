@@ -12,6 +12,7 @@ import {
   nextTheme,
   Popup,
   SCALE_LABEL,
+  StatusTag,
   THEME_LABEL,
   ToastView,
   TooltipLayer,
@@ -99,6 +100,9 @@ export function App({ conn }: { conn: FacilitatorConnection }) {
 
   const online = st ? Object.values(st.seats).filter((s) => s.connected).length : 0;
   const bound = st ? Object.values(st.seats).filter((s) => s.bound).length : 0;
+  const simulated = st?.config.players === "simulated";
+  const agents = st ? Object.values(st.seats).filter((s) => s.agent && !s.withdrawn).length : 0;
+  const fakes = st ? Object.values(st.seats).filter((s) => s.bound && s.fake).length : 0;
 
   return (
     <div className="app-shell col" style={{ gap: "var(--s2)" }}>
@@ -115,6 +119,22 @@ export function App({ conn }: { conn: FacilitatorConnection }) {
           >
             <span className="live-dot" /> LIVE <span className="mono">{st.sessionId}</span>
           </button>
+        )}
+        {simulated && (
+          <StatusTag
+            icon="simulation"
+            title="Simulated players: agents play every seat (simulation database)"
+          >
+            SIMULATION
+          </StatusTag>
+        )}
+        {fakes > 0 && st && !["closed", "aborted"].includes(st.phase) && (
+          <StatusTag
+            icon="fake"
+            title="This session has fake players: test clients the server created (marked fake in the log and exports)"
+          >
+            FAKE PLAYERS ×{fakes}
+          </StatusTag>
         )}
         <span className="spacer" />
         <nav className="tabs" aria-label="Sections">
@@ -189,7 +209,12 @@ export function App({ conn }: { conn: FacilitatorConnection }) {
             <Icon name="clock" /> {fmtDuration(now - st.createdTs)}
           </span>
         )}
-        {st && (
+        {st && simulated && (
+          <span className="seg">
+            <Icon name="agent" /> {agents}/{st.config.seatCount} agents
+          </span>
+        )}
+        {st && !simulated && (
           <span className="seg">
             <Icon name="seats" /> {online}/{st.config.seatCount} online
             {bound < st.config.seatCount ? ` · ${bound} bound` : ""}

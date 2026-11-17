@@ -245,7 +245,16 @@ export function PlayerMirrors({
                 {s.k && <span className="muted">{s.k}</span>}
                 {s.p && <span className="muted">{s.p}</span>}
                 <span className="spacer" />
-                <ConnTag connected={s.connected} withdrawn={s.withdrawn} />
+                {s.agent ? (
+                  <StatusTag icon="agent" title={`Agent: ${s.agent}`}>
+                    {s.withdrawn ? "withdrawn" : "agent"}
+                  </StatusTag>
+                ) : (
+                  <>
+                    {s.fake && <StatusTag icon="fake">fake</StatusTag>}
+                    <ConnTag connected={s.connected} withdrawn={s.withdrawn} />
+                  </>
+                )}
               </div>
               <div style={{ height: 180 }}>
                 <MapView
