@@ -133,6 +133,7 @@ Every pair that carries text or UI meaning is checked automatically (`apps/clien
 | `--primary` | `--panel` | 4.5:1 | 5.13:1 | 7.79:1 | 11.16:1 |
 | `--live` | `--panel` | 4.5:1 | 4.84:1 | 11.03:1 | 14.14:1 |
 | `--warn` | `--panel` | 4.5:1 | 4.92:1 | 9.27:1 | 12.22:1 |
+| `--warn` | `--sunken` | 4.5:1 | 4.58:1 | 9.92:1 | 10.72:1 |
 | `--danger` | `--panel` | 4.5:1 | 5.20:1 | 7.08:1 | 7.80:1 |
 | `--faint` | `--panel` | 3:1 | 3.49:1 | 4.44:1 | 10.02:1 |
 | `--faint` | `--sunken` | 3:1 | 3.25:1 | 4.75:1 | 8.79:1 |
