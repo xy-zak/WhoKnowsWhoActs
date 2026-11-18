@@ -87,6 +87,7 @@ For real sessions, follow the **[session runbook](docs/SESSION-RUNBOOK.md)**.
 | [DATA-TYPES.md](docs/DATA-TYPES.md) | Field-level catalogue of everything that is logged and exported |
 | [SESSION-RUNBOOK.md](docs/SESSION-RUNBOOK.md) | Step by step for running a session (setup wizard, LIVE, wrap-up), plus troubleshooting |
 | [AESTHETIC-RULES.md](docs/AESTHETIC-RULES.md) | Colour tokens and reserved meanings, typography, icons, panels, popups, wayfinding, CRT/motion, keyboard, checklist for new UI |
+| [AUDIO-TRANSCRIPTION.md](docs/AUDIO-TRANSCRIPTION.md) | **Research, not implemented.** Local transcription engines compared (accuracy on accented speech, timestamps, speed, licence, Node integration), pitfalls, proposed pipeline and data model, per-user and composite document mock-ups, GDPR notes, evaluation plan, recommendation |
 
 Each document has a change log (date, commit, change, reason) in [docs/changelog/](docs/changelog/README.md), maintained with the `/update-docs` skill.
 
