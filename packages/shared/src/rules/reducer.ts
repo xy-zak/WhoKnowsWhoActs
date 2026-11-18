@@ -1,5 +1,6 @@
 import { parseSessionConfig } from "../config";
 import type { StoredEvent } from "../events";
+import { applyScoreChanges } from "../game/rules";
 import { emptySeat, type GameState, initialState, type SeatState } from "../state";
 
 /**
@@ -26,6 +27,10 @@ export function applyEvent(state: GameState, ev: StoredEvent): GameState {
       state.scenario = p.scenario;
       state.regionIds = p.regionIds;
       state.viewIds = p.viewIds;
+      state.board = p.board ?? null;
+      state.rules = p.rules ?? null;
+      state.initialScores = { ...(p.initialScores ?? {}) };
+      state.scores = { ...(p.initialScores ?? {}) };
       state.phase = "lobby";
       state.seats = {};
       for (let i = 1; i <= p.config.seatCount; i++) state.seats[i] = emptySeat(i);
@@ -145,6 +150,7 @@ export function applyEvent(state: GameState, ev: StoredEvent): GameState {
       break;
     case "ProposalMade":
     case "DecisionMade": {
+      const s = seatOf(ev.seat);
       state.actions.push({
         seq: ev.seq,
         kind: ev.type === "ProposalMade" ? "propose" : "decide",
@@ -153,8 +159,11 @@ export function applyEvent(state: GameState, ev: StoredEvent): GameState {
         round: state.round,
         serverTs: ev.serverTs,
         revoked: false,
+        k: s?.k ?? null,
+        p: s?.p ?? null,
       });
-      const s = seatOf(ev.seat);
+      // the server applied the game rules when it accepted the action; replay what it recorded
+      applyScoreChanges(state.scores, ev.payload.scoreChanges);
       if (s) s.lastActionTs = ev.serverTs;
       break;
     }
@@ -166,6 +175,7 @@ export function applyEvent(state: GameState, ev: StoredEvent): GameState {
     case "ActionRevoked": {
       const a = state.actions.find((x) => x.seq === ev.payload.targetSeq);
       if (a) a.revoked = true;
+      applyScoreChanges(state.scores, ev.payload.scoreChanges);
       break;
     }
     case "RoundCompleted": {

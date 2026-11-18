@@ -62,7 +62,7 @@ Field-level detail of every logged record is in [DATA-TYPES.md](DATA-TYPES.md).
 | K/P labels, assigned view | Facilitator | Experimental manipulation | Pseudonymous (via seat) | `events` (`LabelsAssigned`) | Research period |
 | Consent answers, form version, text hash, time on screen | Player | Proof of informed consent | Pseudonymous · sensitive | `events` (`ConsentRecorded`) | As long as the data it covers exist |
 | Demographics (bracketed options) | Player | Describe the sample; covariates | Pseudonymous · sensitive | `events` (`DemographicsSubmitted`); hidden from the live dashboard | Research period |
-| Proposals and decisions: region, quota position, prior actors | Player | **Primary research data** | Pseudonymous | `events` | Research period |
+| Proposals and decisions: target sub-square, quota position, prior actors, score changes | Player | **Primary research data** | Pseudonymous | `events` | Research period |
 | Timings: server/client timestamps, durations, reaction times | Server/client | **Primary research data** | Pseudonymous | `events`, `telemetry` | Research period |
 | UI telemetry: screen views, hover, inspect, pan/zoom, tool selection, confirm/cancel, focus/visibility, idle (**only after consent**) | Player client | Behavioural research data | Pseudonymous | `telemetry` | Research period |
 | Connection events, clock sync | Server/client | Data-quality checks | Pseudonymous / non-personal | `events`, `telemetry` | Research period |
@@ -188,7 +188,7 @@ stateDiagram-v2
 | Names, e-mail, student numbers | Not needed for analysis. Identity is only needed for takedown, which the code and key sheet cover. |
 | IP addresses | Identify the PC, not useful for research. The server uses the remote address only for the localhost check of the facilitator page and never logs it (log serializers remove it). |
 | User agent, OS, screen size, device ids | Optional "technical metadata" was declined in the design phase. The lab PCs are known anyway. |
-| Pointer movement traces | Heavy, biometric-adjacent, and not needed: hover and inspect events capture attention at region level. |
+| Pointer movement traces | Heavy, biometric-adjacent, and not needed: hover and inspect events capture attention at sub-square and square level. |
 | Free-text input | Hard to anonymise. The player UI has no free-text fields. |
 | Exact age / date of birth | Brackets (e.g. 25–34) are enough to describe the sample. |
 | Audio / video | Outside the harness. If you record separately, it needs its own consent and DMP entry. |

@@ -295,8 +295,30 @@ export const EXPORT_FILES: ExportFileDef[] = [
       },
       { name: "view", type: "string", description: "View of the seat at action time", source: "state" },
       { name: "kind", type: "string", description: "propose | decide", source: "event type" },
-      { name: "region_id", type: "string", description: "Target region id", source: "payload.regionId" },
-      { name: "region_name", type: "string", description: "Target region name", source: "scenario regions" },
+      {
+        name: "region_id",
+        type: "string",
+        description: "Target sub-square id, e.g. C7-Kb (square C7, knowledge type Kb)",
+        source: "payload.regionId",
+      },
+      {
+        name: "region_name",
+        type: "string",
+        description: "Target sub-square name, e.g. 'C7 · Kb'",
+        source: "scenario regions",
+      },
+      {
+        name: "square_id",
+        type: "string",
+        description: "Square of the target sub-square, e.g. C7",
+        source: "payload.regionId",
+      },
+      {
+        name: "target_k",
+        type: "string",
+        description: "Knowledge type of the target sub-square (Ka–Kd)",
+        source: "payload.regionId",
+      },
       {
         name: "server_ts",
         type: "epoch-ms",
@@ -355,14 +377,28 @@ export const EXPORT_FILES: ExportFileDef[] = [
       {
         name: "prior_proposals",
         type: "seat-list",
-        description: "Seats that had proposed this region earlier this round",
+        description: "Seats that had proposed this sub-square earlier this round",
         source: "payload.priorProposals",
       },
       {
         name: "prior_decisions",
         type: "seat-list",
-        description: "Seats that had decided this region earlier this round",
+        description: "Seats that had decided this sub-square earlier this round",
         source: "payload.priorDecisions",
+      },
+      {
+        name: "score_changes",
+        type: "string",
+        description:
+          "Score changes the game rules applied when the action was accepted, e.g. 'C7-Kb 6>10; C7-Ka 5>4' (empty if none)",
+        source: "payload.scoreChanges",
+      },
+      {
+        name: "map_score_after",
+        type: "number",
+        description:
+          "Map score right after the action (empty for sessions without a grid map); a later revocation is not reflected here",
+        source: "derived: replayed scores + game rules",
       },
       {
         name: "revoked",

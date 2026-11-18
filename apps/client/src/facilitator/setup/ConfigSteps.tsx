@@ -1,19 +1,25 @@
 import {
+  averageScore,
+  GAME_RULES,
+  getGameRules,
   getPolicy,
+  K_LABELS,
   listPolicies,
   MAX_TAG_LENGTH,
   MAX_TAGS,
   normaliseTags,
   type PlayerMode,
+  parseCellId,
   policyParamRows,
   type RoundSpec,
   type Scenario,
+  type Scores,
   type SessionConfig,
   type SimulationConfig,
   seatPolicyId,
 } from "@wkwa/shared";
 import { useEffect, useMemo, useState } from "react";
-import { MapView } from "../../map/MapView";
+import { MapScore, MapView } from "../../map/MapView";
 import {
   Button,
   Callout,
@@ -22,6 +28,7 @@ import {
   Field,
   Icon,
   type IconName,
+  LabelTag,
   SeatDot,
   StatusTag,
   useConfirm,
@@ -35,6 +42,7 @@ export interface ScenarioInfo {
   title: string;
   version: string;
   description: string;
+  board: { cols: number; rows: number } | null;
   regionCount: number;
   viewIds: string[];
   error?: string;
@@ -58,27 +66,29 @@ export function ScenarioStep({
   scenarios: ScenarioInfo[];
 }) {
   const [preview, setPreview] = useState<Scenario | null>(null);
-  const [view, setView] = useState("");
+  const [view, setView] = useState("all");
   useEffect(() => {
     if (!d.scenarioId) return;
     conn.api<Scenario>(`/api/scenarios/${d.scenarioId}`).then(
-      (s) => {
-        setPreview(s);
-        setView(Object.keys(s.views)[0] ?? "");
-      },
+      (s) => setPreview(s),
       () => setPreview(null),
     );
   }, [conn, d.scenarioId]);
-  const fills = useMemo(() => {
-    const v = preview?.views[view];
-    return v ? Object.fromEntries(Object.entries(v.regions).map(([id, c]) => [id, c.fill])) : {};
+  const scores = useMemo(() => {
+    if (!preview) return {};
+    if (view === "all") return preview.initialScores;
+    const out: Scores = {};
+    for (const [id, v] of Object.entries(preview.initialScores)) if (parseCellId(id)?.k === view) out[id] = v;
+    return out;
   }, [preview, view]);
+  const rules = getGameRules(d.config.rules);
 
   return (
     <div className="grid-2" style={{ alignItems: "start" }}>
       <div className="col">
         <span className="hint">
-          Choose the map and datasets. Scenarios live in <code>scenarios/&lt;id&gt;/</code>.
+          Choose the map: its size, knowledge types and starting scores. Scenarios live in{" "}
+          <code>scenarios/&lt;id&gt;/</code>.
         </span>
         <table className="grid">
           <tbody>
@@ -102,7 +112,9 @@ export function ScenarioStep({
                 <td>
                   <strong>{s.title}</strong>
                   <div className="small muted">
-                    {s.id} v{s.version} · {s.regionCount} regions · views {s.viewIds.join(" ")}
+                    {s.id} v{s.version}
+                    {s.board ? ` · ${s.board.cols} × ${s.board.rows} squares` : ""} · {s.regionCount}{" "}
+                    sub-squares · types {s.viewIds.join(" ")}
                   </div>
                   {s.error && (
                     <div className="small t-danger">
@@ -115,22 +127,65 @@ export function ScenarioStep({
           </tbody>
         </table>
         {preview?.description && <p className="small muted">{preview.description}</p>}
+        <Field
+          label="Game rules"
+          hint={
+            <>
+              {rules?.summary ?? "Unknown rules"} The rules live in{" "}
+              <code>packages/shared/src/game/rules.ts</code> (see GAME-RULES.md).
+            </>
+          }
+        >
+          <select
+            aria-label="Game rules"
+            value={d.config.rules}
+            disabled={GAME_RULES.length < 2}
+            data-tip="What players act on and how proposals and decisions change the scores. More rule sets appear here once they are added in code"
+            onChange={(e) => setCfg(d, upd, { rules: e.target.value })}
+          >
+            {GAME_RULES.map((r) => (
+              <option key={r.id} value={r.id}>
+                {r.name} ({r.id} v{r.version})
+              </option>
+            ))}
+          </select>
+        </Field>
       </div>
       <div className="col">
         {preview ? (
           <>
             <div className="row">
-              <span className="small muted upper">Preview</span>
-              <select aria-label="Preview view" value={view} onChange={(e) => setView(e.target.value)}>
-                {Object.entries(preview.views).map(([id, v]) => (
-                  <option key={id} value={id}>
-                    {id} — {v.name}
+              <span className="small muted upper">Preview · starting scores</span>
+              <select
+                aria-label="Preview scores of"
+                value={view}
+                onChange={(e) => setView(e.target.value)}
+                data-tip="Which starting scores to write in the preview: every knowledge type, or what one type's players will see"
+              >
+                <option value="all">all knowledge types</option>
+                {K_LABELS.map((k) => (
+                  <option key={k} value={k}>
+                    {k} — {preview.views[k]?.name ?? k}
                   </option>
                 ))}
               </select>
+              <span className="spacer" />
+              <MapScore
+                label="Start"
+                value={averageScore(preview.initialScores)}
+                max={rules?.scoreRange.max ?? 10}
+                decimals={rules?.mapScoreDecimals ?? 2}
+              />
             </div>
-            <div style={{ height: 260 }}>
-              <MapView geometry={preview} fills={fills} showNames />
+            <div style={{ height: "min(520px, 60vh)" }}>
+              <MapView board={preview.board} views={preview.views} scores={scores} />
+            </div>
+            <div className="row small">
+              {K_LABELS.map((k) => (
+                <span key={k} className="row nowrap" style={{ gap: 4 }}>
+                  <LabelTag label={k} /> <span className="muted">{preview.views[k]?.name}</span>
+                </span>
+              ))}
             </div>
           </>
         ) : (
@@ -553,7 +608,8 @@ export function PlayersStep({ d, upd }: { d: Draft; upd: Upd }) {
             onChange={(v) => vis({ showOthersProgress: v })}
           />
           <Check
-            label="Clear highlights at the start of each round"
+            label="Clear map marks at the start of each round"
+            hint="Hatches (proposed) and fills (decided) of earlier rounds disappear; scores always carry over"
             checked={c.clearHighlightsEachRound}
             onChange={(v) => setCfg(d, upd, { clearHighlightsEachRound: v })}
           />
@@ -749,7 +805,23 @@ export function ReviewStep({
   const simulated = c.players === "simulated";
   const yes = (b: boolean) => (b ? "yes" : "no");
   const rows: Array<[number, string, string]> = [
-    [0, "Scenario", sc ? `${sc.title} (${sc.id} v${sc.version})` : "— not chosen —"],
+    [
+      0,
+      "Scenario",
+      sc
+        ? `${sc.title} (${sc.id} v${sc.version})${sc.board ? ` · ${sc.board.cols} × ${sc.board.rows} squares, ${sc.regionCount} sub-squares` : ""}`
+        : "— not chosen —",
+    ],
+    [
+      0,
+      "Game rules",
+      (() => {
+        const g = getGameRules(c.rules);
+        return g
+          ? `${g.name} (${g.id} v${g.version}) · scores ${g.scoreRange.min}–${g.scoreRange.max}`
+          : `unknown '${c.rules}'`;
+      })(),
+    ],
     [
       1,
       "Rounds",
@@ -790,7 +862,11 @@ export function ReviewStep({
       "Players see",
       `actors ${yes(c.visibility.showActorToPlayers)} · own labels ${yes(c.visibility.showOwnLabels)} · others' labels ${yes(c.visibility.showOtherLabelsToPlayers)} · others' progress ${yes(c.visibility.showOthersProgress)}`,
     ],
-    [2, "Highlights", c.clearHighlightsEachRound ? "cleared each round" : "kept across rounds"],
+    [
+      2,
+      "Map marks",
+      `${c.clearHighlightsEachRound ? "hatches/fills cleared each round" : "hatches/fills kept across rounds"} · scores always carry over · players see only their own knowledge type's scores`,
+    ],
     ...(simulated
       ? []
       : ([
@@ -824,7 +900,12 @@ export function ReviewStep({
               </td>
               <td>{v}</td>
               <td style={{ width: 60, textAlign: "right" }}>
-                <Button size="sm" variant="ghost" onClick={() => goTo(step)}>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => goTo(step)}
+                  tip={`Change ${k.toLowerCase()} (step ${String(step + 1).padStart(2, "0")})`}
+                >
                   Edit
                 </Button>
               </td>

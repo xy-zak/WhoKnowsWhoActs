@@ -27,7 +27,7 @@ Implementation: `apps/client/src/ui/`. That folder holds the tokens, base styles
 3. **One primary action per view.** Exactly one filled blue (`--primary`) button per screen or popup: the thing you most likely do next. Everything else is secondary.
 4. **Colour carries meaning, never decoration.** Each accent has a reserved meaning (§ 2.2). If something is green, it is live or OK.
 5. **Calm by default.** Effects are subtle, never block reading, and switch off completely for reduced-motion users (§ 9).
-6. **Research data is never styled away.** Scenario map fills are research content and are shown exactly as authored. The theme only styles the chrome around them.
+6. **Research data is never styled away.** Scores are always written as numbers, never shown by colour alone. The knowledge-type colours and the hatched / filled patterns mean the same in every theme, screen and legend (§ 2.2).
 
 ## 2. Colour
 
@@ -63,17 +63,19 @@ The table below is generated from `apps/client/src/ui/tokens.ts`.
 | `--review` | The two setup commit points: 06 review & create, 10 start onboarding — nothing else | `#505fb1 (lavender −30%)` | `#b4befe (lavender)` | `#d2b4ff` |
 | `--review-bg` | Tinted background of the commit steps (06, 10) | `#e3e6f6 (base + 10% lavender)` | `#2a2b3f (base + 8% lavender)` | `#1a1028` |
 | `--on-accent` | Text on a filled accent (primary/live/danger buttons, LIVE badge) | `#eff1f5 (base)` | `#11111b (crust)` | `#000000` |
-| `--propose` | MAP ONLY: propose highlight (hatch + dashed outline) | `#df8e1d (yellow)` | `#f9e2af (yellow)` | `#ffe600` |
-| `--propose-text` | Text/icons that refer to proposing (tool button, legend) | `#915c13 (yellow −35%)` | `#f9e2af (yellow)` | `#ffe600` |
-| `--decide` | MAP ONLY: decide highlight (fill + solid outline) | `#d20f39 (red)` | `#f38ba8 (red)` | `#ff4040` |
-| `--decide-text` | Text/icons that refer to deciding (tool button, legend) | `#c80e36 (red −5%)` | `#f38ba8 (red)` | `#ff7070` |
 | `--seat-1` | Seat 1 identity colour | `#b24608 (peach −30%)` | `#fab387 (peach)` | `#ffa64d` |
 | `--seat-2` | Seat 2 identity colour | `#166f7f (sapphire −30%)` | `#74c7ec (sapphire)` | `#5cc8ff` |
 | `--seat-3` | Seat 3 identity colour | `#307820 (green −25%)` | `#a6e3a1 (green)` | `#4cf08a` |
 | `--seat-4` | Seat 4 identity colour | `#8136e3 (mauve −5%)` | `#cba6f7 (mauve)` | `#e09cff` |
-| `--sea` | Map background (water) | `#cadfe7 (mantle + 14% sapphire)` | `#212a39 (mantle + 10% sapphire)` | `#001f3d` |
-| `--land` | Map region without data | `#ccd0da (surface0)` | `#313244 (surface0)` | `#3a3a3a` |
-| `--map-stroke` | Map region borders | `#8c8fa1 (overlay1)` | `#6c7086 (overlay0)` | `#ffffff` |
+| `--map-stroke` | Map: outline of each square of the grid | `#8c8fa1 (overlay1)` | `#6c7086 (overlay0)` | `#ffffff` |
+| `--k-a` | Knowledge type Ka (and power type Pa): sub-square outline, hatch (proposed) and fill (decided) on the map, timeline marks, label swatches | `#1d61e9 (blue, validated categorical)` | `#5b86f0 (blue, validated categorical)` | `#4d8dff` |
+| `--k-a-on` | Score text on a decided (filled) Ka sub-square | `#eff1f5 (base (latte))` | `#11111b (crust (mocha))` | `#000000` |
+| `--k-b` | Knowledge type Kb (and power type Pb): sub-square outline, hatch (proposed) and fill (decided) on the map, timeline marks, label swatches | `#be7919 (amber, validated categorical)` | `#c2871f (amber, validated categorical)` | `#ffb000` |
+| `--k-b-on` | Score text on a decided (filled) Kb sub-square | `#11111b (crust (mocha))` | `#11111b (crust (mocha))` | `#000000` |
+| `--k-c` | Knowledge type Kc (and power type Pc): sub-square outline, hatch (proposed) and fill (decided) on the map, timeline marks, label swatches | `#c43b47 (red, validated categorical)` | `#e05a6c (red, validated categorical)` | `#ff5c7a` |
+| `--k-c-on` | Score text on a decided (filled) Kc sub-square | `#eff1f5 (base (latte))` | `#11111b (crust (mocha))` | `#000000` |
+| `--k-d` | Knowledge type Kd (and power type Pd): sub-square outline, hatch (proposed) and fill (decided) on the map, timeline marks, label swatches | `#008f8a (teal, validated categorical)` | `#13a3a6 (teal, validated categorical)` | `#00d6c8` |
+| `--k-d-on` | Score text on a decided (filled) Kd sub-square | `#11111b (crust (mocha))` | `#11111b (crust (mocha))` | `#000000` |
 
 <!-- END GENERATED: aesthetic-tokens -->
 
@@ -102,13 +104,15 @@ The table below is generated from `apps/client/src/ui/tokens.ts`.
 | `--live` (green) | LIVE indicator, success, connected, step done | Anything that is not "running / OK" |
 | `--warn` (peach) | Needs attention: paused, idle, waiting, unfocused | Errors |
 | `--danger` (red) | Destructive actions and errors, **always with an icon** | Emphasis |
-| `--focus` (mauve) | Keyboard focus ring, selected map region | Anything else |
+| `--focus` (mauve) | Keyboard focus ring, the selected map square, the dashed outline of the sub-square a tool would act on | Anything else |
 | `--review` / `--review-bg` (lavender) | The two **commit points** of setup: 06 review (everything is checked before the irreversible *Create session*) and 10 start onboarding (locks the seats and goes LIVE) | Anything else |
-| `--propose` / `--propose-text` (yellow) | **Map only**: propose highlight (hatch + dashed outline), and text/icons that refer to proposing | Warnings, chrome |
-| `--decide` / `--decide-text` (red) | **Map only**: decide highlight (fill + solid outline), and text/icons that refer to deciding | — (shares red with danger; context and icons separate them) |
+| `--k-a…d` (blue, amber, red, teal) | **Knowledge types** Ka–Kd: the outline of each sub-square on the map, its hatch (proposed) and fill (decided), timeline marks, and the swatch next to every K or P label. A power type uses the colour of its letter (Pa = Ka's blue). | Status, chrome, emphasis. Kc's red is a knowledge type, not danger: it never appears without its `Kc` / `Pc` label or on the map. |
+| `--k-a-on…d-on` | Score numbers written on a filled (decided) sub-square | Anything else |
 | `--seat-1…4` (peach, sapphire, green, mauve) | Identity of a seat, **always next to the seat number** | Status. Seat 3's green is an identity colour, not "OK". |
 
-The seat colours follow the hue structure of the Okabe–Ito colour-blind-safe palette (orange, sky blue, bluish green, purple), and seat badges always show the seat number as well.
+**Pattern = what happened, colour = which knowledge type.** Proposed is always **hatched**, decided always **filled**, on the map, in the timeline and in the `ActSwatch` next to quotas and buttons. Label text stays in text ink; the swatch (`LabelTag`, `ActSwatch` in `ui/components.tsx`) carries the colour, so a label is still readable for colour-blind users and in High contrast.
+
+The knowledge-type colours come from a validated categorical palette: every pair was checked to stay apart for the common colour-vision deficiencies when the palette was chosen, and a test checks that every colour reaches 3:1 against the panel and that score numbers on a fill reach 4.5:1. The seat colours follow the hue structure of the Okabe–Ito colour-blind-safe palette (orange, sky blue, bluish green, purple), and seat badges always show the seat number as well.
 
 ### 2.3 Contrast
 
@@ -135,8 +139,6 @@ Every pair that carries text or UI meaning is checked automatically (`apps/clien
 | `--text` | `--review-bg` | 4.5:1 | 6.43:1 | 9.58:1 | 18.28:1 |
 | `--muted` | `--review-bg` | 4.5:1 | 5.04:1 | 6.22:1 | 14.65:1 |
 | `--on-accent` | `--review` | 4.5:1 | 5.14:1 | 10.48:1 | 11.71:1 |
-| `--propose-text` | `--panel` | 4.5:1 | 4.96:1 | 12.91:1 | 16.57:1 |
-| `--decide-text` | `--panel` | 4.5:1 | 5.20:1 | 7.08:1 | 7.80:1 |
 | `--on-accent` | `--primary` | 4.5:1 | 5.13:1 | 8.91:1 | 11.16:1 |
 | `--on-accent` | `--live` | 4.5:1 | 4.84:1 | 12.61:1 | 14.14:1 |
 | `--on-accent` | `--danger` | 4.5:1 | 5.20:1 | 8.10:1 | 7.80:1 |
@@ -146,6 +148,14 @@ Every pair that carries text or UI meaning is checked automatically (`apps/clien
 | `--seat-2` | `--panel` | 3:1 | 5.14:1 | 8.69:1 | 11.16:1 |
 | `--seat-3` | `--panel` | 3:1 | 4.84:1 | 11.03:1 | 14.14:1 |
 | `--seat-4` | `--panel` | 3:1 | 5.20:1 | 8.07:1 | 10.37:1 |
+| `--k-a` | `--panel` | 3:1 | 4.71:1 | 4.77:1 | 6.57:1 |
+| `--k-a-on` | `--k-a` | 4.5:1 | 4.71:1 | 5.46:1 | 6.57:1 |
+| `--k-b` | `--panel` | 3:1 | 3.13:1 | 5.29:1 | 11.46:1 |
+| `--k-b-on` | `--k-b` | 4.5:1 | 5.30:1 | 6.05:1 | 11.46:1 |
+| `--k-c` | `--panel` | 3:1 | 4.57:1 | 4.57:1 | 7.06:1 |
+| `--k-c-on` | `--k-c` | 4.5:1 | 4.57:1 | 5.22:1 | 7.06:1 |
+| `--k-d` | `--panel` | 3:1 | 3.51:1 | 5.32:1 | 11.45:1 |
+| `--k-d-on` | `--k-d` | 4.5:1 | 4.73:1 | 6.09:1 | 11.45:1 |
 
 <!-- END GENERATED: aesthetic-contrast -->
 
@@ -182,7 +192,7 @@ The sizes below are the **Small** (default) text size. **Large** steps every tok
 
 - **Stroke** 1.5, colour `currentColor`, so icons take the colour of their text.
 - **Sizes:** 16 px inline and in normal buttons, 20 px in large buttons and popup titles, 24 px for display use. No other sizes.
-- **Icon plus text** by default. Icon-only buttons are allowed only in tight toolbars (map zoom, close ✕). They must have a `title` (tooltip), which also becomes the `aria-label`.
+- **Icon plus text** by default. Icon-only buttons are allowed only in tight toolbars (map zoom, close ✕). They must have a `title`, which becomes both the `aria-label` and the styled tooltip.
 - Destructive and warning actions always show their icon (`warning`, `erase`, `stop`, `withdraw`), so meaning never depends on colour alone.
 
 <!-- BEGIN GENERATED: aesthetic-icons -->
@@ -229,8 +239,8 @@ The sizes below are the **Small** (default) text size. **Large** steps every tok
 | `disconnected` | `WifiOff` | Disconnected |
 | `idle` | `Hourglass` | Idle / waiting |
 | `hidden` | `EyeClosed` | Tab hidden / not visible |
-| `propose` | `MapPin` | Propose a region |
-| `decide` | `DoubleCheck` | Decide a region |
+| `propose` | `MapPin` | Propose (mark a sub-square, no score change) |
+| `decide` | `DoubleCheck` | Decide (fill a sub-square, change scores) |
 | `revoke` | `Undo` | Revoke (undo) an action |
 | `zoomIn` | `Plus` | Zoom in |
 | `zoomOut` | `Minus` | Zoom out |
@@ -304,7 +314,8 @@ Use a panel, not a popup, for anything that should stay visible while working. *
 
 **Hover helpers** (`<Button tip="…">`, one global tooltip layer in `ui/Tooltip.tsx`):
 
-- They say what a button does and what it touches (e.g. "Write a pseudonymised export … with participant codes").
+- They say what a button does and what it touches (e.g. "Write a pseudonymised export … with participant codes"). Every button whose effect is not obvious from its label has one; so do map sub-squares (name, score or "score unknown to you", marks), timeline marks and label swatches.
+- On a `Button`, `tip` falls back to `title`. Raw elements use `data-tip`; avoid the native `title` attribute, which shows a second, unstyled tooltip.
 - They appear on hover after 350 ms and immediately on keyboard focus. Screen readers get the same text as the button's description.
 - They are never the only place for information that is needed to act safely; confirmations say it again.
 
@@ -380,5 +391,6 @@ TUI-style single keys. They are ignored while typing in a field, while a popup i
 - [ ] Order of events visible: where am I, what is next?
 - [ ] Works in Latte, Mocha **and** High contrast; in JetBrains Mono, OpenDyslexic **and** the system font; at Small **and** Large text; with animations on **and** off, and with reduced motion.
 - [ ] Keyboard reachable; focus visible (`--focus`); icon-only buttons have a `title`.
-- [ ] Buttons whose effect isn't obvious from the label (exports, printables, deletions) get a hover/focus helper: `<Button tip="…">`.
+- [ ] Buttons whose effect isn't obvious from the label (exports, printables, deletions, game actions) get a hover/focus helper: `<Button tip="…">`.
+- [ ] Anything about a knowledge or power type uses its colour through `LabelTag` / `ActSwatch` (hatched = proposed, filled = decided), never a new colour.
 - [ ] Run `npm run docs:generate` if tokens or icons changed.

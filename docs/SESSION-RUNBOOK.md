@@ -56,7 +56,7 @@ Approximate timing: 30 min setup, about 10 min onboarding, the rounds, 10 min wr
   - `config/demographics.json` (questions; every question offers `prefer_not_to_say`)
   - `config/briefing.md` (game instructions)
   - `config/study.json`: title, researcher, contact e-mail, retention statement and takedown text. These are shown on the consent screen, the end screen and the takedown cards.
-- [ ] **Scenario** ready in `scenarios/<id>/`: `scenario.json`, `map.svg` (one `<path id=… d=…>` per region, no transforms) and `views.json` (one view per K label: `Ka`–`Kd`). Setup step 01 shows a preview of each view, and lists errors under the scenario.
+- [ ] **Scenario** ready in `scenarios/<id>/`: `scenario.json` (board size and one view per K label `Ka`–`Kd`) and `scores.json` (the starting score of every sub-square, 0–10). The demos are `demo` (10 × 10 squares) and `demo-small` (5 × 5). Setup step 01 shows a preview of the starting scores, and lists errors under the scenario. Format: [GAME-RULES.md § 11](GAME-RULES.md#11-starting-scores-and-scenarios).
 - [ ] **Default session settings** in `config/session.default.json`: rounds, quotas, visibility, onboarding. They pre-fill the setup wizard and can be changed per session.
 - [ ] **Software installed** on the facilitator laptop: `npm install && npm run build`. Run `npm test` once; it should be all green.
 - [ ] **Database passphrase chosen**, at least 5 random words. Store it in a password manager and/or a sealed envelope held by your supervisor. A lost passphrase means lost data: there is no recovery.
@@ -85,7 +85,7 @@ Approximate timing: 30 min setup, about 10 min onboarding, the rounds, 10 min wr
 
 | Step | What to check |
 | --- | --- |
-| **01 Scenario** | The map and datasets. Use the preview's view selector to check each view. |
+| **01 Scenario** | The map (board size) and its starting scores. Use the preview's knowledge-type selector to check each type's scores; **Start** is the map score before any action. **Game rules** names the rule set ([GAME-RULES.md](GAME-RULES.md)); it can only be changed when more than one exists. |
 | **02 Rounds** | Number of rounds, rule (quotas or facilitator-ended), quotas per player, optional time limit, how the next round starts, per-round overrides. |
 | **03 Players & visibility** | **Who plays:** *Real participants* (the normal case) or *Simulated players* (agents; see [§ 8](#8-simulated-sessions)). Then seats, how map views are assigned and what players see about each other. Display settings (colours, font, text size, animations) are **not** set here: each participant chooses them with the **DISPLAY** button on their screen, and they are not recorded. |
 | **04 Onboarding** | Consent, demographics, briefing. Turning consent off asks for confirmation: only for tests without participants. |
@@ -99,7 +99,7 @@ The draft is kept in your browser until you create the session, so a reload lose
 | Step | What to do |
 | --- | --- |
 | **07 Connect & bind** | The step shows the player URL(s). Open it on each PC in full-screen (F11); each screen shows **CLIENT N**. Bind each client to a seat. The step is done when it shows `[4/4 seats bound]`. For a test without people, use **Fake player** or **Fill empty seats with fake players** instead ([§ 9](#9-testing-without-people-fake-players)). |
-| **08 Labels** | 1 · Choose the **K–P pairing**: *Aligned* (Ka–Pa, Kb–Pb …) or *Dissociated* — one of the six fully dissociative pairings D1–D6 (no seat holds the same letter, no two seats mirror each other), or *random* (seed logged). The 4×4 matrix shows the result. 2 · Choose which seat gets which **K** (seat order by default, or *Shuffle K across seats*). **P is derived from the pairing**, never chosen per seat. *Save labels*. The pairing number is stored with the labels and in the exports; see [DATA-TYPES.md § Label pairings](DATA-TYPES.md#label-pairings). With view assignment "follows K", the K label also selects the seat's map data. |
+| **08 Labels** | 1 · Choose the **K–P pairing**: *Aligned* (Ka–Pa, Kb–Pb …) or *Dissociated* — one of the six fully dissociative pairings D1–D6 (no seat holds the same letter, no two seats mirror each other), or *random* (seed logged). The 4×4 matrix shows the result. 2 · Choose which seat gets which **K** (seat order by default, or *Shuffle K across seats*). **P is derived from the pairing**, never chosen per seat. *Save labels*. The pairing number is stored with the labels and in the exports; see [DATA-TYPES.md § Label pairings](DATA-TYPES.md#label-pairings). With view assignment "follows K", the K label also selects which scores the seat sees. The P label decides which sub-square the seat acts on (Pa → Ka …; [GAME-RULES.md § 3](GAME-RULES.md#3-what-a-player-can-act-on)). |
 | **09 Key sheet** | *Print key sheet*, then tick "printed and stored separately". Write names on it **by hand** as participants arrive; names never go into the software. |
 | **10 Start onboarding** | A final checklist. **Seat the participants first**, then *START ONBOARDING*. Seats lock, players go to consent → about you → briefing, and the tab flips to **LIVE**. |
 
@@ -121,7 +121,7 @@ The top of LIVE shows the **lifecycle**: `ONBOARDING ─ ROUND 1 ─ ROUND 2 ─
 While a round runs, watch:
 
 - **Seats**: quota bars `▰▰▱▱▱`, `[UNFOCUSED]`, `[TAB HIDDEN]`, `[IDLE]`, latency, reconnects.
-- **Composite map**: colour it by any view. Click a region to compare what every view says about it.
+- **Composite map**: every sub-square's score (or one knowledge type's, or none), the marks of all seats and the **map score**. Click a square to compare its four sub-squares: score now and at the start, which seat sees and which seat acts on each, and the actions on it.
 - **Player views**: exactly what each player sees, with their live hover position.
 - **Timeline**, **Event log** (filter by type or seat; click a row for the full event) and **Live telemetry**.
 
@@ -131,7 +131,7 @@ While a round runs, watch:
 - **Add note** for anything noteworthy. **Never type names.**
 - **Edit labels** (only during onboarding and between rounds).
 - **End game early** and **Abort session**.
-- **Revoke** an action from the event log or the region panel (current round only). The seat gets its quota back; the original event stays in the log.
+- **Revoke** an action from the event log or the square panel (current round only). The seat gets its quota back and the scores are put back as if the action had never happened; the original event stays in the log.
 
 Every destructive action asks for confirmation in a popup.
 
@@ -164,7 +164,7 @@ Debrief participants as your protocol requires.
 | A player PC **lost the network** | `PlayerDisconnected` and an auto-pause; the player sees "Connection lost" | Fix the connection; the page reconnects by itself. Then **RESUME**. |
 | **Wrong client** bound (step 07) | — | **Unbind** it and bind the right one. Harmless before onboarding. |
 | A participant **leaves** mid-game | — | **Withdraw** their seat (Seats panel). Rounds complete without them. |
-| **Misclick** by a player | Visible to everyone | **Revoke** it (event log or region panel, current round only). |
+| **Misclick** by a player | Visible to everyone | **Revoke** it (event log or square panel, current round only). |
 | **Server crashed** or laptop restarted | Events up to the crash are stored | `npm start` again and type the passphrase. The session resumes, browsers re-claim their seats, and the tab shows LIVE. Then **RESUME**. A round time limit keeps counting the downtime; end the round if needed. |
 | **"Wrong passphrase"** at start | The server refuses to open the database | Retype it, paying attention to keyboard layout and caps lock. |
 | Player URL **does not load** | — | See [NETWORKING.md § troubleshooting](NETWORKING.md): firewall, wrong IP, Wi-Fi client isolation. Step 07 lists the URLs of every network interface. |

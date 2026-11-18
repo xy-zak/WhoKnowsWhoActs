@@ -337,7 +337,9 @@ export function SetupStage({ conn }: { conn: FacilitatorConnection }) {
     }
     switch (i) {
       case 0:
-        return sc ? `${sc.title} · ${sc.regionCount} regions · views ${sc.viewIds.join(" ")}` : "not chosen";
+        return sc
+          ? `${sc.title} · ${sc.board ? `${sc.board.cols} × ${sc.board.rows} squares` : `${sc.regionCount} sub-squares`} · rules ${cfg.rules}`
+          : "not chosen";
       case 1:
         return `${cfg.roundCount} rounds · propose ${r.quota.propose ?? "∞"} · decide ${r.quota.decide ?? "∞"}${r.timeLimitSec ? ` · ${r.timeLimitSec}s` : ""}`;
       case 2:
@@ -471,6 +473,7 @@ export function SetupStage({ conn }: { conn: FacilitatorConnection }) {
             <div className="row">
               <Button
                 icon="print"
+                tip="Open the printable sheet of seats and participant codes; names are written on it by hand, never typed"
                 onClick={() =>
                   void conn.openPrintable(`/api/sessions/${sessionId}/print/keysheet`).catch(() => {})
                 }
@@ -582,13 +585,21 @@ export function SetupStage({ conn }: { conn: FacilitatorConnection }) {
     }
   }
 
-  const primary = (i: number): { label: string; icon: IconName } =>
+  const primary = (i: number): { label: string; icon: IconName; tip?: string } =>
     i === REVIEW
-      ? { label: "Create session", icon: "create" }
+      ? {
+          label: "Create session",
+          icon: "create",
+          tip: "Create the session with these settings; steps 01–06 are then locked",
+        }
       : i === START
         ? simulated
-          ? { label: "Start simulation", icon: "start" }
-          : { label: "Start onboarding", icon: "start" }
+          ? { label: "Start simulation", icon: "start", tip: "Run the game with the simulated players" }
+          : {
+              label: "Start onboarding",
+              icon: "start",
+              tip: "Send every player to consent, the short questionnaire and the briefing",
+            }
         : { label: "Next", icon: "next" };
   const blockedHint: Record<number, string> = {
     6: "Bind every seat to continue.",
@@ -612,7 +623,13 @@ export function SetupStage({ conn }: { conn: FacilitatorConnection }) {
             next · <kbd>N</kbd> current step
           </span>
           {lobby && (
-            <Button variant="danger" size="sm" icon="stop" onClick={() => void discard()}>
+            <Button
+              variant="danger"
+              size="sm"
+              icon="stop"
+              onClick={() => void discard()}
+              tip="Abandon this session (marked aborted) and configure a new one"
+            >
               Discard session
             </Button>
           )}
@@ -700,6 +717,7 @@ export function SetupStage({ conn }: { conn: FacilitatorConnection }) {
                       kbd="Enter"
                       disabled={!canNext(i) || busy}
                       onClick={next}
+                      tip={p.tip}
                     >
                       {p.label}
                     </Button>

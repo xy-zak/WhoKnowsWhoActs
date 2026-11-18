@@ -1,3 +1,4 @@
+import type { Board, Scores } from "./board";
 import { type FakePlayerPace, type RoundSpec, type SessionConfig, SessionConfigSchema } from "./config";
 import type { ActionKind, KLabel, LabelPairing, PLabel } from "./labels";
 
@@ -54,10 +55,15 @@ export interface ActionRecord {
   seq: number;
   kind: ActionKind;
   seat: number;
+  /** Target sub-square, e.g. "C7-Kb". */
   regionId: string;
   round: number;
   serverTs: number;
   revoked: boolean;
+  /** The seat's knowledge type when it acted. */
+  k: KLabel | null;
+  /** The seat's power type when it acted. */
+  p: PLabel | null;
 }
 
 export interface RoundRecord {
@@ -75,6 +81,14 @@ export interface GameState {
   scenario: { id: string; title: string; version: string; hash: string } | null;
   regionIds: string[];
   viewIds: string[];
+  /** Grid map of the session (null for sessions recorded before the grid map). */
+  board: Board | null;
+  /** Game rules recorded at creation (see game/rules.ts and docs/GAME-RULES.md). */
+  rules: { id: string; version: string } | null;
+  /** Starting score of every sub-square (from the scenario). */
+  initialScores: Scores;
+  /** Current score of every sub-square: the starting scores plus every recorded score change. */
+  scores: Scores;
   phase: Phase;
   onboardingSteps: OnboardingStep[];
   /** K–P pairing of the latest label assignment (null before labels are assigned). */
@@ -130,6 +144,10 @@ export function initialState(): GameState {
     scenario: null,
     regionIds: [],
     viewIds: [],
+    board: null,
+    rules: null,
+    initialScores: {},
+    scores: {},
     phase: "lobby",
     onboardingSteps: [],
     labelPairing: null,

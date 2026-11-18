@@ -22,6 +22,7 @@ The change logs are evidence for the master's thesis evaluation. Assessors read 
 | `docs/DATA-TYPES.md` | `docs/changelog/DATA-TYPES-CHANGELOG.md` |
 | `docs/SESSION-RUNBOOK.md` | `docs/changelog/SESSION-RUNBOOK-CHANGELOG.md` |
 | `docs/AESTHETIC-RULES.md` | `docs/changelog/AESTHETIC-RULES-CHANGELOG.md` |
+| `docs/GAME-RULES.md` | `docs/changelog/GAME-RULES-CHANGELOG.md` |
 
 A new `docs/X.md` gets a new `docs/changelog/X-CHANGELOG.md` (same template), a row in the table above, a row in `docs/changelog/README.md`, and the "Change log" link line under its title.
 
@@ -62,6 +63,7 @@ Where code changes usually land:
 | `apps/server/src/db/` (migrations, schema versions) | DATA-TYPES (DB tables, ER diagram), DATA-MANAGEMENT (storage, retention) |
 | `apps/server/src/gdpr/`, `cli.ts` | DATA-MANAGEMENT (takedown, erasure, exports, CLI table), SESSION-RUNBOOK (wrap-up) |
 | `apps/server/src/session/`, rules, state machines | ARCHITECTURE (state machines, rules), SESSION-RUNBOOK |
+| `packages/shared/src/game/`, `board.ts`, `scenarios/` | GAME-RULES (rules, targeting, scores, scenario format), ARCHITECTURE (extension guide), DATA-TYPES |
 | `apps/client/src/facilitator/` | SESSION-RUNBOOK (tabs, setup steps, LIVE, shortcuts), ARCHITECTURE (module layout) |
 | `apps/client/src/player/` | SESSION-RUNBOOK, AESTHETIC-RULES, ARCHITECTURE (module layout) |
 | `apps/client/src/ui/` (tokens, icons, components, CSS) | AESTHETIC-RULES (partly generated) |

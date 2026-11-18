@@ -2,6 +2,7 @@ import { z } from "zod";
 import { SessionConfigSchema } from "./config";
 import { EVENT_DEFS, EVENT_TYPES, EventEnvelopeSchema, type EventType } from "./events";
 import { EXPORT_FILES, type ExportFileDef, expandColumns } from "./exportColumns";
+import { DEFAULT_GAME_RULES, GAME_RULES } from "./game/rules";
 import { CROCKFORD, normaliseParticipantCode } from "./ids";
 import { DISSOCIATED_PAIRINGS, K_LABELS, type LabelPairing, P_LABELS, pairedP, pairingPerm } from "./labels";
 import type { DataClass, RecordMeta } from "./meta";
@@ -485,6 +486,36 @@ export function renderSimulationPolicies(): string {
   return out.join("\n");
 }
 
+/* ─────────────────────────── Game rules ─────────────────────────── */
+
+/** Every registered rule set (game/rules.ts) with its numbers, for GAME-RULES.md. */
+export function renderGameRules(): string {
+  const out: string[] = [
+    table(
+      ["Rules (`rules`)", "Version", "Name", "Score range", "What it does"],
+      GAME_RULES.map((r) => [
+        `${code(r.id)}${r.id === DEFAULT_GAME_RULES ? " (default)" : ""}`,
+        r.version,
+        r.name,
+        `${r.scoreRange.min}–${r.scoreRange.max}`,
+        r.summary,
+      ]),
+    ),
+  ];
+  for (const r of GAME_RULES) {
+    out.push(
+      "",
+      `**${code(r.id)} numbers** (${code("packages/shared/src/game/rules.ts")}):`,
+      "",
+      table(
+        ["Parameter", "Value"],
+        Object.entries(r.params).map(([k, v]) => [k, code(typeof v === "string" ? v : JSON.stringify(v))]),
+      ),
+    );
+  }
+  return out.join("\n");
+}
+
 /* ─────────────────────────── Message catalogue ─────────────────────────── */
 
 function messagePayload(m: MessageDef): string {
@@ -712,6 +743,7 @@ export const GENERATED_BLOCKS: Record<string, () => string> = {
   "message-catalogue": renderMessageCatalogue,
   "data-class-summary": renderDataClassSummary,
   "simulation-policies": renderSimulationPolicies,
+  "game-rules": renderGameRules,
 };
 
 const BLOCK_RE = /<!-- BEGIN GENERATED: ([a-z0-9-]+) -->[\s\S]*?<!-- END GENERATED: \1 -->/g;

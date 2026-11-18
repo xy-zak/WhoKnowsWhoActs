@@ -29,9 +29,14 @@ async function onboard(page: Page) {
   await expect(page.getByText("You're all set")).toBeVisible();
 }
 
-async function act(page: Page, kind: "Propose" | "Decide", region: string) {
-  await page.locator(`path[data-region="${region}"]`).click();
-  await page.locator("aside").getByRole("button", { name: kind, exact: true }).click();
+/** Click a square of the grid map, then Propose/Decide in its panel (lands on the player's power-type sub-square). */
+async function act(page: Page, kind: "Propose" | "Decide", square: string) {
+  await page.locator(`g[data-square="${square}"] rect.grid-square`).click();
+  await expect(page.locator(".panel-title", { hasText: `Square ${square}` })).toBeVisible();
+  await page
+    .locator("aside")
+    .getByRole("button", { name: new RegExp(`^${kind} ${square} · K[a-d]`) })
+    .click();
   await page.keyboard.press("Enter"); // inline confirm prompt
   await expect(page.locator("aside").getByRole("button", { name: /Confirm/ })).toHaveCount(0);
 }
@@ -51,7 +56,7 @@ test("setup wizard → live round → wrap-up → replay", async ({ page: fac, b
   // 01 scenario
   await current(fac, "scenario");
   await expect(fac.locator(".popup")).toHaveCount(0); // setup uses an accordion, not popups
-  await fac.getByRole("radio", { name: /Demo island/ }).check();
+  await fac.getByRole("radio", { name: /^Demo grid/ }).check();
   await next(fac).click();
   // 02 rounds: one round, 1 + 1 actions
   await current(fac, "rounds");
@@ -115,12 +120,12 @@ test("setup wizard → live round → wrap-up → replay", async ({ page: fac, b
   const start = fac.getByRole("button", { name: /Start round 1 of 1/ });
   await expect(start).toBeEnabled();
   await start.click();
-  const regions = ["R02", "R05", "R07", "R10"];
+  const squares = ["B2", "E5", "G7", "J10"];
   await Promise.all(
     players.map(async (p, i) => {
       await expect(p.page.getByText(/Round 1\/1/)).toBeVisible();
-      await act(p.page, "Propose", regions[i]!);
-      await act(p.page, "Decide", regions[(i + 1) % 4]!);
+      await act(p.page, "Propose", squares[i]!);
+      await act(p.page, "Decide", squares[(i + 1) % 4]!);
     }),
   );
   for (const p of players)
@@ -173,7 +178,7 @@ test("simulated players: setup without clients or key sheet → agents play LIVE
 
   // 01 scenario → 02 rounds: two short rounds
   await current(fac, "scenario");
-  await fac.getByRole("radio", { name: /Demo island/ }).check();
+  await fac.getByRole("radio", { name: /^Demo grid/ }).check();
   await primary().click();
   await current(fac, "rounds");
   await fac.getByRole("spinbutton", { name: "Number of rounds" }).fill("2");
@@ -210,7 +215,7 @@ test("simulated players: setup without clients or key sheet → agents play LIVE
   await current(fac, "connect");
   const agents = fac.locator(".acc-step.current");
   await expect(agents).toContainText("Simulated players");
-  await expect(agents.getByText("Random (random v1)")).toHaveCount(4);
+  await expect(agents.getByText("Random (random v2)")).toHaveCount(4);
   await expect(agents).toContainText("E2ESEED:3");
   await primary().click();
 
@@ -279,7 +284,7 @@ test("fake players: one real browser + three server-created fake players → rou
   fac.on("pageerror", (e) => console.log("facilitator page error:", e.message));
   await fac.goto("/facilitator");
   await current(fac, "scenario");
-  await fac.getByRole("radio", { name: /Demo island/ }).check();
+  await fac.getByRole("radio", { name: /^Demo grid/ }).check();
   await next(fac).click();
   await current(fac, "rounds");
   await fac.getByRole("spinbutton", { name: "Number of rounds" }).fill("1");
@@ -325,8 +330,8 @@ test("fake players: one real browser + three server-created fake players → rou
   await onboard(real.page);
   await fac.getByRole("button", { name: /Start round 1 of 1/ }).click();
   await expect(real.page.getByText(/Round 1\/1/)).toBeVisible();
-  await act(real.page, "Propose", "R03");
-  await act(real.page, "Decide", "R04");
+  await act(real.page, "Propose", "C3");
+  await act(real.page, "Decide", "D4");
   await expect(real.page.getByText(/WK-[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]/)).toBeVisible({ timeout: 20_000 });
   await fac.screenshot({ path: "test-results/facilitator-fake-live.png", fullPage: true });
 

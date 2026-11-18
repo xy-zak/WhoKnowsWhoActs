@@ -3,18 +3,18 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import {
   ConsentFormSchema,
+  checkInitialScores,
   DemographicsFormSchema,
+  K_LABELS,
   type OnboardingContent,
   PREFER_NOT_TO_SAY,
-  pathAnchor,
-  type Region,
+  regionsOf,
   type Scenario,
   ScenarioFileSchema,
+  ScoreMatricesSchema,
   StudyConfigSchema,
-  type View,
-  ViewSchema,
+  scoresFromMatrices,
 } from "@wkwa/shared";
-import { z } from "zod";
 
 export function sha256(text: string | Buffer): string {
   return createHash("sha256").update(text).digest("hex");
@@ -22,59 +22,34 @@ export function sha256(text: string | Buffer): string {
 
 /* ─────────────────────────── Scenarios ─────────────────────────── */
 
-function attr(tag: string, name: string): string | undefined {
-  const m = tag.match(new RegExp(`\\s${name}\\s*=\\s*("([^"]*)"|'([^']*)')`));
-  return m ? (m[2] ?? m[3]) : undefined;
-}
-
-/** Extract regions (<path id="…" d="…" data-name="…">) and the viewBox from an SVG outline. */
-export function parseSvgOutline(svg: string): { viewBox: string; regions: Region[] } {
-  const svgTag = svg.match(/<svg\b[^>]*>/)?.[0];
-  if (!svgTag) throw new Error("No <svg> element found");
-  const viewBox = attr(svgTag, "viewBox");
-  if (!viewBox) throw new Error("The <svg> element needs a viewBox attribute");
-  if (/\btransform\s*=/.test(svg)) {
-    throw new Error(
-      "SVG transforms are not supported; flatten transforms before exporting (Inkscape: Path → Object to Path, then remove transforms)",
-    );
-  }
-  const regions: Region[] = [];
-  const seen = new Set<string>();
-  for (const m of svg.matchAll(/<path\b[^>]*>/g)) {
-    const tag = m[0];
-    const id = attr(tag, "id");
-    const d = attr(tag, "d");
-    if (!id || !d) continue;
-    if (seen.has(id)) throw new Error(`Duplicate region id '${id}'`);
-    seen.add(id);
-    regions.push({ id, name: attr(tag, "data-name") ?? id, path: d, anchor: pathAnchor(d) });
-  }
-  if (regions.length === 0) throw new Error("No <path id=… d=…> regions found in the SVG");
-  return { viewBox, regions };
-}
-
+/**
+ * Load `scenario.json` (+ its scores file): a grid board, one view per
+ * knowledge type and the starting score of every sub-square. Throws with a
+ * readable message when anything is missing or the sizes do not match.
+ */
 export function loadScenario(dir: string): Scenario {
   const file = ScenarioFileSchema.parse(JSON.parse(readFileSync(path.join(dir, "scenario.json"), "utf8")));
-  const outline = parseSvgOutline(readFileSync(path.join(dir, file.map), "utf8"));
-  const views: Record<string, View> =
-    typeof file.views === "string"
-      ? z.record(z.string(), ViewSchema).parse(JSON.parse(readFileSync(path.join(dir, file.views), "utf8")))
-      : file.views;
-  const regionIds = new Set(outline.regions.map((r) => r.id));
-  for (const [viewId, view] of Object.entries(views)) {
-    for (const rid of Object.keys(view.regions)) {
-      if (!regionIds.has(rid)) throw new Error(`View '${viewId}' has content for unknown region '${rid}'`);
-    }
+  for (const k of K_LABELS) {
+    if (!file.views[k])
+      throw new Error(`The scenario needs a view for every knowledge type; '${k}' is missing`);
   }
+  const matrices = ScoreMatricesSchema.parse(
+    typeof file.scores === "string"
+      ? JSON.parse(readFileSync(path.join(dir, file.scores), "utf8"))
+      : file.scores,
+  );
+  const initialScores = scoresFromMatrices(file.board, matrices);
+  const problem = checkInitialScores(file.board, initialScores);
+  if (problem) throw new Error(problem);
   const body = {
     id: file.id,
     title: file.title,
     version: file.version,
     description: file.description,
-    viewBox: outline.viewBox,
-    regions: outline.regions,
-    attributes: file.attributes,
-    views,
+    board: file.board,
+    views: file.views as Scenario["views"],
+    regions: regionsOf(file.board),
+    initialScores,
   };
   return { ...body, hash: sha256(JSON.stringify(body)) };
 }
@@ -84,6 +59,9 @@ export interface ScenarioInfo {
   title: string;
   version: string;
   description: string;
+  /** Board size in squares. */
+  board: { cols: number; rows: number } | null;
+  /** Number of sub-squares (4 per square). */
   regionCount: number;
   viewIds: string[];
   error?: string;
@@ -106,6 +84,7 @@ export class ScenarioLibrary {
           title: s.title,
           version: s.version,
           description: s.description,
+          board: s.board,
           regionCount: s.regions.length,
           viewIds: Object.keys(s.views),
         });
@@ -115,6 +94,7 @@ export class ScenarioLibrary {
           title: entry.name,
           version: "?",
           description: "",
+          board: null,
           regionCount: 0,
           viewIds: [],
           error: String((e as Error).message),

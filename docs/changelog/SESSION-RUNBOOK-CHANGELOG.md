@@ -2,6 +2,14 @@
 
 History of [SESSION-RUNBOOK.md](../SESSION-RUNBOOK.md). Newest first. How entries are written: [README.md](README.md).
 
+## Unreleased
+
+### Not yet committed · grid map, scores and game rules (documents the code in the same commit)
+
+- **Type:** Feature
+- **Change:** The preparation checklist describes the new scenario files (`scenario.json`, `scores.json`) and both demos. Step 01 explains the starting-score preview, the start map score and the game-rules choice; step 08 says the P label decides which sub-square a seat acts on. LIVE describes the composite map with scores and the square comparison, and revoking restores the scores.
+- **Reason:** Facilitators must check the right things in setup and understand what revoking does to the scores.
+
 ### 2026-11-17 · `a4ddecd` · Document simulated and fake players
 
 - **Type:** Feature

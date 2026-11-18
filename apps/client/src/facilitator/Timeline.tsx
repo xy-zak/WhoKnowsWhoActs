@@ -1,10 +1,13 @@
-import type { StoredEvent } from "@wkwa/shared";
-import { DECIDE_COLOUR, PROPOSE_COLOUR, seatColour } from "../map/MapView";
-import { Panel } from "../ui";
+import { cellName, formatScoreChanges, parseCellId, type StoredEvent } from "@wkwa/shared";
+import { useId } from "react";
+import { kColour, seatColour } from "../map/MapView";
+import { ActSwatch, LabelTag, Panel } from "../ui";
 
 /**
- * Swimlane timeline: one lane per seat, proposals (○) and decisions (■) over
- * time, round boundaries and pauses. Optional cursor for replay.
+ * Swimlane timeline: one lane per seat, proposals and decisions over time,
+ * round boundaries and pauses. Marks use the map's encoding: the colour is the
+ * knowledge type of the target sub-square, hatched = proposed, filled =
+ * decided. Optional cursor for replay.
  */
 export function Timeline({
   events,
@@ -17,14 +20,17 @@ export function Timeline({
   now: number;
   cursorTs?: number;
 }) {
+  const uid = useId().replace(/:/g, "");
   const start = events.find((e) => e.type === "RoundStarted")?.serverTs ?? events[0]?.serverTs;
   if (start === undefined || seats.length === 0) return null;
   const end = Math.max(now, (events.at(-1)?.serverTs ?? start) + 1000, start + 60_000);
   const W = 1000;
   const laneH = 26;
   const top = 18;
+  const M = 10; // mark size
   const H = top + seats.length * laneH + 8;
-  const x = (ts: number) => 60 + ((ts - start) / (end - start)) * (W - 70);
+  const L = 84; // left gutter for the seat labels
+  const x = (ts: number) => L + M / 2 + ((ts - start) / (end - start)) * (W - L - M - 10);
 
   const rounds: Array<{ round: number; s: number; e: number | null }> = [];
   const pauses: Array<{ s: number; e: number | null }> = [];
@@ -45,17 +51,45 @@ export function Timeline({
       .filter((e) => e.type === "ActionRevoked")
       .map((e) => (e.payload as { targetSeq: number }).targetSeq),
   );
+  const ks = ["a", "b", "c", "d"] as const;
 
   return (
     <Panel title="Timeline" icon="timeline">
       <div className="col">
-        <span className="hint">○ propose · ■ decide · shaded = paused · minutes since round 1</span>
+        <span className="legend">
+          <span>
+            <ActSwatch kind="propose" /> propose
+          </span>
+          <span>
+            <ActSwatch kind="decide" /> decide
+          </span>
+          <span>colour = knowledge type of the sub-square:</span>
+          {ks.map((l) => (
+            <LabelTag key={l} label={`K${l}`} />
+          ))}
+          <span>· faded = revoked · shaded = paused · minutes since round 1</span>
+        </span>
         <svg
           viewBox={`0 0 ${W} ${H}`}
           style={{ width: "100%", height: "auto" }}
           role="img"
           aria-label="Timeline"
         >
+          <defs>
+            {ks.map((l) => (
+              <pattern
+                key={l}
+                id={`${uid}-tl-${l}`}
+                patternUnits="userSpaceOnUse"
+                width={4}
+                height={4}
+                patternTransform="rotate(45)"
+              >
+                <rect width={4} height={4} style={{ fill: "var(--panel)" }} />
+                <rect width={2} height={4} style={{ fill: `var(--k-${l})` }} />
+              </pattern>
+            ))}
+          </defs>
           {rounds.map((r) => (
             <g key={r.round}>
               <rect
@@ -83,7 +117,7 @@ export function Timeline({
           {seats.map((s, i) => (
             <g key={s}>
               <line
-                x1={60}
+                x1={L}
                 x2={W - 10}
                 y1={top + i * laneH + laneH / 2}
                 y2={top + i * laneH + laneH / 2}
@@ -102,29 +136,30 @@ export function Timeline({
             if (lane < 0) return null;
             const cx = x(e.serverTs);
             const cy = top + lane * laneH + laneH / 2;
-            const op = revoked.has(e.seq) ? 0.25 : 1;
-            return e.type === "ProposalMade" ? (
-              <circle
-                key={e.seq}
-                cx={cx}
-                cy={cy}
-                r={5}
-                style={{ fill: "var(--panel)", stroke: PROPOSE_COLOUR, opacity: op }}
-                strokeWidth={2.5}
-              >
-                <title>{`#${e.seq} propose ${e.payload.regionId}`}</title>
-              </circle>
-            ) : (
+            const isRevoked = revoked.has(e.seq);
+            const k = parseCellId(e.payload.regionId)?.k;
+            const colour = k ? kColour(k) : "var(--text)";
+            const propose = e.type === "ProposalMade";
+            const changes = formatScoreChanges(e.payload.scoreChanges);
+            const tip = `#${e.seq} · seat ${e.seat} ${propose ? "proposed" : "decided"} ${cellName(e.payload.regionId)}${
+              changes ? ` · scores: ${changes}` : ""
+            }${isRevoked ? " · revoked" : ""}`;
+            return (
               <rect
                 key={e.seq}
-                x={cx - 4.5}
-                y={cy - 4.5}
-                width={9}
-                height={9}
-                style={{ fill: DECIDE_COLOUR, opacity: op }}
-              >
-                <title>{`#${e.seq} decide ${e.payload.regionId}`}</title>
-              </rect>
+                data-tip={tip}
+                x={cx - M / 2}
+                y={cy - M / 2}
+                width={M}
+                height={M}
+                style={{
+                  fill: propose ? (k ? `url(#${uid}-tl-${k[1]})` : "var(--panel)") : colour,
+                  stroke: colour,
+                  opacity: isRevoked ? 0.25 : 1,
+                }}
+                strokeWidth={1.5}
+                aria-label={tip}
+              />
             );
           })}
           {[0, 0.25, 0.5, 0.75, 1].map((f) => {

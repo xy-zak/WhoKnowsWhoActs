@@ -178,8 +178,8 @@ Columns shared by every event row:
 | [`PlayerConnected`](#playerconnected) | A bound player's browser (re)connected. | system | yes | pseudonymous | 1 + number of reconnects per seat |
 | [`PlayerDisconnected`](#playerdisconnected) | A bound player's browser disconnected. | system | yes | pseudonymous | 0–n per seat |
 | [`RoundStarted`](#roundstarted) | A round began; players may now propose/decide. | facilitator, system | yes | non-personal | roundCount per session (default 3) |
-| [`ProposalMade`](#proposalmade) | A player proposed a region (highlighted for all players). | player | yes | pseudonymous | ≤ quota.propose × seats × rounds (default 60) |
-| [`DecisionMade`](#decisionmade) | A player decided on a region (highlighted in the decision colour for all players). | player | yes | pseudonymous | ≤ quota.decide × seats × rounds (default 60) |
+| [`ProposalMade`](#proposalmade) | A player proposed a sub-square of the map (hatched in its knowledge-type colour for all players). | player | yes | pseudonymous | ≤ quota.propose × seats × rounds (default 60) |
+| [`DecisionMade`](#decisionmade) | A player decided on a sub-square of the map (filled in its knowledge-type colour for all players); the game rules change the scores. | player | yes | pseudonymous | ≤ quota.decide × seats × rounds (default 60) |
 | [`IntentRejected`](#intentrejected) | A player's propose/decide attempt was refused by the rules. | player | no | pseudonymous | rare |
 | [`ActionRevoked`](#actionrevoked) | Facilitator undid a proposal/decision (e.g. misclick). The original event is kept. | facilitator | yes | pseudonymous | rare |
 | [`RoundCompleted`](#roundcompleted) | A round ended. | system, facilitator | yes | non-personal | roundCount per session |
@@ -218,9 +218,16 @@ A new session was created with a scenario and configuration.
 | `scenario.id` | `string` | Scenario id |
 | `scenario.title` | `string` | Scenario title |
 | `scenario.version` | `string` | Scenario version |
-| `scenario.hash` | `string` | SHA-256 of the loaded scenario (map + views) |
-| `regionIds` | `array<string>` | All region ids in the map outline |
-| `viewIds` | `array<string>` | All view ids available in the scenario |
+| `scenario.hash` | `string` | SHA-256 of the loaded scenario (board, views and starting scores) |
+| `regionIds` | `array<string>` | Every region id of the map: one per sub-square, e.g. 'C7-Kb' (square C7, knowledge type Kb) |
+| `viewIds` | `array<string>` | All view ids available in the scenario (one per knowledge type) |
+| `board` | `object` | Size of the grid map in squares (absent in sessions recorded before the grid map) |
+| `board.cols` | `integer 1–26` | Number of columns (lettered A, B, C, …) |
+| `board.rows` | `integer 1–26` | Number of rows (numbered 1, 2, 3, …) |
+| `initialScores` | `map<string, number>` | Starting score of every sub-square, by region id (from the scenario) |
+| `rules` | `object` | Game rules this session is played with (docs/GAME-RULES.md) |
+| `rules.id` | `string` | Id of the game rules (game/rules.ts) |
+| `rules.version` | `string` | Version of those rules' code (bumped whenever their behaviour changes) |
 | `harness` | `object` | Software version, for reproducibility |
 | `harness.version` | `string` | Harness package version |
 | `harness.gitCommit` | `string` | Git commit of the harness code ('unknown' if not a git checkout) |
@@ -252,6 +259,7 @@ A new session was created with a scenario and configuration.
         "minDelayMs": 800,
         "maxDelayMs": 2500
       },
+      "rules": "standard",
       "seatCount": 4,
       "roundCount": 3,
       "defaultRound": {
@@ -283,13 +291,16 @@ A new session was created with a scenario and configuration.
     },
     "scenario": {
       "id": "demo",
-      "title": "Demo archipelago",
-      "version": "1",
+      "title": "Demo grid",
+      "version": "2",
       "hash": "9f2c…"
     },
     "regionIds": [
-      "R01",
-      "R02"
+      "A1-Ka",
+      "A1-Kb",
+      "A1-Kc",
+      "A1-Kd",
+      "B1-Ka"
     ],
     "viewIds": [
       "Ka",
@@ -297,6 +308,21 @@ A new session was created with a scenario and configuration.
       "Kc",
       "Kd"
     ],
+    "board": {
+      "cols": 10,
+      "rows": 10
+    },
+    "initialScores": {
+      "A1-Ka": 6,
+      "A1-Kb": 3,
+      "A1-Kc": 8,
+      "A1-Kd": 5,
+      "B1-Ka": 7
+    },
+    "rules": {
+      "id": "standard",
+      "version": "1"
+    },
     "harness": {
       "version": "0.1.0",
       "gitCommit": "3e1a9c2"
@@ -907,11 +933,11 @@ A round began; players may now propose/decide.
 
 ### `ProposalMade`
 
-A player proposed a region (highlighted for all players).
+A player proposed a sub-square of the map (hatched in its knowledge-type colour for all players).
 
 |  |  |
 | --- | --- |
-| **Trigger** | Player confirms a 'propose' on a region and the server accepts it. |
+| **Trigger** | Player picks a square with the propose tool and confirms; the server accepts it. The sub-square is the one the game rules give the player (standard rules: the one matching their power type). |
 | **Caused by** | player |
 | **Changes game state** | yes |
 | **Visible to** | Everyone (actor seat visible to players if showActorToPlayers) |
@@ -922,12 +948,16 @@ A player proposed a region (highlighted for all players).
 
 | Field | Type | Description |
 | --- | --- | --- |
-| `regionId` | `string` | Target region id |
+| `regionId` | `string` | Target sub-square, e.g. 'C7-Kb' |
 | `quotaUsed` | `integer ≥ 1` | Proposals this seat has made this round, including this one |
 | `quotaLimit` | `integer \| null` | Proposal quota this round (null = unlimited) |
-| `priorProposals` | `array<integer 1–4>` | Seats that had already proposed this region this round |
-| `priorDecisions` | `array<integer 1–4>` | Seats that had already decided this region this round |
+| `priorProposals` | `array<integer 1–4>` | Seats that had already proposed this sub-square this round |
+| `priorDecisions` | `array<integer 1–4>` | Seats that had already decided this sub-square this round |
 | `msSinceRoundStart` | `number ≥ 0` | Active (un-paused) server time since the round started (milliseconds) |
+| `scoreChanges` | `array<object>` | Score changes caused by this event, computed by the session's game rules (docs/GAME-RULES.md); only sub-squares whose score changed. Absent in sessions recorded before the grid map |
+| `scoreChanges[].regionId` | `string` | Sub-square whose score changed, e.g. 'C7-Ka' |
+| `scoreChanges[].from` | `number` | Score before |
+| `scoreChanges[].to` | `number` | Score after |
 
 <details><summary>Example row</summary>
 
@@ -945,14 +975,15 @@ A player proposed a region (highlighted for all players).
   "clientTs": 1794825999995.8,
   "clientSeq": 7,
   "payload": {
-    "regionId": "R07",
+    "regionId": "C7-Kb",
     "quotaUsed": 2,
     "quotaLimit": 5,
     "priorProposals": [
       3
     ],
     "priorDecisions": [],
-    "msSinceRoundStart": 51234
+    "msSinceRoundStart": 51234,
+    "scoreChanges": []
   }
 }
 ```
@@ -961,11 +992,11 @@ A player proposed a region (highlighted for all players).
 
 ### `DecisionMade`
 
-A player decided on a region (highlighted in the decision colour for all players).
+A player decided on a sub-square of the map (filled in its knowledge-type colour for all players); the game rules change the scores.
 
 |  |  |
 | --- | --- |
-| **Trigger** | Player confirms a 'decide' on a region and the server accepts it. |
+| **Trigger** | Player picks a square with the decide tool and confirms; the server accepts it. The sub-square is the one the game rules give the player (standard rules: the one matching their power type). |
 | **Caused by** | player |
 | **Changes game state** | yes |
 | **Visible to** | Everyone (actor seat visible to players if showActorToPlayers) |
@@ -976,12 +1007,16 @@ A player decided on a region (highlighted in the decision colour for all players
 
 | Field | Type | Description |
 | --- | --- | --- |
-| `regionId` | `string` | Target region id |
+| `regionId` | `string` | Target sub-square, e.g. 'C7-Kb' |
 | `quotaUsed` | `integer ≥ 1` | Decisions this seat has made this round, including this one |
 | `quotaLimit` | `integer \| null` | Decision quota this round (null = unlimited) |
-| `priorProposals` | `array<integer 1–4>` | Seats that had proposed this region this round before this decision |
-| `priorDecisions` | `array<integer 1–4>` | Seats that had already decided this region this round |
+| `priorProposals` | `array<integer 1–4>` | Seats that had proposed this sub-square this round before this decision |
+| `priorDecisions` | `array<integer 1–4>` | Seats that had already decided this sub-square this round |
 | `msSinceRoundStart` | `number ≥ 0` | Active (un-paused) server time since the round started (milliseconds) |
+| `scoreChanges` | `array<object>` | Score changes caused by this event, computed by the session's game rules (docs/GAME-RULES.md); only sub-squares whose score changed. Absent in sessions recorded before the grid map |
+| `scoreChanges[].regionId` | `string` | Sub-square whose score changed, e.g. 'C7-Ka' |
+| `scoreChanges[].from` | `number` | Score before |
+| `scoreChanges[].to` | `number` | Score after |
 
 <details><summary>Example row</summary>
 
@@ -999,7 +1034,7 @@ A player decided on a region (highlighted in the decision colour for all players
   "clientTs": 1794825999995.8,
   "clientSeq": 7,
   "payload": {
-    "regionId": "R07",
+    "regionId": "C7-Kb",
     "quotaUsed": 1,
     "quotaLimit": 5,
     "priorProposals": [
@@ -1007,7 +1042,24 @@ A player decided on a region (highlighted in the decision colour for all players
       2
     ],
     "priorDecisions": [],
-    "msSinceRoundStart": 73410
+    "msSinceRoundStart": 73410,
+    "scoreChanges": [
+      {
+        "regionId": "C7-Kb",
+        "from": 6,
+        "to": 10
+      },
+      {
+        "regionId": "C7-Ka",
+        "from": 5,
+        "to": 4
+      },
+      {
+        "regionId": "C7-Kc",
+        "from": 2,
+        "to": 1
+      }
+    ]
   }
 }
 ```
@@ -1020,7 +1072,7 @@ A player's propose/decide attempt was refused by the rules.
 
 |  |  |
 | --- | --- |
-| **Trigger** | Server validation fails (not active, paused, quota used up, unknown region, …). |
+| **Trigger** | Server validation fails (not active, paused, quota used up, unknown sub-square, a sub-square the game rules do not give this player, …). |
 | **Caused by** | player |
 | **Changes game state** | no |
 | **Visible to** | Facilitator; the acting player gets an error message |
@@ -1032,7 +1084,7 @@ A player's propose/decide attempt was refused by the rules.
 | Field | Type | Description |
 | --- | --- | --- |
 | `kind` | `"propose" \| "decide"` | Map interaction: 'propose' or 'decide' |
-| `regionId` | `string` | Region the player tried to act on |
+| `regionId` | `string` | Sub-square the player tried to act on |
 | `reason` | `"round_not_active" \| "paused" \| "seat_inactive" \| "unknown_region" \| "quota_exhausted" \| "rule"` | Machine-readable rejection reason |
 | `detail` | `string` | Human-readable explanation |
 
@@ -1053,7 +1105,7 @@ A player's propose/decide attempt was refused by the rules.
   "clientSeq": 7,
   "payload": {
     "kind": "decide",
-    "regionId": "R02",
+    "regionId": "B2-Ka",
     "reason": "quota_exhausted",
     "detail": "No decisions left this round"
   }
@@ -1071,7 +1123,7 @@ Facilitator undid a proposal/decision (e.g. misclick). The original event is kep
 | **Trigger** | Facilitator clicks 'Revoke' on an action during the active round. |
 | **Caused by** | facilitator |
 | **Changes game state** | yes |
-| **Visible to** | Everyone (highlight disappears) |
+| **Visible to** | Everyone (the hatch/fill disappears and its score changes are undone) |
 | **Data class** | pseudonymous |
 | **Typical frequency** | rare |
 
@@ -1082,8 +1134,12 @@ Facilitator undid a proposal/decision (e.g. misclick). The original event is kep
 | `targetSeq` | `integer` | seq of the ProposalMade/DecisionMade being revoked |
 | `targetType` | `"ProposalMade" \| "DecisionMade"` | Type of the revoked event |
 | `targetSeat` | `integer 1–4` | Seat whose action was revoked |
-| `regionId` | `string` | Region of the revoked action |
+| `regionId` | `string` | Sub-square of the revoked action |
 | `reason` | `string (≤ 200 chars)` | Facilitator's reason (free text, no personal data) |
+| `scoreChanges` | `array<object>` | Score changes caused by the revocation: the scores replayed without the revoked action, compared with before. Absent in sessions recorded before the grid map |
+| `scoreChanges[].regionId` | `string` | Sub-square whose score changed, e.g. 'C7-Ka' |
+| `scoreChanges[].from` | `number` | Score before |
+| `scoreChanges[].to` | `number` | Score after |
 
 <details><summary>Example row</summary>
 
@@ -1104,8 +1160,20 @@ Facilitator undid a proposal/decision (e.g. misclick). The original event is kep
     "targetSeq": 57,
     "targetType": "DecisionMade",
     "targetSeat": 4,
-    "regionId": "R11",
-    "reason": "misclick"
+    "regionId": "F3-Kd",
+    "reason": "misclick",
+    "scoreChanges": [
+      {
+        "regionId": "F3-Kd",
+        "from": 9,
+        "to": 5
+      },
+      {
+        "regionId": "F3-Ka",
+        "from": 2,
+        "to": 3
+      }
+    ]
   }
 }
 ```
@@ -1504,8 +1572,8 @@ Telemetry is fine-grained interface behaviour. It **never changes game state** a
 | Type | Summary | Caused by | Changes state | Data class | Typical frequency |
 | --- | --- | --- | --- | --- | --- |
 | [`screen_view`](#screen_view) | The player's client showed a new screen. | player | no | pseudonymous | ~10 per seat |
-| [`region_hover`](#region_hover) | The pointer rested on a region (recorded when it leaves). | player | no | pseudonymous | tens to hundreds per seat per round |
-| [`region_inspect`](#region_inspect) | The player opened or closed the info panel of a region. | player | no | pseudonymous | tens per seat per round |
+| [`region_hover`](#region_hover) | The pointer rested on a sub-square of the map (recorded when it leaves). | player | no | pseudonymous | tens to hundreds per seat per round |
+| [`region_inspect`](#region_inspect) | The player opened or closed the info panel of a square. | player | no | pseudonymous | tens per seat per round |
 | [`map_view_change`](#map_view_change) | The player panned or zoomed the map. | player | no | pseudonymous | 0–tens per seat per round |
 | [`tool_select`](#tool_select) | The player selected the propose or decide tool (or deselected). | player | no | pseudonymous | tens per seat per round |
 | [`action_draft`](#action_draft) | Confirmation step of a propose/decide: opened, cancelled or confirmed. | player | no | pseudonymous | ≥ number of actions |
@@ -1563,11 +1631,11 @@ The player's client showed a new screen.
 
 ### `region_hover`
 
-The pointer rested on a region (recorded when it leaves).
+The pointer rested on a sub-square of the map (recorded when it leaves).
 
 |  |  |
 | --- | --- |
-| **Trigger** | Pointer leaves a region after ≥150 ms on it (shorter passes are ignored as noise). |
+| **Trigger** | Pointer leaves a sub-square after ≥150 ms on it (shorter passes are ignored as noise). |
 | **Caused by** | player |
 | **Changes game state** | no |
 | **Visible to** | Facilitator (live hover indicator + log) |
@@ -1578,7 +1646,7 @@ The pointer rested on a region (recorded when it leaves).
 
 | Field | Type | Description |
 | --- | --- | --- |
-| `regionId` | `string` | Hovered region |
+| `regionId` | `string` | Hovered sub-square, e.g. 'C7-Kb' |
 | `durationMs` | `number ≥ 0` | Hover duration (milliseconds) |
 
 <details><summary>Example row</summary>
@@ -1596,7 +1664,7 @@ The pointer rested on a region (recorded when it leaves).
   "serverTs": 1794826000000.9,
   "serverWall": "2026-11-16T10:46:40.000Z",
   "payload": {
-    "regionId": "R04",
+    "regionId": "C7-Kb",
     "durationMs": 1840
   }
 }
@@ -1606,11 +1674,11 @@ The pointer rested on a region (recorded when it leaves).
 
 ### `region_inspect`
 
-The player opened or closed the info panel of a region.
+The player opened or closed the info panel of a square.
 
 |  |  |
 | --- | --- |
-| **Trigger** | Player clicks a region (open) or closes/replaces the panel (close). |
+| **Trigger** | Player clicks a square (open) or closes/replaces the panel (close). |
 | **Caused by** | player |
 | **Changes game state** | no |
 | **Visible to** | Facilitator |
@@ -1621,7 +1689,7 @@ The player opened or closed the info panel of a region.
 
 | Field | Type | Description |
 | --- | --- | --- |
-| `regionId` | `string` | Inspected region |
+| `regionId` | `string` | Inspected square, e.g. 'C7' (the panel shows all four sub-squares) |
 | `action` | `"open" \| "close"` | Panel opened or closed |
 | `durationMs` | `number ≥ 0 \| null` | How long the panel was open (close only) (milliseconds) |
 
@@ -1640,7 +1708,7 @@ The player opened or closed the info panel of a region.
   "serverTs": 1794826000000.9,
   "serverWall": "2026-11-16T10:46:40.000Z",
   "payload": {
-    "regionId": "R04",
+    "regionId": "C7",
     "action": "close",
     "durationMs": 5320
   }
@@ -1745,7 +1813,7 @@ Confirmation step of a propose/decide: opened, cancelled or confirmed.
 
 |  |  |
 | --- | --- |
-| **Trigger** | Player clicks a region with a tool selected (opened), then confirms or cancels. |
+| **Trigger** | Player clicks a square with a tool selected, or a Propose/Decide button in the square panel (opened), then confirms or cancels. |
 | **Caused by** | player |
 | **Changes game state** | no |
 | **Visible to** | Facilitator |
@@ -1757,7 +1825,7 @@ Confirmation step of a propose/decide: opened, cancelled or confirmed.
 | Field | Type | Description |
 | --- | --- | --- |
 | `kind` | `"propose" \| "decide"` | Map interaction: 'propose' or 'decide' |
-| `regionId` | `string` | Region of the drafted action |
+| `regionId` | `string` | Sub-square the drafted action would land on (the one the game rules give this player) |
 | `outcome` | `"opened" \| "cancelled" \| "confirmed"` | Confirmation step opened, cancelled, or confirmed (confirmed → intent sent) |
 
 <details><summary>Example row</summary>
@@ -1776,7 +1844,7 @@ Confirmation step of a propose/decide: opened, cancelled or confirmed.
   "serverWall": "2026-11-16T10:46:40.000Z",
   "payload": {
     "kind": "propose",
-    "regionId": "R07",
+    "regionId": "C7-Kb",
     "outcome": "cancelled"
   }
 }
@@ -1999,7 +2067,7 @@ Result of a clock synchronisation between client and server.
 
 ## One action, all its traces
 
-What is stored when seat 2 looks at region **R07**, opens its info panel, selects the *Propose* tool and proposes it. Telemetry rows reach the `telemetry` table through the server in batches; the diagram shows the logical order.
+What is stored when seat 2 (power type `Pb`) looks at square **C7**, opens its info panel, selects the *Propose* tool and proposes it. The proposal lands on sub-square **C7-Kb**, the sub-square of the seat's power type ([GAME-RULES.md § 3](GAME-RULES.md#3-what-a-player-can-act-on)). Telemetry rows reach the `telemetry` table through the server in batches; the diagram shows the logical order.
 
 ```mermaid
 sequenceDiagram
@@ -2012,25 +2080,25 @@ sequenceDiagram
   participant O as Other player clients
   S->>C: state (seq 57)
   C->>T: state_received seq 57
-  U->>C: pointer enters R07
-  C-->>S: presence R07 (live mirror only, not stored)
-  U->>C: click R07
-  C->>T: region_inspect open R07
+  U->>C: pointer enters sub-square C7-Kb
+  C-->>S: presence C7-Kb (live mirror only, not stored)
+  U->>C: click square C7
+  C->>T: region_inspect open C7
   U->>C: move to toolbar, choose Propose
-  C->>T: region_hover R07, 2310 ms
+  C->>T: region_hover C7-Kb, 2310 ms
   C->>T: tool_select propose
-  U->>C: click R07 with the Propose tool
+  U->>C: click square C7 with the Propose tool
   C->>T: action_draft opened
   U->>C: confirm
   C->>T: action_draft confirmed
-  C->>S: intent (clientSeq 7, propose, R07)
-  S->>E: ProposalMade seq 58
+  C->>S: intent (clientSeq 7, propose, C7-Kb)
+  S->>E: ProposalMade seq 58 (no score changes)
   S-->>C: ack ok, seq 58
-  S->>O: state (seq 58), R07 highlighted for everyone
+  S->>O: state (seq 58), C7-Kb hatched for everyone
   S->>C: state (seq 58)
   C->>T: state_received seq 58
   U->>C: close the info panel
-  C->>T: region_hover R07, 2700 ms
+  C->>T: region_hover C7-Kb, 2700 ms
   C->>T: region_inspect close, 6120 ms
 ```
 
@@ -2039,17 +2107,17 @@ The resulting rows, ordered by client time (t = 0 at the first `state_received`)
 | t (ms) | Table | seq / id | Type | Payload | Notes |
 | ---: | --- | --- | --- | --- | --- |
 | 0 | telemetry | id 1201 | `state_received` | `{"seq":57}` | Player's screen now shows state 57 |
-| 2100 | telemetry | id 1202 | `region_inspect` | `{"regionId":"R07","action":"open","durationMs":null}` | Info panel opened (own view's data for R07) |
-| 3810 | telemetry | id 1203 | `region_hover` | `{"regionId":"R07","durationMs":2310}` | Pointer had rested on R07 since t = 1500 |
+| 2100 | telemetry | id 1202 | `region_inspect` | `{"regionId":"C7","action":"open","durationMs":null}` | Info panel of square C7 opened (shows the seat's own Kb score) |
+| 3810 | telemetry | id 1203 | `region_hover` | `{"regionId":"C7-Kb","durationMs":2310}` | Pointer had rested on C7-Kb since t = 1500 |
 | 4050 | telemetry | id 1204 | `tool_select` | `{"tool":"propose"}` | |
-| 5600 | telemetry | id 1205 | `action_draft` | `{"kind":"propose","regionId":"R07","outcome":"opened"}` | Confirmation popover shown |
-| 6900 | telemetry | id 1206 | `action_draft` | `{"kind":"propose","regionId":"R07","outcome":"confirmed"}` | |
-| 6903 | **events** | **seq 58** | **`ProposalMade`** | `{"regionId":"R07","quotaUsed":2,"quotaLimit":5,"priorProposals":[3],"priorDecisions":[],"msSinceRoundStart":51234}` | `client_ts` = t 6900, `client_seq` = 7, `actor_kind` = player |
+| 5600 | telemetry | id 1205 | `action_draft` | `{"kind":"propose","regionId":"C7-Kb","outcome":"opened"}` | Confirmation prompt shown |
+| 6900 | telemetry | id 1206 | `action_draft` | `{"kind":"propose","regionId":"C7-Kb","outcome":"confirmed"}` | |
+| 6903 | **events** | **seq 58** | **`ProposalMade`** | `{"regionId":"C7-Kb","quotaUsed":2,"quotaLimit":5,"priorProposals":[3],"priorDecisions":[],"msSinceRoundStart":51234,"scoreChanges":[]}` | `client_ts` = t 6900, `client_seq` = 7, `actor_kind` = player |
 | 6910 | telemetry | id 1207 | `state_received` | `{"seq":58}` | The other three clients send their own `state_received` 58 rows |
-| 7900 | telemetry | id 1208 | `region_hover` | `{"regionId":"R07","durationMs":2700}` | Second hover, from t = 5200 |
-| 8220 | telemetry | id 1209 | `region_inspect` | `{"regionId":"R07","action":"close","durationMs":6120}` | |
+| 7900 | telemetry | id 1208 | `region_hover` | `{"regionId":"C7-Kb","durationMs":2700}` | Second hover, from t = 5200 |
+| 8220 | telemetry | id 1209 | `region_inspect` | `{"regionId":"C7","action":"close","durationMs":6120}` | |
 
-In `actions.csv` this becomes one row with `reaction_ms` = 6903 (from seeing state 57 to the accepted proposal), `ms_since_prev_own_action` measured from this seat's previous action in the round, and `prior_proposals` = `3`.
+In `actions.csv` this becomes one row with `reaction_ms` = 6903 (from seeing state 57 to the accepted proposal), `ms_since_prev_own_action` measured from this seat's previous action in the round, `prior_proposals` = `3`, `square_id` = `C7`, `target_k` = `Kb`, an empty `score_changes` (a proposal changes no scores) and `map_score_after` equal to the map score before. A decision would fill the sub-square instead and record its score changes, e.g. `C7-Kb 6>10; C7-Ka 4>3; C7-Kc 5>4; C7-Kd 2>1`.
 
 ## Session configuration
 
@@ -2068,6 +2136,7 @@ Stored verbatim in `SessionCreated.config` and in `sessions.config_json`. Defaul
 | `simulation.seed` | `string (≤ 40 chars) \| null` | `null` | Seed for the agents' random choices; null = a random seed is drawn when the session is created and stored here |
 | `simulation.minDelayMs` | `integer 0–600000` | `800` | Shortest pause before an agent's turn (ms); 0 and 0 = as fast as possible |
 | `simulation.maxDelayMs` | `integer 0–600000` | `2500` | Longest pause before an agent's turn (ms) |
+| `rules` | `string (pattern)` | `"standard"` | Game rules: what players act on and how actions change the scores (id from game/rules.ts; see GAME-RULES.md) |
 | `seatCount` | `integer 1–4` | `4` | Number of player seats (4 for real sessions; fewer for pilots) |
 | `roundCount` | `integer 1–20` | `3` | Number of rounds in the game |
 | `defaultRound` | `object` | — | Round definition used for every round unless overridden |
@@ -2080,7 +2149,7 @@ Stored verbatim in `SessionCreated.config` and in `sessions.config_json`. Defaul
 | `roundAdvance` | `"facilitator" \| "auto"` | `"facilitator"` | Who starts the next round after one completes |
 | `autoAdvanceDelaySec` | `integer ≥ 0` | `10` | Delay before the next round starts when roundAdvance = 'auto' |
 | `viewAssignment` | `"byKnowledgeType" \| "manual"` | `"byKnowledgeType"` | How a seat's map view is chosen: from its K label, or set manually by the facilitator |
-| `clearHighlightsEachRound` | `boolean` | `true` | If true, players only see the current round's proposals/decisions |
+| `clearHighlightsEachRound` | `boolean` | `true` | If true, the map only shows the current round's proposals (hatched) and decisions (filled); scores always carry over |
 | `pauseOnDisconnect` | `boolean` | `true` | Automatically pause the game when a player disconnects during a round |
 | `onboarding` | `object` | — | Onboarding steps each player completes before round 1 |
 | `onboarding.consent` | `boolean` | `true` | Show the in-game consent screen (keep ON for real sessions) |
@@ -2283,8 +2352,10 @@ Analysis-ready table of every map interaction with labels, timings and context. 
 | `p_label` | string | Power type of the seat at action time | state |
 | `view` | string | View of the seat at action time | state |
 | `kind` | string | propose \| decide | event type |
-| `region_id` | string | Target region id | payload.regionId |
-| `region_name` | string | Target region name | scenario regions |
+| `region_id` | string | Target sub-square id, e.g. C7-Kb (square C7, knowledge type Kb) | payload.regionId |
+| `region_name` | string | Target sub-square name, e.g. 'C7 · Kb' | scenario regions |
+| `square_id` | string | Square of the target sub-square, e.g. C7 | payload.regionId |
+| `target_k` | string | Knowledge type of the target sub-square (Ka–Kd) | payload.regionId |
 | `server_ts` | epoch-ms | Server time the action was accepted | envelope |
 | `server_wall` | iso-datetime | Same as server_ts, human-readable | envelope |
 | `client_ts` | epoch-ms | Client time of the confirm click, corrected to server time | envelope.clientTs |
@@ -2294,8 +2365,10 @@ Analysis-ready table of every map interaction with labels, timings and context. 
 | `reaction_ms` | number | server_ts minus clientTs of this seat's latest state_received telemetry before the action (time from seeing the latest state to acting); empty if none | derived: telemetry state_received |
 | `quota_used` | integer | Actions of this kind used by the seat this round, incl. this one | payload.quotaUsed |
 | `quota_limit` | integer | Quota for this kind this round (empty = unlimited) | payload.quotaLimit |
-| `prior_proposals` | seat-list | Seats that had proposed this region earlier this round | payload.priorProposals |
-| `prior_decisions` | seat-list | Seats that had decided this region earlier this round | payload.priorDecisions |
+| `prior_proposals` | seat-list | Seats that had proposed this sub-square earlier this round | payload.priorProposals |
+| `prior_decisions` | seat-list | Seats that had decided this sub-square earlier this round | payload.priorDecisions |
+| `score_changes` | string | Score changes the game rules applied when the action was accepted, e.g. 'C7-Kb 6>10; C7-Ka 5>4' (empty if none) | payload.scoreChanges |
+| `map_score_after` | number | Map score right after the action (empty for sessions without a grid map); a later revocation is not reflected here | derived: replayed scores + game rules |
 | `revoked` | bool01 | 1 if the facilitator revoked the action | ActionRevoked |
 | `revoked_by_seq` | integer | seq of the ActionRevoked event (empty if not revoked) | ActionRevoked.seq |
 

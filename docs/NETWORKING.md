@@ -82,7 +82,7 @@ flowchart LR
   FD -->|"exports, printing, erasure"| REST
 ```
 
-There is **no player-to-player channel**. Even the "highlight for all players" effect of a proposal works this way: the server records the event, then pushes each player an updated projection that contains the highlight.
+There is **no player-to-player channel**. Even the "mark for all players" effect of a proposal (the hatched sub-square) works this way: the server records the event, then pushes each player an updated projection that contains the mark.
 
 | Namespace | Clients | Receives | May send |
 | --- | --- | --- | --- |
@@ -273,7 +273,7 @@ Every client→server payload is validated with the zod schema listed here. Inva
 | `bound` | `{ seat: number, sessionId: string, seatToken: string }` | — (SeatBound is logged when the facilitator binds) | This browser was bound to a seat; carries the reconnect token. |
 | `unbound` | `{ reason: string }` | — | The seat binding was removed (or the session ended); return to the waiting screen. |
 | `rehello` | `{}` | — | A session was (re)attached on the server; the client re-sends `hello` with its stored seat token so its seat is re-claimed. |
-| `state` | `PlayerView` | Client acknowledges with telemetry 'state_received' | Full projected state for this player (PlayerView): phase, round, own labels and quotas, map geometry, OWN view content only, highlights. |
+| `state` | `PlayerView` | Client acknowledges with telemetry 'state_received' | Full projected state for this player (PlayerView): phase, round, own labels and quotas, the grid (board size, knowledge-type names), the scores of the OWN knowledge type only, the map score, which knowledge type the player acts on, and the marks (proposals and decisions). |
 
 #### `/facilitator` — client→server
 
@@ -322,7 +322,7 @@ Used by the dashboard's data pages and by scripts. **Localhost-only** unless `AD
 | --- | --- | --- |
 | `GET` | `/api/health` | Liveness check (no data) |
 | `GET` | `/api/scenarios` | Available scenarios |
-| `GET` | `/api/scenarios/:id` | Full scenario (outline + all views) for the setup preview |
+| `GET` | `/api/scenarios/:id` | Full scenario (board, all views and starting scores) for the setup preview |
 | `GET` | `/api/server-info` | Player URLs on this machine's LAN interfaces (setup step "Connect & bind") |
 | `GET` | `/api/config/session-defaults` | Default session configuration for the setup form (`config/session.default.json`, validated) |
 | `GET` | `/api/sessions` | All sessions of both databases with status, newest first; `players` is `"real"` (participant database) or `"simulated"` (simulation database); `fakeSeats` lists seats played by fake players |

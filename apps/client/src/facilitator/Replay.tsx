@@ -147,7 +147,7 @@ export function Replay({
                   </td>
                   <td className="small">{s.createdWall.slice(0, 16).replace("T", " ")}</td>
                   <td style={{ textAlign: "right" }}>
-                    <Button size="sm" icon="start">
+                    <Button size="sm" icon="start" tip="Step through this session's events from the start">
                       Replay
                     </Button>
                   </td>
@@ -194,7 +194,7 @@ export function Replay({
         title={`Replay · ${data.sessionId}`}
         icon="replay"
         actions={
-          <Button size="sm" icon="back" onClick={() => onPick("")}>
+          <Button size="sm" icon="back" onClick={() => onPick("")} tip="Back to the list of sessions">
             Other session
           </Button>
         }

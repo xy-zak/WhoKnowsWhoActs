@@ -3,9 +3,7 @@ import {
   DEFAULT_VALIDATORS,
   type GameState,
   isOnboardingComplete,
-  pathAnchor,
   playerView,
-  quotaUsed,
   reduceEvents,
   roundRemainingMs,
   roundSpecFor,
@@ -14,7 +12,7 @@ import {
   type Validator,
   validateIntent,
 } from "../src";
-import { type EventLog, readySession, testScenario } from "./helpers";
+import { act, type EventLog, readySession, testScenario } from "./helpers";
 
 function startRound(log: EventLog, round: number) {
   log.push(
@@ -22,26 +20,6 @@ function startRound(log: EventLog, round: number) {
     { round, spec: roundSpecFor(log.state.config, round), startedBy: "facilitator" },
     { actor: "facilitator" },
   );
-}
-
-function act(log: EventLog, seat: number, kind: "propose" | "decide", regionId: string) {
-  const st = log.state;
-  const v = validateIntent(st, seat, { kind, regionId });
-  if (!v.ok) return v;
-  const type = kind === "propose" ? "ProposalMade" : "DecisionMade";
-  log.push(
-    type,
-    {
-      regionId,
-      quotaUsed: quotaUsed(st, seat, kind) + 1,
-      quotaLimit: st.roundSpec!.quota[kind],
-      priorProposals: [],
-      priorDecisions: [],
-      msSinceRoundStart: 0,
-    },
-    { seat, code: `WK-TEST-000${seat}-X`, actor: "player" },
-  );
-  return v;
 }
 
 describe("session setup", () => {
@@ -63,7 +41,7 @@ describe("session setup", () => {
 describe("rounds and quotas (default: 5 propose + 5 decide, 3 rounds)", () => {
   it("rejects actions outside an active round", () => {
     const log = readySession();
-    expect(validateIntent(log.state, 1, { kind: "propose", regionId: "A" })).toMatchObject({
+    expect(validateIntent(log.state, 1, { kind: "propose", regionId: "A1-Ka" })).toMatchObject({
       ok: false,
       reason: "round_not_active",
     });
@@ -75,13 +53,13 @@ describe("rounds and quotas (default: 5 propose + 5 decide, 3 rounds)", () => {
     const rule = ruleFor(log.state);
     for (let i = 0; i < 5; i++) {
       for (let seat = 1; seat <= 4; seat++) {
-        expect(act(log, seat, "propose", "A").ok).toBe(true);
-        expect(act(log, seat, "decide", "B").ok).toBe(true);
+        expect(act(log, seat, "propose", "A1").ok).toBe(true);
+        expect(act(log, seat, "decide", "B1").ok).toBe(true);
       }
       if (i < 4) expect(rule.isComplete(log.state)).toBe(false);
     }
     expect(rule.isComplete(log.state)).toBe(true);
-    expect(act(log, 1, "propose", "A")).toMatchObject({ ok: false, reason: "quota_exhausted" });
+    expect(act(log, 1, "propose", "A1")).toMatchObject({ ok: false, reason: "quota_exhausted" });
   });
 
   it("does not complete while one seat still has quota left", () => {
@@ -89,8 +67,8 @@ describe("rounds and quotas (default: 5 propose + 5 decide, 3 rounds)", () => {
     startRound(log, 1);
     for (let i = 0; i < 5; i++)
       for (let seat = 1; seat <= 3; seat++) {
-        act(log, seat, "propose", "A");
-        act(log, seat, "decide", "A");
+        act(log, seat, "propose", "A1");
+        act(log, seat, "decide", "A1");
       }
     expect(ruleFor(log.state).isComplete(log.state)).toBe(false);
   });
@@ -101,7 +79,7 @@ describe("rounds and quotas (default: 5 propose + 5 decide, 3 rounds)", () => {
     const ev = log.push(
       "ProposalMade",
       {
-        regionId: "A",
+        regionId: "A1-Ka",
         quotaUsed: 1,
         quotaLimit: 1,
         priorProposals: [],
@@ -110,24 +88,24 @@ describe("rounds and quotas (default: 5 propose + 5 decide, 3 rounds)", () => {
       },
       { seat: 1, actor: "player" },
     );
-    expect(validateIntent(log.state, 1, { kind: "propose", regionId: "B" }).ok).toBe(false);
+    expect(validateIntent(log.state, 1, { kind: "propose", regionId: "B1-Ka" }).ok).toBe(false);
     log.push(
       "ActionRevoked",
-      { targetSeq: ev.seq, targetType: "ProposalMade", targetSeat: 1, regionId: "A", reason: "misclick" },
+      { targetSeq: ev.seq, targetType: "ProposalMade", targetSeat: 1, regionId: "A1-Ka", reason: "misclick" },
       { actor: "facilitator" },
     );
-    expect(validateIntent(log.state, 1, { kind: "propose", regionId: "B" }).ok).toBe(true);
+    expect(validateIntent(log.state, 1, { kind: "propose", regionId: "B1-Ka" }).ok).toBe(true);
   });
 
-  it("rejects while paused and for unknown regions", () => {
+  it("rejects while paused and for unknown sub-squares", () => {
     const log = readySession();
     startRound(log, 1);
     log.push("GamePaused", { reason: "facilitator", seat: null }, { actor: "facilitator" });
-    expect(validateIntent(log.state, 1, { kind: "propose", regionId: "A" })).toMatchObject({
+    expect(validateIntent(log.state, 1, { kind: "propose", regionId: "A1-Ka" })).toMatchObject({
       reason: "paused",
     });
     log.push("GameResumed", { pausedMs: 1000 }, { actor: "facilitator" });
-    expect(validateIntent(log.state, 1, { kind: "propose", regionId: "ZZ" })).toMatchObject({
+    expect(validateIntent(log.state, 1, { kind: "propose", regionId: "Z9-Ka" })).toMatchObject({
       reason: "unknown_region",
     });
   });
@@ -135,7 +113,7 @@ describe("rounds and quotas (default: 5 propose + 5 decide, 3 rounds)", () => {
   it("'manual' rule never auto-completes; unlimited quotas allowed", () => {
     const log = readySession({ defaultRound: { rule: "manual", quota: { propose: null, decide: null } } });
     startRound(log, 1);
-    for (let i = 0; i < 20; i++) expect(act(log, 1, "propose", "A").ok).toBe(true);
+    for (let i = 0; i < 20; i++) expect(act(log, 1, "propose", "A1").ok).toBe(true);
     expect(ruleFor(log.state).isComplete(log.state)).toBe(false);
   });
 
@@ -150,11 +128,11 @@ describe("rounds and quotas (default: 5 propose + 5 decide, 3 rounds)", () => {
     startRound(log, 1);
     log.push("ParticipantWithdrawn", { seat: 4, by: "facilitator", phase: "round_active" }, { seat: 4 });
     for (let seat = 1; seat <= 3; seat++) {
-      act(log, seat, "propose", "A");
-      act(log, seat, "decide", "A");
+      act(log, seat, "propose", "A1");
+      act(log, seat, "decide", "A1");
     }
     expect(ruleFor(log.state).isComplete(log.state)).toBe(true);
-    expect(validateIntent(log.state, 4, { kind: "propose", regionId: "A" })).toMatchObject({
+    expect(validateIntent(log.state, 4, { kind: "propose", regionId: "A1-Kd" })).toMatchObject({
       reason: "seat_inactive",
     });
   });
@@ -165,10 +143,10 @@ describe("rounds and quotas (default: 5 propose + 5 decide, 3 rounds)", () => {
     const decideOnlyProposed: Validator = (state: GameState, _seat, intent) =>
       intent.kind === "decide" &&
       !state.actions.some((a) => a.kind === "propose" && a.regionId === intent.regionId && !a.revoked)
-        ? { ok: false, reason: "rule", detail: "Decide only on proposed regions" }
+        ? { ok: false, reason: "rule", detail: "Decide only on proposed sub-squares" }
         : { ok: true };
     const validators = [...DEFAULT_VALIDATORS, decideOnlyProposed];
-    expect(validateIntent(log.state, 1, { kind: "decide", regionId: "C" }, validators)).toMatchObject({
+    expect(validateIntent(log.state, 1, { kind: "decide", regionId: "A2-Ka" }, validators)).toMatchObject({
       reason: "rule",
     });
   });
@@ -189,8 +167,8 @@ describe("replay determinism", () => {
   it("reduceEvents reproduces the live state and supports scrubbing", () => {
     const log = readySession();
     startRound(log, 1);
-    act(log, 1, "propose", "A");
-    act(log, 2, "decide", "B");
+    act(log, 1, "propose", "A1");
+    act(log, 2, "decide", "B1");
     const replayed = reduceEvents(log.events);
     expect(replayed).toEqual(log.state);
     const partial = reduceEvents(log.events, log.events.length - 1);
@@ -199,28 +177,29 @@ describe("replay determinism", () => {
 });
 
 describe("player projection (information asymmetry)", () => {
-  it("contains only the player's own view content", () => {
+  it("contains only the scores of the player's own knowledge type", () => {
     const log = readySession();
     startRound(log, 1);
     for (let seat = 1; seat <= 4; seat++) {
       const view = playerView(log.state, testScenario, seat, null, Date.now());
-      const json = JSON.stringify(view);
-      const own = ["ka", "kb", "kc", "kd"][seat - 1]!;
-      expect(json).toContain(`${own}-secret-A`);
-      for (const other of ["ka", "kb", "kc", "kd"].filter((x) => x !== own)) {
-        expect(json).not.toContain(`${other}-secret-A`);
-      }
+      const own = (["Ka", "Kb", "Kc", "Kd"] as const)[seat - 1]!;
+      const ids = Object.keys(view.scores);
+      expect(ids).toHaveLength(4); // one per square of the 2 × 2 board
+      expect(ids.every((id) => id.endsWith(`-${own}`))).toBe(true);
+      expect(view.me.knows).toBe(own);
+      // the only aggregate a player gets is the map score
+      expect(view.mapScore).toBeCloseTo(75 / 16);
       // participant codes are not exposed during the game
-      expect(json).not.toMatch(/WK-TEST/);
+      expect(JSON.stringify(view)).not.toMatch(/WK-TEST/);
     }
   });
 
   it("hides actors and other labels according to visibility config", () => {
     const log = readySession({ visibility: { showActorToPlayers: false, showOtherLabelsToPlayers: false } });
     startRound(log, 1);
-    act(log, 2, "propose", "A");
+    act(log, 2, "propose", "A1");
     const v1 = playerView(log.state, testScenario, 1, null, Date.now());
-    expect(v1.highlights[0]).toMatchObject({ regionId: "A", seat: null, mine: false });
+    expect(v1.highlights[0]).toMatchObject({ regionId: "A1-Kb", seat: null, mine: false });
     expect(v1.others.every((o) => o.k === null && o.p === null)).toBe(true);
     const v2 = playerView(log.state, testScenario, 2, null, Date.now());
     expect(v2.highlights[0]).toMatchObject({ seat: 2, mine: true });
@@ -229,7 +208,7 @@ describe("player projection (information asymmetry)", () => {
   it("clears highlights between rounds when configured", () => {
     const log = readySession({ defaultRound: { quota: { propose: 1, decide: 0 } } });
     startRound(log, 1);
-    for (let seat = 1; seat <= 4; seat++) act(log, seat, "propose", "A");
+    for (let seat = 1; seat <= 4; seat++) act(log, seat, "propose", "A1");
     log.push("RoundCompleted", {
       round: 1,
       reason: "quota_met",
@@ -245,12 +224,5 @@ describe("player projection (information asymmetry)", () => {
     const log = readySession();
     log.push("GameCompleted", { roundsPlayed: 0, reason: "facilitator" });
     expect(playerView(log.state, testScenario, 1, null, 0).me.participantCode).toBe("WK-TEST-0001-X");
-  });
-});
-
-describe("geometry", () => {
-  it("computes polygon centroids", () => {
-    expect(pathAnchor("M0 0 L10 0 L10 10 L0 10 Z")).toEqual([5, 5]);
-    expect(pathAnchor("M0 0 h10 v10 h-10 z")).toEqual([5, 5]);
   });
 });

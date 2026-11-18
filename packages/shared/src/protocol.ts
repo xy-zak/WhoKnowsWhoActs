@@ -62,7 +62,7 @@ export const TelemetryBatch = z.object({
   items: z.array(TelemetryItemSchema).max(500),
 });
 export const Presence = z.object({
-  regionId: z.string().max(64).nullable().describe("Region currently hovered (null = none)"),
+  regionId: z.string().max(64).nullable().describe("Sub-square currently hovered (null = none)"),
 });
 
 /* ─────────────────────────── /facilitator : client → server ─────────────────────────── */
@@ -234,7 +234,7 @@ export const MESSAGES: Record<string, MessageDef> = {
     namespace: "/player",
     direction: "server→client",
     description:
-      "Full projected state for this player (PlayerView): phase, round, own labels and quotas, map geometry, OWN view content only, highlights.",
+      "Full projected state for this player (PlayerView): phase, round, own labels and quotas, the grid (board size, knowledge-type names), the scores of the OWN knowledge type only, the map score, which knowledge type the player acts on, and the marks (proposals and decisions).",
     schema: "PlayerView",
     logged: "Client acknowledges with telemetry 'state_received'",
   },

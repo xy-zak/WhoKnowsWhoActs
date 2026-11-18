@@ -1,4 +1,10 @@
-import { EVENT_TYPES, type GameState, type StoredEvent, type StoredTelemetry } from "@wkwa/shared";
+import {
+  EVENT_TYPES,
+  formatScoreChanges,
+  type GameState,
+  type StoredEvent,
+  type StoredTelemetry,
+} from "@wkwa/shared";
 import { Fragment, useMemo, useState } from "react";
 import { Button, Panel, SeatDot } from "../ui";
 
@@ -19,12 +25,13 @@ export function summarise(ev: StoredEvent, regionName: (id: string) => string): 
       ]
         .filter(Boolean)
         .join("; ");
-      return `${regionName(p.regionId)} (${p.quotaUsed}/${p.quotaLimit ?? "∞"})${prior ? ` — ${prior}` : ""}`;
+      const scores = formatScoreChanges(p.scoreChanges);
+      return `${regionName(p.regionId)} (${p.quotaUsed}/${p.quotaLimit ?? "∞"})${prior ? ` — ${prior}` : ""}${scores ? ` · scores ${scores}` : ""}`;
     }
     case "IntentRejected":
       return `${ev.payload.kind} ${regionName(ev.payload.regionId)}: ${ev.payload.reason}`;
     case "ActionRevoked":
-      return `#${ev.payload.targetSeq} ${ev.payload.targetType} by seat ${ev.payload.targetSeat}${ev.payload.reason ? ` (${ev.payload.reason})` : ""}`;
+      return `#${ev.payload.targetSeq} ${ev.payload.targetType} by seat ${ev.payload.targetSeat} on ${regionName(ev.payload.regionId)}${ev.payload.reason ? ` (${ev.payload.reason})` : ""}${ev.payload.scoreChanges?.length ? ` · scores ${formatScoreChanges(ev.payload.scoreChanges)}` : ""}`;
     case "RoundStarted":
       return `round ${ev.payload.round} (${ev.payload.startedBy})`;
     case "RoundCompleted":
@@ -157,6 +164,7 @@ export function EventLog({
                             x.stopPropagation();
                             onRevoke!(e.seq);
                           }}
+                          tip="Undo this action for everyone: its mark and score changes are undone and the quota is returned; the event stays in the log"
                         >
                           Revoke
                         </Button>

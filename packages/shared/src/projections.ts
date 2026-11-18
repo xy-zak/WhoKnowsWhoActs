@@ -1,7 +1,9 @@
+import { parseCellId, type Scores } from "./board";
 import type { OnboardingContent, RoundSpec, StudyConfig } from "./config";
-import type { ActionKind, KLabel, PLabel } from "./labels";
+import { actorOf, mapScoreOf, rulesFor } from "./game/scoring";
+import { type ActionKind, K_LABELS, type KLabel, type PLabel } from "./labels";
 import { quotaLimit, quotaUsed } from "./rules/roundRules";
-import type { MapGeometry, RegionContent, Scenario } from "./scenario";
+import type { MapGeometry, Scenario } from "./scenario";
 import {
   type ConsentStatus,
   type GameState,
@@ -16,8 +18,9 @@ import {
  * PROJECTIONS — what each recipient is allowed to see.
  *
  * Information asymmetry is enforced HERE, on the server: a player's
- * projection contains only their own view's region content. Other views'
- * data never leaves the server towards that player.
+ * projection contains only the scores of their own view (one knowledge
+ * type). Other knowledge types' scores never leave the server towards that
+ * player; only the map score (one average) does.
  * ═══════════════════════════════════════════════════════════════════════════ */
 
 export interface QuotaStatus {
@@ -33,6 +36,7 @@ export function quotaLeft(q: QuotaStatus): number {
 export interface Highlight {
   seq: number;
   kind: ActionKind;
+  /** Sub-square, e.g. "C7-Kb". */
   regionId: string;
   round: number;
   /** Seat that acted; null when the session hides actors from players. */
@@ -59,6 +63,10 @@ export interface PlayerView {
     k: KLabel | null;
     p: PLabel | null;
     viewName: string | null;
+    /** Knowledge type whose scores this seat sees (its view). */
+    knows: KLabel | null;
+    /** Knowledge type of the sub-square this seat's proposals / decisions land on (from the game rules; null = cannot act). */
+    actsOn: Record<ActionKind, KLabel | null>;
     consent: ConsentStatus;
     nextStep: OnboardingStep | null;
     withdrawn: boolean;
@@ -76,8 +84,12 @@ export interface PlayerView {
     progress: Record<ActionKind, QuotaStatus> | null;
   }>;
   map: MapGeometry;
-  /** Region content of THIS player's view only. */
-  content: Record<string, RegionContent>;
+  /** Game rules of the session (id + version; look the rule set up with getGameRules). */
+  rules: { id: string; version: string };
+  /** Scores of THIS player's knowledge type only (sub-square id → score). */
+  scores: Scores;
+  /** Score of the whole map (null before the session has a board). */
+  mapScore: number | null;
   highlights: Highlight[];
   broadcasts: Array<{ seq: number; text: string; serverTs: number }>;
   onboarding: OnboardingContent | null;
@@ -108,6 +120,13 @@ export function playerView(
   if (!seat) throw new Error(`No seat ${seatNo}`);
   const vis = state.config.visibility;
   const view = seat.view ? scenario.views[seat.view] : undefined;
+  const knows =
+    seat.view && (K_LABELS as readonly string[]).includes(seat.view) ? (seat.view as KLabel) : null;
+  const rules = rulesFor(state);
+  const scores: Scores = {};
+  if (knows) {
+    for (const [id, v] of Object.entries(state.scores)) if (parseCellId(id)?.k === knows) scores[id] = v;
+  }
   const inGame = state.round > 0;
   const nextStep = state.phase === "onboarding" ? nextOnboardingStep(state, seat) : null;
 
@@ -130,6 +149,11 @@ export function playerView(
       k: vis.showOwnLabels ? seat.k : null,
       p: vis.showOwnLabels ? seat.p : null,
       viewName: view?.name ?? null,
+      knows,
+      actsOn: {
+        propose: rules.targetOf(actorOf(state, seat.seat), "propose"),
+        decide: rules.targetOf(actorOf(state, seat.seat), "decide"),
+      },
       consent: seat.consent,
       nextStep,
       withdrawn: seat.withdrawn,
@@ -147,8 +171,10 @@ export function playerView(
         p: vis.showOtherLabelsToPlayers ? s.p : null,
         progress: vis.showOthersProgress && inGame ? quotaFor(state, s.seat) : null,
       })),
-    map: { viewBox: scenario.viewBox, regions: scenario.regions, attributes: scenario.attributes },
-    content: view?.regions ?? {},
+    map: { board: state.board ?? scenario.board, views: scenario.views },
+    rules: { id: rules.id, version: state.rules?.version ?? rules.version },
+    scores,
+    mapScore: mapScoreOf(state),
     highlights: visibleActions(state).map((a) => ({
       seq: a.seq,
       kind: a.kind,

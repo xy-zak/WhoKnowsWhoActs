@@ -1,24 +1,25 @@
 # Who Knows, Who Acts?
 
-A **research game harness** for a four-player, map-based serious game played on a local network. It provides everything *around* the game: networking, sessions and rounds, per-player map views, propose/decide interactions, a facilitator manager, and a GDPR-aware data pipeline with rich, documented metadata. The game itself can then be designed on top.
+A **research game harness** for a four-player, map-based serious game played on a local network. It provides everything *around* the game: networking, sessions and rounds, a grid map where each player knows a different part of the scores, propose/decide interactions, pluggable game rules, a facilitator manager, and a GDPR-aware data pipeline with rich, documented metadata. The game itself can then be designed on top.
 
 | Facilitator · LIVE (Catppuccin Mocha) | Facilitator · SETUP wizard (Catppuccin Latte) |
 | --- | --- |
-| ![Facilitator LIVE tab: lifecycle stepper, NEXT panel, seats with quota bars, composite map with an all-views comparison of a region, and live mirrors of every player's screen](docs/img/facilitator-live.png) | ![Setup at step 03 of 10 with the stepper and visibility settings](docs/img/facilitator-setup.png) |
+| ![Facilitator LIVE tab: lifecycle stepper, NEXT panel, seats with K/P label swatches and quota bars, the composite map with every score and the map score, the comparison of one square's four sub-squares, and live mirrors of every player's screen](docs/img/facilitator-live.png) | ![Setup at step 01 of 10: scenario, game rules and a preview of the starting scores of the 10 × 10 demo grid](docs/img/facilitator-setup.png) |
 | **Player · game (Latte)** | **Player · game (Mocha)** |
-| ![Player game screen in Latte: status line with quota bars, propose/decide tools, the shared map with this player's own data and the inline confirm prompt](docs/img/player-game.png) | ![Player game screen in Mocha with CRT scanlines](docs/img/player-game-mocha.png) |
+| ![Player game screen in Latte: status line with labels, map score and quota bars, the propose/decide tools, the grid map with this player's own scores, hatched proposals and filled decisions, and the panel of the selected square](docs/img/player-game.png) | ![The same player screen in Mocha](docs/img/player-game-mocha.png) |
 
 *Screenshots use the fictional demo scenario and simulated players. Every player and the facilitator choose their own display settings (colours, font, text size, animations) as accessibility settings; they are never recorded.*
 
 ## What it does
 
 - **Hub-and-spoke LAN game.** Four browsers connect to one server (the facilitator's laptop), and every message passes through it. No internet is needed; all assets are bundled.
-- **Same outline, different knowledge.** Every player sees the same map regions, but each gets a different dataset (*view*) for them. The server enforces this: a player's browser never receives another player's data. The facilitator sees the **composite** of all views and live mirrors of every player's screen.
-- **Propose and decide.** *Propose* highlights a region for everyone (amber, hatched); *decide* marks it in a second colour (red). Both pass through a confirmation step.
+- **Same map, different knowledge.** The map is a grid of squares (10 × 10 in the demo, 5 × 5 in a smaller one). Every square holds four **sub-squares**, one per knowledge type (`Ka`–`Kd`), each with a score from 0 to 10. A player sees only the scores of their own knowledge type. The server enforces this: a player's browser never receives the other scores. Everyone sees the **map score** (the average of all scores). The facilitator sees the **composite** of all scores and live mirrors of every player's screen.
+- **Propose and decide.** A player acts on the sub-square of their **power type** (`Pa` → `Ka` …) in the square they pick. *Propose* hatches it for everyone; *decide* fills it, adds 4 to its score and takes 1 from the other three sub-squares of that square. Both pass through a confirmation step. Colour = knowledge type, pattern = what happened, everywhere in the interface.
+- **Pluggable game rules.** What an action lands on and what it does to the scores live in one file (`packages/shared/src/game/rules.ts`). Each session records the rule set and version it used, and events store the score changes they caused, so past sessions never change when the rules do ([GAME-RULES.md](docs/GAME-RULES.md)).
 - **Real or simulated players.** In setup step 03 the facilitator chooses *real participants* or *simulated players*. Simulated sessions are played by agents inside the server, following pluggable **policies** (the rules are added in `packages/shared/src/simulation/`). They skip consent, client binding, participant codes and the key sheet, can run in real time or as fast as possible, repeat exactly from a logged seed, and are stored in a **separate simulation database** (`data/wkwa-sim.db`).
 - **Fake players for testing.** In a session with real players, the server can fill seats with *fake players* (setup step 07): test clients that connect like a browser and play at random. They skip consent and the questionnaire, get no participant code, and are marked fake in the log and the exports (`fake_player`, `fakeSeats`). Try a session alone with three fake players and yourself on the fourth seat.
 - **Rounds.** Default: 3 rounds, and a round ends when every player has made 5 proposals and 5 decisions. Rounds can be changed per session (quotas, unlimited, time limits, facilitator-ended rounds, per-round overrides) and extended in code (pluggable round rules and validators).
-- **Labels.** Each seat gets a knowledge type (`Ka`–`Kd`) and a power type (`Pa`–`Pd`), assigned manually or randomly in setup step 08 (the seed is logged). By default the K label selects the seat's map view.
+- **Labels.** Each seat gets a knowledge type (`Ka`–`Kd`) and a power type (`Pa`–`Pd`), assigned manually or randomly in setup step 08 (the seed is logged). By default the K label selects which scores the seat sees, and the P label which sub-squares it acts on.
 - **Every interaction is recorded** in an append-only, event-sourced log with server and clock-corrected client timestamps. Fine-grained UI telemetry is recorded too: hover, inspect, pan/zoom, tool choice, confirm/cancel, focus, idle, and state acknowledgements for exact reaction times.
 - **Facilitator manager**, organised in order of use: **[1] SETUP | LIVE · [2] REPLAY · [3] DATABASE**.
   - **SETUP** is 10 steps stacked as a vertical accordion (scenario → rounds → players → onboarding → tags → review & create → connect clients → labels → key sheet → start). The current step is expanded; finished steps collapse into a one-line summary, and a blue wayfinder bar stays pinned to the top while you scroll, so you always see where you are. Review & create and start onboarding have their own colour.
@@ -76,6 +77,7 @@ For real sessions, follow the **[session runbook](docs/SESSION-RUNBOOK.md)**.
 | Document | Contents |
 | --- | --- |
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Components, event sourcing, state machines, projections (information asymmetry), rules, extension guide, testing |
+| [GAME-RULES.md](docs/GAME-RULES.md) | The grid map, who sees which scores, what players act on, what proposals and decisions do, the map score, revoking, how to change the rules, scenario format |
 | [NETWORKING.md](docs/NETWORKING.md) | LAN topology, hub-and-spoke protocol, connection/reconnect/clock-sync sequences, message catalogue, REST API, security, troubleshooting |
 | [DATA-MANAGEMENT.md](docs/DATA-MANAGEMENT.md) | GDPR design: data inventory and flow, pseudonymisation, consent, encryption, takedown procedure, anonymisation, retention, risk table, ethics checklist |
 | [DATA-TYPES.md](docs/DATA-TYPES.md) | Field-level catalogue of everything that is logged and exported |
@@ -91,7 +93,8 @@ packages/shared/   schemas (zod), event reducer, rules, projections, agent polic
 apps/server/       Fastify + Socket.IO server, encrypted store, session manager, REST API, GDPR tooling, CLI, bots
 apps/client/       React/Vite: design system (ui/), player app (/) and facilitator manager (/facilitator)
 config/            study info, consent, demographics, briefing, default session settings (placeholders!)
-scenarios/demo/    fictional demo map (SVG) with four placeholder datasets
+scenarios/         fictional demo grids: demo (10 × 10) and demo-small (5 × 5), four placeholder knowledge types
+scripts/           doc generator, demo starting-score generator, dev and e2e helpers
 docs/              design documentation
 e2e/               Playwright tests
 ```
@@ -100,9 +103,9 @@ e2e/               Playwright tests
 
 The harness is meant to be extended. See [ARCHITECTURE.md § 12 Extension guide](docs/ARCHITECTURE.md#12-extension-guide). In short:
 
-- **Your map and data:** add `scenarios/<id>/` with an SVG outline (one `<path id>` per region) and one view per K label.
+- **Your map and data:** add `scenarios/<id>/` with a `scenario.json` (board size, one view per K label) and a `scores.json` (starting score of every sub-square); see [GAME-RULES.md § 11](docs/GAME-RULES.md#11-starting-scores-and-scenarios).
 - **Simulated players:** write agent policies in `packages/shared/src/simulation/policies.ts` (template at the top of the file; see ARCHITECTURE.md § 14).
-- **Rules:** add validators (`packages/shared/src/rules/validators.ts`), e.g. "decide only on proposed regions" or rules that depend on power type, and add round rules (`roundRules.ts`).
+- **Game rules:** change the numbers or the behaviour in `packages/shared/src/game/rules.ts` (targeting, score changes, map score, extra validators such as "decide only on proposed sub-squares"), or add a variant to `GAME_RULES`; see [GAME-RULES.md § 10](docs/GAME-RULES.md#10-changing-the-rules). Round rules go in `roundRules.ts`.
 - **New actions or data:** add event or telemetry types in `packages/shared/src/events.ts` / `telemetry.ts`, with their documentation metadata, then run `npm run docs:generate`.
 
 > **This repository is public.** Research data lives in `data/` and `exports/`, which are git-ignored (a test checks this). Never commit databases, exports, filled-in key sheets or real participant information. Replace the `[placeholders]` in `config/` with your approved texts.

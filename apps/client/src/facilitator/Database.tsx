@@ -201,6 +201,11 @@ export function Database({
               className={`tab${db === d.id ? " active" : ""}`}
               aria-pressed={db === d.id}
               onClick={() => setDb(d.id)}
+              data-tip={
+                d.id === "real"
+                  ? "Sessions with real participants: personal data, takedown and erasure apply"
+                  : "Sessions played by simulated players only (no participants)"
+              }
             >
               <Icon name={d.icon} />
               {d.label} · {ofDb(sessions, d.id).length}

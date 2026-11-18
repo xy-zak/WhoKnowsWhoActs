@@ -116,7 +116,7 @@ export function App({ conn }: { conn: FacilitatorConnection }) {
             type="button"
             className="live-indicator"
             onClick={() => setTab("main")}
-            title="Go to the live session"
+            data-tip="Go to the live session"
           >
             <span className="live-dot" /> LIVE <span className="mono">{st.sessionId}</span>
           </button>
@@ -143,6 +143,7 @@ export function App({ conn }: { conn: FacilitatorConnection }) {
             type="button"
             className={`tab${tab === "main" ? " active" : ""}`}
             onClick={() => setTab("main")}
+            data-tip={isLive ? "Run the live session (1)" : "Set up a new session (1)"}
           >
             <kbd>1</kbd>
             <Icon name={isLive ? "live" : "setup"} />
@@ -152,6 +153,7 @@ export function App({ conn }: { conn: FacilitatorConnection }) {
             type="button"
             className={`tab${tab === "replay" ? " active" : ""}`}
             onClick={() => setTab("replay")}
+            data-tip="Step through a recorded session event by event (2)"
           >
             <kbd>2</kbd>
             <Icon name="replay" />
@@ -161,6 +163,7 @@ export function App({ conn }: { conn: FacilitatorConnection }) {
             type="button"
             className={`tab${tab === "database" ? " active" : ""}`}
             onClick={() => setTab("database")}
+            data-tip="Stored sessions, exports and erasure requests (3)"
           >
             <kbd>3</kbd>
             <Icon name="database" />
@@ -231,13 +234,13 @@ export function App({ conn }: { conn: FacilitatorConnection }) {
           type="button"
           className="seg"
           onClick={() => setDisplay(true)}
-          title="Display settings (D): colours T · font F · text size S · animations A"
+          data-tip="Display settings (D): colours T · font F · text size S · animations A"
         >
           <Icon name="display" /> <kbd>D</kbd> {THEME_LABEL[prefs.theme].toUpperCase()} ·{" "}
           {FONT_LABEL[prefs.font].toUpperCase()} · {SCALE_LABEL[prefs.scale].toUpperCase()}
           {prefs.animations ? "" : " · NO ANIM"}
         </button>
-        <button type="button" className="seg" onClick={() => setHelp(true)} title="Keyboard shortcuts (?)">
+        <button type="button" className="seg" onClick={() => setHelp(true)} data-tip="Keyboard shortcuts (?)">
           <Icon name="help" /> <kbd>?</kbd> HELP
         </button>
       </footer>

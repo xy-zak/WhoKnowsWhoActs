@@ -2,6 +2,14 @@
 
 History of [NETWORKING.md](../NETWORKING.md). Newest first. How entries are written: [README.md](README.md).
 
+## Unreleased
+
+### Not yet committed · grid map, scores and game rules (documents the code in the same commit)
+
+- **Type:** Feature
+- **Change:** The `state` message (generated) now lists the grid, the player's own knowledge type's scores, the map score and the knowledge type the player acts on. The REST table describes `/api/scenarios/:id` as board, views and starting scores, and the proposal effect is called a mark.
+- **Reason:** The player's projection changed with the grid map; the protocol description must say what a browser receives, because the asymmetry of knowledge is enforced there.
+
 ### 2026-11-17 · `a4ddecd` · Document simulated and fake players
 
 - **Type:** Feature

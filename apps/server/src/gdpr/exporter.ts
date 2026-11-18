@@ -9,9 +9,11 @@ import {
   fakeSeats,
   generateAnonymousId,
   initialState,
+  mapScoreOf,
   type PayloadOf,
   pairingName,
   pairingText,
+  parseCellId,
   parseSessionConfig,
   randomCrockford,
   reduceEvents,
@@ -170,12 +172,13 @@ export function exportSession(
   const prevOwn = new Map<string, number>();
   const walk = initialState();
   for (const e of events) {
+    let actionRow: Record<string, unknown> | null = null;
     if ((e.type === "ProposalMade" || e.type === "DecisionMade") && e.seat !== null) {
       const s = walk.seats[e.seat];
       const key = `${e.seat}:${e.round}`;
       const prev = prevOwn.get(key);
       const ack = lastAckBefore(e.seat, e.serverTs);
-      actions.push({
+      actionRow = {
         session_id: sessionId,
         seq: e.seq,
         round: e.round,
@@ -187,6 +190,8 @@ export function exportSession(
         kind: e.type === "ProposalMade" ? "propose" : "decide",
         region_id: e.payload.regionId,
         region_name: regionNames.get(e.payload.regionId) ?? e.payload.regionId,
+        square_id: parseCellId(e.payload.regionId)?.id ?? null,
+        target_k: parseCellId(e.payload.regionId)?.k ?? null,
         server_ts: e.serverTs,
         server_wall: e.serverWall,
         client_ts: e.clientTs,
@@ -198,12 +203,21 @@ export function exportSession(
         quota_limit: e.payload.quotaLimit,
         prior_proposals: e.payload.priorProposals,
         prior_decisions: e.payload.priorDecisions,
+        score_changes: (e.payload.scoreChanges ?? [])
+          .map((c) => `${c.regionId} ${c.from}>${c.to}`)
+          .join("; "),
+        map_score_after: null,
         revoked: revokedBy.has(e.seq),
         revoked_by_seq: revokedBy.get(e.seq) ?? null,
-      });
+      };
+      actions.push(actionRow);
       prevOwn.set(key, e.serverTs);
     }
     applyEvent(walk, e);
+    if (actionRow && walk.board) {
+      const score = mapScoreOf(walk);
+      actionRow.map_score_after = score === null ? null : Math.round(score * 10_000) / 10_000;
+    }
   }
   csv("actions.csv", actions);
 

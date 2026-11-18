@@ -4,6 +4,12 @@ History of [ARCHITECTURE.md](../ARCHITECTURE.md). Newest first. How entries are 
 
 ## Unreleased
 
+### Not yet committed · grid map, scores and game rules (documents the code in the same commit)
+
+- **Type:** Feature
+- **Change:** The glossary defines squares, sub-squares (regions), views as knowledge types, game rules and the map score. The scope table, module map, projection table and diagram, validation pipeline (new `gameRulesAllow`), event sequence diagram, testing table and extension guide (change the game rules; scenario format with `board` and `scores.json`) follow the grid map, and the SVG outline is gone.
+- **Reason:** The map changed from an SVG outline to a grid with scores, and the game rules moved into their own module, so the architecture text and diagrams must match the code.
+
 ### Not yet committed · documents `7ca658f`
 
 - **Type:** Feature

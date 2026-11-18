@@ -25,12 +25,14 @@ import {
 import { useEffect, useState } from "react";
 import { fmtDuration } from "../common/format";
 import {
+  ActSwatch,
   AsciiProgress,
   Button,
   Callout,
   ConnTag,
   Field,
   Icon,
+  LabelTag,
   Panel,
   SeatDot,
   StatusTag,
@@ -181,6 +183,7 @@ export function BindEditor({ conn, dash }: { conn: FacilitatorConnection; dash: 
                   <Button
                     size="sm"
                     icon="withdraw"
+                    tip="Free this seat so another client can be bound to it"
                     onClick={() =>
                       void conn
                         .cmd("seat:unbind", { seat: s.seat, reason: "facilitator" }, "Unbound")
@@ -288,14 +291,18 @@ export function PairingMatrix({ pairing, usedK }: { pairing: LabelPairing | null
         <tr>
           <th>{pairing ? pairingName(pairing) : "—"}</th>
           {P_LABELS.map((p) => (
-            <th key={p}>{p}</th>
+            <th key={p}>
+              <LabelTag label={p} filled />
+            </th>
           ))}
         </tr>
       </thead>
       <tbody>
         {K_LABELS.map((k) => (
           <tr key={k}>
-            <td className={usedK && !usedK.has(k) ? "faint" : "strong"}>{k}</td>
+            <td className={usedK && !usedK.has(k) ? "faint" : "strong"}>
+              <LabelTag label={k} />
+            </td>
             {P_LABELS.map((p) => {
               const on = pairing ? pairedP(k, pairing) === p : false;
               return (
@@ -479,7 +486,17 @@ export function LabelsEditor({
                     ))}
                   </select>
                 </td>
-                <td className="strong">{p ?? <span className="faint">random D1–D6</span>}</td>
+                <td className="strong">
+                  {p ? (
+                    <LabelTag
+                      label={p}
+                      filled
+                      tip={`Power type ${p}: seat ${s.seat}'s proposals and decisions land on the K${p[1]} sub-squares`}
+                    />
+                  ) : (
+                    <span className="faint">random D1–D6</span>
+                  )}
+                </td>
                 <td className="small">
                   {manualView ? (
                     <select
@@ -493,7 +510,9 @@ export function LabelsEditor({
                       ))}
                     </select>
                   ) : view ? (
-                    `${view} · ${scenario?.views[view]?.name ?? ""}`
+                    <span data-tip={`Seat ${s.seat} sees the scores of the ${view} sub-squares`}>
+                      {view} · {scenario?.views[view]?.name ?? ""}
+                    </span>
                   ) : (
                     <span className="faint">follows K</span>
                   )}
@@ -509,7 +528,11 @@ export function LabelsEditor({
         </Callout>
       )}
       <div className="row">
-        <Button icon="randomise" onClick={shuffle}>
+        <Button
+          icon="randomise"
+          onClick={shuffle}
+          tip="Deal the K labels to the seats at random (the seed is logged); the pairing then sets each P"
+        >
           Shuffle K across seats
         </Button>
         <span className="hint">
@@ -521,6 +544,7 @@ export function LabelsEditor({
           icon="ok"
           disabled={!dirty || !valid}
           onClick={save}
+          tip="Assign these labels and views to the seats (logged)"
         >
           Save labels
         </Button>
@@ -621,8 +645,24 @@ export function SeatsPanel({
                     )}
                   </td>
                   <td className="mono small">{s.participantCode ?? <span className="faint">—</span>}</td>
-                  <td>{s.k ?? <span className="faint">–</span>}</td>
-                  <td>{s.p ?? <span className="faint">–</span>}</td>
+                  <td>
+                    {s.k ? (
+                      <LabelTag label={s.k} tip={`Knowledge type of seat ${s.seat}`} />
+                    ) : (
+                      <span className="faint">–</span>
+                    )}
+                  </td>
+                  <td>
+                    {s.p ? (
+                      <LabelTag
+                        label={s.p}
+                        filled
+                        tip={`Power type of seat ${s.seat}: acts on the K${s.p[1]} sub-squares`}
+                      />
+                    ) : (
+                      <span className="faint">–</span>
+                    )}
+                  </td>
                   <td className="small">
                     {s.view ? (scenario?.views[s.view]?.name ?? s.view) : <span className="faint">–</span>}
                   </td>
@@ -646,12 +686,12 @@ export function SeatsPanel({
                   <td className="small">
                     {st.round > 0 && s.bound ? (
                       <span className="col" style={{ gap: 0 }}>
-                        <span>
-                          <span className="t-propose">P</span>{" "}
+                        <span className="row nowrap" style={{ gap: 4 }} data-tip="Proposals used this round">
+                          <ActSwatch kind="propose" k={s.p ? `K${s.p[1]}` : null} />
                           <AsciiProgress used={quotaUsed(st, s.seat, "propose")} limit={pLim} />
                         </span>
-                        <span>
-                          <span className="t-decide">D</span>{" "}
+                        <span className="row nowrap" style={{ gap: 4 }} data-tip="Decisions used this round">
+                          <ActSwatch kind="decide" k={s.p ? `K${s.p[1]}` : null} />
                           <AsciiProgress used={quotaUsed(st, s.seat, "decide")} limit={dLim} />
                         </span>
                       </span>
@@ -695,6 +735,7 @@ export function SeatsPanel({
                         variant="danger"
                         icon="withdraw"
                         onClick={() => void withdraw(s.seat)}
+                        tip="Stop this seat taking part; rounds complete without it from now on"
                       >
                         Withdraw
                       </Button>

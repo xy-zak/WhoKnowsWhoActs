@@ -1,0 +1,14 @@
+{
+  "id": "demo-small",
+  "title": "Small demo grid (placeholder)",
+  "version": "1",
+  "description": "Fictional 5 × 5 grid (100 sub-squares) with the same four placeholder knowledge types as the demo. Starting scores are a fixed-seed pattern from scripts/demo-scores.mjs. Replace with your own scenario.",
+  "board": { "cols": 5, "rows": 5 },
+  "views": {
+    "Ka": { "name": "Hydrology", "description": "Water-related information" },
+    "Kb": { "name": "Census", "description": "Population and housing" },
+    "Kc": { "name": "Ecology", "description": "Nature and protected species" },
+    "Kd": { "name": "Economy", "description": "Land prices and jobs" }
+  },
+  "scores": "scores.json"
+}

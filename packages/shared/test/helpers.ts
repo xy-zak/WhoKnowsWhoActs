@@ -1,13 +1,22 @@
 import {
   applyEvent,
+  cellId,
+  cellsOf,
   type EventType,
   type GameState,
   initialState,
+  type KLabel,
   type PayloadOf,
+  quotaUsed,
+  regionsOf,
   type Scenario,
+  type Scores,
   type SessionConfigInput,
   SessionConfigSchema,
   type StoredEvent,
+  scoreChangesForIntent,
+  standardRules,
+  validateIntent,
 } from "../src";
 
 /** Builds a sequence of stored events for tests, with increasing seq and timestamps. */
@@ -43,25 +52,41 @@ export class EventLog {
   }
 }
 
+/** 2 × 2 squares (A1 B1 / A2 B2) = 16 sub-squares. */
+export const TEST_BOARD = { cols: 2, rows: 2 };
+
+/** Starting scores: 5 everywhere, except square A1 (Ka 5, Kb 9, Kc 0, Kd 1) for range tests. */
+export const TEST_SCORES: Scores = {
+  ...Object.fromEntries(cellsOf(TEST_BOARD).map((id) => [id, 5])),
+  "A1-Ka": 5,
+  "A1-Kb": 9,
+  "A1-Kc": 0,
+  "A1-Kd": 1,
+};
+
 export const testScenario: Scenario = {
   id: "test",
   title: "Test",
   version: "1",
   description: "",
-  viewBox: "0 0 100 100",
-  regions: [
-    { id: "A", name: "Alpha", path: "M0 0 L50 0 L50 50 L0 50 Z", anchor: [25, 25] },
-    { id: "B", name: "Beta", path: "M50 0 L100 0 L100 50 L50 50 Z", anchor: [75, 25] },
-    { id: "C", name: "Gamma", path: "M0 50 L100 50 L100 100 L0 100 Z", anchor: [50, 75] },
-  ],
-  attributes: [{ key: "value", label: "Value", unit: "" }],
+  board: TEST_BOARD,
   views: {
-    Ka: { name: "View A", description: "", regions: { A: { attributes: { value: "ka-secret-A" } } } },
-    Kb: { name: "View B", description: "", regions: { A: { attributes: { value: "kb-secret-A" } } } },
-    Kc: { name: "View C", description: "", regions: { A: { attributes: { value: "kc-secret-A" } } } },
-    Kd: { name: "View D", description: "", regions: { A: { attributes: { value: "kd-secret-A" } } } },
+    Ka: { name: "View A", description: "" },
+    Kb: { name: "View B", description: "" },
+    Kc: { name: "View C", description: "" },
+    Kd: { name: "View D", description: "" },
   },
+  regions: regionsOf(TEST_BOARD),
+  initialScores: TEST_SCORES,
   hash: "test",
+};
+
+/** The board/scores/rules part of a SessionCreated payload for the test scenario. */
+export const TEST_MAP = {
+  regionIds: testScenario.regions.map((r) => r.id),
+  board: TEST_BOARD,
+  initialScores: TEST_SCORES,
+  rules: { id: standardRules.id, version: standardRules.version },
 };
 
 /** A session with 4 bound, labelled, onboarded seats, ready for round 1. */
@@ -73,7 +98,7 @@ export function readySession(configInput: SessionConfigInput = {}): EventLog {
     {
       config,
       scenario: { id: "test", title: "Test", version: "1", hash: "test" },
-      regionIds: testScenario.regions.map((r) => r.id),
+      ...TEST_MAP,
       viewIds: ["Ka", "Kb", "Kc", "Kd"],
       harness: { version: "0", gitCommit: "test" },
       notes: "",
@@ -121,4 +146,33 @@ export function readySession(configInput: SessionConfigInput = {}): EventLog {
     log.push("BriefingAcknowledged", { textSha256: "y", durationMs: 1 }, { seat, code, actor: "player" });
   }
   return log;
+}
+
+/** The sub-square of `square` that `seat` acts on (standard rules: its power type's letter). */
+export function targetOf(log: EventLog, seat: number, square: string): string {
+  const p = log.state.seats[seat]!.p!;
+  return cellId(square, `K${p[1]}` as KLabel);
+}
+
+/** Validate and record an action on a square, the way the server does (score changes included). */
+export function act(log: EventLog, seat: number, kind: "propose" | "decide", square: string) {
+  const st = log.state;
+  const regionId = square.includes("-") ? square : targetOf(log, seat, square);
+  const v = validateIntent(st, seat, { kind, regionId });
+  if (!v.ok) return v;
+  const type = kind === "propose" ? "ProposalMade" : "DecisionMade";
+  log.push(
+    type,
+    {
+      regionId,
+      quotaUsed: quotaUsed(st, seat, kind) + 1,
+      quotaLimit: st.roundSpec!.quota[kind],
+      priorProposals: [],
+      priorDecisions: [],
+      msSinceRoundStart: 0,
+      scoreChanges: scoreChangesForIntent(st, seat, { kind, regionId }),
+    },
+    { seat, code: `WK-TEST-000${seat}-X`, actor: "player" },
+  );
+  return v;
 }

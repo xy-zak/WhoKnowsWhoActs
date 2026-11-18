@@ -50,8 +50,8 @@ export const ICON_TABLE = {
   idle: { iconoir: "Hourglass", meaning: "Idle / waiting" },
   hidden: { iconoir: "EyeClosed", meaning: "Tab hidden / not visible" },
   // map actions
-  propose: { iconoir: "MapPin", meaning: "Propose a region" },
-  decide: { iconoir: "DoubleCheck", meaning: "Decide a region" },
+  propose: { iconoir: "MapPin", meaning: "Propose (mark a sub-square, no score change)" },
+  decide: { iconoir: "DoubleCheck", meaning: "Decide (fill a sub-square, change scores)" },
   revoke: { iconoir: "Undo", meaning: "Revoke (undo) an action" },
   zoomIn: { iconoir: "Plus", meaning: "Zoom in" },
   zoomOut: { iconoir: "Minus", meaning: "Zoom out" },

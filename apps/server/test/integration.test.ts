@@ -4,13 +4,6 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { IntentAck } from "../src/session/SessionManager";
 import { cleanup, setupSession, startTestServer, type TestServer } from "./harness";
 
-const VIEW_KEYS: Record<string, string[]> = {
-  Ka: ["floodRisk", "groundwater"],
-  Kb: ["population", "housingNeed"],
-  Kc: ["biodiversity", "protectedSpecies"],
-  Kd: ["landPrice", "jobs"],
-};
-
 describe("full game with 4 bot players (default rules: 3 rounds × 5 propose + 5 decide)", () => {
   let srv: TestServer;
   let result: Awaited<ReturnType<typeof setupSession>>;
@@ -61,19 +54,15 @@ describe("full game with 4 bot players (default rules: 3 rounds × 5 propose + 5
     }
   });
 
-  it("each player only ever received its own view's data", () => {
+  it("each player only ever received its own knowledge type's scores", () => {
     const state = srv.ctx.hub.session!.state;
     for (const bot of result.bots) {
       const view = state.seats[bot.seat!]!.view!;
-      const own = VIEW_KEYS[view]!;
-      const others = Object.entries(VIEW_KEYS)
-        .filter(([k]) => k !== view)
-        .flatMap(([, v]) => v);
       expect(bot.states.length).toBeGreaterThan(10);
       for (const s of bot.states) {
-        const json = JSON.stringify(s.content);
-        if (Object.keys(s.content).length > 0) for (const k of own) expect(json).toContain(k);
-        for (const k of others) expect(json).not.toContain(`"${k}"`);
+        const ids = Object.keys(s.scores);
+        if (s.phase === "round_active") expect(ids).toHaveLength(100); // one per square of the 10 × 10 demo
+        for (const id of ids) expect(id.endsWith(`-${view}`)).toBe(true);
       }
       // participant code only revealed once the game is over
       for (const s of bot.states) {
@@ -98,7 +87,7 @@ describe("full game with 4 bot players (default rules: 3 rounds × 5 propose + 5
     const ack = await bot.emit<IntentAck>("intent", {
       clientSeq: 10_000,
       kind: "propose",
-      regionId: "R01",
+      regionId: "A1-Ka",
       clientTs: Date.now(),
     });
     expect(ack).toMatchObject({ ok: false, reason: "round_not_active" });
@@ -137,7 +126,8 @@ describe("robustness", () => {
     await fac.cmd("round:start");
     const b = bots[1]!;
     await b.waitFor((v) => v.phase === "round_active");
-    const msg = { clientSeq: 1, kind: "propose", regionId: "R03", clientTs: Date.now() };
+    const target = b.states.at(-1)!.me.actsOn.propose!;
+    const msg = { clientSeq: 1, kind: "propose", regionId: `C1-${target}`, clientTs: Date.now() };
     const a1 = await b.emit<IntentAck>("intent", msg);
     const a2 = await b.emit<IntentAck>("intent", msg);
     expect(a1).toMatchObject({ ok: true });

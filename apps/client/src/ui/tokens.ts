@@ -66,6 +66,33 @@ function accent(theme: CatTheme, name: CatName): string {
   return theme === "latte" ? shade(hex, LATTE_DARKEN[name] ?? 0) : hex;
 }
 
+/**
+ * KNOWLEDGE-TYPE COLOURS (Ka–Kd; power types Pa–Pd share the colour of the
+ * same letter). A categorical palette, not Catppuccin's own pastels (they are
+ * too light and too grey to tell four categories apart). Validated per theme
+ * on the panel surface with the dataviz palette checks: all four pairs (they
+ * all touch inside a square) stay apart under protanopia and deuteranopia
+ * (ΔE ≥ 7 OKLab ×100; position and labels are the secondary encoding) and
+ * under normal vision (ΔE ≥ 15), and every colour reaches ≥ 3:1 on the panel.
+ * `--k-x-on` is the score text on a filled (decided) sub-square: whichever
+ * ink reads better on that fill (≥ 4.5:1, checked in tokens.test.ts).
+ */
+export const KNOWLEDGE_COLOURS: Record<
+  "a" | "b" | "c" | "d",
+  { hue: string; latte: string; mocha: string; contrast: string }
+> = {
+  a: { hue: "blue", latte: "#1d61e9", mocha: "#5b86f0", contrast: "#4d8dff" },
+  b: { hue: "amber", latte: "#be7919", mocha: "#c2871f", contrast: "#ffb000" },
+  c: { hue: "red", latte: "#c43b47", mocha: "#e05a6c", contrast: "#ff5c7a" },
+  d: { hue: "teal", latte: "#008f8a", mocha: "#13a3a6", contrast: "#00d6c8" },
+};
+export const KNOWLEDGE_LETTERS = ["a", "b", "c", "d"] as const;
+
+/** The darker or lighter ink, whichever contrasts more with `fill`. */
+function inkOn(fill: string, dark: string, light: string): string {
+  return contrast(dark, fill) >= contrast(light, fill) ? dark : light;
+}
+
 export interface TokenDoc {
   token: string;
   role: string;
@@ -174,30 +201,6 @@ const DEFS: Array<{
     source: (t) => (t === "latte" ? "base" : "crust"),
   },
   {
-    token: "propose",
-    role: "MAP ONLY: propose highlight (hatch + dashed outline)",
-    value: (t) => cat(t, "yellow"),
-    source: () => "yellow",
-  },
-  {
-    token: "propose-text",
-    role: "Text/icons that refer to proposing (tool button, legend)",
-    value: (t) => accent(t, "yellow"),
-    source: (t) => (t === "latte" ? "yellow −35%" : "yellow"),
-  },
-  {
-    token: "decide",
-    role: "MAP ONLY: decide highlight (fill + solid outline)",
-    value: (t) => cat(t, "red"),
-    source: () => "red",
-  },
-  {
-    token: "decide-text",
-    role: "Text/icons that refer to deciding (tool button, legend)",
-    value: (t) => accent(t, "red"),
-    source: (t) => (t === "latte" ? "red −5%" : "red"),
-  },
-  {
     token: "seat-1",
     role: "Seat 1 identity colour",
     value: (t) => accent(t, "peach"),
@@ -222,24 +225,35 @@ const DEFS: Array<{
     source: (t) => (t === "latte" ? "mauve −5%" : "mauve"),
   },
   {
-    token: "sea",
-    role: "Map background (water)",
-    value: (t) => mix(cat(t, "mantle"), cat(t, "sapphire"), t === "latte" ? 0.14 : 0.1),
-    source: (t) => `mantle + ${t === "latte" ? 14 : 10}% sapphire`,
-  },
-  {
-    token: "land",
-    role: "Map region without data",
-    value: (t) => cat(t, "surface0"),
-    source: () => "surface0",
-  },
-  {
     token: "map-stroke",
-    role: "Map region borders",
+    role: "Map: outline of each square of the grid",
     value: (t) => cat(t, t === "latte" ? "overlay1" : "overlay0"),
     source: (t) => (t === "latte" ? "overlay1" : "overlay0"),
   },
+  ...KNOWLEDGE_DEFS(),
 ];
+
+function KNOWLEDGE_DEFS(): typeof DEFS {
+  const dark = cat("mocha", "crust");
+  const light = cat("latte", "base");
+  return KNOWLEDGE_LETTERS.flatMap((l) => {
+    const c = KNOWLEDGE_COLOURS[l];
+    return [
+      {
+        token: `k-${l}`,
+        role: `Knowledge type K${l} (and power type P${l}): sub-square outline, hatch (proposed) and fill (decided) on the map, timeline marks, label swatches`,
+        value: (t: CatTheme) => c[t],
+        source: () => `${c.hue}, validated categorical`,
+      },
+      {
+        token: `k-${l}-on`,
+        role: `Score text on a decided (filled) K${l} sub-square`,
+        value: (t: CatTheme) => inkOn(c[t], dark, light),
+        source: (t: CatTheme) => (inkOn(c[t], dark, light) === dark ? "crust (mocha)" : "base (latte)"),
+      },
+    ];
+  });
+}
 
 /**
  * High-contrast theme: not a Catppuccin flavour. Pure black/white chrome and
@@ -264,17 +278,17 @@ const HIGH_CONTRAST: Record<string, string> = {
   review: "#d2b4ff",
   "review-bg": "#1a1028",
   "on-accent": "#000000",
-  propose: "#ffe600",
-  "propose-text": "#ffe600",
-  decide: "#ff4040",
-  "decide-text": "#ff7070",
   "seat-1": "#ffa64d",
   "seat-2": "#5cc8ff",
   "seat-3": "#4cf08a",
   "seat-4": "#e09cff",
-  sea: "#001f3d",
-  land: "#3a3a3a",
   "map-stroke": "#ffffff",
+  ...Object.fromEntries(
+    KNOWLEDGE_LETTERS.flatMap((l) => [
+      [`k-${l}`, KNOWLEDGE_COLOURS[l].contrast],
+      [`k-${l}-on`, inkOn(KNOWLEDGE_COLOURS[l].contrast, "#000000", "#ffffff")],
+    ]),
+  ),
 };
 
 export const THEMES: Record<ThemeName, Record<string, string>> = {
@@ -298,8 +312,6 @@ export const AAA_PAIRS: Array<[string, string]> = [
   ["warn", "panel"],
   ["danger", "panel"],
   ["review", "review-bg"],
-  ["propose-text", "panel"],
-  ["decide-text", "panel"],
 ];
 
 export const TOKEN_DOCS: TokenDoc[] = DEFS.map((d) => ({
@@ -360,8 +372,6 @@ export const CONTRAST_PAIRS: Array<[string, string, number]> = [
   ["text", "review-bg", 4.5],
   ["muted", "review-bg", 4.5],
   ["on-accent", "review", 4.5],
-  ["propose-text", "panel", 4.5],
-  ["decide-text", "panel", 4.5],
   ["on-accent", "primary", 4.5],
   ["on-accent", "live", 4.5],
   ["on-accent", "danger", 4.5],
@@ -371,4 +381,10 @@ export const CONTRAST_PAIRS: Array<[string, string, number]> = [
   ["seat-2", "panel", 3],
   ["seat-3", "panel", 3],
   ["seat-4", "panel", 3],
+  ...KNOWLEDGE_LETTERS.flatMap(
+    (l): Array<[string, string, number]> => [
+      [`k-${l}`, "panel", 3],
+      [`k-${l}-on`, `k-${l}`, 4.5],
+    ],
+  ),
 ];

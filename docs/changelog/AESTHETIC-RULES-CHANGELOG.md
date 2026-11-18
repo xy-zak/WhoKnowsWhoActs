@@ -2,6 +2,14 @@
 
 History of [AESTHETIC-RULES.md](../AESTHETIC-RULES.md). Newest first. How entries are written: [README.md](README.md).
 
+## Unreleased
+
+### Not yet committed · grid map, scores and game rules (documents the code in the same commit)
+
+- **Type:** Feature
+- **Change:** § 1 principle 6 and § 2.2 replace the yellow propose and red decide colours with one colour per knowledge type (`--k-a…d`, power types share the colour of their letter), with hatched = proposed and filled = decided everywhere. The generated token and contrast tables add these colours; tooltips now cover icon-only buttons through `title`, and the checklist gains a line on label swatches.
+- **Reason:** Colour now carries one meaning across the map, timeline and labels. The palette was checked for colour-vision deficiencies, and text stays in text ink so labels remain readable.
+
 ### 2026-11-17 · `a4ddecd` · Document simulated and fake players
 
 - **Type:** Feature

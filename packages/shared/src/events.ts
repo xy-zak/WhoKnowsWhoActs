@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { BoardSchema } from "./board";
 import { FakePaceSchema, RoundSpecSchema, SessionConfigSchema } from "./config";
 import {
   ActionKindSchema,
@@ -24,6 +25,20 @@ const Ms = (d: string) => z.number().min(0).describe(`${d} (milliseconds)`);
 
 const ConfigExample = SessionConfigSchema.parse({});
 
+/** One sub-square's score before and after an action, as computed by the game rules when it was accepted. */
+const ScoreChangesSchema = z
+  .array(
+    z.object({
+      regionId: z.string().describe("Sub-square whose score changed, e.g. 'C7-Ka'"),
+      from: z.number().describe("Score before"),
+      to: z.number().describe("Score after"),
+    }),
+  )
+  .optional()
+  .describe(
+    "Score changes caused by this event, computed by the session's game rules (docs/GAME-RULES.md); only sub-squares whose score changed. Absent in sessions recorded before the grid map",
+  );
+
 export const EVENT_DEFS = {
   SessionCreated: defineRecord({
     summary: "A new session was created with a scenario and configuration.",
@@ -40,11 +55,33 @@ export const EVENT_DEFS = {
           id: z.string().describe("Scenario id"),
           title: z.string().describe("Scenario title"),
           version: z.string().describe("Scenario version"),
-          hash: z.string().describe("SHA-256 of the loaded scenario (map + views)"),
+          hash: z.string().describe("SHA-256 of the loaded scenario (board, views and starting scores)"),
         })
         .describe("Scenario used in this session"),
-      regionIds: z.array(z.string()).describe("All region ids in the map outline"),
-      viewIds: z.array(z.string()).describe("All view ids available in the scenario"),
+      regionIds: z
+        .array(z.string())
+        .describe(
+          "Every region id of the map: one per sub-square, e.g. 'C7-Kb' (square C7, knowledge type Kb)",
+        ),
+      viewIds: z
+        .array(z.string())
+        .describe("All view ids available in the scenario (one per knowledge type)"),
+      board: BoardSchema.optional().describe(
+        "Size of the grid map in squares (absent in sessions recorded before the grid map)",
+      ),
+      initialScores: z
+        .record(z.string(), z.number())
+        .optional()
+        .describe("Starting score of every sub-square, by region id (from the scenario)"),
+      rules: z
+        .object({
+          id: z.string().describe("Id of the game rules (game/rules.ts)"),
+          version: z
+            .string()
+            .describe("Version of those rules' code (bumped whenever their behaviour changes)"),
+        })
+        .optional()
+        .describe("Game rules this session is played with (docs/GAME-RULES.md)"),
       harness: z
         .object({
           version: z.string().describe("Harness package version"),
@@ -55,9 +92,12 @@ export const EVENT_DEFS = {
     }),
     example: {
       config: ConfigExample,
-      scenario: { id: "demo", title: "Demo archipelago", version: "1", hash: "9f2c…" },
-      regionIds: ["R01", "R02"],
+      scenario: { id: "demo", title: "Demo grid", version: "2", hash: "9f2c…" },
+      regionIds: ["A1-Ka", "A1-Kb", "A1-Kc", "A1-Kd", "B1-Ka"],
       viewIds: ["Ka", "Kb", "Kc", "Kd"],
+      board: { cols: 10, rows: 10 },
+      initialScores: { "A1-Ka": 6, "A1-Kb": 3, "A1-Kc": 8, "A1-Kd": 5, "B1-Ka": 7 },
+      rules: { id: "standard", version: "1" },
       harness: { version: "0.1.0", gitCommit: "3e1a9c2" },
       notes: "Pilot session",
     },
@@ -321,45 +361,51 @@ export const EVENT_DEFS = {
   }),
 
   ProposalMade: defineRecord({
-    summary: "A player proposed a region (highlighted for all players).",
-    trigger: "Player confirms a 'propose' on a region and the server accepts it.",
+    summary:
+      "A player proposed a sub-square of the map (hatched in its knowledge-type colour for all players).",
+    trigger:
+      "Player picks a square with the propose tool and confirms; the server accepts it. The sub-square is the one the game rules give the player (standard rules: the one matching their power type).",
     actors: ["player"],
     changesState: true,
     visibleTo: "Everyone (actor seat visible to players if showActorToPlayers)",
     dataClass: "pseudonymous",
     frequency: "≤ quota.propose × seats × rounds (default 60)",
     payload: z.object({
-      regionId: z.string().describe("Target region id"),
+      regionId: z.string().describe("Target sub-square, e.g. 'C7-Kb'"),
       quotaUsed: z
         .number()
         .int()
         .min(1)
         .describe("Proposals this seat has made this round, including this one"),
       quotaLimit: z.number().int().nullable().describe("Proposal quota this round (null = unlimited)"),
-      priorProposals: SeatList.describe("Seats that had already proposed this region this round"),
-      priorDecisions: SeatList.describe("Seats that had already decided this region this round"),
+      priorProposals: SeatList.describe("Seats that had already proposed this sub-square this round"),
+      priorDecisions: SeatList.describe("Seats that had already decided this sub-square this round"),
       msSinceRoundStart: Ms("Active (un-paused) server time since the round started"),
+      scoreChanges: ScoreChangesSchema,
     }),
     example: {
-      regionId: "R07",
+      regionId: "C7-Kb",
       quotaUsed: 2,
       quotaLimit: 5,
       priorProposals: [3],
       priorDecisions: [],
       msSinceRoundStart: 51234,
+      scoreChanges: [],
     },
   }),
 
   DecisionMade: defineRecord({
-    summary: "A player decided on a region (highlighted in the decision colour for all players).",
-    trigger: "Player confirms a 'decide' on a region and the server accepts it.",
+    summary:
+      "A player decided on a sub-square of the map (filled in its knowledge-type colour for all players); the game rules change the scores.",
+    trigger:
+      "Player picks a square with the decide tool and confirms; the server accepts it. The sub-square is the one the game rules give the player (standard rules: the one matching their power type).",
     actors: ["player"],
     changesState: true,
     visibleTo: "Everyone (actor seat visible to players if showActorToPlayers)",
     dataClass: "pseudonymous",
     frequency: "≤ quota.decide × seats × rounds (default 60)",
     payload: z.object({
-      regionId: z.string().describe("Target region id"),
+      regionId: z.string().describe("Target sub-square, e.g. 'C7-Kb'"),
       quotaUsed: z
         .number()
         .int()
@@ -367,24 +413,31 @@ export const EVENT_DEFS = {
         .describe("Decisions this seat has made this round, including this one"),
       quotaLimit: z.number().int().nullable().describe("Decision quota this round (null = unlimited)"),
       priorProposals: SeatList.describe(
-        "Seats that had proposed this region this round before this decision",
+        "Seats that had proposed this sub-square this round before this decision",
       ),
-      priorDecisions: SeatList.describe("Seats that had already decided this region this round"),
+      priorDecisions: SeatList.describe("Seats that had already decided this sub-square this round"),
       msSinceRoundStart: Ms("Active (un-paused) server time since the round started"),
+      scoreChanges: ScoreChangesSchema,
     }),
     example: {
-      regionId: "R07",
+      regionId: "C7-Kb",
       quotaUsed: 1,
       quotaLimit: 5,
       priorProposals: [3, 2],
       priorDecisions: [],
       msSinceRoundStart: 73410,
+      scoreChanges: [
+        { regionId: "C7-Kb", from: 6, to: 10 },
+        { regionId: "C7-Ka", from: 5, to: 4 },
+        { regionId: "C7-Kc", from: 2, to: 1 },
+      ],
     },
   }),
 
   IntentRejected: defineRecord({
     summary: "A player's propose/decide attempt was refused by the rules.",
-    trigger: "Server validation fails (not active, paused, quota used up, unknown region, …).",
+    trigger:
+      "Server validation fails (not active, paused, quota used up, unknown sub-square, a sub-square the game rules do not give this player, …).",
     actors: ["player"],
     changesState: false,
     visibleTo: "Facilitator; the acting player gets an error message",
@@ -392,7 +445,7 @@ export const EVENT_DEFS = {
     frequency: "rare",
     payload: z.object({
       kind: ActionKindSchema,
-      regionId: z.string().describe("Region the player tried to act on"),
+      regionId: z.string().describe("Sub-square the player tried to act on"),
       reason: z
         .enum(["round_not_active", "paused", "seat_inactive", "unknown_region", "quota_exhausted", "rule"])
         .describe("Machine-readable rejection reason"),
@@ -400,7 +453,7 @@ export const EVENT_DEFS = {
     }),
     example: {
       kind: "decide",
-      regionId: "R02",
+      regionId: "B2-Ka",
       reason: "quota_exhausted",
       detail: "No decisions left this round",
     },
@@ -411,22 +464,29 @@ export const EVENT_DEFS = {
     trigger: "Facilitator clicks 'Revoke' on an action during the active round.",
     actors: ["facilitator"],
     changesState: true,
-    visibleTo: "Everyone (highlight disappears)",
+    visibleTo: "Everyone (the hatch/fill disappears and its score changes are undone)",
     dataClass: "pseudonymous",
     frequency: "rare",
     payload: z.object({
       targetSeq: z.number().int().describe("seq of the ProposalMade/DecisionMade being revoked"),
       targetType: z.enum(["ProposalMade", "DecisionMade"]).describe("Type of the revoked event"),
       targetSeat: SeatSchema.describe("Seat whose action was revoked"),
-      regionId: z.string().describe("Region of the revoked action"),
+      regionId: z.string().describe("Sub-square of the revoked action"),
       reason: z.string().max(200).describe("Facilitator's reason (free text, no personal data)"),
+      scoreChanges: ScoreChangesSchema.describe(
+        "Score changes caused by the revocation: the scores replayed without the revoked action, compared with before. Absent in sessions recorded before the grid map",
+      ),
     }),
     example: {
       targetSeq: 57,
       targetType: "DecisionMade",
       targetSeat: 4,
-      regionId: "R11",
+      regionId: "F3-Kd",
       reason: "misclick",
+      scoreChanges: [
+        { regionId: "F3-Kd", from: 9, to: 5 },
+        { regionId: "F3-Ka", from: 2, to: 3 },
+      ],
     },
   }),
 

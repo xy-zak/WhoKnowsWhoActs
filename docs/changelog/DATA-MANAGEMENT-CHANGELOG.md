@@ -2,6 +2,14 @@
 
 History of [DATA-MANAGEMENT.md](../DATA-MANAGEMENT.md). Newest first. How entries are written: [README.md](README.md).
 
+## Unreleased
+
+### Not yet committed · grid map, scores and game rules (documents the code in the same commit)
+
+- **Type:** Risk mitigation
+- **Change:** The data inventory row for proposals and decisions now names the target sub-square and the score changes, and the minimisation table speaks of sub-squares and squares instead of regions.
+- **Reason:** The inventory must list exactly what is stored; score changes are game data tied to a seat, so they share the pseudonymous classification of the actions.
+
 ### 2026-11-17 · `a4ddecd` · Document simulated and fake players
 
 - **Type:** Risk mitigation

@@ -31,10 +31,11 @@ The harness is the **infrastructure** for a 4-player, turn-based, map-interactio
 
 | The harness provides | Left to the game built on top |
 | --- | --- |
-| Networking (hub-and-spoke, server-authoritative) | The actual scenario: map, region data, narrative |
-| Sessions, seats, participant codes, K/P labels | What K and P labels *mean* in the rules |
-| Per-player map views on a shared outline | Scoring, win conditions, extra action types |
-| `propose` / `decide` interactions with quotas | Game-specific validators (e.g. "decide only proposed areas") |
+| Networking (hub-and-spoke, server-authoritative) | The actual scenario: board size, starting scores, narrative |
+| Sessions, seats, participant codes, K/P labels | Win conditions, extra action types |
+| A grid map (squares of four knowledge-type sub-squares), each player seeing only their own type's scores | |
+| `propose` / `decide` interactions with quotas | |
+| Pluggable **game rules**: what a player acts on, what actions do to the scores, the map score ([GAME-RULES.md](GAME-RULES.md)) | The final rule set and its numbers |
 | Configurable rounds (default: 5 + 5 per player, 3 rounds) | Final round structure |
 | Facilitator dashboard, composite view, replay | Game-specific dashboard widgets |
 | Complete event + telemetry logging, exports, codebook | Analysis scripts |
@@ -58,10 +59,13 @@ Design principles:
 | **Seat** | One of the 4 player positions (1–4). A client is *bound* to a seat by the facilitator. |
 | **Participant code** | Random pseudonymous id (`WK-XXXX-XXXX-C`) generated when a seat is bound. Used for takedown requests. |
 | **Labels** | Each seat gets one knowledge type (`Ka`–`Kd`) and one power type (`Pa`–`Pd`). |
-| **Scenario** | Map outline (SVG regions) plus a set of *views*. |
-| **View** | One dataset on the outline (fill colour, label, attributes per region). By default a seat sees the view matching its K label. |
-| **Region** | One polygon of the outline. Every action targets exactly one region. |
-| **Intent** | A request from a client ("propose R07"). It may be accepted or rejected. |
+| **Scenario** | A board size (squares), one *view* per knowledge type, and the starting score of every sub-square. |
+| **Square** | One tile of the grid map, e.g. `C7` (column C, row 7). It holds four sub-squares, one per knowledge type. |
+| **Sub-square (region)** | One knowledge type's part of a square, e.g. `C7-Kb`. It has a score (0–10) and is what every action targets. Events, telemetry and exports call its id the *region id*. |
+| **View** | One knowledge type (name and description): the scores of its sub-squares are what a seat with that view knows. By default a seat's view is its K label. |
+| **Game rules** | The rule set of a session: which sub-square an action lands on, what it does to the scores, and the map score ([GAME-RULES.md](GAME-RULES.md)). |
+| **Map score** | One score for the whole map; in the standard rules, the average of every sub-square's score. |
+| **Intent** | A request from a client ("decide C7-Kb"). It may be accepted or rejected. |
 | **Event** | An immutable record in the session log (`ProposalMade`, `RoundStarted`, …). |
 | **Telemetry** | Fine-grained UI behaviour (hover, inspect, focus …). Stored separately and never changes game state. |
 | **Reducer** | Pure function `applyEvent(state, event)` that derives game state from events. |
@@ -159,7 +163,9 @@ flowchart TB
 | Path | Contents |
 | --- | --- |
 | `packages/shared/src/config.ts` | Session config (rounds, quotas, visibility flags), study/consent/demographics schemas |
-| `packages/shared/src/scenario.ts` | Scenario, region, view schemas; path → anchor geometry |
+| `packages/shared/src/board.ts` | Grid geometry: squares, sub-squares, ids (`C7-Kb`), starting-score matrices |
+| `packages/shared/src/game/` | `rules.ts` (rule sets: targeting, score changes, map score; registry `GAME_RULES`), `scoring.ts` (glue between rules and session state). See [GAME-RULES.md](GAME-RULES.md) |
+| `packages/shared/src/scenario.ts` | Scenario, region (sub-square) and view schemas |
 | `packages/shared/src/events.ts` | All game event types with payload schemas and documentation metadata |
 | `packages/shared/src/telemetry.ts` | All telemetry types |
 | `packages/shared/src/protocol.ts` | Socket message schemas and catalogue |
@@ -172,9 +178,10 @@ flowchart TB
 | `apps/client/src/ui/` | Design system: `tokens.ts` (Catppuccin Latte/Mocha → semantic colour tokens, contrast-tested), `theme.css` (TUI base styles), `crt.css` (subtle CRT layer), components (`Panel`, `Button`, `Popup`, `useConfirm`, `Stepper`, `StatusTag`, `AsciiProgress`, …), `Icon.tsx` + `icons.ts` (semantic Iconoir icons), `prefs.ts` + `DisplaySettings.tsx` (per-browser display settings: colours, font, text size, animations). Rules: [AESTHETIC-RULES.md](AESTHETIC-RULES.md) |
 | `apps/client/src/facilitator/` | Manager shell (`App.tsx`: top bar, LIVE indicator, tabs, status bar, shortcuts), `setup/` (10-step wizard), `live/` (lifecycle, NEXT, tools, wrap-up), `seats.tsx`, `Composite.tsx`, `EventLog.tsx`, `Timeline.tsx`, `Replay.tsx`, `Database.tsx` |
 | `apps/client/src/player/` | Player screens (waiting, onboarding with stepper, game, end) and the DISPLAY panel; display settings are per browser (`ui/prefs.ts`), never from or to the server |
-| `apps/client/src/` (other) | `map/` (SVG renderer, themed via CSS variables), `net/` (socket, clock sync, telemetry) |
+| `apps/client/src/` (other) | `map/` (grid map in SVG: squares, sub-squares, hatches, scores, legend, map score; themed via CSS variables), `net/` (socket, clock sync, telemetry) |
 | `config/` | `study.json`, `consent.json` + `consent.md`, `demographics.json`, `briefing.md`, `session.default.json` |
-| `scenarios/<id>/` | `scenario.json`, `map.svg`, `views.json` |
+| `scenarios/<id>/` | `scenario.json` (board, views), `scores.json` (starting scores) |
+| `scripts/demo-scores.mjs` | Regenerates the fixed-seed starting scores of the demo scenarios |
 
 ## 5. Event sourcing: from click to data
 
@@ -189,14 +196,15 @@ sequenceDiagram
   participant R as Rules (shared)
   participant DB as Event store (SQLCipher)
   participant O as Other clients and facilitator
-  P->>N: intent (clientSeq 7, propose, R07, clientTs)
+  P->>N: intent (clientSeq 7, decide, C7-Kb, clientTs)
   N->>N: validate payload with zod
   N->>SM: handleIntent(seat 2, intent)
   SM->>SM: clientSeq 7 seen before? then repeat the earlier ack
   SM->>R: validateIntent(state, seat, intent)
   alt accepted
     R-->>SM: ok
-    SM->>DB: append ProposalMade (seq 58)
+    SM->>R: game rules: score changes of this decision
+    SM->>DB: append DecisionMade (seq 58, scoreChanges)
     SM->>R: applyEvent(state, event)
     SM->>R: round rule isComplete(state)?
     opt round complete
@@ -301,17 +309,17 @@ The full `GameState` exists only on the server. Each recipient gets a **projecti
 ```mermaid
 flowchart LR
   LOG[("Event log")] -->|reduce| GS["GameState<br/>all seats, codes,<br/>all actions"]
-  SC["Scenario<br/>outline + views<br/>Ka, Kb, Kc, Kd"]
+  SC["Scenario + session<br/>grid, scores of<br/>Ka, Kb, Kc, Kd"]
   GS --> V1["playerView seat 1"]
   GS --> V2["playerView seat 2"]
   GS --> V3["playerView seat 3"]
   GS --> V4["playerView seat 4"]
   GS --> FV["facilitatorView"]
-  SC -->|outline + view of seat 1 only| V1
-  SC -->|outline + view of seat 2 only| V2
-  SC -->|outline + view of seat 3 only| V3
-  SC -->|outline + view of seat 4 only| V4
-  SC -->|all views| FV
+  SC -->|grid + scores of seat 1's view only| V1
+  SC -->|grid + scores of seat 2's view only| V2
+  SC -->|grid + scores of seat 3's view only| V3
+  SC -->|grid + scores of seat 4's view only| V4
+  SC -->|all scores| FV
   V1 --> B1["Seat 1 browser"]
   V2 --> B2["Seat 2 browser"]
   V3 --> B3["Seat 3 browser"]
@@ -321,9 +329,11 @@ flowchart LR
 
 | Information | Own player | Other players | Facilitator |
 | --- | --- | --- | --- |
-| Map outline (regions) | ✓ | ✓ | ✓ |
-| Region content of the player's own view | ✓ | ✗ never sent | ✓ (all views) |
-| Proposals and decisions (highlights) | ✓ | ✓ (actor seat only if `showActorToPlayers`) | ✓ with seat and time |
+| Grid (board size, knowledge-type names) | ✓ | ✓ | ✓ |
+| Scores of the player's own knowledge type (view) | ✓ | ✗ never sent | ✓ (all types) |
+| Map score | ✓ | ✓ | ✓ |
+| Which knowledge type the player acts on (`me.actsOn`) | ✓ | ✗ | ✓ |
+| Proposals and decisions (hatched / filled marks) | ✓ | ✓ (actor seat only if `showActorToPlayers`) | ✓ with seat and time |
 | Own K/P labels | if `showOwnLabels` | if `showOtherLabelsToPlayers` | ✓ |
 | Quota progress | ✓ | if `showOthersProgress` | ✓ |
 | Connection / ready status of seats | ✓ | ✓ | ✓ (+ focus, idle, latency, hover) |
@@ -331,7 +341,7 @@ flowchart LR
 | Demographic answers | ✗ (only sends them) | ✗ | ✗ live (only "submitted ✓"); in exports only |
 | Consent answers | ✗ | ✗ | consent status only |
 
-`playerView` is the **only** code path that builds a message for a player. The automated tests check that no player's messages ever contain another view's data.
+`playerView` is the **only** code path that builds a message for a player. The automated tests check that no player's messages ever contain another view's scores.
 
 ## 9. Rounds and the rules engine
 
@@ -350,11 +360,13 @@ flowchart LR
 | 1 | `roundIsActive` | `round_not_active` |
 | 2 | `notPaused` | `paused` |
 | 3 | `seatIsActive` (bound, not withdrawn) | `seat_inactive` |
-| 4 | `regionExists` | `unknown_region` |
+| 4 | `regionExists` (a sub-square of the board) | `unknown_region` |
 | 5 | `roundRuleAllows` (quota) | `quota_exhausted` |
-| + | game-specific validators you add | `rule` |
+| 6 | `gameRulesAllow`: the sub-square the game rules give the seat (standard rules: the one of its power type), then the rule set's own validators | `rule` |
 
-`decide` is deliberately **independent** of `propose`: a player may decide any region. The `DecisionMade` event records which seats had proposed or decided that region beforehand, so the relationship can still be analysed.
+`decide` is deliberately **independent** of `propose`: a player may decide any square. The `DecisionMade` event records which seats had proposed or decided that sub-square beforehand, so the relationship can still be analysed.
+
+**Scores.** When the server accepts a proposal or decision, it asks the session's game rules what the action does to the scores and records the result in the event (`scoreChanges`). The reducer only replays recorded changes, so a past session's scores never change when the rules do. Revoking an action records the changes that undo it. Details and the rule set itself: [GAME-RULES.md](GAME-RULES.md).
 
 ## 10. Timing model
 
@@ -379,9 +391,15 @@ Clients estimate their clock offset with an NTP-style exchange (5 samples on con
 
 The harness is meant to be extended once the game design is settled. For each extension point: **where** to change it, and what to keep in sync.
 
-### Add a game rule (validator)
+### Change the game rules
 
-1. Write a `Validator` in `packages/shared/src/rules/validators.ts`, e.g. "decide only on regions proposed by someone else". Return `{ ok: false, reason: "rule", detail }` to reject.
+Everything that is "the game" lives in `packages/shared/src/game/rules.ts`: which sub-square an action lands on (`targetOf`), what it does to the scores (`deltas`), the map score, and optional extra validators. Change the numbers in `STANDARD`, or add a rule set to `GAME_RULES`; bump the version, update the tests in `packages/shared/test/gameRules.test.ts` and [GAME-RULES.md](GAME-RULES.md) (step by step in its § 10). Nothing else in the harness needs to change.
+
+### Add a harness validator
+
+Restrictions that are part of the game (e.g. "decide only on sub-squares proposed by someone else") belong in the rule set's `validators` (above). A validator that every game needs goes in `packages/shared/src/rules/validators.ts`:
+
+1. Write a `Validator`. Return `{ ok: false, reason: "rule", detail }` to reject.
 2. Add it to `DEFAULT_VALIDATORS` (order matters; the first rejection wins).
 3. Add a unit test in `packages/shared/test/rules.test.ts`.
 
@@ -428,13 +446,15 @@ Labels are available in the state (`state.seats[seat].k` / `.p`), so rules like 
 
 ```
 scenarios/<id>/
-  scenario.json   { id, title, version, description, map: "map.svg", attributes: [...], views: "views.json" }
-  map.svg         one <path id="R01" data-name="Northreach" d="..."/> per region, viewBox on <svg>
-  views.json      { "Ka": { name, description, regions: { "R01": { fill, label, icon, attributes, notes } } }, "Kb": … }
+  scenario.json   { id, title, version, description, board: { cols, rows },
+                    views: { "Ka": { name, description }, "Kb": …, "Kc": …, "Kd": … },
+                    scores: "scores.json" }
+  scores.json     { "Ka": [[3, 5, …], …], "Kb": …, "Kc": …, "Kd": … }   rows top first, columns A first
 ```
 
-- SVG constraints: one `<path>` per region with a unique `id`, optional `data-name`, and **no transforms** (flatten them in Inkscape: *Path → Object to Path*, then apply the transform). The `viewBox` goes on the root element.
-- With `viewAssignment: "byKnowledgeType"`, view ids must be `Ka`–`Kd`.
+- The board is at most 26 × 26 squares. `demo` is 10 × 10 (400 sub-squares) and `demo-small` 5 × 5 (100).
+- Every knowledge type `Ka`–`Kd` needs a view and a score matrix of exactly `rows` × `cols` numbers; the server lists a scenario with a size error in setup step 01 and does not let you choose it. Starting scores must lie in the rule set's range (0–10 for the standard rules).
+- Details: [GAME-RULES.md § 11](GAME-RULES.md#11-starting-scores-and-scenarios).
 - Bump `version` whenever you change the scenario. Its hash is recorded in every session anyway.
 
 ### Keeping documentation and data contracts in sync
@@ -452,6 +472,7 @@ scenarios/<id>/
 | Layer | Tool | What is checked |
 | --- | --- | --- |
 | Rules | Vitest (`packages/shared/test`) | Quotas, round completion, pause, revoke, overrides, custom validators, deterministic replay, projection asymmetry, participant-code checksums |
+| Game rules | Vitest (`packages/shared/test/gameRules.test.ts`) | Board ids and starting-score matrices, targeting by power type (also in a dissociated pairing), +4 / −1 with the 0–10 limits, map score, the reducer replaying recorded score changes, revoke replay, a second rule set plugging in |
 | Documentation | Vitest + `npm run docs:check` | Generated blocks are up to date; every event, telemetry type and message is documented |
 | Server integration | Vitest + `socket.io-client` bots | A full 3-round game with 4 bots on a temporary encrypted DB: event counts, rejections, reconnect + auto-pause, intent deduplication, revoke, resume from the log, **no cross-view data leakage**, no codes in payloads, IP-free logs |
 | GDPR | Vitest | Wrong passphrase fails; no plaintext codes in the DB file; export files match `EXPORT_FILES` column by column; anonymised exports contain no codes; erasure removes every row, adds the register entry and never reuses seq numbers; backups are encrypted; rekey works; data folders are git-ignored |
@@ -507,8 +528,8 @@ sequenceDiagram
   RUN->>RUN: round active, not paused, seat active?
   RUN->>P: act(playerView of seat 2, context)
   alt returns an action
-    P-->>RUN: propose R07
-    RUN->>SM: intent(seat 2, propose R07), like a player's click
+    P-->>RUN: propose C7-Kb
+    RUN->>SM: intent(seat 2, propose C7-Kb), like a player's click
     SM->>SM: same validators and quotas
     SM->>DB: append ProposalMade or IntentRejected
     SM-->>RUN: ack
@@ -562,9 +583,10 @@ export const cautiousPolicy = definePolicy({
   params: z.object({ threshold: z.number().min(0).max(1).default(0.3).describe("…") }),
   act(view, ctx) {
     if (!canAct(view)) return null;            // round running, not paused, not withdrawn
-    // view.content: this seat's own data · view.highlights: what is on the map
+    // view.scores: this seat's own knowledge type · view.highlights: what is on the map
+    // view.me.actsOn[kind]: the K of the sub-square an action lands on (Pa → Ka …)
     // ctx.params, ctx.random(), ctx.memory, kindsWithQuota(view), pick(list, ctx.random)
-    return null;                               // or { kind: "propose", regionId: "R07" }
+    return null;                               // or { kind: "propose", regionId: "C7-Kb" }
   },
 });
 ```
@@ -576,7 +598,7 @@ See [§ 12 Add an agent policy](#add-an-agent-policy-simulated-players) for wher
 
 | Policy | Version | Name | What it does |
 | --- | --- | --- | --- |
-| `random` | 1 | Random | Baseline. On each turn it proposes or decides on a uniformly random region while it has quota left. It ignores what its map view shows. |
+| `random` | 2 | Random | Baseline. On each turn it proposes or decides on a uniformly random square (the sub-square the game rules give it) while it has quota left. It ignores the scores it sees. |
 | `idle` | 1 | Idle | Never acts. Use it for a seat that only watches, or to test time limits and rounds the facilitator ends. |
 
 **`random` parameters** (`simulation.params.random`):

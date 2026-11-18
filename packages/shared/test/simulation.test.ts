@@ -17,7 +17,7 @@ import {
   seatPolicyId,
   seededRandom,
 } from "../src";
-import { EventLog, testScenario } from "./helpers";
+import { EventLog, TEST_MAP, testScenario } from "./helpers";
 
 /** A simulated session with agents in every seat, labelled, at round 1. */
 function simulatedSession(seatCount = 2): EventLog {
@@ -28,7 +28,7 @@ function simulatedSession(seatCount = 2): EventLog {
   log.push("SessionCreated", {
     config,
     scenario: { id: "test", title: "Test", version: "1", hash: "test" },
-    regionIds: testScenario.regions.map((r) => r.id),
+    ...TEST_MAP,
     viewIds: ["Ka", "Kb", "Kc", "Kd"],
     harness: { version: "0", gitCommit: "test" },
     notes: "",
@@ -36,7 +36,7 @@ function simulatedSession(seatCount = 2): EventLog {
   for (let seat = 1; seat <= seatCount; seat++) {
     log.push(
       "AgentBound",
-      { seat, policy: "random", policyVersion: "1", params: { proposeBias: 0.5 }, seed: `S:${seat}` },
+      { seat, policy: "random", policyVersion: "2", params: { proposeBias: 0.5 }, seed: `S:${seat}` },
       { seat },
     );
   }
@@ -120,7 +120,7 @@ describe("AgentBound in the reducer", () => {
     for (const s of Object.values(st.seats)) {
       expect(s).toMatchObject({
         bound: true,
-        agent: { policy: "random", policyVersion: "1", params: { proposeBias: 0.5 }, seed: `S:${s.seat}` },
+        agent: { policy: "random", policyVersion: "2", params: { proposeBias: 0.5 }, seed: `S:${s.seat}` },
         participantCode: null,
         terminal: null,
         connected: true,
@@ -136,7 +136,7 @@ describe("random policy", () => {
     expect(randomPolicy.act(view(log.state, 1), ctx())).toBeNull();
   });
 
-  it("acts on an existing region within its quota, and is reproducible from its seed", () => {
+  it("acts on the sub-square of its power type within its quota, and is reproducible from its seed", () => {
     const log = simulatedSession();
     log.push("RoundStarted", {
       round: 1,
@@ -148,6 +148,7 @@ describe("random policy", () => {
     expect(a).not.toBeNull();
     expect(["propose", "decide"]).toContain(a!.kind);
     expect(testScenario.regions.map((r) => r.id)).toContain(a!.regionId);
+    expect(a!.regionId).toMatch(/-Ka$/); // seat 1 holds Pa → acts on Ka sub-squares
     const run = (seed: string) => {
       const c = ctx(seed);
       return Array.from({ length: 20 }, () => randomPolicy.act(v, c));
@@ -168,7 +169,7 @@ describe("random policy", () => {
     log.push(
       "ProposalMade",
       {
-        regionId: "A",
+        regionId: "A1-Ka",
         quotaUsed: 1,
         quotaLimit: 1,
         priorProposals: [],
@@ -180,10 +181,10 @@ describe("random policy", () => {
     expect(randomPolicy.act(view(log.state, 1), ctx())).toBeNull();
   });
 
-  it("sees only its own view's data (the player projection)", () => {
+  it("sees only its own knowledge type's scores (the player projection)", () => {
     const log = simulatedSession();
     const v = view(log.state, 1);
-    expect(JSON.stringify(v.content)).toContain("ka-secret-A");
-    expect(JSON.stringify(v.content)).not.toContain("kb-secret-A");
+    expect(Object.keys(v.scores).length).toBe(4);
+    expect(Object.keys(v.scores).every((id) => id.endsWith("-Ka"))).toBe(true);
   });
 });

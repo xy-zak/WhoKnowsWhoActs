@@ -2,6 +2,14 @@
 
 History of [DATA-TYPES.md](../DATA-TYPES.md). Newest first. How entries are written: [README.md](README.md).
 
+## Unreleased
+
+### Not yet committed · grid map, scores and game rules (documents the code in the same commit)
+
+- **Type:** Feature
+- **Change:** The generated sections add `board`, `initialScores` and `rules` to `SessionCreated`, `scoreChanges` to `ProposalMade`, `DecisionMade` and `ActionRevoked`, the `rules` setting, and the `square_id`, `target_k`, `score_changes` and `map_score_after` columns of `actions.csv`; region ids are now sub-squares such as `C7-Kb`. The worked example "One action, all its traces" follows one proposal on the grid.
+- **Reason:** Analysts need to know what every new field means, and that the recorded score changes, not the current rules, are the record of what happened.
+
 ### 2026-11-17 · `a4ddecd` · Document simulated and fake players
 
 - **Type:** Feature

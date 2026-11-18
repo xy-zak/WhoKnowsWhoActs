@@ -1,10 +1,13 @@
+import { parseCellId } from "../board";
 import type { PayloadOf } from "../events";
+import { actorOf, rulesFor } from "../game/scoring";
 import type { ActionKind } from "../labels";
 import type { GameState } from "../state";
 import { ruleFor } from "./roundRules";
 
 export interface Intent {
   kind: ActionKind;
+  /** Target sub-square, e.g. "C7-Kb". */
   regionId: string;
 }
 
@@ -15,12 +18,11 @@ export type ValidationResult = { ok: true } | { ok: false; reason: RejectionReas
  * A validator inspects the state and an intent and either lets it through or
  * rejects it with a reason. Validators run in order; the first rejection wins.
  *
- * Game-design hooks live here. Examples you might add later:
- *  - "decide must target a region someone else proposed"
- *  - "power type Pa may decide twice as often"
- *  - "a region can only be decided once per round"
- * Write a function, add it to DEFAULT_VALIDATORS (or pass a custom list to
- * validateIntent), and add a unit test in packages/shared/test.
+ * Harness checks live here. Checks that are part of the GAME (which
+ * sub-square a player may act on, "a sub-square can only be decided once per
+ * round", …) belong to the game rules instead (game/rules.ts:
+ * `targetOf` and `validators`); `gameRulesAllow` below runs them. That way a
+ * rule change never touches this file. Add a unit test in packages/shared/test.
  */
 export type Validator = (state: GameState, seat: number, intent: Intent) => ValidationResult;
 
@@ -44,16 +46,42 @@ export const seatIsActive: Validator = (state, seat) => {
 export const regionExists: Validator = (state, _seat, intent) =>
   state.regionIds.includes(intent.regionId)
     ? OK
-    : { ok: false, reason: "unknown_region", detail: `Unknown region '${intent.regionId}'` };
+    : { ok: false, reason: "unknown_region", detail: `Unknown sub-square '${intent.regionId}'` };
 
 /** Delegates to the round rule (quota checks). */
 export const roundRuleAllows: Validator = (state, seat, intent) =>
   ruleFor(state).canAct(state, seat, intent.kind);
 
 /**
- * Default rule set. Note: 'decide' is deliberately independent of 'propose' —
- * a player may decide on any region. Whether it had been proposed (and by
- * whom) is recorded in the DecisionMade event for analysis.
+ * Delegates to the session's game rules: the target must be the sub-square
+ * the rules give this seat (standard rules: the one of its power type), and
+ * every validator of the rule set must pass. Sessions without a board (recorded
+ * before the grid map) skip this.
+ */
+export const gameRulesAllow: Validator = (state, seat, intent) => {
+  if (!state.board) return OK;
+  const rules = rulesFor(state);
+  const target = rules.targetOf(actorOf(state, seat), intent.kind);
+  const cell = parseCellId(intent.regionId);
+  if (target === null)
+    return { ok: false, reason: "rule", detail: "You cannot act on the map yet (no power type assigned)" };
+  if (!cell || cell.k !== target)
+    return {
+      ok: false,
+      reason: "rule",
+      detail: `You can only act on ${target} sub-squares (your power type)`,
+    };
+  for (const v of rules.validators ?? []) {
+    const r = v(state, seat, intent);
+    if (!r.ok) return r;
+  }
+  return OK;
+};
+
+/**
+ * Default validators. Note: 'decide' is deliberately independent of 'propose' —
+ * a player may decide on a sub-square nobody proposed. Whether it had been
+ * proposed (and by whom) is recorded in the DecisionMade event for analysis.
  */
 export const DEFAULT_VALIDATORS: Validator[] = [
   roundIsActive,
@@ -61,6 +89,7 @@ export const DEFAULT_VALIDATORS: Validator[] = [
   seatIsActive,
   regionExists,
   roundRuleAllows,
+  gameRulesAllow,
 ];
 
 export function validateIntent(

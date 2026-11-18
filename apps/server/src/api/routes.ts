@@ -25,7 +25,7 @@ export function registerApi(ctx: AppContext, guard: Guard) {
 
   app.get("/api/scenarios", opts, async () => scenarios.list());
 
-  /** Full scenario (outline + all views) for the setup preview. */
+  /** Full scenario (board, all views, starting scores) for the setup preview. */
   app.get<{ Params: { id: string } }>("/api/scenarios/:id", opts, async (req, reply) => {
     try {
       return scenarios.load(req.params.id);

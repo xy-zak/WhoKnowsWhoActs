@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { DEFAULT_GAME_RULES } from "./game/rules";
 import { MAX_SEATS } from "./labels";
 
 /* ─────────────────────────── Rounds ─────────────────────────── */
@@ -133,6 +134,13 @@ export const SessionConfigSchema = z
         "Who plays: 'real' = participants on player PCs (consent, codes, client binding; participant database); 'simulated' = in-process agents (no consent, codes or clients; simulation database)",
       ),
     simulation: SimulationConfigSchema.default(SIMULATION_DEFAULTS),
+    rules: z
+      .string()
+      .regex(/^[a-z][a-z0-9-]*$/)
+      .default(DEFAULT_GAME_RULES)
+      .describe(
+        "Game rules: what players act on and how actions change the scores (id from game/rules.ts; see GAME-RULES.md)",
+      ),
     seatCount: z
       .number()
       .int()
@@ -167,7 +175,9 @@ export const SessionConfigSchema = z
     clearHighlightsEachRound: z
       .boolean()
       .default(true)
-      .describe("If true, players only see the current round's proposals/decisions"),
+      .describe(
+        "If true, the map only shows the current round's proposals (hatched) and decisions (filled); scores always carry over",
+      ),
     pauseOnDisconnect: z
       .boolean()
       .default(true)

@@ -1,50 +1,14 @@
 {
   "id": "demo",
-  "title": "Demo island (placeholder)",
-  "version": "1",
-  "description": "Fictional 12-region island with four placeholder datasets (hydrology, census, ecology, economy). Replace with your own scenario.",
-  "map": "map.svg",
-  "attributes": [
-    {
-      "key": "floodRisk",
-      "label": "Flood risk",
-      "unit": "%"
-    },
-    {
-      "key": "groundwater",
-      "label": "Groundwater level (1–9)",
-      "unit": ""
-    },
-    {
-      "key": "population",
-      "label": "Population",
-      "unit": ""
-    },
-    {
-      "key": "housingNeed",
-      "label": "Housing need (1–9)",
-      "unit": ""
-    },
-    {
-      "key": "biodiversity",
-      "label": "Biodiversity (1–9)",
-      "unit": ""
-    },
-    {
-      "key": "protectedSpecies",
-      "label": "Protected species",
-      "unit": ""
-    },
-    {
-      "key": "landPrice",
-      "label": "Land price",
-      "unit": "€/m²"
-    },
-    {
-      "key": "jobs",
-      "label": "Jobs",
-      "unit": ""
-    }
-  ],
-  "views": "views.json"
+  "title": "Demo grid (placeholder)",
+  "version": "2",
+  "description": "Fictional 10 × 10 grid with four placeholder knowledge types (hydrology, census, ecology, economy). Starting scores are a fixed-seed pattern from scripts/demo-scores.mjs. Replace with your own scenario.",
+  "board": { "cols": 10, "rows": 10 },
+  "views": {
+    "Ka": { "name": "Hydrology", "description": "Water-related information" },
+    "Kb": { "name": "Census", "description": "Population and housing" },
+    "Kc": { "name": "Ecology", "description": "Nature and protected species" },
+    "Kd": { "name": "Economy", "description": "Land prices and jobs" }
+  },
+  "scores": "scores.json"
 }

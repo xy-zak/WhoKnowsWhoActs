@@ -47,6 +47,7 @@ export function Button({
   active,
   iconOnly,
   tip,
+  title,
   children,
   className = "",
   type = "button",
@@ -59,11 +60,13 @@ export function Button({
   kbd?: string;
   size?: "sm" | "lg";
   active?: boolean;
-  /** Icon-only buttons need a `title` (tooltip) and get it as aria-label. */
+  /** Icon-only buttons need a `title`: it becomes their aria-label (and their tooltip when there is no `tip`). */
   iconOnly?: boolean;
-  /** Hover/focus helper text (styled tooltip, also exposed to screen readers). */
+  /** Hover/focus helper text (styled tooltip, also exposed to screen readers). Defaults to `title`. */
   tip?: string;
 }) {
+  const tipText = tip ?? title;
+  const label = iconOnly ? title : undefined;
   const cls = [
     "btn",
     variant !== "secondary" ? `btn-${variant}` : "",
@@ -79,9 +82,9 @@ export function Button({
       ref={ref}
       type={type}
       className={cls}
-      aria-label={iconOnly ? rest.title : undefined}
-      data-tip={tip}
-      aria-description={tip}
+      aria-label={label}
+      data-tip={tipText}
+      aria-description={tipText !== label ? tipText : undefined}
       {...rest}
     >
       {icon && <Icon name={icon} size={size === "lg" ? 20 : 16} />}
@@ -105,19 +108,24 @@ export function StatusTag({
   children,
   solid = false,
   title,
+  tip,
   className = "",
 }: {
   tone?: Tone;
   icon?: IconName;
   children: ReactNode;
   solid?: boolean;
+  /** Hover/focus helper text (styled tooltip). `title` is kept as an alias. */
   title?: string;
+  tip?: string;
   className?: string;
 }) {
+  const help = tip ?? title;
   return (
     <span
       className={`tag ${tone}${solid && tone === "live" ? " solid-live" : ""} ${className}`}
-      title={title}
+      data-tip={help}
+      aria-description={help}
     >
       {icon && <Icon name={icon} />}
       {children}
@@ -159,6 +167,47 @@ export function AsciiProgress({
 
 export function SeatDot({ seat }: { seat: number }) {
   return <span className="seat-dot" style={{ background: `var(--seat-${seat})` }} />;
+}
+
+/* ─────────────────────────── Knowledge / power colours ─────────────────────────── */
+
+/**
+ * CSS colour of a knowledge type (Ka–Kd) or power type (Pa–Pd): both use the
+ * colour of their letter (--k-a … --k-d). Unknown labels get the text colour.
+ */
+export function labelColour(label: string | null | undefined): string {
+  const letter = label?.[1];
+  return letter && "abcd".includes(letter) ? `var(--k-${letter})` : "var(--text)";
+}
+
+/** A K or P label with its colour swatch, e.g. ▣ Kb. Pass `tip` to explain it on hover. */
+export function LabelTag({ label, tip, filled = false }: { label: string; tip?: string; filled?: boolean }) {
+  return (
+    <span
+      className="ktag"
+      data-tip={tip}
+      style={{ "--k": labelColour(label) } as CSSProperties}
+      aria-description={tip}
+    >
+      <span className={`ksw${filled ? " filled" : ""}`} aria-hidden="true" />
+      {label}
+    </span>
+  );
+}
+
+/**
+ * The map's propose/decide mark as a small swatch: hatched = proposed,
+ * filled = decided, in the colour of the sub-square's knowledge type (or the
+ * text colour when no type is given, e.g. in a legend).
+ */
+export function ActSwatch({ kind, k }: { kind: "propose" | "decide"; k?: string | null }) {
+  return (
+    <span
+      className={`act-sw ${kind}`}
+      style={k ? ({ "--k": labelColour(k) } as CSSProperties) : undefined}
+      aria-hidden="true"
+    />
+  );
 }
 
 /* ─────────────────────────── Stepper (wayfinding) ─────────────────────────── */

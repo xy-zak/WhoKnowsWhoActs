@@ -1,7 +1,7 @@
 import type { PlayerView } from "@wkwa/shared";
 import { type ReactNode, useRef, useState } from "react";
 import { Markdown } from "../common/Markdown";
-import { Button, Callout, Check, Icon, type IconName, Panel, StatusTag } from "../ui";
+import { ActSwatch, Button, Callout, Check, type IconName, LabelTag, Panel, StatusTag } from "../ui";
 import { Centered, OnboardingStepper } from "./chrome";
 import type { PlayerConnection } from "./connection";
 
@@ -75,13 +75,24 @@ export function ConsentScreen({ conn, view }: { conn: PlayerConnection; view: Pl
       footer={
         <>
           {!confirmDecline ? (
-            <Button icon="close" disabled={busy} onClick={() => setConfirmDecline(true)}>
+            <Button
+              icon="close"
+              disabled={busy}
+              onClick={() => setConfirmDecline(true)}
+              tip="You can decline without giving a reason; you will be asked to confirm"
+            >
               I do not want to take part
             </Button>
           ) : (
             <span className="row">
               <span className="small t-danger">Are you sure?</span>
-              <Button variant="danger" icon="warning" disabled={busy} onClick={() => submit(true)}>
+              <Button
+                variant="danger"
+                icon="warning"
+                disabled={busy}
+                onClick={() => submit(true)}
+                tip="You will not play and no game or interaction data will be collected from you"
+              >
                 Yes, I decline
               </Button>
               <Button disabled={busy} onClick={() => setConfirmDecline(false)}>
@@ -96,6 +107,11 @@ export function ConsentScreen({ conn, view }: { conn: PlayerConnection; view: Pl
             icon="ok"
             disabled={!allRequired || busy}
             onClick={() => submit(false)}
+            tip={
+              allRequired
+                ? "Give consent and go on to a few short questions"
+                : "Tick every required box first"
+            }
           >
             I agree — continue
           </Button>
@@ -179,7 +195,14 @@ export function DemographicsScreen({ conn, view }: { conn: PlayerConnection; vie
             {answered}/{form.questions.length} answered
           </StatusTag>
           <span className="spacer" />
-          <Button variant="primary" size="lg" icon="next" disabled={!complete || busy} onClick={submit}>
+          <Button
+            variant="primary"
+            size="lg"
+            icon="next"
+            disabled={!complete || busy}
+            onClick={submit}
+            tip={complete ? "Save your answers and go on to the briefing" : "Answer every question first"}
+          >
             Continue
           </Button>
         </>
@@ -240,7 +263,14 @@ export function BriefingScreen({ conn, view }: { conn: PlayerConnection; view: P
       footer={
         <>
           <span className="spacer" />
-          <Button variant="primary" size="lg" icon="ok" disabled={busy} onClick={submit}>
+          <Button
+            variant="primary"
+            size="lg"
+            icon="ok"
+            disabled={busy}
+            onClick={submit}
+            tip="Tell the facilitator you are ready; the game starts when every player is"
+          >
             I'm ready
           </Button>
         </>
@@ -249,18 +279,35 @@ export function BriefingScreen({ conn, view }: { conn: PlayerConnection; view: P
       <Markdown text={b.markdown} />
       {(view.me.k || view.me.p) && (
         <Callout icon="labels">
-          Your roles: <strong>{view.me.k}</strong> · <strong>{view.me.p}</strong>
-          {view.me.viewName && (
-            <>
-              {" "}
-              · your information source: <strong>{view.me.viewName}</strong>
-            </>
-          )}
+          <span className="row" style={{ gap: 6 }}>
+            Your roles:
+            {view.me.k && (
+              <LabelTag
+                label={view.me.k}
+                tip="Your knowledge type: on the map you see the scores of these sub-squares"
+              />
+            )}
+            {view.me.p && (
+              <LabelTag
+                label={view.me.p}
+                filled
+                tip="Your power type: your proposals and decisions land on the sub-squares of this letter"
+              />
+            )}
+            {view.me.viewName && (
+              <>
+                · you see the <strong>{view.me.viewName}</strong> scores
+                {view.me.knows ? ` (${view.me.knows} sub-squares)` : ""}
+              </>
+            )}
+            {view.me.actsOn.decide && <> · you act on the {view.me.actsOn.decide} sub-squares</>}
+          </span>
         </Callout>
       )}
-      <p className="hint">
-        <Icon name="propose" /> Propose highlights an area for everyone · <Icon name="decide" /> Decide marks
-        it as decided · keys <kbd>P</kbd> <kbd>D</kbd> <kbd>Enter</kbd> <kbd>Esc</kbd>
+      <p className="hint row" style={{ gap: 6 }}>
+        <ActSwatch kind="propose" /> Propose marks a sub-square (hatched) for everyone ·{" "}
+        <ActSwatch kind="decide" /> Decide fills it and changes the scores · keys <kbd>P</kbd> <kbd>D</kbd>{" "}
+        <kbd>Enter</kbd> <kbd>Esc</kbd>
       </p>
     </Page>
   );

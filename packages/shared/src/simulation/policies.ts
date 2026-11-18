@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { cellId, squaresOf } from "../board";
 import { canAct, definePolicy, kindsWithQuota, type PlayerPolicy, pick, registerPolicy } from "./policy";
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -12,16 +13,17 @@ import { canAct, definePolicy, kindsWithQuota, type PlayerPolicy, pick, register
  *     id: "cautious",
  *     version: "1",
  *     name: "Cautious",
- *     description: "Proposes regions its own view marks as low risk; decides only on proposed regions.",
+ *     description: "Decides on squares where its own knowledge type scores low.",
  *     params: z.object({
- *       threshold: z.number().min(0).max(1).default(0.3).describe("Highest risk it accepts"),
+ *       threshold: z.number().min(0).max(10).default(3).describe("Highest own score it acts on"),
  *     }),
  *     act(view, ctx) {
  *       if (!canAct(view)) return null;
- *       // view.content[regionId] = this seat's own data; view.highlights = what is on the map;
- *       // view.me.k / view.me.p = own labels (if the session shows them to players).
+ *       // view.scores = this seat's own knowledge type's scores ("C7-Ka" → 6); view.highlights = what is
+ *       // on the map; view.mapScore = the whole map's score; view.me.actsOn.decide = the knowledge type
+ *       // of the sub-squares its decisions land on (game rules); view.me.k / view.me.p = own labels.
  *       // Use ctx.random() for every random choice, ctx.memory to remember things between turns.
- *       return null; // or { kind: "propose", regionId: "R07" }
+ *       return null; // or { kind: "decide", regionId: cellId("C7", view.me.actsOn.decide!) }
  *     },
  *   });
  *
@@ -31,13 +33,13 @@ import { canAct, definePolicy, kindsWithQuota, type PlayerPolicy, pick, register
  * behaviour changes: every simulated seat logs the version it ran with.
  * ═══════════════════════════════════════════════════════════════════════════ */
 
-/** Baseline: random regions, random propose/decide, as long as quota is left. */
+/** Baseline: random squares, random propose/decide, as long as quota is left. */
 export const randomPolicy = definePolicy({
   id: "random",
-  version: "1",
+  version: "2",
   name: "Random",
   description:
-    "Baseline. On each turn it proposes or decides on a uniformly random region while it has quota left. It ignores what its map view shows.",
+    "Baseline. On each turn it proposes or decides on a uniformly random square (the sub-square the game rules give it) while it has quota left. It ignores the scores it sees.",
   params: z.object({
     proposeBias: z
       .number()
@@ -48,11 +50,12 @@ export const randomPolicy = definePolicy({
   }),
   act(view, ctx) {
     if (!canAct(view)) return null;
-    const kinds = kindsWithQuota(view);
-    if (kinds.length === 0 || view.map.regions.length === 0) return null;
+    const kinds = kindsWithQuota(view).filter((k) => view.me.actsOn[k] !== null);
+    const squares = squaresOf(view.map.board);
+    if (kinds.length === 0 || squares.length === 0) return null;
     const kind =
       kinds.length === 1 ? kinds[0]! : ctx.random() < ctx.params.proposeBias ? "propose" : "decide";
-    return { kind, regionId: pick(view.map.regions, ctx.random).id };
+    return { kind, regionId: cellId(pick(squares, ctx.random), view.me.actsOn[kind]!) };
   },
 });
 

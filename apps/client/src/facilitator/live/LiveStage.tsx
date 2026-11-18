@@ -98,7 +98,14 @@ function NextPanel({
       prompt = "Everyone is ready.";
       action = () => run("round:start", {}, "Round 1 started");
       primary = (
-        <Button variant="primary" size="lg" icon="start" kbd="N" onClick={action}>
+        <Button
+          variant="primary"
+          size="lg"
+          icon="start"
+          kbd="N"
+          onClick={action}
+          tip="Start the first round: players can act until their quotas are used or you end the round"
+        >
           Start round 1 of {st.config.roundCount}
         </Button>
       );
@@ -127,17 +134,31 @@ function NextPanel({
       : `Round ${st.round} of ${st.config.roundCount} in progress · ${total}${max !== null ? `/${max}` : ""} actions · ${fmtDuration(roundActiveMs(st, now))}${left !== null ? ` · ${fmtDuration(left)} left` : ""}`;
     action = () => run(st.paused ? "game:resume" : "game:pause", {}, st.paused ? "Resumed" : "Paused");
     primary = st.paused ? (
-      <Button variant="primary" size="lg" icon="start" kbd="P" onClick={action}>
+      <Button
+        variant="primary"
+        size="lg"
+        icon="start"
+        kbd="P"
+        onClick={action}
+        tip="Let players act again; the round clock carries on"
+      >
         Resume
       </Button>
     ) : (
-      <Button size="lg" icon="pause" kbd="P" onClick={action}>
+      <Button
+        size="lg"
+        icon="pause"
+        kbd="P"
+        onClick={action}
+        tip="Freeze the game: players cannot act and the round clock stops"
+      >
         Pause
       </Button>
     );
     secondary = (
       <Button
         icon="endRound"
+        tip="End this round now, even if players still have actions left"
         onClick={async () => {
           if (
             await confirm({
@@ -158,7 +179,14 @@ function NextPanel({
     prompt = `Round ${st.round} complete.${st.config.roundAdvance === "auto" ? ` Round ${st.round + 1} starts automatically in ${st.config.autoAdvanceDelaySec} s.` : ""}`;
     action = () => run("round:start", {}, `Round ${st.round + 1} started`);
     primary = (
-      <Button variant="primary" size="lg" icon="start" kbd="N" onClick={action}>
+      <Button
+        variant="primary"
+        size="lg"
+        icon="start"
+        kbd="N"
+        onClick={action}
+        tip="Start the next round with fresh quotas; scores carry over"
+      >
         Start round {st.round + 1} of {st.config.roundCount}
       </Button>
     );
@@ -170,7 +198,14 @@ function NextPanel({
         : "Game complete (fake players only). Wrap up: export → close.";
     action = onWrapUp;
     primary = (
-      <Button variant="primary" size="lg" icon="next" kbd="N" onClick={onWrapUp}>
+      <Button
+        variant="primary"
+        size="lg"
+        icon="next"
+        kbd="N"
+        onClick={onWrapUp}
+        tip="Go to wrap-up: payout cards, export and close"
+      >
         Wrap up session
       </Button>
     );
@@ -243,7 +278,12 @@ function ToolsPanel({
             placeholder="Message to all players…"
             style={{ flex: 1 }}
           />
-          <Button type="submit" icon="broadcast" disabled={!broadcast.trim()}>
+          <Button
+            type="submit"
+            icon="broadcast"
+            disabled={!broadcast.trim()}
+            tip="Show this message on every player's screen (it is also logged)"
+          >
             Broadcast
           </Button>
         </form>
@@ -263,7 +303,12 @@ function ToolsPanel({
             placeholder="Note for the log — never type names"
             style={{ flex: 1 }}
           />
-          <Button type="submit" icon="notes" disabled={!note.trim()}>
+          <Button
+            type="submit"
+            icon="notes"
+            disabled={!note.trim()}
+            tip="Add a timestamped facilitator note to the event log; it is exported, so never type names"
+          >
             Add note
           </Button>
         </form>
@@ -272,7 +317,7 @@ function ToolsPanel({
             icon="labels"
             disabled={!canLabels}
             onClick={onLabels}
-            title="Possible during onboarding and between rounds"
+            tip="Change seat labels and pairing; possible during onboarding and between rounds"
           >
             Edit labels
           </Button>
@@ -281,6 +326,7 @@ function ToolsPanel({
             <Button
               variant="danger"
               icon="stop"
+              tip="End the current round and mark the game complete; actions so far are kept"
               onClick={async () => {
                 if (
                   await confirm({
@@ -314,6 +360,7 @@ function ToolsPanel({
             <Button
               variant="danger"
               icon="stop"
+              tip="Mark the session aborted (data is kept); players see their end screen"
               onClick={async () => {
                 if (
                   await confirm({
@@ -385,7 +432,12 @@ function WrapUp({ conn, st, onClose }: { conn: FacilitatorConnection; st: GameSt
       onPrimary={canNext && !busy ? next : undefined}
       footer={
         <>
-          <Button icon="back" disabled={step === 0} onClick={() => setStep(step - 1)}>
+          <Button
+            icon="back"
+            disabled={step === 0}
+            onClick={() => setStep(step - 1)}
+            tip="Previous wrap-up step"
+          >
             Back
           </Button>
           <span className="spacer" />
@@ -395,6 +447,11 @@ function WrapUp({ conn, st, onClose }: { conn: FacilitatorConnection; st: GameSt
             kbd="Enter"
             disabled={!canNext || busy}
             onClick={next}
+            tip={
+              key === "close"
+                ? "Archive the session: no further events; it can still be replayed and exported"
+                : "Next wrap-up step"
+            }
           >
             {key === "close" ? "Close session" : "Next"}
           </Button>
@@ -447,7 +504,13 @@ function WrapUp({ conn, st, onClose }: { conn: FacilitatorConnection; st: GameSt
               : "Write the standard (pseudonymised) export of this session for analysis."}
           </p>
           <div className="row">
-            <Button variant="primary" icon="export" disabled={busy} onClick={() => void doExport()}>
+            <Button
+              variant="primary"
+              icon="export"
+              disabled={busy}
+              onClick={() => void doExport()}
+              tip="Write this session's CSV and JSON export files to the exports folder"
+            >
               Export session
             </Button>
           </div>
@@ -603,7 +666,7 @@ export function LiveStage({ conn }: { conn: FacilitatorConnection }) {
           footer={
             <>
               <span className="spacer" />
-              <Button icon="close" kbd="Esc" onClick={() => setLabels(false)}>
+              <Button icon="close" kbd="Esc" onClick={() => setLabels(false)} tip="Close the label editor">
                 Done
               </Button>
             </>

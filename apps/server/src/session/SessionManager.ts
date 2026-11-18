@@ -11,6 +11,7 @@ import {
   type GameState,
   generateParticipantCode,
   generateSessionId,
+  getGameRules,
   getPolicy,
   initialState,
   isOnboardingComplete,
@@ -37,6 +38,8 @@ import {
   type Scenario,
   type SessionConfig,
   type StoredEvent,
+  scoreChangesForIntent,
+  scoreChangesForRevoke,
   seatList,
   seatPolicyId,
   seededRandom,
@@ -134,6 +137,15 @@ export class SessionManager {
         );
       }
     }
+    const rules = getGameRules(config.rules);
+    if (!rules) throw new CommandError(`Unknown game rules '${config.rules}'`);
+    const { min, max } = rules.scoreRange;
+    const outOfRange = Object.entries(deps.scenario.initialScores).find(([, v]) => v < min || v > max);
+    if (outOfRange) {
+      throw new CommandError(
+        `Scenario '${deps.scenario.id}': the starting score of ${outOfRange[0]} (${outOfRange[1]}) is outside the range of the '${rules.id}' rules (${min}–${max})`,
+      );
+    }
     const sessionId = generateSessionId(new Date(), config.players);
     const m = new SessionManager(sessionId, deps);
     const hv = harnessVersion();
@@ -164,6 +176,9 @@ export class SessionManager {
           },
           regionIds: deps.scenario.regions.map((r) => r.id),
           viewIds: Object.keys(deps.scenario.views),
+          board: deps.scenario.board,
+          initialScores: deps.scenario.initialScores,
+          rules: { id: rules.id, version: rules.version },
           harness: hv,
           notes,
         },
@@ -210,6 +225,15 @@ export class SessionManager {
         { sessionId, expected: m.state.scenario.hash, actual: deps.scenario.hash },
         "scenario files changed since the session was created",
       );
+    }
+    if (m.state.rules) {
+      const now = getGameRules(m.state.rules.id);
+      if (!now || now.version !== m.state.rules.version) {
+        deps.log.warn(
+          { sessionId, recorded: m.state.rules, current: now ? { id: now.id, version: now.version } : null },
+          "game rules changed since the session was created; recorded scores stay as they were, new actions use the current rules",
+        );
+      }
     }
     // connection status is not meaningful across restarts (agents are always there)
     for (const s of seatList(m.state)) if (!s.agent) s.connected = false;
@@ -595,6 +619,7 @@ export class SessionManager {
           targetSeat: a.seat,
           regionId: a.regionId,
           reason,
+          scoreChanges: scoreChangesForRevoke(this.state, seq),
         },
       });
     });
@@ -864,6 +889,8 @@ export class SessionManager {
       priorProposals: seatsWith("propose"),
       priorDecisions: seatsWith("decide"),
       msSinceRoundStart: Math.round(roundActiveMs(st, this.clock())),
+      // the game rules run once, here; the event records their effect (see game/rules.ts)
+      scoreChanges: scoreChangesForIntent(st, seat, { kind: msg.kind, regionId: msg.regionId }),
     };
     const ev = this.append(
       msg.kind === "propose"

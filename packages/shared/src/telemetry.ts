@@ -42,34 +42,34 @@ export const TELEMETRY_DEFS = {
   }),
 
   region_hover: defineRecord({
-    summary: "The pointer rested on a region (recorded when it leaves).",
-    trigger: "Pointer leaves a region after ≥150 ms on it (shorter passes are ignored as noise).",
+    summary: "The pointer rested on a sub-square of the map (recorded when it leaves).",
+    trigger: "Pointer leaves a sub-square after ≥150 ms on it (shorter passes are ignored as noise).",
     actors: ["player"],
     changesState: false,
     visibleTo: "Facilitator (live hover indicator + log)",
     dataClass: "pseudonymous",
     frequency: "tens to hundreds per seat per round",
     payload: z.object({
-      regionId: z.string().describe("Hovered region"),
+      regionId: z.string().describe("Hovered sub-square, e.g. 'C7-Kb'"),
       durationMs: Ms("Hover duration"),
     }),
-    example: { regionId: "R04", durationMs: 1840 },
+    example: { regionId: "C7-Kb", durationMs: 1840 },
   }),
 
   region_inspect: defineRecord({
-    summary: "The player opened or closed the info panel of a region.",
-    trigger: "Player clicks a region (open) or closes/replaces the panel (close).",
+    summary: "The player opened or closed the info panel of a square.",
+    trigger: "Player clicks a square (open) or closes/replaces the panel (close).",
     actors: ["player"],
     changesState: false,
     visibleTo: "Facilitator",
     dataClass: "pseudonymous",
     frequency: "tens per seat per round",
     payload: z.object({
-      regionId: z.string().describe("Inspected region"),
+      regionId: z.string().describe("Inspected square, e.g. 'C7' (the panel shows all four sub-squares)"),
       action: z.enum(["open", "close"]).describe("Panel opened or closed"),
       durationMs: Ms("How long the panel was open (close only)").nullable(),
     }),
-    example: { regionId: "R04", action: "close", durationMs: 5320 },
+    example: { regionId: "C7", action: "close", durationMs: 5320 },
   }),
 
   map_view_change: defineRecord({
@@ -104,7 +104,8 @@ export const TELEMETRY_DEFS = {
 
   action_draft: defineRecord({
     summary: "Confirmation step of a propose/decide: opened, cancelled or confirmed.",
-    trigger: "Player clicks a region with a tool selected (opened), then confirms or cancels.",
+    trigger:
+      "Player clicks a square with a tool selected, or a Propose/Decide button in the square panel (opened), then confirms or cancels.",
     actors: ["player"],
     changesState: false,
     visibleTo: "Facilitator",
@@ -112,12 +113,14 @@ export const TELEMETRY_DEFS = {
     frequency: "≥ number of actions",
     payload: z.object({
       kind: ActionKindSchema,
-      regionId: z.string().describe("Region of the drafted action"),
+      regionId: z
+        .string()
+        .describe("Sub-square the drafted action would land on (the one the game rules give this player)"),
       outcome: z
         .enum(["opened", "cancelled", "confirmed"])
         .describe("Confirmation step opened, cancelled, or confirmed (confirmed → intent sent)"),
     }),
-    example: { kind: "propose", regionId: "R07", outcome: "cancelled" },
+    example: { kind: "propose", regionId: "C7-Kb", outcome: "cancelled" },
   }),
 
   focus_change: defineRecord({

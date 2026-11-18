@@ -93,7 +93,7 @@ describe("simulated players", () => {
       [1, 2, 3, 4].map((seat) => ({
         seat,
         policy: "random",
-        policyVersion: "1",
+        policyVersion: "2",
         params: { proposeBias: 0.5 },
         seed: `TESTSEED:${seat}`,
       })),
@@ -240,9 +240,9 @@ describe("simulated players", () => {
     await fac.cmd("game:end");
     const seat1 = seen.filter((v) => v.me.seat === 1);
     expect(seat1.length).toBeGreaterThan(0);
-    const json = JSON.stringify(seat1[0]!.content);
-    expect(json).toContain("floodRisk"); // Ka's own data
-    expect(json).not.toContain("population"); // Kb's data
+    const ids = Object.keys(seat1[0]!.scores);
+    expect(ids).toHaveLength(100); // Ka's own scores, one per square
+    expect(ids.every((id) => id.endsWith("-Ka"))).toBe(true); // never Kb's
   });
 
   it("exports simulated sessions into exports/simulations with the agent policy per seat", async () => {
