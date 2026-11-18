@@ -1,0 +1,20 @@
+{
+  "micCheck": {
+    "phrase": "[Placeholder] I am testing my microphone: one, two, three, four, five.",
+    "minSpeechMs": 1000
+  },
+  "calibration": {
+    "sentences": [
+      { "id": "h01-01", "text": "The birch canoe slid on the smooth planks." },
+      { "id": "h01-02", "text": "Glue the sheet to the dark blue background." },
+      { "id": "h01-03", "text": "It's easy to tell the depth of a well." },
+      { "id": "h01-04", "text": "These days a chicken leg is a rare dish." },
+      { "id": "h01-05", "text": "Rice is often served in round bowls." },
+      { "id": "h01-06", "text": "The juice of lemons makes fine punch." },
+      { "id": "h01-07", "text": "The box was thrown beside the parked truck." },
+      { "id": "h01-09", "text": "Four hours of steady work faced us." }
+    ],
+    "turnMs": 6000,
+    "gapMs": 1000
+  }
+}

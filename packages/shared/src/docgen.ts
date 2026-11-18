@@ -103,6 +103,7 @@ function typeStringInner(js: JS, compactObjects: boolean, depth: number): string
   if (js.const !== undefined) return JSON.stringify(js.const);
   if (Array.isArray(js.anyOf))
     return js.anyOf.map((m: JS) => typeString(m, compactObjects, depth)).join(" | ");
+  if (js.type === undefined && js.format === "binary") return "binary";
   const t = Array.isArray(js.type) ? js.type.join(" | ") : js.type;
   switch (t) {
     case "integer":
@@ -110,6 +111,7 @@ function typeStringInner(js: JS, compactObjects: boolean, depth: number): string
     case "number":
       return `number${range(js)}`;
     case "string": {
+      if (js.format === "uuid") return "string (uuid)";
       const extra: string[] = [];
       if (js.maxLength !== undefined) extra.push(`≤ ${js.maxLength} chars`);
       if (js.pattern) extra.push("pattern");
@@ -233,6 +235,7 @@ const DATA_CLASS_LABEL: Record<DataClass, string> = {
   "non-personal": "non-personal",
   pseudonymous: "pseudonymous",
   "pseudonymous-sensitive": "pseudonymous · sensitive",
+  voice: "voice · identifying",
 };
 
 /* ─────────────────────────── Examples ─────────────────────────── */
@@ -256,6 +259,9 @@ const IN_ROUND: ReadonlySet<EventType> = new Set([
   "ActionRevoked",
   "GamePaused",
   "GameResumed",
+  "RecordingPaused",
+  "RecordingResumed",
+  "AudioTrackStopped",
   "FacilitatorBroadcast",
 ]);
 const WITH_CLIENT_SEQ: ReadonlySet<EventType> = new Set(["ProposalMade", "DecisionMade", "IntentRejected"]);
@@ -421,13 +427,17 @@ export function renderTelemetrySections(): string {
 
 /** Record types grouped by personal-data class (used in DATA-MANAGEMENT.md). */
 export function renderDataClassSummary(): string {
-  const classes: DataClass[] = ["pseudonymous-sensitive", "pseudonymous", "non-personal"];
+  const classes: DataClass[] = ["voice", "pseudonymous-sensitive", "pseudonymous", "non-personal"];
   const rows = classes.map((c) => {
     const ev = EVENT_TYPES.filter((t) => (EVENT_DEFS[t] as RecordMeta).dataClass === c).map(code);
     const tel = TELEMETRY_TYPES.filter((t) => (TELEMETRY_DEFS[t] as RecordMeta).dataClass === c).map(code);
     return [DATA_CLASS_LABEL[c], ev.join(", ") || "—", tel.join(", ") || "—"];
   });
-  return table(["Data class", "Game events", "Telemetry types"], rows);
+  return [
+    table(["Data class", "Game events", "Telemetry types"], rows),
+    "",
+    `${DATA_CLASS_LABEL.voice}: recordings of a participant's voice. No event or telemetry payload carries voice: the audio is stored as encrypted files (${code("data/audio/<sessionId>/*.wka")}, one key per file in the database) and is never part of an anonymised export.`,
+  ].join("\n");
 }
 
 /* ─────────────────────────── Session configuration ─────────────────────────── */

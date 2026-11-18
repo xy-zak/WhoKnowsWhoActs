@@ -1,3 +1,4 @@
+export * from "./audio";
 export * from "./board";
 export * from "./config";
 export * from "./docgen";

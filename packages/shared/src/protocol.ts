@@ -1,6 +1,19 @@
 import { z } from "zod";
+import {
+  AUDIO_BYTES_PER_SAMPLE,
+  AUDIO_MAX_CHUNK_SAMPLES,
+  AudioStopReasonSchema,
+  Dbfs,
+  type MicLevelState,
+  MicLevelStateSchema,
+  PcmSchema,
+  pcmByteLength,
+  TrackIdSchema,
+} from "./audio";
 import { FakePaceSchema, SessionConfigSchema } from "./config";
+import { EVENT_DEFS } from "./events";
 import { ActionKindSchema, KLabelSchema, SeatSchema } from "./labels";
+import type { AudioState } from "./state";
 import { TelemetryItemSchema } from "./telemetry";
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -65,6 +78,68 @@ export const Presence = z.object({
   regionId: z.string().max(64).nullable().describe("Sub-square currently hovered (null = none)"),
 });
 
+/* /player : audio (sessions that record audio; see audio.ts) */
+
+const ClockOffsetMs = z
+  .number()
+  .describe("Clock offset (server minus client, ms) the client applied to its timestamps");
+const Count = (d: string) => z.number().int().min(0).describe(d);
+
+/** Result of the player's own mic check (logged as MicCheckCompleted). */
+export const MicCheckSubmit = EVENT_DEFS.MicCheckCompleted.payload.extend({
+  durationMs: DurationMs,
+  clientTs: ClientTs,
+});
+
+/** A new track (logged as AudioTrackStarted), plus the timing of its first sample. */
+export const AudioStart = EVENT_DEFS.AudioTrackStarted.payload.extend({
+  clientTs: ClientTs.describe("Time of the track's first sample, corrected to server time (epoch ms)"),
+  clockOffsetMs: ClockOffsetMs,
+});
+
+export const AudioChunk = z
+  .object({
+    trackId: TrackIdSchema,
+    seq: Count("Chunk number within the track (0, 1, 2, …); a resend repeats it"),
+    startSample: Count("Index of the chunk's first sample within the track (0-based)"),
+    sampleCount: z
+      .number()
+      .int()
+      .min(1)
+      .max(AUDIO_MAX_CHUNK_SAMPLES)
+      .describe(`Samples in this chunk (nominally 80 000 = 5 s; at most ${AUDIO_MAX_CHUNK_SAMPLES})`),
+    clientTs: ClientTs.describe("Time of the chunk's first sample, corrected to server time (epoch ms)"),
+    clockOffsetMs: ClockOffsetMs,
+    rmsDb: Dbfs("RMS level of the chunk"),
+    peakDb: Dbfs("Peak level of the chunk"),
+    clippedSamples: Count("Samples at full scale (clipping)"),
+    pcm: PcmSchema,
+  })
+  .refine((c) => pcmByteLength(c.pcm) === c.sampleCount * AUDIO_BYTES_PER_SAMPLE, {
+    message: "pcm must hold exactly sampleCount × 2 bytes",
+    path: ["pcm"],
+  })
+  .refine((c) => c.clippedSamples <= c.sampleCount, {
+    message: "clippedSamples cannot exceed sampleCount",
+    path: ["clippedSamples"],
+  });
+
+export const AudioStop = z.object({
+  trackId: TrackIdSchema,
+  reason: AudioStopReasonSchema,
+  totalSamples: Count("Samples the browser captured in this track"),
+  droppedChunks: Count("Chunks the browser had to drop (resend queue full); their audio is missing"),
+  clientTs: ClientTs,
+});
+
+export const AudioLevel = z.object({
+  state: MicLevelStateSchema,
+  rmsDb: Dbfs("RMS level over the last ~250 ms"),
+  peakDb: Dbfs("Peak level over the last ~250 ms"),
+  pendingChunks: Count("Chunks captured but not yet acknowledged by the server"),
+  pendingBytes: Count("Bytes of those chunks (held in memory only)"),
+});
+
 /* ─────────────────────────── /facilitator : client → server ─────────────────────────── */
 
 export const SessionCreate = z.object({
@@ -120,6 +195,18 @@ export const WithdrawMsg = z.object({ seat: SeatSchema });
 export const AbortMsg = z.object({ reason: z.string().max(200).default("") });
 export const Empty = z.object({}).passthrough();
 
+/* /facilitator : audio */
+const FacilitatorReason = z
+  .string()
+  .max(200)
+  .default("")
+  .describe("Facilitator's reason (free text, no personal data)");
+export const CalibrationSkip = z.object({ reason: FacilitatorReason });
+export const MicSkip = z.object({ seat: SeatSchema, reason: FacilitatorReason });
+export const RecordingPause = z.object({
+  reason: z.string().max(200).optional().describe("Facilitator's reason (free text, no personal data)"),
+});
+
 export type Ack<T = unknown> = { ok: true; data?: T } | { ok: false; error: string };
 
 /* ─────────────────────────── Catalogue (drives docs/NETWORKING.md) ─────────────────────────── */
@@ -169,6 +256,15 @@ export const MESSAGES: Record<string, MessageDef> = {
     ack: "Ack",
     logged: "DemographicsSubmitted",
   },
+  "mic:check": {
+    namespace: "/player",
+    direction: "client→server",
+    description:
+      "Result of the player's own mic check (sessions that record audio; the onboarding step after consent). Only processing flags and the sample rate are sent, never the device name or id.",
+    schema: MicCheckSubmit,
+    ack: "Ack",
+    logged: "MicCheckCompleted",
+  },
   "briefing:ack": {
     namespace: "/player",
     direction: "client→server",
@@ -199,6 +295,41 @@ export const MESSAGES: Record<string, MessageDef> = {
     description: "Volatile 'currently hovering' signal for the facilitator's live mirrors.",
     schema: Presence,
     logged: "Not stored (ephemeral). The persisted record is telemetry 'region_hover'.",
+  },
+  "audio:start": {
+    namespace: "/player",
+    direction: "client→server",
+    description:
+      "A new audio track starts (one continuous capture run). Accepted only while the seat should record (audio consent given, mic check reached and not skipped, recording not paused, not a fake player or agent).",
+    schema: AudioStart,
+    ack: "Ack",
+    logged: "AudioTrackStarted (the track is opened in the encrypted audio store)",
+  },
+  "audio:chunk": {
+    namespace: "/player",
+    direction: "client→server",
+    description:
+      "About 5 s of audio of an open track (16 kHz mono s16le, binary). The browser keeps unacknowledged chunks in memory only and resends them in order after a reconnect; a resend with the same trackId and seq is stored once.",
+    schema: AudioChunk,
+    ack: "Ack<{ trackId, seq }>",
+    logged: "Encrypted audio store only (audio_chunks + the track's .wka file), never the event log",
+  },
+  "audio:stop": {
+    namespace: "/player",
+    direction: "client→server",
+    description:
+      "The browser stopped capturing a track (pause, game complete, unload, permission lost, error).",
+    schema: AudioStop,
+    ack: "Ack",
+    logged: "AudioTrackStopped",
+  },
+  "audio:level": {
+    namespace: "/player",
+    direction: "client→server",
+    description:
+      "Volatile microphone meter reading (about 4 Hz) for the facilitator's LIVE mic column; dropped when the network is busy.",
+    schema: AudioLevel,
+    logged: "Not stored (ephemeral).",
   },
   /* /player S→C */
   terminal: {
@@ -316,6 +447,57 @@ export const MESSAGES: Record<string, MessageDef> = {
     schema: Empty,
     ack: "Ack",
     logged: "OnboardingStarted (no steps), RoundStarted",
+  },
+  "calibration:start": {
+    namespace: "/facilitator",
+    direction: "client→server",
+    description:
+      "Sessions that record audio: start the calibration once every seat is ready. The server then times the turns (each seat reads a sentence aloud while the others stay quiet) and runs a quick quality check.",
+    schema: Empty,
+    ack: "Ack",
+    logged: "CalibrationStarted, then CalibrationTurn per seat, CalibrationCompleted and CalibrationChecked",
+  },
+  "calibration:redo": {
+    namespace: "/facilitator",
+    direction: "client→server",
+    description: "Run the calibration again (e.g. after a seat moved closer to its microphone).",
+    schema: Empty,
+    ack: "Ack",
+    logged: "CalibrationStarted, then as calibration:start",
+  },
+  "calibration:skip": {
+    namespace: "/facilitator",
+    direction: "client→server",
+    description: "Skip (or cancel) the calibration, after confirmation; round 1 may then start without it.",
+    schema: CalibrationSkip,
+    ack: "Ack",
+    logged: "CalibrationSkipped",
+  },
+  "mic:skip": {
+    namespace: "/facilitator",
+    direction: "client→server",
+    description:
+      "Skip a seat's mic check (e.g. no working microphone): the player continues onboarding and the seat is not recorded.",
+    schema: MicSkip,
+    ack: "Ack",
+    logged: "MicCheckSkipped",
+  },
+  "recording:pause": {
+    namespace: "/facilitator",
+    direction: "client→server",
+    description:
+      "Pause audio recording for every seat, after confirmation (players cannot mute themselves). The game goes on.",
+    schema: RecordingPause,
+    ack: "Ack",
+    logged: "RecordingPaused (+ AudioTrackStopped per recording seat)",
+  },
+  "recording:resume": {
+    namespace: "/facilitator",
+    direction: "client→server",
+    description: "Resume audio recording; every recorded seat starts a new track.",
+    schema: Empty,
+    ack: "Ack",
+    logged: "RecordingResumed (+ AudioTrackStarted per recording seat)",
   },
   "round:start": {
     namespace: "/facilitator",
@@ -466,6 +648,25 @@ export interface SeatLiveStats {
   screen: string | null;
   telemetryCount: number;
   lastTelemetryTs: number | null;
+  /** Microphone of the seat (sessions that record audio; absent otherwise). */
+  mic?: SeatMicStats;
+}
+
+/** Live microphone figures of one seat, for the facilitator's LIVE mic column (never stored). */
+export interface SeatMicStats {
+  /** Latest state reported by the browser (`audio:level`). */
+  state: MicLevelState;
+  /** Latest meter reading (dBFS). */
+  rmsDb: number;
+  peakDb: number;
+  /** When the server last stored a chunk of this seat (server clock; null = none yet). */
+  lastChunkServerTs: number | null;
+  /** Chunks the browser still holds unacknowledged (upload backlog). */
+  pendingChunks: number;
+  /** Tracks stored for this seat so far. */
+  tracks: number;
+  /** Audio stored for this seat so far (ms). */
+  recordedMs: number;
 }
 
 export interface DashboardMsg {
@@ -475,4 +676,6 @@ export interface DashboardMsg {
   stats: Record<number, SeatLiveStats>;
   /** True when the dashboard is attached to a session that can still change. */
   live: boolean;
+  /** Audio recording and calibration (sessions that record audio; the same block as `state.audio`). */
+  audio?: AudioState;
 }

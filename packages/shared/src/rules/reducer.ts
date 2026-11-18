@@ -1,7 +1,16 @@
+import { AUDIO_CONSENT_ITEM } from "../audio";
 import { parseSessionConfig } from "../config";
 import type { StoredEvent } from "../events";
 import { applyScoreChanges } from "../game/rules";
-import { emptySeat, type GameState, initialState, type SeatState } from "../state";
+import {
+  type CalibrationState,
+  emptyAudioState,
+  emptyCalibration,
+  emptySeat,
+  type GameState,
+  initialState,
+  type SeatState,
+} from "../state";
 
 /**
  * Apply one event to the state (mutates `state` in place and returns it).
@@ -34,6 +43,7 @@ export function applyEvent(state: GameState, ev: StoredEvent): GameState {
       state.phase = "lobby";
       state.seats = {};
       for (let i = 1; i <= p.config.seatCount; i++) state.seats[i] = emptySeat(i);
+      state.audio = emptyAudioState(state.config);
       break;
     }
     case "SessionNote":
@@ -105,9 +115,88 @@ export function applyEvent(state: GameState, ev: StoredEvent): GameState {
       break;
     case "ConsentRecorded": {
       const s = seatOf(ev.seat);
-      if (s) s.consent = ev.payload.consented ? "given" : "declined";
+      if (!s) break;
+      s.consent = ev.payload.consented ? "given" : "declined";
+      // audio needs its own item ticked as well; a skipped consent never permits recording
+      s.audioConsent = ev.payload.consented && ev.payload.answers[AUDIO_CONSENT_ITEM] === true;
       break;
     }
+    case "MicCheckCompleted": {
+      const s = seatOf(ev.seat);
+      // a failed check leaves the step open; a skipped one stays skipped
+      if (s && ev.payload.passed && s.micCheck === "pending") s.micCheck = "passed";
+      break;
+    }
+    case "MicCheckSkipped": {
+      const s = seatOf(ev.payload.seat);
+      if (s) s.micCheck = "skipped";
+      break;
+    }
+    case "AudioTrackStarted":
+    case "AudioTrackStopped":
+      // audit trail only: tracks live in the audio store, not in the game state
+      break;
+    case "CalibrationStarted": {
+      const p = ev.payload;
+      state.audio.calibration = {
+        ...emptyCalibration(),
+        status: "running",
+        order: [...p.order],
+        sentenceIds: [...p.sentenceIds],
+        turnMs: p.turnMs,
+        gapMs: p.gapMs,
+        startedTs: ev.serverTs,
+      };
+      break;
+    }
+    // Calibration events apply only in the matching status, so a late event of an earlier run
+    // (e.g. a check arriving after a redo) never changes the current one.
+    case "CalibrationTurn": {
+      const c = state.audio.calibration;
+      if (c.status !== "running") break;
+      endRunningTurn(c, ev.serverTs);
+      c.turnIndex = ev.payload.index;
+      c.turns.push({
+        seat: ev.payload.seat,
+        sentenceId: ev.payload.sentenceId,
+        startTs: ev.serverTs,
+        endTs: null,
+      });
+      break;
+    }
+    case "CalibrationCompleted": {
+      const c = state.audio.calibration;
+      if (c.status !== "running") break;
+      c.status = "done";
+      c.turnIndex = null;
+      c.turns = ev.payload.turns.map((t) => ({ ...t }));
+      c.completedTs = ev.serverTs;
+      break;
+    }
+    case "CalibrationChecked":
+      if (state.audio.calibration.status !== "done") break;
+      state.audio.calibration.quality = {
+        perSeat: ev.payload.perSeat.map((r) => ({ ...r })),
+        ok: ev.payload.ok,
+        checkedTs: ev.serverTs,
+      };
+      break;
+    case "CalibrationSkipped": {
+      const c = state.audio.calibration;
+      // a finished calibration stays done (its measurements are complete)
+      if (c.status === "done") break;
+      endRunningTurn(c, ev.serverTs);
+      c.status = "skipped";
+      c.turnIndex = null;
+      c.completedTs = ev.serverTs;
+      break;
+    }
+    case "RecordingPaused":
+      state.audio.recordingPaused = true;
+      break;
+    case "RecordingResumed":
+      state.audio.recordingPaused = false;
+      break;
     case "DemographicsSubmitted": {
       const s = seatOf(ev.seat);
       if (s) s.demographics = true;
@@ -233,6 +322,12 @@ export function applyEvent(state: GameState, ev: StoredEvent): GameState {
     }
   }
   return state;
+}
+
+/** Close the calibration's latest turn if still open: at its nominal end, or at `ts` if that is earlier. */
+function endRunningTurn(c: CalibrationState, ts: number) {
+  const last = c.turns[c.turns.length - 1];
+  if (last && last.endTs === null) last.endTs = Math.min(last.startTs + (c.turnMs ?? 0), ts);
 }
 
 /** Fold a list of events into a fresh state (optionally only up to and including `uptoSeq`). */

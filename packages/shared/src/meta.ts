@@ -14,8 +14,11 @@ export type Actor = "player" | "facilitator" | "system";
  *    until the key sheet is destroyed.
  *  - `pseudonymous-sensitive`: as above but deserves extra care
  *    (demographics, consent answers).
+ *  - `voice`: a recording of a participant's voice. Directly identifying
+ *    (whatever code it is stored under), so it is encrypted at rest and
+ *    never part of an anonymised export.
  */
-export type DataClass = "non-personal" | "pseudonymous" | "pseudonymous-sensitive";
+export type DataClass = "non-personal" | "pseudonymous" | "pseudonymous-sensitive" | "voice";
 
 export interface RecordMeta<P extends z.ZodType = z.ZodType> {
   summary: string;

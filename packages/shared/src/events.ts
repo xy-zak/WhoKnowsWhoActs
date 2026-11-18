@@ -1,4 +1,12 @@
 import { z } from "zod";
+import {
+  AUDIO_SAMPLE_RATE,
+  AudioSettingsSchema,
+  AudioStartReasonSchema,
+  AudioStopReasonSchema,
+  Dbfs,
+  TrackIdSchema as TrackId,
+} from "./audio";
 import { BoardSchema } from "./board";
 import { FakePaceSchema, RoundSpecSchema, SessionConfigSchema } from "./config";
 import {
@@ -10,6 +18,7 @@ import {
   ViewIdSchema,
 } from "./labels";
 import { defineRecord } from "./meta";
+import { ONBOARDING_STEPS } from "./state";
 
 /* ═══════════════════════════════════════════════════════════════════════════
  * GAME EVENTS — the append-only, authoritative log of a session.
@@ -24,6 +33,16 @@ const SeatList = z.array(SeatSchema);
 const Ms = (d: string) => z.number().min(0).describe(`${d} (milliseconds)`);
 
 const ConfigExample = SessionConfigSchema.parse({});
+
+const EXAMPLE_TRACK_ID = "1b4e28ba-2fa1-4d2b-883f-0016d3cca427";
+const EXAMPLE_SETTINGS = {
+  sampleRate: 48000,
+  echoCancellation: false,
+  noiseSuppression: false,
+  autoGainControl: false,
+  channelCount: 1,
+};
+const SentenceId = z.string().min(1).max(40).describe("Id of the calibration sentence (config/audio.json)");
 
 /** One sub-square's score before and after an action, as computed by the game rules when it was accepted. */
 const ScoreChangesSchema = z
@@ -234,7 +253,7 @@ export const EVENT_DEFS = {
   }),
 
   OnboardingStarted: defineRecord({
-    summary: "Seats are locked; players move to the consent / demographics / briefing screens.",
+    summary: "Seats are locked; players move to the consent / mic check / demographics / briefing screens.",
     trigger: "Facilitator clicks 'Start onboarding' once all seats are bound and labelled.",
     actors: ["facilitator"],
     changesState: true,
@@ -243,8 +262,10 @@ export const EVENT_DEFS = {
     frequency: "1 per session",
     payload: z.object({
       steps: z
-        .array(z.enum(["consent", "demographics", "briefing"]))
-        .describe("Onboarding steps enabled for this session"),
+        .array(z.enum(ONBOARDING_STEPS))
+        .describe(
+          "Onboarding steps enabled for this session, in order ('mic_check' only when the session records audio)",
+        ),
     }),
     example: { steps: ["consent", "demographics", "briefing"] },
   }),
@@ -271,6 +292,60 @@ export const EVENT_DEFS = {
       consented: true,
       durationMs: 84213,
     },
+  }),
+
+  MicCheckCompleted: defineRecord({
+    summary:
+      "A player finished their own mic check (sessions that record audio): how loud the room and their voice were, and whether it passed.",
+    trigger:
+      "The player's browser ends the mic check (the onboarding step after consent). Passed: it heard enough speech above the background noise, and the step is done. Not passed: the step stays open (the player tries again, or the facilitator skips the check). Recording starts with the mic check.",
+    actors: ["player"],
+    changesState: true,
+    visibleTo: "Facilitator (mic check status and levels)",
+    dataClass: "pseudonymous",
+    frequency: "1 per seat (audio sessions only; more if failed checks are logged)",
+    payload: z.object({
+      passed: z
+        .boolean()
+        .describe(
+          "True if enough speech was heard above the background noise; the mic check step is then done",
+        ),
+      attempts: z.number().int().min(1).max(100).describe("Attempts the player made, including the last one"),
+      durationMs: Ms("Time the mic check screen was open"),
+      settings: AudioSettingsSchema,
+      noiseFloorDb: Dbfs("Background level measured before the player spoke"),
+      speechDb: Dbfs("Level of the player's speech"),
+      speechMs: Ms("Speech heard"),
+    }),
+    example: {
+      passed: true,
+      attempts: 1,
+      durationMs: 14250,
+      settings: EXAMPLE_SETTINGS,
+      noiseFloorDb: -58.2,
+      speechDb: -21.7,
+      speechMs: 2840,
+    },
+  }),
+
+  MicCheckSkipped: defineRecord({
+    summary:
+      "The facilitator skipped a seat's mic check: the player continues onboarding, but the seat is NOT recorded.",
+    trigger:
+      "Facilitator clicks 'Skip mic check' for a seat (e.g. no working microphone); the seat's recording stops.",
+    actors: ["facilitator"],
+    changesState: true,
+    visibleTo: "Facilitator; the player moves on to the next onboarding step",
+    dataClass: "pseudonymous",
+    frequency: "rare (audio sessions only)",
+    payload: z.object({
+      seat: SeatSchema,
+      reason: z
+        .string()
+        .max(200)
+        .describe("Facilitator's reason, e.g. 'no working microphone' (free text, no personal data)"),
+    }),
+    example: { seat: 3, reason: "no working microphone" },
   }),
 
   DemographicsSubmitted: defineRecord({
@@ -336,6 +411,196 @@ export const EVENT_DEFS = {
       reason: z.string().describe("Socket.IO disconnect reason, e.g. 'transport close'"),
     }),
     example: { seat: 2, reason: "transport close" },
+  }),
+
+  AudioTrackStarted: defineRecord({
+    summary:
+      "A seat's browser started a new audio track: one continuous capture run of its microphone, uploaded in 5 s chunks of 16 kHz mono audio.",
+    trigger:
+      "Recording (re)starts for a seat: at its mic check, after the facilitator resumes recording, after a reconnect or page reload, or when the microphone comes back after a permission or device loss.",
+    actors: ["player"],
+    changesState: false,
+    visibleTo: "Facilitator (LIVE mic column)",
+    dataClass: "pseudonymous",
+    frequency: "1 per seat, plus 1 per reconnect, reload and recording pause (audio sessions only)",
+    payload: z.object({
+      trackId: TrackId,
+      sampleRate: z
+        .literal(AUDIO_SAMPLE_RATE)
+        .describe("Sample rate of the uploaded audio (Hz; always 16 000)"),
+      settings: AudioSettingsSchema,
+      reason: AudioStartReasonSchema,
+    }),
+    example: {
+      trackId: EXAMPLE_TRACK_ID,
+      sampleRate: AUDIO_SAMPLE_RATE,
+      settings: EXAMPLE_SETTINGS,
+      reason: "mic_check",
+    },
+  }),
+
+  AudioTrackStopped: defineRecord({
+    summary:
+      "A seat's audio track ended. The audio itself is stored separately, encrypted (never in the event log).",
+    trigger:
+      "The browser stops capturing (recording paused, game complete, page unload, microphone lost, capture error), or the server closes the track (disconnect, withdrawal, session closed or aborted).",
+    actors: ["player", "system"],
+    changesState: false,
+    visibleTo: "Facilitator (LIVE mic column)",
+    dataClass: "pseudonymous",
+    frequency: "1 per AudioTrackStarted",
+    payload: z.object({
+      trackId: TrackId,
+      reason: AudioStopReasonSchema,
+      samples: z
+        .number()
+        .int()
+        .min(0)
+        .describe("Samples the server stored for this track (16 000 per second)"),
+      chunks: z.number().int().min(0).describe("Chunks the server stored for this track"),
+      droppedChunks: z
+        .number()
+        .int()
+        .min(0)
+        .describe(
+          "Chunks the browser had to drop (e.g. its in-memory resend queue overflowed during a long disconnect); their audio is missing",
+        ),
+    }),
+    example: {
+      trackId: EXAMPLE_TRACK_ID,
+      reason: "paused",
+      samples: 9_600_000,
+      chunks: 120,
+      droppedChunks: 0,
+    },
+  }),
+
+  CalibrationStarted: defineRecord({
+    summary:
+      "The calibration started: each seat in turn reads a sentence aloud while the others stay quiet, which measures how much each voice leaks into the other microphones.",
+    trigger:
+      "Facilitator clicks 'Start calibration' (or 'Redo calibration') in the NEXT panel once every seat is ready (sessions that record audio).",
+    actors: ["facilitator"],
+    changesState: true,
+    visibleTo: "Everyone (players see whose turn it is)",
+    dataClass: "non-personal",
+    frequency: "0–1 per session, plus 1 per redo (audio sessions only)",
+    payload: z
+      .object({
+        order: z.array(SeatSchema).min(1).describe("Seats in turn order"),
+        sentenceIds: z
+          .array(SentenceId)
+          .min(1)
+          .describe("Sentence each turn reads (ids from config/audio.json), parallel to order"),
+        turnMs: Ms("Length of one seat's turn"),
+        gapMs: Ms("Silence between two turns"),
+      })
+      .refine((p) => p.sentenceIds.length === p.order.length, {
+        message: "sentenceIds must have one entry per seat in order",
+      }),
+    example: {
+      order: [1, 2, 3, 4],
+      sentenceIds: ["h01-01", "h01-02", "h01-03", "h01-04"],
+      turnMs: 6000,
+      gapMs: 1000,
+    },
+  }),
+
+  CalibrationTurn: defineRecord({
+    summary:
+      "A seat's calibration turn began (the event's serverTs is the start of the turn): that seat reads its sentence aloud, the others stay quiet.",
+    trigger:
+      "Server timer during the calibration: right after CalibrationStarted, then every turnMs + gapMs.",
+    actors: ["system"],
+    changesState: true,
+    visibleTo: "Everyone (only the seat whose turn it is sees the sentence)",
+    dataClass: "pseudonymous",
+    frequency: "1 per seat per calibration",
+    payload: z.object({
+      index: z.number().int().min(0).describe("Position of the turn in the order (0-based)"),
+      seat: SeatSchema.describe("Seat whose turn it is"),
+      sentenceId: SentenceId,
+    }),
+    example: { index: 2, seat: 3, sentenceId: "h01-03" },
+  }),
+
+  CalibrationCompleted: defineRecord({
+    summary:
+      "Every calibration turn has run; the turn windows are used to measure the leakage between microphones.",
+    trigger: "Server timer, at the end of the last turn.",
+    actors: ["system"],
+    changesState: true,
+    visibleTo: "Everyone",
+    dataClass: "non-personal",
+    frequency: "0–1 per calibration",
+    payload: z.object({
+      turns: z
+        .array(
+          z.object({
+            seat: SeatSchema,
+            sentenceId: SentenceId,
+            startTs: z.number().describe("Start of the turn (server clock, Unix epoch ms)"),
+            endTs: z.number().describe("End of the turn (server clock, Unix epoch ms)"),
+          }),
+        )
+        .describe("Every turn with its window, in order"),
+    }),
+    example: {
+      turns: [
+        { seat: 1, sentenceId: "h01-01", startTs: 1794825979000.4, endTs: 1794825985000.4 },
+        { seat: 2, sentenceId: "h01-02", startTs: 1794825986000.9, endTs: 1794825992000.9 },
+      ],
+    },
+  }),
+
+  CalibrationChecked: defineRecord({
+    summary:
+      "Quick quality check of the calibration: per seat, how much louder its own voice was on its own microphone than on the loudest other one.",
+    trigger: "Server, right after CalibrationCompleted, from the audio of the calibration turns.",
+    actors: ["system"],
+    changesState: true,
+    visibleTo: "Facilitator (LIVE: per-seat margins and advice, e.g. 'move closer or use a headset')",
+    dataClass: "pseudonymous",
+    frequency: "1 per CalibrationCompleted",
+    payload: z.object({
+      perSeat: z
+        .array(
+          z.object({
+            seat: SeatSchema,
+            ownDb: Dbfs("Level of the seat's voice on its own mic during its turn").nullable(),
+            bestOtherDb: Dbfs("Loudest level of that voice on another seat's mic").nullable(),
+            marginDb: z
+              .number()
+              .nullable()
+              .describe("ownDb − bestOtherDb (dB); null when the seat's audio is missing"),
+            ok: z.boolean().describe("True if the margin is large enough to tell this seat's speech apart"),
+          }),
+        )
+        .describe("Result per seat"),
+      ok: z.boolean().describe("True if every seat passed"),
+    }),
+    example: {
+      perSeat: [
+        { seat: 1, ownDb: -22.4, bestOtherDb: -38.9, marginDb: 16.5, ok: true },
+        { seat: 3, ownDb: -30.1, bestOtherDb: -34.2, marginDb: 4.1, ok: false },
+      ],
+      ok: false,
+    },
+  }),
+
+  CalibrationSkipped: defineRecord({
+    summary:
+      "The facilitator skipped (or cancelled) the calibration; speaker attribution then estimates the leakage between microphones from the recordings.",
+    trigger: "Facilitator clicks 'Skip calibration' and confirms.",
+    actors: ["facilitator"],
+    changesState: true,
+    visibleTo: "Everyone",
+    dataClass: "non-personal",
+    frequency: "0–1 per session (audio sessions only)",
+    payload: z.object({
+      reason: z.string().max(200).describe("Facilitator's reason (free text, no personal data)"),
+    }),
+    example: { reason: "everyone uses a headset" },
   }),
 
   RoundStarted: defineRecord({
@@ -545,6 +810,37 @@ export const EVENT_DEFS = {
     frequency: "0–n",
     payload: z.object({ pausedMs: Ms("Length of the pause") }),
     example: { pausedMs: 45000 },
+  }),
+
+  RecordingPaused: defineRecord({
+    summary:
+      "The facilitator paused audio recording for every seat (players cannot mute themselves). The game itself goes on.",
+    trigger: "Facilitator clicks 'Pause recording' in TOOLS and confirms; every seat's track stops.",
+    actors: ["facilitator"],
+    changesState: true,
+    visibleTo: "Everyone (players see that recording is paused)",
+    dataClass: "non-personal",
+    frequency: "0–n (audio sessions only)",
+    payload: z.object({
+      reason: z
+        .string()
+        .max(200)
+        .optional()
+        .describe("Facilitator's reason, e.g. 'private conversation' (free text, no personal data)"),
+    }),
+    example: { reason: "break" },
+  }),
+
+  RecordingResumed: defineRecord({
+    summary: "The facilitator resumed audio recording; every recorded seat starts a new track.",
+    trigger: "Facilitator clicks 'Resume recording' in TOOLS.",
+    actors: ["facilitator"],
+    changesState: true,
+    visibleTo: "Everyone",
+    dataClass: "non-personal",
+    frequency: "1 per RecordingPaused",
+    payload: z.object({}),
+    example: {},
   }),
 
   FacilitatorBroadcast: defineRecord({

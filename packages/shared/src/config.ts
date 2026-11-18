@@ -122,6 +122,9 @@ export const FakePaceSchema = z
 
 /* ─────────────────────────── Session config ─────────────────────────── */
 
+/** Audio recording is off unless a session switches it on (setup step 04). */
+export const AUDIO_CONFIG_DEFAULTS = { enabled: false, requireCalibration: true };
+
 export const MAX_TAGS = 20;
 export const MAX_TAG_LENGTH = 40;
 
@@ -193,6 +196,23 @@ export const SessionConfigSchema = z
       })
       .default({ consent: true, demographics: true, briefing: true })
       .describe("Onboarding steps each player completes before round 1"),
+    audio: z
+      .object({
+        enabled: z
+          .boolean()
+          .default(false)
+          .describe(
+            "Record each participant's microphone, from their mic check (an onboarding step after consent) until the game is complete. Needs the consent step with the audio consent item, and HTTPS; never used for simulated sessions or fake players",
+          ),
+        requireCalibration: z
+          .boolean()
+          .default(true)
+          .describe(
+            "With audio on: round 1 can start only once the calibration (each seat reads a sentence aloud in turn while the others stay quiet) is done or skipped",
+          ),
+      })
+      .default(AUDIO_CONFIG_DEFAULTS)
+      .describe("Microphone recording (research data: see DATA-MANAGEMENT.md)"),
     visibility: z
       .object({
         showActorToPlayers: z
@@ -223,6 +243,11 @@ export const SessionConfigSchema = z
       .describe(
         "Researcher-entered session tags, e.g. ['pilot', 'condition-A'] (entered comma-separated; no personal data)",
       ),
+  })
+  // nobody may be recorded without consent: a session that records audio must ask for it
+  .refine((c) => !c.audio.enabled || c.players === "simulated" || c.onboarding.consent, {
+    message: "Recording audio needs the consent step (onboarding.consent)",
+    path: ["audio", "enabled"],
   })
   .describe("Session configuration (stored verbatim in SessionCreated)");
 
@@ -269,8 +294,9 @@ export function parseSessionConfig(input: unknown): SessionConfig {
 
 /**
  * What a simulated session actually runs with: no onboarding (agents cannot
- * consent or answer questionnaires) and no pause on disconnect (agents never
- * disconnect). A no-op for real sessions.
+ * consent or answer questionnaires), no pause on disconnect (agents never
+ * disconnect) and no audio (agents have no microphone). A no-op for real
+ * sessions.
  */
 export function normaliseForPlayers(config: SessionConfig): SessionConfig {
   if (config.players !== "simulated") return config;
@@ -278,6 +304,7 @@ export function normaliseForPlayers(config: SessionConfig): SessionConfig {
     ...config,
     onboarding: { consent: false, demographics: false, briefing: false },
     pauseOnDisconnect: false,
+    audio: { ...config.audio, enabled: false },
   };
 }
 
@@ -307,7 +334,12 @@ export const ConsentItemSchema = z.object({
     .describe("Stable id of the consent statement"),
   text: z.string().describe("Statement the participant ticks"),
   required: z.boolean().default(true).describe("Participation is impossible without this item"),
+  when: z
+    .enum(["audio"])
+    .optional()
+    .describe("Shown only when the session records audio ('audio'); absent = always shown"),
 });
+export type ConsentItem = z.infer<typeof ConsentItemSchema>;
 
 export const ConsentFormSchema = z.object({
   version: z.string().describe("Version of the consent form; bump whenever the text changes"),
@@ -329,8 +361,110 @@ export const DemographicsFormSchema = z.object({
 });
 export type DemographicsForm = z.infer<typeof DemographicsFormSchema>;
 
+/**
+ * Compose the consent text and items for one session. Markdown between
+ * `<!-- if audio -->` and `<!-- end if -->` is kept (markers stripped) when the
+ * session records audio and removed when it does not; items with
+ * `when: "audio"` are dropped when it does not. Pure and deterministic, so the
+ * hash of the composed text identifies exactly what a participant saw.
+ *
+ * Throws on a marker it cannot pair (a missing or misspelled `<!-- end if -->`,
+ * a nested block, an unknown condition), so audio-only text never leaks into
+ * a session without audio.
+ */
+export function composeConsent<I extends { when?: "audio" | undefined }>(
+  consent: { markdown: string; items: readonly I[] },
+  opts: { audio: boolean },
+): { markdown: string; items: I[] } {
+  return {
+    markdown: composeConditionalMarkdown(consent.markdown, opts.audio),
+    items: consent.items.filter((i) => opts.audio || i.when !== "audio"),
+  };
+}
+
+const AUDIO_BLOCK = /<!--\s*if\s+audio\s*-->([\s\S]*?)<!--\s*end\s*if\s*-->/gi;
+/** Any condition marker left after composing means the text was not written as intended. */
+const STRAY_MARKER = /<!--\s*(?:if\b|end\s*if\b)/i;
+
+function composeConditionalMarkdown(md: string, audio: boolean): string {
+  const composed = composeBlocks(md, audio);
+  const stray = STRAY_MARKER.exec(composed);
+  if (stray) {
+    const line = composed.slice(0, stray.index).split("\n").length;
+    throw new Error(
+      `Consent text: unmatched or unknown condition marker near line ${line} (use '<!-- if audio -->' … '<!-- end if -->', not nested)`,
+    );
+  }
+  return composed;
+}
+
+function composeBlocks(md: string, audio: boolean): string {
+  let out = "";
+  let last = 0;
+  for (const m of md.matchAll(AUDIO_BLOCK)) {
+    out += md.slice(last, m.index);
+    last = m.index + m[0].length;
+    if (audio) {
+      // keep the content; a block written on lines of its own loses the line breaks next to its markers
+      out += (m[1] ?? "").replace(/^[ \t]*\r?\n/, "").replace(/\r?\n[ \t]*$/, "");
+      continue;
+    }
+    // removed: a block on lines of its own also takes its line break, and one of the blank lines around it
+    if (out === "" || out.endsWith("\n")) {
+      const eol = /^[ \t]*\r?\n/.exec(md.slice(last));
+      if (eol) last += eol[0].length;
+      if (out === "" || /\n[ \t]*\r?\n$/.test(out)) {
+        const blank = /^[ \t]*\r?\n/.exec(md.slice(last));
+        if (blank) last += blank[0].length;
+      }
+    }
+  }
+  return out + md.slice(last);
+}
+
 /** Value every demographic question must offer. */
 export const PREFER_NOT_TO_SAY = "prefer_not_to_say";
+
+/** Texts and timings of the audio steps (`config/audio.json`), used when a session records audio. */
+export const AudioContentSchema = z.object({
+  micCheck: z
+    .object({
+      phrase: z.string().min(1).max(300).describe("Sentence each player reads aloud during their mic check"),
+      minSpeechMs: z
+        .number()
+        .int()
+        .min(200)
+        .max(30_000)
+        .default(1000)
+        .describe("Speech the mic check must hear before it passes (ms)"),
+    })
+    .describe("Each player's own mic check (onboarding step after consent)"),
+  calibration: z
+    .object({
+      sentences: z
+        .array(
+          z.object({
+            id: z
+              .string()
+              .regex(/^[a-z0-9_-]+$/)
+              .max(40)
+              .describe("Stable id of the sentence (logged in CalibrationStarted / CalibrationTurn)"),
+            text: z.string().min(1).max(300).describe("Sentence a seat reads aloud in its calibration turn"),
+          }),
+        )
+        .min(4)
+        .refine((list) => new Set(list.map((s) => s.id)).size === list.length, {
+          message: "Calibration sentence ids must be unique",
+        })
+        .describe("Sentences for the calibration turns (at least one per seat)"),
+      turnMs: z.number().int().min(2000).max(30_000).default(6000).describe("Length of one seat's turn (ms)"),
+      gapMs: z.number().int().min(0).max(10_000).default(1000).describe("Silence between two turns (ms)"),
+    })
+    .describe(
+      "Facilitator-led calibration: each seat in turn reads a sentence while the others stay quiet (gives the leakage between microphones)",
+    ),
+});
+export type AudioContent = z.infer<typeof AudioContentSchema>;
 
 /** Content shown to players during onboarding (sent inside their projection). */
 export const OnboardingContentSchema = z.object({
@@ -343,5 +477,8 @@ export const OnboardingContentSchema = z.object({
   }),
   demographics: DemographicsFormSchema,
   briefing: z.object({ markdown: z.string(), sha256: z.string() }),
+  audio: AudioContentSchema.optional().describe(
+    "Mic check and calibration texts (sessions that record audio)",
+  ),
 });
 export type OnboardingContent = z.infer<typeof OnboardingContentSchema>;
