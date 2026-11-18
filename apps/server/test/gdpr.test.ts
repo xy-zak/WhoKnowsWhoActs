@@ -262,6 +262,14 @@ describe("public repository safety", () => {
       "wkwa.db-wal",
       "some/where/players.csv",
       ".env",
+      // audio: encrypted recordings, backup copies of the audio folder, decrypted or exported sound
+      "data/audio/S-20261116-AAAA/0123456789abcdef0123456789abcdef.wka",
+      "backups/wkwa.db.audio/S-20261116-AAAA/0123456789abcdef0123456789abcdef.wka",
+      "seat1.wav",
+      "some/where/recording.webm",
+      "clip.ogg",
+      "clip.opus",
+      "clip.flac",
     ];
     const out = execFileSync("git", ["check-ignore", ...paths], { cwd: REPO_ROOT })
       .toString()
