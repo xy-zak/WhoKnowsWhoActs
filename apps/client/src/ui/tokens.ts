@@ -160,13 +160,13 @@ const DEFS: Array<{
   },
   {
     token: "live",
-    role: "LIVE indicator, success, connected — nothing else",
+    role: "LIVE indicator, success, connected, microphone recording — nothing else",
     value: (t) => accent(t, "green"),
     source: (t) => (t === "latte" ? "green −25%" : "green"),
   },
   {
     token: "warn",
-    role: "Warnings, attention needed (paused, idle, waiting)",
+    role: "Warnings, attention needed (paused, idle, waiting, no mic signal)",
     value: (t) => accent(t, "peach"),
     source: (t) => (t === "latte" ? "peach −30%" : "peach"),
   },
@@ -366,6 +366,9 @@ export const CONTRAST_PAIRS: Array<[string, string, number]> = [
   ["live", "panel", 4.5],
   ["warn", "panel", 4.5],
   ["danger", "panel", 4.5],
+  // empty level-meter / progress cells: a graphic that shows the scale (≥ 3:1)
+  ["faint", "panel", 3],
+  ["faint", "sunken", 3],
   ["focus", "panel", 3],
   ["review", "panel", 4.5],
   ["review", "review-bg", 4.5],

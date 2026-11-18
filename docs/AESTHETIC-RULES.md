@@ -16,6 +16,7 @@ Implementation: `apps/client/src/ui/`. That folder holds the tokens, base styles
 6. [Panels](#6-panels)
 7. [Popups, confirmations and toasts](#7-popups-confirmations-and-toasts)
 8. [Order of events and wayfinding](#8-order-of-events-and-wayfinding)
+   - [8.1 Audio indicators](#81-audio-indicators)
 9. [Motion and animations](#9-motion-and-animations)
 10. [Keyboard](#10-keyboard)
 11. [Checklist for new UI](#11-checklist-for-new-ui)
@@ -56,8 +57,8 @@ The table below is generated from `apps/client/src/ui/tokens.ts`.
 | `--muted` | Secondary text, labels, metadata | `#5c5f77 (subtext1)` | `#a6adc8 (subtext0)` | `#e6e6e6` |
 | `--faint` | Placeholders, disabled text, brackets | `#7c7f93 (overlay2)` | `#7f849c (overlay1)` | `#b3b3b3` |
 | `--primary` | The primary action of a view; links; current step | `#1b5cdd (blue −10%)` | `#89b4fa (blue)` | `#5cc8ff` |
-| `--live` | LIVE indicator, success, connected — nothing else | `#307820 (green −25%)` | `#a6e3a1 (green)` | `#4cf08a` |
-| `--warn` | Warnings, attention needed (paused, idle, waiting) | `#b24608 (peach −30%)` | `#fab387 (peach)` | `#ffb84d` |
+| `--live` | LIVE indicator, success, connected, microphone recording — nothing else | `#307820 (green −25%)` | `#a6e3a1 (green)` | `#4cf08a` |
+| `--warn` | Warnings, attention needed (paused, idle, waiting, no mic signal) | `#b24608 (peach −30%)` | `#fab387 (peach)` | `#ffb84d` |
 | `--danger` | Destructive actions and errors (always with an icon) | `#c80e36 (red −5%)` | `#f38ba8 (red)` | `#ff7070` |
 | `--focus` | Keyboard focus ring, selection outline | `#8136e3 (mauve −5%)` | `#cba6f7 (mauve)` | `#ff5cff` |
 | `--review` | The two setup commit points: 06 review & create, 10 start onboarding — nothing else | `#505fb1 (lavender −30%)` | `#b4befe (lavender)` | `#d2b4ff` |
@@ -101,8 +102,8 @@ The table below is generated from `apps/client/src/ui/tokens.ts`.
 | Colour token | Means | Never use it for |
 | --- | --- | --- |
 | `--primary` (blue) | The primary action of a view, the current step, links | Status, decoration |
-| `--live` (green) | LIVE indicator, success, connected, step done | Anything that is not "running / OK" |
-| `--warn` (peach) | Needs attention: paused, idle, waiting, unfocused | Errors |
+| `--live` (green) | LIVE indicator, success, connected, step done, microphone recording (`[REC]`, § 8.1) | Anything that is not "running / OK" |
+| `--warn` (peach) | Needs attention: paused, idle, waiting, unfocused, no mic signal, a level too quiet or clipping | Errors |
 | `--danger` (red) | Destructive actions and errors, **always with an icon** | Emphasis |
 | `--focus` (mauve) | Keyboard focus ring, the selected map square, the dashed outline of the sub-square a tool would act on | Anything else |
 | `--review` / `--review-bg` (lavender) | The two **commit points** of setup: 06 review (everything is checked before the irreversible *Create session*) and 10 start onboarding (locks the seats and goes LIVE) | Anything else |
@@ -133,6 +134,8 @@ Every pair that carries text or UI meaning is checked automatically (`apps/clien
 | `--live` | `--panel` | 4.5:1 | 4.84:1 | 11.03:1 | 14.14:1 |
 | `--warn` | `--panel` | 4.5:1 | 4.92:1 | 9.27:1 | 12.22:1 |
 | `--danger` | `--panel` | 4.5:1 | 5.20:1 | 7.08:1 | 7.80:1 |
+| `--faint` | `--panel` | 3:1 | 3.49:1 | 4.44:1 | 10.02:1 |
+| `--faint` | `--sunken` | 3:1 | 3.25:1 | 4.75:1 | 8.79:1 |
 | `--focus` | `--panel` | 3:1 | 5.20:1 | 8.07:1 | 8.23:1 |
 | `--review` | `--panel` | 4.5:1 | 5.14:1 | 9.17:1 | 11.71:1 |
 | `--review` | `--review-bg` | 4.5:1 | 4.68:1 | 7.74:1 | 10.20:1 |
@@ -252,6 +255,11 @@ The sizes below are the **Small** (default) text size. **Large** steps every tok
 | `timeline` | `Timer` | Timeline, round timer |
 | `telemetry` | `Activity` | Live telemetry |
 | `clock` | `Clock` | Session clock |
+| `microphone` | `Microphone` | Microphone being recorded ([REC]), mic OK |
+| `microphoneOff` | `MicrophoneMute` | Not recording: recording paused, audio off, mic skipped |
+| `microphoneWarning` | `MicrophoneWarning` | Microphone problem: no signal, permission denied, error |
+| `voice` | `Voice` | Mic calibration, a seat's speaking turn |
+| `upload` | `CloudUpload` | Audio upload backlog (recorded chunks not yet on the server) |
 | `export` | `DatabaseExport` | Export a session |
 | `anonymise` | `Fingerprint` | Anonymised export |
 | `print` | `Printer` | Print a page |
@@ -346,6 +354,44 @@ Use a panel, not a popup, for anything that should stay visible while working. *
 - **Fake players** (test clients in a real session) are marked the same way: a neutral **`[FAKE]`** tag with the *fake* icon (test tube) on their seat, in the mirrors and the bind step, **`[FAKE PLAYERS ×N]`** in the top bar, and `fake ×N` on the session in DATABASE.
 - **Sub-tabs** inside a page (DATABASE: *Participants* | *Simulations*) use the same `tab` style as the top bar, in a `subtabs` row under it.
 
+### 8.1 Audio indicators
+
+When a session records audio, each participant's microphone is recorded from the mic check until the game is complete. Players have **no mute**: the facilitator can pause recording for everyone. So the recording state must always be visible, to the player and to the facilitator, and must never look like an error. Components: `RecTag`, `LevelMeter` and `RecordingBanner` in `ui/audio.tsx`; their states and maths are in `ui/audioMeta.ts` (unit-tested).
+
+**Recording states** (`RecTag`, `compact` for table cells; its hover helper always gives the full meaning):
+
+| State | Tag (compact) | Tone | Icon |
+| --- | --- | --- | --- |
+| Recording | `[REC]` | `--live` | `microphone` |
+| Paused by the facilitator (for everyone) | `[PAUSED]` | `--warn` | `microphoneOff` |
+| No signal: silent for a long time, or the device disappeared | `[NO SIGNAL]` (`[NO SIG]`) | `--warn` | `microphoneWarning` |
+| Asking for permission | `[ASKING…]` | `--warn` | `idle` |
+| Permission denied | `[MIC DENIED]` (`[DENIED]`) | `--danger` | `microphoneWarning` |
+| Error (microphone or recorder failed) | `[MIC ERROR]` (`[ERROR]`) | `--danger` | `microphoneWarning` |
+| Not recording: audio off, fake or simulated player | `[NOT RECORDING]` (`[OFF]`) | neutral | `microphoneOff` |
+| Mic skipped by the facilitator | `[MIC SKIPPED]` (`[SKIPPED]`) | neutral | `microphoneOff` |
+
+- **Recording is not red.** `--danger` means destructive actions and errors (§ 2.2), and recording is neither: it is the normal, running state, so it uses `--live`. A red REC dot would tell participants that something is wrong, and would make real errors (`[MIC DENIED]`, `[MIC ERROR]`) harder to spot.
+- Only *recording* uses the `microphone` icon; every other state uses a crossed-out or warning microphone (or the hourglass while asking), so the state never depends on colour alone.
+- **Static.** No pulsing or blinking REC dot, and no flicker when the state changes (§ 9).
+
+**Level meter** (`LevelMeter`): `▮▮▮▮▮▮▮▯▯▯▯▯ −24 dB`, 12 cells over −60…0 dBFS (8 cells when `compact`), filled and hollow like `AsciiProgress`. The cells are drawn in CSS in the shape of ▮ / ▯, sized in `em`: none of the bundled fonts has these glyphs, and the fallback glyphs differ by system and font (they are tiny in OpenDyslexic), so the meter looks and measures the same in every font and text size.
+
+- Neutral (text ink) normally. **Warn** when too quiet (below −50 dBFS), with `[TOO QUIET]`, or clipping (a peak at or above −1 dBFS), with `[CLIPPING]`. Compact meters show no hint tag; their hover helper says what the warn colour means. **Never red**: a level is not an error.
+- Where silence is normal (the facilitator's seats, while others talk), switch the quiet warning off (`quietDb={null}`); a seat that stays silent for a long time is shown by `[NO SIGNAL]` instead.
+- A bright hollow cell above the level is the recent peak. No level yet reads `— dB`.
+- **Instant.** The meter redraws on every level update, with no CSS transition, easing or animation (§ 9). The dB number has a fixed width and the hint tag has its room reserved, so nothing shifts while the level changes.
+- It is a `role="meter"` with `aria-valuemin`, `aria-valuemax`, `aria-valuenow` and an `aria-label`; the hint is in `aria-valuetext`.
+
+**Where they appear:**
+
+| Where | What |
+| --- | --- |
+| Player chrome (onboarding and game) | `RecordingBanner`: a slim, non-dismissable line, e.g. `[REC] Your microphone is being recorded` or `[PAUSED] Recording paused by the facilitator` |
+| Player mic check | `LevelMeter` plus the `RecTag` while asking for permission, and its result |
+| Facilitator LIVE seats | `RecTag compact` and `LevelMeter compact quietDb={null}` per seat; `upload` icon for an upload backlog; `voice` for calibration turns |
+| Facilitator DATABASE | The audio column and the per-seat audio popup: the same tags and icons (e.g. `[MIC SKIPPED]` for a seat with no audio), never a red tone for audio that was simply not recorded |
+
 ## 9. Motion and animations
 
 There are **no static CRT effects** (no scanlines, no glow or bloom). The CRT character lives only in **animations**, all in `apps/client/src/ui/crt.css` and gated by the *Animations* switch (`data-crt="on"` on `<html>`).
@@ -363,8 +409,8 @@ Ordinary UI motion that is **not** part of the CRT style: an accordion step fade
 
 **Rules:**
 
-- **Never animate data.** Maps, highlights, quotas, tables and timers update instantly, especially during a round. Only chrome animates.
-- Nothing loops: no blinking cursors, pulsing dots or flicker except the one-off state changes above. The block cursor `█` is static.
+- **Never animate data.** Maps, highlights, quotas, tables, timers and microphone level meters update instantly, especially during a round. Only chrome animates.
+- Nothing loops: no blinking cursors, pulsing dots (including a REC dot) or flicker except the one-off state changes above. The block cursor `█` is static.
 - **`prefers-reduced-motion: reduce` switches off every animation.**
 - Otherwise animations are a display setting of each screen (§ 2.1): the facilitator toggles them with `A` or the DISPLAY popup, each player in their DISPLAY panel. They are not recorded.
 
@@ -396,4 +442,5 @@ TUI-style single keys. They are ignored while typing in a field, while a popup i
 - [ ] Keyboard reachable; focus visible (`--focus`); icon-only buttons have a `title`.
 - [ ] Buttons whose effect isn't obvious from the label (exports, printables, deletions, game actions) get a hover/focus helper: `<Button tip="…">`.
 - [ ] Anything about a knowledge or power type uses its colour through `LabelTag` / `ActSwatch` (hatched = proposed, filled = decided), never a new colour.
+- [ ] Anything about microphone recording uses `RecTag` / `LevelMeter` / `RecordingBanner` (§ 8.1): recording is live, never red; meters are instant, nothing pulses.
 - [ ] Run `npm run docs:generate` if tokens or icons changed.
