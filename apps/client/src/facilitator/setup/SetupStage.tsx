@@ -52,6 +52,46 @@ import {
   setKeySheetConfirmed,
 } from "./draft";
 
+/** GET /api/server-info (the server's `ServerInfo`). */
+interface ServerInfo {
+  playerUrls: Array<{ url: string; iface: string }>;
+  port: number;
+  tls: {
+    enabled: boolean;
+    mode: "auto" | "provided" | "off";
+    fingerprintSha256: string | null;
+    sans: string[];
+    expires: string | null;
+  };
+}
+
+/** Step 07: what participants see when they open the HTTPS address, and the fingerprint to compare. */
+function TlsNote({ tls }: { tls: ServerInfo["tls"] }) {
+  if (!tls.enabled)
+    return (
+      <p className="hint">
+        HTTPS is off (<span className="mono">WKWA_TLS=off</span>): fine for tests, but browsers on other PCs
+        cannot use the microphone over plain HTTP.
+      </p>
+    );
+  return (
+    <p className="hint">
+      {tls.mode === "auto" ? (
+        <>
+          HTTPS with this laptop's own <strong>self-signed certificate</strong>: each browser shows a security
+          warning once; accept it (SESSION-RUNBOOK § 10).{" "}
+        </>
+      ) : (
+        "HTTPS with your own certificate (TLS_CERT). "
+      )}
+      Certificate SHA-256 fingerprint, to compare with the browser's:{" "}
+      <strong className="mono" style={{ overflowWrap: "anywhere" }}>
+        {tls.fingerprintSha256}
+      </strong>
+    </p>
+  );
+}
+
 /** The ten setup steps. 01–06 configure (no session yet); 07–10 prepare the created session (lobby). */
 export const SETUP_STEPS: Array<StepDef & { icon: IconName; title: string }> = [
   { key: "scenario", label: "Scenario", title: "Scenario", icon: "scenario" },
@@ -121,7 +161,8 @@ export function SetupStage({ conn }: { conn: FacilitatorConnection }) {
   const [step, setStep] = useState<number>(() => (lobby ? 6 : (loadDraft()?.reached ?? 0)));
   const [busy, setBusy] = useState(false);
   const [keySheet, setKeySheet] = useState(false);
-  const [urls, setUrls] = useState<Array<{ url: string; iface: string }>>([]);
+  const [info, setInfo] = useState<ServerInfo | null>(null);
+  const urls = info?.playerUrls ?? [];
   const stepRefs = useRef<Array<HTMLElement | null>>([]);
   const didMount = useRef(false);
   const wayRef = useRef<HTMLElement | null>(null);
@@ -145,10 +186,7 @@ export function SetupStage({ conn }: { conn: FacilitatorConnection }) {
 
   useEffect(() => {
     conn.api<ScenarioInfo[]>("/api/scenarios").then(setScenarios, () => {});
-    conn.api<{ playerUrls: Array<{ url: string; iface: string }> }>("/api/server-info").then(
-      (r) => setUrls(r.playerUrls),
-      () => {},
-    );
+    conn.api<ServerInfo>("/api/server-info").then(setInfo, () => {});
     if (!loadDraft()) {
       conn.api<SessionConfig>("/api/config/session-defaults").then(
         (def) => setDraftState((cur) => cur ?? emptyDraft(def)),
@@ -444,6 +482,7 @@ export function SetupStage({ conn }: { conn: FacilitatorConnection }) {
               in full-screen (F11). Each one appears here as a numbered <strong>client</strong>; bind each
               client to a seat.
             </Callout>
+            {info && <TlsNote tls={info.tls} />}
             <BindEditor conn={conn} dash={dash} />
           </div>
         ) : null;

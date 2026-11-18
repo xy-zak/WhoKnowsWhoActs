@@ -30,7 +30,7 @@ Related documents: [ARCHITECTURE.md](ARCHITECTURE.md), [DATA-MANAGEMENT.md](DATA
 - **Hub and spoke.** Players never talk to each other directly. Every message goes to the server, which validates it, records it and sends each recipient **its own projection** of the state.
 - **Low data rate.** The game is turn-based. A full player state is a few tens of kilobytes and is re-sent on every change. That is simpler and more robust than sending deltas, and amounts to well under 1 Mbit/s in total.
 - **Offline by design.** All assets are bundled with the app (no CDNs, no web fonts, no analytics), so the LAN does not need an internet connection, and it is recommended not to have one.
-- **Transport:** Socket.IO 4 (WebSocket, with HTTP long-polling as automatic fallback) on Fastify 5.
+- **Transport:** Socket.IO 4 (WebSocket, with HTTP long-polling as automatic fallback) on Fastify 5, over **HTTPS** with a certificate the server makes itself ([§ 11](#11-security-on-the-lan)). Browsers only allow the microphone on a secure page.
 
 ## 2. Physical topology
 
@@ -38,8 +38,8 @@ Related documents: [ARCHITECTURE.md](ARCHITECTURE.md), [DATA-MANAGEMENT.md](DATA
 flowchart TB
   INET(("Internet"))
   R["Dedicated router or switch<br/>own SSID or cables, DHCP<br/>no client isolation"]
-  L["Facilitator laptop<br/>server on 0.0.0.0:3000<br/>dashboard via localhost:3000/facilitator"]
-  P1["Player PC 1<br/>browser: http://LAPTOP-IP:3000"]
+  L["Facilitator laptop<br/>server on 0.0.0.0:3000 (HTTPS)<br/>dashboard via https://localhost:3000/facilitator"]
+  P1["Player PC 1<br/>browser: https://LAPTOP-IP:3000"]
   P2["Player PC 2<br/>browser"]
   P3["Player PC 3<br/>browser"]
   P4["Player PC 4<br/>browser"]
@@ -58,7 +58,7 @@ Recommendations:
 | Network | A **dedicated** small router or switch that you control | Venue and university Wi-Fi (e.g. eduroam) often isolates clients, so the PCs cannot reach the laptop. It also keeps research traffic off shared networks. |
 | Uplink | None (unplug the WAN port) | Nothing in the harness needs the internet; this removes a whole class of risk. |
 | Laptop connection | Ethernet cable | Stable, and keeps the laptop's IP address predictable. |
-| Laptop IP | Fixed or DHCP-reserved (e.g. `192.168.1.10`) | Player PCs can bookmark the URL. |
+| Laptop IP | Fixed or DHCP-reserved (e.g. `192.168.1.10`) | Player PCs can bookmark the URL, and the server's certificate stays the same, so browsers that accepted it once are not warned again ([§ 11](#11-security-on-the-lan)). |
 | Player PCs | Any modern browser (Chromium/Firefox/Edge), full-screen (F11), notifications off | Fewer distractions; focus and visibility telemetry stays meaningful. |
 
 ## 3. Logical topology: hub and spoke
@@ -91,23 +91,27 @@ There is **no player-to-player channel**. Even the "mark for all players" effect
 
 ## 4. Ports, interfaces and configuration
 
-The server binds to `HOST:PORT` (default `0.0.0.0:3000`, i.e. all interfaces). On start it prints the URLs of all non-internal IPv4 interfaces, e.g. `Players: http://192.168.1.10:3000`.
+The server binds to `HOST:PORT` (default `0.0.0.0:3000`, i.e. all interfaces) and speaks **HTTPS and secure WebSockets (WSS)** on that one port. On start it prints the URLs of all non-internal IPv4 interfaces, e.g. `https://192.168.1.10:3000/   (eth0)`, and the SHA-256 fingerprint of its certificate (see [§ 11](#11-security-on-the-lan)).
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `PORT` | `3000` | TCP port for HTTP and WebSocket |
+| `PORT` | `3000` | TCP port for HTTPS (or HTTP) and WebSocket |
 | `HOST` | `0.0.0.0` | Interface to bind. Set it to the LAN address to avoid exposing other interfaces. |
-| `WKWA_DATA_DIR` | `./data` | Encrypted database (`wkwa.db`) and logs (`logs/server.log`) |
+| `WKWA_DATA_DIR` | `./data` | Encrypted databases (`wkwa.db`, `wkwa-sim.db`), logs (`logs/server.log`) and the self-signed certificate (`tls/`) |
 | `WKWA_EXPORTS_DIR` | `./exports` | Export output folder |
 | `WKWA_DB_PASSPHRASE` | — | **Development and tests only.** On session day, type the passphrase at the hidden prompt instead. |
 | `ADMIN_TOKEN` | — | Enables remote facilitator access with a bearer token (otherwise the facilitator is localhost-only) |
-| `TLS_CERT`, `TLS_KEY` | — | Paths to a certificate and key; when both are set the server speaks HTTPS/WSS |
+| `WKWA_TLS` | `auto` | `auto`: HTTPS with a **self-signed certificate** the server makes and keeps in `data/tls/` ([§ 11](#11-security-on-the-lan)). **Required for sessions with audio**: browsers only allow the microphone on a secure page. `off`: plain HTTP. `npm run dev`, the Playwright server and the unit tests use `off`; they run on `localhost`/`127.0.0.1`, which browsers treat as secure anyway. |
+| `TLS_CERT`, `TLS_KEY` | — | Your own certificate and unencrypted key (PEM files), instead of the self-signed one. Set both or neither (one alone stops the server). When both are set they are used whatever `WKWA_TLS` says (mode `provided`). |
+| `HTTP_REDIRECT_PORT` | — | Optional second, plain-HTTP port that answers every request with `301` to `https://<same host>:PORT<same path>`, so that a typed `http://` address still arrives. E.g. `8080`, or `80` so players can type just `http://LAPTOP-IP` (port 80 needs administrator rights on Linux). Ignored when TLS is off. |
 
 | URL | Who |
 | --- | --- |
-| `http://LAPTOP-IP:3000/` | Player PCs |
-| `http://localhost:3000/facilitator` | Facilitator, on the laptop itself |
-| `http://localhost:3000/api/…` | Dashboard / scripts (see [§ 10](#10-rest-api)) |
+| `https://LAPTOP-IP:3000/` | Player PCs (each browser accepts the certificate warning once) |
+| `https://localhost:3000/facilitator` | Facilitator, on the laptop itself (accept the warning once there too) |
+| `https://localhost:3000/api/…` | Dashboard / scripts (see [§ 10](#10-rest-api)) |
+
+With `WKWA_TLS=off` the same URLs start with `http://`.
 
 ## 5. Connecting and binding a seat
 
@@ -334,7 +338,7 @@ Used by the dashboard's data pages and by scripts. **Localhost-only** unless `AD
 | `GET` | `/api/health` | Liveness check (no data) |
 | `GET` | `/api/scenarios` | Available scenarios |
 | `GET` | `/api/scenarios/:id` | Full scenario (board, all views and starting scores) for the setup preview |
-| `GET` | `/api/server-info` | Player URLs on this machine's LAN interfaces (setup step "Connect & bind") |
+| `GET` | `/api/server-info` | Player URLs on this machine's LAN interfaces (setup step "Connect & bind"), and `tls: { enabled, mode: "auto" \| "provided" \| "off", fingerprintSha256, sans, expires }` (see [§ 11](#11-security-on-the-lan)) |
 | `GET` | `/api/config/session-defaults` | Default session configuration for the setup form (`config/session.default.json`, validated) |
 | `GET` | `/api/sessions` | All sessions of both databases with status, newest first; `players` is `"real"` (participant database) or `"simulated"` (simulation database); `fakeSeats` lists seats played by fake players |
 | `GET` | `/api/sessions/:id` | One session (metadata + reduced state + `players`) |
@@ -362,20 +366,46 @@ Used by the dashboard's data pages and by scripts. **Localhost-only** unless `AD
 | A player reads other players' data via browser devtools | Not possible: the server never sends another view's content to a player (see [ARCHITECTURE.md § 8](ARCHITECTURE.md#8-projections-who-sees-what)). |
 | A player forges messages (e.g. acting for another seat) | The seat comes from the server-side socket binding, never from the payload. Every payload is schema-validated, and rules are enforced on the server. |
 | A browser pretends to be a fake player to skip consent | Not possible: a client is fake only if the server registered its terminal key before starting it. Nothing a client sends can set the flag. |
-| Eavesdropping on the LAN | Without TLS, traffic (game actions, consent and demographic answers, all pseudonymised) crosses the LAN **in plaintext**. Mitigate with a dedicated network you control, and/or enable TLS. |
+| Eavesdropping on the LAN | HTTPS is on by default (`WKWA_TLS=auto`), so game actions, consent and demographic answers (all pseudonymised) and any microphone audio are **encrypted** on the LAN. Only with `WKWA_TLS=off` do they cross it in plaintext; use that for development and tests on `localhost` only. |
+| A device on the LAN poses as the server (man in the middle) | The certificate is self-signed, so a browser cannot tell by itself that it is talking to the real laptop: it warns, and the participant accepts the warning. A rogue device would show a warning too, for a certificate with a **different fingerprint**. Controls: a dedicated network that only you control, the address taken from the facilitator, and the fingerprint compared in setup step 07 ([SESSION-RUNBOOK.md § 10](SESSION-RUNBOOK.md#10-https-and-the-certificate-warning)). |
+| Someone copies the certificate's private key | `data/tls/self-signed-key.pem` is readable only by the laptop user (mode `0600` on Linux and macOS), lives in the git-ignored `data/` folder, and is never sent anywhere. On Windows, and on FAT/exFAT drives, file modes do not apply: the key has the folder's permissions, so keep `data/` in your own user profile on a laptop no one else logs in to. Delete `data/tls/` to make a new key at the next start (participants then accept a new warning). |
 | Rogue devices on the network | Use WPA2/3 with a password only you know, or wired connections; switch off the router's WAN. |
 
-**Enabling TLS (optional).** Create a locally trusted certificate with [mkcert](https://github.com/FiloSottile/mkcert):
+**HTTPS with a self-signed certificate (default).** Browsers only give a page the microphone (`getUserMedia`) in a *secure context*: a page loaded over HTTPS, or from `localhost`. Player PCs open the server by its LAN address, so the server must speak HTTPS. A closed LAN has no internet and no public domain name, so no publicly trusted certificate is possible, and the participants' own laptops cannot have a local certificate authority (such as [mkcert](https://github.com/FiloSottile/mkcert)'s) installed beforehand. The server therefore makes its own certificate at start-up (`apps/server/src/tls.ts`, with the [`selfsigned`](https://www.npmjs.com/package/selfsigned) library; no `openssl` needed, so it works on every OS):
 
-```bash
-mkcert -install                                   # once, on the laptop
-mkcert -cert-file data/tls.pem -key-file data/tls-key.pem 192.168.1.10 localhost
-TLS_CERT=data/tls.pem TLS_KEY=data/tls-key.pem npm start
+| Property | Value |
+| --- | --- |
+| Key | ECDSA P-256, made on the laptop, never leaves it |
+| Validity | 397 days (from one day in the past, so a PC whose clock is slightly behind still accepts it) |
+| Extensions | `basicConstraints CA:false` (it cannot sign other certificates), `keyUsage digitalSignature`, `extKeyUsage serverAuth` |
+| Names (SANs) | DNS `localhost`, the laptop's host name and `<host name>.local`; IP `127.0.0.1`, `::1` and **every non-internal IPv4 address** of the laptop |
+| Files | `data/tls/self-signed-cert.pem`, `data/tls/self-signed-key.pem` (mode `0600`), and `data/tls/meta.json` (`sans`, `created`, `expires`, `fingerprintSha256`) |
+| Fingerprint | SHA-256 of the certificate, as `AB:CD:…` (32 pairs). Printed at start-up, shown in setup step 07 and returned by `GET /api/server-info`. Browsers show the same value in their certificate viewer (some with spaces instead of colons). |
+
+```mermaid
+flowchart TD
+  S["Server start"] --> P{"TLS_CERT and TLS_KEY set?"}
+  P -->|"yes"| PR["HTTPS with your certificate<br/>mode provided"]
+  P -->|"no"| O{"WKWA_TLS"}
+  O -->|"off"| H["Plain HTTP<br/>dev and tests only"]
+  O -->|"auto (default)"| E{"data/tls/ has a certificate<br/>and its matching key?"}
+  E -->|"no"| C["Make a new certificate<br/>(or a new one if the files are damaged)"]
+  E -->|"yes"| N{"Covers every current<br/>address and host name?"}
+  N -->|"no: the laptop is on another network"| R["Make a new certificate<br/>browsers warn again"]
+  N -->|"yes"| X{"Expires within 30 days?"}
+  X -->|"yes"| R
+  X -->|"no"| U["Reuse it<br/>accepted warnings stay accepted"]
 ```
 
-The player PCs must trust the mkcert root CA (`mkcert -CAROOT` shows where it is; import it into each browser or OS), or they will show a certificate warning. For a closed LAN with your own router, plain HTTP is usually an acceptable residual risk. Record the choice in your data management plan.
+The certificate is **reused across restarts**, so a browser that accepted it once is not warned again. Addresses that have gone away (e.g. Wi-Fi switched off) do not count: only a *new* address or host name, near expiry (or a certificate that is not valid yet because the clock was set back), or missing or damaged files make a new one. A new certificate keeps the names of the old one as well, so a laptop that moves between two networks (lab and home) settles on one certificate that covers both. Virtual network adapters count too (VPN, Docker, WSL or Hyper-V adapters): switch on the ones you need *before* the first start, because one that comes up with a new address later makes a new certificate. The start-up banner says which case applied, and names the missing addresses; the server log only records the case, never addresses or host names. Each new certificate has a new fingerprint and makes every browser warn once more, so keep the laptop's IP address fixed ([§ 2](#2-physical-topology)).
 
-**Firewall.** The laptop must accept incoming TCP connections on `PORT`:
+Each participant accepts the warning **once per browser**, talked through it by the facilitator: [SESSION-RUNBOOK.md § 10](SESSION-RUNBOOK.md#10-https-and-the-certificate-warning) has the steps for Chrome, Edge, Firefox and Safari. The facilitator accepts it once too, for `https://localhost:3000/facilitator`. Fake players and `npm run bots` connect to the server without checking its certificate: they are the server's own test clients, over loopback. For bots against another machine, `--insecure` must be given explicitly.
+
+**Your own certificate.** If you have a certificate the player PCs trust (for example from a university CA, or mkcert where you control the PCs), start with `TLS_CERT=… TLS_KEY=… npm start`. It takes precedence over `WKWA_TLS`, its fingerprint is shown in the same places, and the browsers show no warning.
+
+**Plain HTTP** (`WKWA_TLS=off`) is meant for development and tests on the laptop itself. Browsers on other PCs then have no microphone, and traffic crosses the LAN unencrypted. Record the TLS set-up in your data management plan.
+
+**Firewall.** The laptop must accept incoming TCP connections on `PORT` (and on `HTTP_REDIRECT_PORT`, if you set it):
 
 | OS | Command / action |
 | --- | --- |
@@ -389,9 +419,9 @@ The player PCs must trust the mkcert root CA (`mkcert -CAROOT` shows where it is
 - [ ] Router powered on, WAN unplugged, SSID/password known only to the research team
 - [ ] Laptop connected (cable) and has its expected IP (`ip addr` / `ipconfig`)
 - [ ] Firewall allows TCP `3000`
-- [ ] `npm start` → passphrase entered → server prints the player URL
-- [ ] Facilitator dashboard opens at `http://localhost:3000/facilitator`
-- [ ] Each player PC opens the player URL and shows **Client N**, and all 4 clients appear on the dashboard
+- [ ] `npm start` → passphrase entered → server prints the `https://` player URL and the certificate fingerprint (and *reusing* the certificate, if the laptop's address has not changed)
+- [ ] Facilitator dashboard opens at `https://localhost:3000/facilitator` (certificate warning accepted once)
+- [ ] Each player PC opens the player URL, accepts the certificate warning ([SESSION-RUNBOOK.md § 10](SESSION-RUNBOOK.md#10-https-and-the-certificate-warning)) and shows **Client N**, and all 4 clients appear on the dashboard
 - [ ] Optional: run `npm run bots -- --count 4` *before* participants arrive, for a full rehearsal on the real network
 - [ ] Player browsers in full-screen, notifications and screen savers off, power-saving sleep disabled
 
@@ -399,11 +429,20 @@ The player PCs must trust the mkcert root CA (`mkcert -CAROOT` shows where it is
 
 | Symptom | Likely cause | Fix |
 | --- | --- | --- |
-| Player PC: "This site can't be reached" | Wrong IP, firewall, or the server is bound to another interface | Check the URL printed by the server; open the firewall port; set `HOST=0.0.0.0` |
+| Player PC: "This site can't be reached" | Wrong IP, firewall, or the server is bound to another interface | Check the `https://` URL printed by the server; open the firewall port; set `HOST=0.0.0.0` |
 | Works on the laptop, not on PCs | Wi-Fi client isolation (common on venue/guest networks) | Use your own router; disable "AP/client isolation" |
 | Client never appears on the dashboard | Page loaded from a cached or old URL; JavaScript blocked | Hard-reload (Ctrl+Shift+R); check the browser console |
 | Two PCs show the same client number | Same browser profile synced or copied (identical `localStorage`) | Clear site data on one PC and reload |
 | Repeated "Reconnecting…" | Wi-Fi power saving, weak signal | Use cables; disable power saving on the network adapter |
 | Large `rttMs` / clock offset jumps on the dashboard | Congested Wi-Fi, PC under load | Move closer to the router or use cables; close other apps |
-| Facilitator page says "forbidden" | Opened from another machine without `ADMIN_TOKEN` | Open it on the laptop via `localhost`, or set `ADMIN_TOKEN` |
-| Certificate warning on player PCs | TLS enabled, but the mkcert CA is not trusted on that PC | Import the root CA, or disable TLS on a closed LAN |
+| Facilitator page says "forbidden" | Opened from another machine without `ADMIN_TOKEN` | Open it on the laptop via `https://localhost:3000/facilitator`, or set `ADMIN_TOKEN` |
+| "Your connection is not private" (Chrome, Edge), "Warning: Potential Security Risk Ahead" (Firefox), "This Connection Is Not Private" (Safari) | Expected: the server's certificate is self-signed | Accept it once per browser: [SESSION-RUNBOOK.md § 10](SESSION-RUNBOOK.md#10-https-and-the-certificate-warning). Compare the fingerprint with setup step 07 if in doubt. |
+| The warning is back on a PC that had accepted it | The server made a new certificate (new LAN address or host name, near expiry, or `data/tls/` deleted; the start-up banner says which), or another browser, profile or private window is used | Accept it again. Keep the laptop's IP address fixed (DHCP reservation) so the certificate stays the same. |
+| `NET::ERR_CERT_COMMON_NAME_INVALID` (Chrome, Edge) or `SSL_ERROR_BAD_CERT_DOMAIN` (Firefox) | The address in the URL is not in the certificate: the laptop got a new address while the server was running, or the page was opened by another name | Restart the server (it makes a certificate that covers the current addresses) and open one of the URLs it prints |
+| `NET::ERR_CERT_DATE_INVALID` | The PC's clock is more than a day off, or the certificate expired while the server kept running | Set the PC's clock right; restart the server |
+| "didn't send any data" (`ERR_EMPTY_RESPONSE`), "the connection was reset" or "the server unexpectedly dropped the connection" | The URL starts with `http://`, but the server speaks HTTPS on that port | Type `https://`. Or start the server with `HTTP_REDIRECT_PORT` (e.g. `80`) so plain-HTTP addresses are redirected. |
+| No "Proceed"/"Accept the risk" link on the warning page | The browser is managed (company or school policy forbids certificate exceptions) | Use another browser on that PC, or another device |
+| Safari: the page loads but stays on "Reconnecting…", or reacts slowly | Safari may refuse secure WebSockets to a self-signed server; Socket.IO then falls back to HTTP long-polling | Usually it still works, just more slowly. Otherwise use Chrome, Edge or Firefox on that Mac. |
+| Server stops at start with "Set both TLS_CERT and TLS_KEY" or "TLS_KEY does not belong…" | Only one of the two is set, or they are not a pair | Set both to a matching pair, or unset both to use the self-signed certificate |
+| Server stops at start with "WKWA_TLS must be…" or "HTTP_REDIRECT_PORT must be…" | A typo in the environment | Use `auto` or `off`, and a port number (the data CLI, `npm run cli`, still works meanwhile) |
+| A new certificate at every start, although the laptop stays on the same network | A virtual adapter (VPN, Docker, WSL, Hyper-V) gets a new address each time | Switch that adapter off before starting the server for sessions. The start-up banner names the address that was missing. |

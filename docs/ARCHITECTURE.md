@@ -500,7 +500,8 @@ Prefer fake players over bots for rehearsals: their data is marked, and no conse
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
-| `--url` | `http://localhost:3000` | Server to connect to |
+| `--url` | this laptop: `https://localhost:3000` if the server speaks HTTPS, else `http://` (port from `PORT`) | Server to connect to. Over HTTPS the bots accept the server's self-signed certificate without checking it. |
+| `--insecure` | off | Accept an unchecked (self-signed) certificate from a server on **another** machine; on this laptop (`localhost`, `127.0.0.1`, `[::1]`) it is accepted anyway |
 | `--count` | `3` | Number of simulated players |
 | `--delay` | `1500-5000` | Random pause between a bot's actions (ms, `min-max`) |
 | `--auto` | off | Also act as facilitator: create a session if none is attached, bind every client (bots **and** humans) to the next free seat, randomise labels, start onboarding and each round. **Never use during a real session.** |

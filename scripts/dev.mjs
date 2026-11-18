@@ -7,6 +7,11 @@ const env = {
   WKWA_DATA_DIR: process.env.WKWA_DATA_DIR ?? "data/dev",
   WKWA_DB_PASSPHRASE: process.env.WKWA_DB_PASSPHRASE ?? "dev-only-passphrase",
   HOST: process.env.HOST ?? "127.0.0.1",
+  // plain HTTP, always: Vite proxies to http://localhost:PORT, and localhost is a secure
+  // context (microphone allowed). A TLS_CERT/TLS_KEY left in the shell would break the proxy.
+  WKWA_TLS: "off",
+  TLS_CERT: "",
+  TLS_KEY: "",
 };
 
 const procs = [

@@ -30,8 +30,11 @@ export async function startTestServer(
     scenariosDir: path.join(REPO_ROOT, "scenarios"),
     clientDist: path.join(tmp, "no-client"),
     adminToken: null,
+    // plain HTTP unless a test asks for TLS: 127.0.0.1 is a secure context anyway
+    tlsMode: "off",
     tlsCert: null,
     tlsKey: null,
+    httpRedirectPort: null,
     logToStdout: false,
     logLevel: "info",
     ...overrides,
@@ -41,7 +44,7 @@ export async function startTestServer(
   const port = (ctx.app.server.address() as AddressInfo).port;
   return {
     ctx,
-    url: `http://127.0.0.1:${port}`,
+    url: `${ctx.tls.info.enabled ? "https" : "http"}://127.0.0.1:${port}`,
     dir: tmp,
     runtime,
     async close() {
@@ -61,14 +64,19 @@ export async function setupSession(
   n = 4,
   botOpts: Partial<ConstructorParameters<typeof Bot>[0]> = {},
 ) {
-  const fac = new FacilitatorClient(url);
+  // a test server with TLS on uses a self-signed certificate
+  const insecureTls = url.startsWith("https:");
+  const fac = new FacilitatorClient(url, undefined, { insecureTls });
   await fac.connected();
   const { sessionId } = await fac.cmd<{ sessionId: string }>("session:create", {
     scenarioId: "demo",
     config: { seatCount: n, ...config },
     notes: "integration test",
   });
-  const bots = Array.from({ length: n }, (_, i) => new Bot({ url, name: `bot${i + 1}`, ...botOpts }));
+  const bots = Array.from(
+    { length: n },
+    (_, i) => new Bot({ url, name: `bot${i + 1}`, insecureTls, ...botOpts }),
+  );
   const terminals = await Promise.all(bots.map((b) => b.waitForTerminal()));
   for (let i = 0; i < n; i++) await fac.cmd("seat:bind", { terminal: terminals[i], seat: i + 1 });
   await Promise.all(bots.map((b) => b.waitFor((v) => v.phase === "lobby")));

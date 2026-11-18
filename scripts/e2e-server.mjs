@@ -15,6 +15,10 @@ const child = spawn("npx", ["tsx", "apps/server/src/index.ts"], {
     WKWA_LOG_STDOUT: "0",
     HOST: "127.0.0.1",
     PORT: process.env.E2E_PORT ?? "3999",
+    // plain HTTP: the browsers open http://127.0.0.1, which is a secure context (microphone allowed)
+    WKWA_TLS: "off",
+    TLS_CERT: "",
+    TLS_KEY: "",
   },
 });
 const stop = () => child.kill("SIGTERM");

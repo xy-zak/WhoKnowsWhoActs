@@ -53,8 +53,9 @@ npm run build        # build the browser clients
 npm start            # asks for (or creates) the database passphrase
 ```
 
-- Facilitator manager: open `http://localhost:3000/facilitator` **on the server laptop**. The SETUP wizard opens automatically.
-- Players: open one of the `http://<laptop-ip>:3000/` URLs printed at start-up.
+- Facilitator manager: open `https://localhost:3000/facilitator` **on the server laptop**. The SETUP wizard opens automatically.
+- Players: open one of the `https://<laptop-ip>:3000/` URLs printed at start-up.
+- The server speaks HTTPS with a **self-signed certificate** it makes itself (browsers only allow the microphone on secure pages), so each browser shows a security warning **once**: accept it as described in [SESSION-RUNBOOK.md § 10](docs/SESSION-RUNBOOK.md#10-https-and-the-certificate-warning). The terminal and setup step 07 show the certificate's fingerprint to compare. `WKWA_TLS=off npm start` serves plain HTTP instead (for tests on the laptop itself).
 
 Try it alone: walk the SETUP wizard in the manager, and in step 07 click **Fill empty seats with fake players** after binding your own browser window to one seat. Alternatively, `npm run bots -- --count 4 --auto` plays a whole session by itself. Or choose **Simulated players** in setup step 03: agents fill every seat and play while you watch LIVE.
 
@@ -64,10 +65,10 @@ For real sessions, follow the **[session runbook](docs/SESSION-RUNBOOK.md)**.
 
 | Command | Purpose |
 | --- | --- |
-| `npm start` | Run the server (serves the built clients). Env: `PORT`, `HOST`, `WKWA_DATA_DIR`, `WKWA_EXPORTS_DIR`, `ADMIN_TOKEN`, `TLS_CERT`/`TLS_KEY` (see [NETWORKING.md](docs/NETWORKING.md)) |
+| `npm start` | Run the server (serves the built clients). Env: `PORT`, `HOST`, `WKWA_DATA_DIR`, `WKWA_EXPORTS_DIR`, `ADMIN_TOKEN`, `WKWA_TLS` (`auto`/`off`), `TLS_CERT`/`TLS_KEY`, `HTTP_REDIRECT_PORT` (see [NETWORKING.md § 4](docs/NETWORKING.md#4-ports-interfaces-and-configuration)) |
 | `npm run dev` | Development mode: server with auto-restart, plus Vite with hot reload on `http://localhost:5173` (separate dev database) |
 | `npm run build` | Build the player and facilitator clients |
-| `npm run bots -- [--count N] [--auto]` | External test players that connect like browsers (and optionally an automatic facilitator), e.g. for load tests. They are **not** marked in the data: for rehearsals use **fake players** (setup step 07); for agents choose *Simulated players* (step 03). |
+| `npm run bots -- [--count N] [--auto] [--url U]` | External test players that connect like browsers (to this laptop over HTTPS or HTTP, whichever the server speaks, unless `--url` says otherwise) (and optionally an automatic facilitator), e.g. for load tests. They are **not** marked in the data: for rehearsals use **fake players** (setup step 07); for agents choose *Simulated players* (step 03). |
 | `npm run cli -- <command> [--sim]` | Data management: `sessions`, `lookup`, `export`, `anonymise`, `erase`, `erasures`, `backup`, `rekey`, `verify`; `--sim` works on the simulation database |
 | `npm test` | Unit and integration tests (rules, full bot games, GDPR guarantees, docs drift) |
 | `npm run test:e2e` | Playwright: a full game through the real UI with 4 player browsers, plus a render check of every diagram |

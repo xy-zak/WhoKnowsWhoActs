@@ -17,6 +17,7 @@ Background: [ARCHITECTURE.md](ARCHITECTURE.md) (how it works) · [NETWORKING.md]
 7. [Printable checklist](#7-printable-checklist)
 8. [Simulated sessions](#8-simulated-sessions)
 9. [Testing without people: fake players](#9-testing-without-people-fake-players)
+10. [HTTPS and the certificate warning](#10-https-and-the-certificate-warning)
 
 ## 1. Overview
 
@@ -33,7 +34,7 @@ flowchart TD
   A["npm start<br/>type the database passphrase"] --> S1
   subgraph SETUP["SETUP tab: 10 steps as an accordion, one open at a time"]
     S1["01 Scenario"] --> S2["02 Rounds"] --> S3["03 Players and visibility"] --> S4["04 Onboarding"] --> S5["05 Tags and notes"] --> S6["06 Review and CREATE"]
-    S6 --> S7["07 Connect and bind<br/>open the player URL on 4 PCs"] --> S8["08 Labels<br/>pairing: aligned or D1–D6<br/>+ K per seat"] --> S9["09 Print the key sheet"] --> S10["10 Start onboarding"]
+    S6 --> S7["07 Connect and bind<br/>open the https player URL on 4 PCs<br/>accept the certificate warning once"] --> S8["08 Labels<br/>pairing: aligned or D1–D6<br/>+ K per seat"] --> S9["09 Print the key sheet"] --> S10["10 Start onboarding"]
   end
   S10 --> L1
   subgraph LIVE["LIVE tab: lifecycle stepper + NEXT panel"]
@@ -61,13 +62,14 @@ Approximate timing: 30 min setup, about 10 min onboarding, the rounds, 10 min wr
 - [ ] **Software installed** on the facilitator laptop: `npm install && npm run build`. Run `npm test` once; it should be all green.
 - [ ] **Database passphrase chosen**, at least 5 random words. Store it in a password manager and/or a sealed envelope held by your supervisor. A lost passphrase means lost data: there is no recovery.
 - [ ] **Dry run** with bots: `npm start`, then `npm run bots -- --count 3` in a second terminal. Play the fourth seat yourself on another device. Tag practice sessions `pilot` (step 05), or use a separate data directory (`WKWA_DATA_DIR=data-pilot npm start`).
-- [ ] **Network** planned: ideally a dedicated router/switch without internet, with Wi-Fi "client isolation" off. See [NETWORKING.md](NETWORKING.md).
+- [ ] **Network** planned: ideally a dedicated router/switch without internet, with Wi-Fi "client isolation" off, and a **fixed (DHCP-reserved) IP address** for the laptop, so its certificate stays the same from session to session. See [NETWORKING.md](NETWORKING.md).
+- [ ] **HTTPS tried out:** `npm start` makes the laptop's self-signed certificate. Open `https://localhost:3000/facilitator`, accept the warning ([§ 10](#10-https-and-the-certificate-warning)), then open the player URL on a second computer and accept it there too, in each browser you expect participants to bring (Chrome, Edge, Firefox, Safari).
 - [ ] **Printer** reachable from the laptop. The key sheet and the takedown cards (one PDF per participant) are printed per session from the manager.
 
 ## 3. The day before a session
 
 - [ ] Laptop charged, OS updates done (so nothing restarts during the session), sleep disabled.
-- [ ] Router/switch and cables tested; each player PC can open `http://<laptop-ip>:3000/`.
+- [ ] Router/switch and cables tested; a test computer on the session network can open `https://<laptop-ip>:3000/` (after accepting the certificate warning, [§ 10](#10-https-and-the-certificate-warning)).
 - [ ] Firewall on the laptop allows incoming TCP 3000 (see NETWORKING.md § troubleshooting).
 - [ ] Encrypted backup of the database: `npm run cli -- backup --out /path/to/backup/wkwa-YYYYMMDD.db`.
 
@@ -76,8 +78,8 @@ Approximate timing: 30 min setup, about 10 min onboarding, the rounds, 10 min wr
 ### 4.1 Start the server (about 30 minutes before)
 
 1. Connect the laptop and the player PCs to the session network.
-2. On the laptop, run `npm start` and type the database passphrase. The terminal prints the **manager** URL (`http://localhost:3000/facilitator`; open it on the laptop) and the **player** URL(s).
-3. The manager opens on **SETUP** with step **01 SCENARIO** expanded.
+2. On the laptop, run `npm start` and type the database passphrase. The terminal prints the **manager** URL (`https://localhost:3000/facilitator`; open it on the laptop), the **player** URL(s) (`https://<laptop-ip>:3000/`) and the certificate's **SHA-256 fingerprint**. It also says whether it is *reusing* the certificate (browsers that accepted it before are not warned again) or made a new one (everyone accepts the warning once more; [§ 10](#10-https-and-the-certificate-warning)).
+3. The browser warns about the certificate the first time; accept it ([§ 10](#10-https-and-the-certificate-warning)). The manager opens on **SETUP** with step **01 SCENARIO** expanded.
 
 > If the server was restarted mid-session, the most recent unfinished session is resumed automatically, browsers re-claim their seats on their own, and the tab shows LIVE again.
 
@@ -98,7 +100,7 @@ The draft is kept in your browser until you create the session, so a reload lose
 
 | Step | What to do |
 | --- | --- |
-| **07 Connect & bind** | The step shows the player URL(s). Open it on each PC in full-screen (F11); each screen shows **CLIENT N**. Bind each client to a seat. The step is done when it shows `[4/4 seats bound]`. For a test without people, use **Fake player** or **Fill empty seats with fake players** instead ([§ 9](#9-testing-without-people-fake-players)). |
+| **07 Connect & bind** | The step shows the player URL(s) and the certificate fingerprint. Open the URL on each PC; the browser shows a **certificate warning** once, so talk the participant through accepting it ([§ 10](#10-https-and-the-certificate-warning)). Then full-screen (F11); each screen shows **CLIENT N**. Bind each client to a seat. The step is done when it shows `[4/4 seats bound]`. For a test without people, use **Fake player** or **Fill empty seats with fake players** instead ([§ 9](#9-testing-without-people-fake-players)). |
 | **08 Labels** | 1 · Choose the **K–P pairing**: *Aligned* (Ka–Pa, Kb–Pb …) or *Dissociated* — one of the six fully dissociative pairings D1–D6 (no seat holds the same letter, no two seats mirror each other), or *random* (seed logged). The 4×4 matrix shows the result. 2 · Choose which seat gets which **K** (seat order by default, or *Shuffle K across seats*). **P is derived from the pairing**, never chosen per seat. *Save labels*. The pairing number is stored with the labels and in the exports; see [DATA-TYPES.md § Label pairings](DATA-TYPES.md#label-pairings). With view assignment "follows K", the K label also selects which scores the seat sees. The P label decides which sub-square the seat acts on (Pa → Ka …; [GAME-RULES.md § 3](GAME-RULES.md#3-what-a-player-can-act-on)). |
 | **09 Key sheet** | *Print key sheet*, then tick "printed and stored separately". Write names on it **by hand** as participants arrive; names never go into the software. |
 | **10 Start onboarding** | A final checklist. **Seat the participants first**, then *START ONBOARDING*. Seats lock, players go to consent → about you → briefing, and the tab flips to **LIVE**. |
@@ -167,9 +169,10 @@ Debrief participants as your protocol requires.
 | **Misclick** by a player | Visible to everyone | **Revoke** it (event log or square panel, current round only). |
 | **Server crashed** or laptop restarted | Events up to the crash are stored | `npm start` again and type the passphrase. The session resumes, browsers re-claim their seats, and the tab shows LIVE. Then **RESUME**. A round time limit keeps counting the downtime; end the round if needed. |
 | **"Wrong passphrase"** at start | The server refuses to open the database | Retype it, paying attention to keyboard layout and caps lock. |
-| Player URL **does not load** | — | See [NETWORKING.md § troubleshooting](NETWORKING.md): firewall, wrong IP, Wi-Fi client isolation. Step 07 lists the URLs of every network interface. |
+| Player URL **does not load** | — | See [NETWORKING.md § troubleshooting](NETWORKING.md#13-troubleshooting): firewall, wrong IP, Wi-Fi client isolation, `http://` typed instead of `https://`. Step 07 lists the URLs of every network interface. |
+| Player PC shows a **security warning** ("not private", "potential security risk") | Expected: the server's certificate is self-signed | Talk the participant through accepting it: [§ 10](#10-https-and-the-certificate-warning). |
 | Player PC shows **"opened in another window"** | The same seat was opened twice | Close the extra tab; the newest window holds the seat. |
-| Manager says **ACCESS DENIED** | It was opened from another PC | Use `http://localhost:3000/facilitator` on the laptop, or start with `ADMIN_TOKEN=…` and open `/facilitator?token=…`. |
+| Manager says **ACCESS DENIED** | It was opened from another PC | Use `https://localhost:3000/facilitator` on the laptop, or start with `ADMIN_TOKEN=…` and open `/facilitator?token=…`. |
 | Animations are distracting / slow, or text is hard to read | Display settings | Manager: `D` (or the DISPLAY segment in the status bar), or directly `A` animations, `T` colours (incl. High contrast), `F` font (incl. OpenDyslexic), `S` text size. Players: the **DISPLAY** button in the bottom-right corner of their screen has the same four settings; show the participant where it is. Anyone whose OS requests reduced motion never gets animations. |
 | Everything is broken, you must stop | — | *Tools → Abort session* (with a reason). Data is kept and marked aborted; players see the end screen with their code. |
 
@@ -178,7 +181,7 @@ Debrief participants as your protocol requires.
 **Before participants arrive**
 - [ ] Network up; `npm start`; passphrase entered
 - [ ] Steps 01–06 done (scenario, rounds, players, onboarding, tags) → session created
-- [ ] Step 07: 4 clients bound · Step 08: labels assigned · Step 09: key sheet printed
+- [ ] Step 07: 4 clients bound (certificate warning accepted on each) · Step 08: labels assigned · Step 09: key sheet printed
 
 **With participants**
 - [ ] Names written on the key sheet (by hand)
@@ -247,3 +250,42 @@ What the data says:
 Fake players can only be added in the lobby, and only in sessions with real players (a simulated session already has agents). Unbinding a fake seat ends that fake player. After a server restart, the fake players come back by themselves and re-claim their seats. If a round was paused because they lost the connection, press **RESUME**.
 
 `npm run bots` still exists, but its bots go through consent and the questionnaire with made-up answers and are **not** marked in the data. Use fake players instead.
+
+## 10. HTTPS and the certificate warning
+
+Browsers only allow the microphone on secure pages, so the server speaks **HTTPS**, with a certificate it makes itself: a *self-signed* certificate, kept in `data/tls/` and reused at every start ([NETWORKING.md § 11](NETWORKING.md#11-security-on-the-lan)). No browser knows this certificate, so the first time a browser opens the server it shows a full-page security warning. On this closed network that is expected. Each participant accepts it **once**, in their own browser, while you talk them through it. Nothing is installed on their laptop.
+
+A sentence that works: *"Your browser warns because this is a private server on this room's network, without a certificate from the internet. That is expected here. Please click …"*
+
+| Browser | The warning says | Steps |
+| --- | --- | --- |
+| **Chrome** (Windows, macOS, Linux) | "Your connection is not private" (`NET::ERR_CERT_AUTHORITY_INVALID`) | **Advanced** → **Proceed to 192.168.1.10 (unsafe)** |
+| **Edge** (Windows, macOS) | "Your connection isn't private" | **Advanced** → **Continue to 192.168.1.10 (unsafe)** |
+| **Firefox** (Windows, macOS, Linux) | "Warning: Potential Security Risk Ahead" (`MOZILLA_PKIX_ERROR_SELF_SIGNED_CERT`) | **Advanced…** → **Accept the Risk and Continue** |
+| **Safari** (macOS) | "This Connection Is Not Private" | **Show Details** → the link **visit this website** → **Visit Website** in the dialog. macOS may then ask for the Mac's password (or Touch ID) to save the exception: the participant types it, never you. |
+
+The page then loads and shows **CLIENT N**. The address bar keeps a "Not secure" sign or a struck-through lock; that is normal for a self-signed certificate.
+
+**Checking the fingerprint** (recommended at the first session, and whenever something looks odd). Setup step 07 and the terminal show the certificate's SHA-256 fingerprint, e.g. `0D:83:76:C9:…:15:A3:51:0C`. The browser shows the same value:
+
+- Chrome, Edge: click **Not secure** in the address bar → the certificate details → *SHA-256 fingerprint* of the **certificate** (not of the public key).
+- Firefox: on the warning page, **Advanced…** → **View Certificate** → *Fingerprints* → *SHA-256*.
+- Safari: **Show Details** → **view the certificate** → **Details** → *Fingerprints* → *SHA-256*.
+
+Some browsers show spaces instead of colons. Compare at least the first four and the last four pairs. If they differ, **stop**: that browser is not talking to this laptop (a wrong address, or another device on the network). Check the URL and the network before going on.
+
+**The facilitator** opens `https://localhost:3000/facilitator` on the laptop and accepts the same warning once (the certificate also names `localhost`, but the browser does not know it either). While HTTPS is on, `http://localhost:3000` does not answer.
+
+**When the warning comes back:**
+
+- The server made a **new certificate**: the laptop has a new IP address or host name (another network, or the router gave it another address), the certificate expires within 30 days, or `data/tls/` was deleted. The start-up banner says why, and step 07 shows the new fingerprint. Everyone accepts the warning once more. A fixed (DHCP-reserved) IP address for the laptop avoids this.
+- The participant uses another browser, browser profile or a private window, or has cleared the browser's data.
+- Chrome and Edge may ask again after some days; Firefox and Safari keep the exception until it is removed.
+
+**Afterwards** (offer it in the debrief), participants can remove the exception again:
+
+- Safari: *Keychain Access* → *login* → *Certificates* → "Who Knows, Who Acts? LAN server" → delete.
+- Firefox: *Settings* → *Privacy & Security* → *Certificates* → *View Certificates…* → *Servers* → the laptop's address → delete.
+- Chrome, Edge: the exception lapses by itself.
+
+Other symptoms (no "Proceed" link on a managed laptop, `http://` typed instead of `https://`, a wrong-name or date error, Safari reconnecting): see [NETWORKING.md § 13](NETWORKING.md#13-troubleshooting).
