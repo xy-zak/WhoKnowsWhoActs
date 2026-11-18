@@ -15,15 +15,38 @@ export interface RuntimeOptions {
   scenariosDir: string;
   clientDist: string;
   adminToken: string | null;
+  /**
+   * WKWA_TLS: `auto` (default) serves HTTPS with a self-signed certificate the
+   * server makes and keeps in data/tls/; `off` serves plain HTTP (development,
+   * tests: localhost is a secure context anyway). TLS_CERT + TLS_KEY win over both.
+   */
+  tlsMode: TlsSetting;
+  /** TLS_CERT / TLS_KEY: your own certificate and key (PEM); both or neither. */
   tlsCert: string | null;
   tlsKey: string | null;
+  /** HTTP_REDIRECT_PORT: an extra plain-HTTP port that redirects to HTTPS (null = none). */
+  httpRedirectPort: number | null;
   /** Log to stdout as well as to data/logs/server.log. */
   logToStdout: boolean;
   logLevel: string;
+  /**
+   * Server-only settings (WKWA_TLS, HTTP_REDIRECT_PORT) that could not be read.
+   * The server refuses to start with any; the data CLI, which never serves, ignores them.
+   */
+  configErrors?: string[];
 }
 
 export function runtimeFromEnv(env: NodeJS.ProcessEnv = process.env): RuntimeOptions {
   const r = (p: string) => path.resolve(REPO_ROOT, p);
+  const configErrors: string[] = [];
+  const read = <T>(parse: () => T, fallback: T): T => {
+    try {
+      return parse();
+    } catch (e) {
+      configErrors.push((e as Error).message);
+      return fallback;
+    }
+  };
   return {
     host: env.HOST ?? "0.0.0.0",
     port: Number(env.PORT ?? 3000),
@@ -33,11 +56,30 @@ export function runtimeFromEnv(env: NodeJS.ProcessEnv = process.env): RuntimeOpt
     scenariosDir: r(env.WKWA_SCENARIOS_DIR ?? "scenarios"),
     clientDist: r(env.WKWA_CLIENT_DIST ?? "apps/client/dist"),
     adminToken: env.ADMIN_TOKEN && env.ADMIN_TOKEN.length > 0 ? env.ADMIN_TOKEN : null,
-    tlsCert: env.TLS_CERT ?? null,
-    tlsKey: env.TLS_KEY ?? null,
+    tlsMode: read(() => tlsSetting(env.WKWA_TLS), "auto"),
+    tlsCert: env.TLS_CERT ? r(env.TLS_CERT) : null,
+    tlsKey: env.TLS_KEY ? r(env.TLS_KEY) : null,
+    httpRedirectPort: read(() => optionalPort("HTTP_REDIRECT_PORT", env.HTTP_REDIRECT_PORT), null),
     logToStdout: env.WKWA_LOG_STDOUT !== "0",
     logLevel: env.LOG_LEVEL ?? "info",
+    configErrors,
   };
+}
+
+export type TlsSetting = "auto" | "off";
+
+function tlsSetting(value: string | undefined): TlsSetting {
+  const v = value?.trim().toLowerCase() || "auto";
+  if (v === "auto" || v === "off") return v;
+  throw new Error(`WKWA_TLS must be "auto" or "off", not "${value}".`);
+}
+
+function optionalPort(name: string, value: string | undefined): number | null {
+  if (value === undefined || value.trim() === "") return null;
+  const n = Number(value);
+  if (!Number.isInteger(n) || n < 1 || n > 65_535)
+    throw new Error(`${name} must be a TCP port (1–65535), not "${value}".`);
+  return n;
 }
 
 let cachedVersion: { version: string; gitCommit: string } | null = null;

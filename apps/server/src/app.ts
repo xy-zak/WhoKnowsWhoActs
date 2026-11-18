@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import type { AddressInfo } from "node:net";
 import path from "node:path";
 import fastifyStatic from "@fastify/static";
@@ -13,6 +13,7 @@ import { DB_FILES, dbFile, SessionStores } from "./db/stores";
 import { createLogger } from "./logger";
 import { Hub, isLoopback, tokenMatches } from "./net/hub";
 import type { RuntimeOptions } from "./runtime";
+import { outcomeLogFields, resolveTls, type TlsState, urlHost } from "./tls";
 
 export interface AppContext {
   app: FastifyInstance;
@@ -25,6 +26,8 @@ export interface AppContext {
   stores: SessionStores;
   log: Logger;
   runtime: RuntimeOptions;
+  /** HTTPS of this run: off, a self-signed certificate (auto) or TLS_CERT/TLS_KEY (provided). */
+  tls: TlsState;
   scenarios: ScenarioLibrary;
   /** True if the request may use facilitator functions (loopback or valid ADMIN_TOKEN). */
   isFacilitator(req: FastifyRequest): boolean;
@@ -34,8 +37,10 @@ export interface AppContext {
 export async function createApp(
   runtime: RuntimeOptions,
   passphrase: string,
-  opts: { logger?: Logger; autoResume?: boolean } = {},
+  opts: { logger?: Logger; autoResume?: boolean; tls?: TlsState } = {},
 ): Promise<AppContext> {
+  // first: a bad TLS_CERT/TLS_KEY fails start-up with nothing opened yet
+  const tls = opts.tls ?? (await resolveTls(runtime));
   const log =
     opts.logger ?? createLogger(runtime.dataDir, { stdout: runtime.logToStdout, level: runtime.logLevel });
   const db = openDatabase(dbFile(runtime.dataDir, "real"), passphrase);
@@ -53,14 +58,24 @@ export async function createApp(
     }
     throw e;
   }
+  // after the databases opened: once per start, not once per passphrase attempt
+  if (tls.info.enabled)
+    // no names or addresses here: the server log never holds them
+    log.info(
+      {
+        tls: tls.info.mode,
+        fingerprintSha256: tls.info.fingerprintSha256,
+        expires: tls.info.expires,
+        ...(tls.outcome ? outcomeLogFields(tls.outcome) : {}),
+      },
+      "HTTPS on",
+    );
+  else log.info({ tls: "off" }, "HTTPS off: plain HTTP (WKWA_TLS=off)");
   const store = new Store(db);
   const stores = new SessionStores(store, new Store(simDb));
   const scenarios = new ScenarioLibrary(runtime.scenariosDir);
 
-  const https =
-    runtime.tlsCert && runtime.tlsKey
-      ? { cert: readFileSync(runtime.tlsCert), key: readFileSync(runtime.tlsKey) }
-      : null;
+  const https = tls.https;
 
   const app = Fastify({
     loggerInstance: log,
@@ -76,7 +91,7 @@ export async function createApp(
       const make = () => {
         const port = (app.server.address() as AddressInfo).port;
         const any = runtime.host === "0.0.0.0" || runtime.host === "::";
-        const host = any ? "127.0.0.1" : runtime.host.includes(":") ? `[${runtime.host}]` : runtime.host;
+        const host = any ? "127.0.0.1" : urlHost(runtime.host);
         resolve(`${https ? "https" : "http"}://${host}:${port}`);
       };
       if (app.server.listening) make();
@@ -115,6 +130,7 @@ export async function createApp(
     stores,
     log,
     runtime,
+    tls,
     scenarios,
     isFacilitator,
     async close() {

@@ -257,11 +257,13 @@ export class FacilitatorClient {
   dashboard: DashboardMsg | null = null;
   events: StoredEvent[] = [];
 
-  constructor(url: string, token?: string) {
+  constructor(url: string, token?: string, opts: { insecureTls?: boolean } = {}) {
     this.socket = io(`${url}/facilitator`, {
       transports: ["websocket"],
       forceNew: true,
       auth: token ? { token } : {},
+      // the server's self-signed certificate (WKWA_TLS=auto) is not trusted by Node
+      ...(opts.insecureTls ? { rejectUnauthorized: false } : {}),
     });
     this.socket.on("dashboard", (d: DashboardMsg) => {
       this.dashboard = d;

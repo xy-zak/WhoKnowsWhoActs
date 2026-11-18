@@ -91,8 +91,9 @@ export function App({ conn }: { conn: FacilitatorConnection }) {
           </span>
           <p>
             The facilitator manager only opens on the server computer itself (
-            <code>http://localhost:PORT/facilitator</code>), or from another device when the server was
-            started with <code>ADMIN_TOKEN</code> and you open <code>/facilitator?token=…</code>.
+            <code>{`${location.protocol}//localhost:PORT/facilitator`}</code>), or from another device when
+            the server was started with <code>ADMIN_TOKEN</code> and you open{" "}
+            <code>/facilitator?token=…</code>.
           </p>
         </div>
       </div>
