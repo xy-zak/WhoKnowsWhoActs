@@ -22,6 +22,7 @@ A **research game harness** for a four-player, map-based serious game played on 
 - **Fake players for testing.** In a session with real players, the server can fill seats with *fake players* (setup step 07): test clients that connect like a browser and play at random. They skip consent and the questionnaire, get no participant code, and are marked fake in the log and the exports (`fake_player`, `fakeSeats`). Try a session alone with three fake players and yourself on the fourth seat.
 - **Rounds.** Default: 3 rounds, and a round ends when every player has made 5 proposals and 5 decisions. Rounds can be changed per session (quotas, unlimited, time limits, facilitator-ended rounds, per-round overrides) and extended in code (pluggable round rules and validators).
 - **Labels.** Each seat gets a knowledge type (`Ka`–`Kd`) and a power type (`Pa`–`Pd`), assigned manually or randomly in setup step 08 (the seed is logged). By default the K label selects which scores the seat sees, and the P label which sub-squares it acts on.
+- **Microphone audio, optional.** In a session with audio (setup step 04, off by default) every participant's browser records its own microphone, after a separate required consent item and a mic check. No microphone opens until every real seat has consented. A facilitator-led calibration and the recordings let the server work out **who spoke when** although all four players sit in one room, by comparing loudness across the mics (no voiceprints). Audio is stored in encrypted files (one key per file, erased by deleting the key), and leaves the store only through a registered *Export audio* action. Automatic transcription is researched only. See [docs/AUDIO.md](docs/AUDIO.md) and [docs/AUDIO-TRANSCRIPTION.md](docs/AUDIO-TRANSCRIPTION.md).
 - **Every interaction is recorded** in an append-only, event-sourced log with server and clock-corrected client timestamps. Fine-grained UI telemetry is recorded too: hover, inspect, pan/zoom, tool choice, confirm/cancel, focus, idle, and state acknowledgements for exact reaction times.
 - **Facilitator manager**, organised in order of use: **[1] SETUP | LIVE · [2] REPLAY · [3] DATABASE**.
   - **SETUP** is 10 steps stacked as a vertical accordion (scenario → rounds → players → onboarding → tags → review & create → connect clients → labels → key sheet → start). The current step is expanded; finished steps collapse into a one-line summary, and a blue wayfinder bar stays pinned to the top while you scroll, so you always see where you are. Review & create and start onboarding have their own colour.
@@ -39,7 +40,8 @@ A **research game harness** for a four-player, map-based serious game played on 
   - names only on a hand-written paper key sheet
   - the database **encrypted at rest** (SQLCipher)
   - IP-free logs
-  - one-step **takedown/erasure** with a register
+  - one-step **takedown/erasure** with a register, audio included
+  - audio only after a separate consent item, never in anonymised exports, encrypted per file
   - anonymised exports for publication
 - **Documented data.** Every export comes with a generated codebook. The docs are generated from the same schemas that validate the data, and tests fail if they drift.
 
@@ -55,6 +57,7 @@ npm start            # asks for (or creates) the database passphrase
 
 - Facilitator manager: open `https://localhost:3000/facilitator` **on the server laptop**. The SETUP wizard opens automatically.
 - Players: open one of the `https://<laptop-ip>:3000/` URLs printed at start-up.
+- Microphone recording is off by default. To record audio, tick **Record audio** in setup step 04 (it needs the consent step); see the audio part of the [session runbook](docs/SESSION-RUNBOOK.md#11-sessions-with-audio). `npm run bots -- --count 4 --auto --audio` rehearses a whole audio session.
 - The server speaks HTTPS with a **self-signed certificate** it makes itself (browsers only allow the microphone on secure pages), so each browser shows a security warning **once**: accept it as described in [SESSION-RUNBOOK.md § 10](docs/SESSION-RUNBOOK.md#10-https-and-the-certificate-warning). The terminal and setup step 07 show the certificate's fingerprint to compare. `WKWA_TLS=off npm start` serves plain HTTP instead (for tests on the laptop itself).
 
 Try it alone: walk the SETUP wizard in the manager, and in step 07 click **Fill empty seats with fake players** after binding your own browser window to one seat. Alternatively, `npm run bots -- --count 4 --auto` plays a whole session by itself. Or choose **Simulated players** in setup step 03: agents fill every seat and play while you watch LIVE.
@@ -68,8 +71,8 @@ For real sessions, follow the **[session runbook](docs/SESSION-RUNBOOK.md)**.
 | `npm start` | Run the server (serves the built clients). Env: `PORT`, `HOST`, `WKWA_DATA_DIR`, `WKWA_EXPORTS_DIR`, `ADMIN_TOKEN`, `WKWA_TLS` (`auto`/`off`), `TLS_CERT`/`TLS_KEY`, `HTTP_REDIRECT_PORT` (see [NETWORKING.md § 4](docs/NETWORKING.md#4-ports-interfaces-and-configuration)) |
 | `npm run dev` | Development mode: server with auto-restart, plus Vite with hot reload on `http://localhost:5173` (separate dev database) |
 | `npm run build` | Build the player and facilitator clients |
-| `npm run bots -- [--count N] [--auto] [--url U]` | External test players that connect like browsers (to this laptop over HTTPS or HTTP, whichever the server speaks, unless `--url` says otherwise) (and optionally an automatic facilitator), e.g. for load tests. They are **not** marked in the data: for rehearsals use **fake players** (setup step 07); for agents choose *Simulated players* (step 03). |
-| `npm run cli -- <command> [--sim]` | Data management: `sessions`, `lookup`, `export`, `anonymise`, `erase`, `erasures`, `backup`, `rekey`, `verify`; `--sim` works on the simulation database |
+| `npm run bots -- [--count N] [--auto] [--audio] [--url U]` | External test players that connect like browsers (to this laptop over HTTPS or HTTP, whichever the server speaks, unless `--url` says otherwise) (and optionally an automatic facilitator; `--audio` also tests microphone recording with synthetic audio), e.g. for load tests. They are **not** marked in the data: for rehearsals use **fake players** (setup step 07); for agents choose *Simulated players* (step 03). |
+| `npm run cli -- <command> [--sim]` | Data management: `sessions`, `lookup`, `export`, `anonymise`, `erase`, `erasures`, `delete-session`, `deletions`, `delete-audio`, `audio-deletions`, `backup`, `rekey`, `verify`; `--sim` works on the simulation database |
 | `npm test` | Unit and integration tests (rules, full bot games, GDPR guarantees, docs drift) |
 | `npm run test:e2e` | Playwright: a full game through the real UI with 4 player browsers, plus a render check of every diagram |
 | `npm run docs:generate` | Regenerate the schema-derived parts of `docs/` |
@@ -87,6 +90,7 @@ For real sessions, follow the **[session runbook](docs/SESSION-RUNBOOK.md)**.
 | [DATA-TYPES.md](docs/DATA-TYPES.md) | Field-level catalogue of everything that is logged and exported |
 | [SESSION-RUNBOOK.md](docs/SESSION-RUNBOOK.md) | Step by step for running a session (setup wizard, LIVE, wrap-up), plus troubleshooting |
 | [AESTHETIC-RULES.md](docs/AESTHETIC-RULES.md) | Colour tokens and reserved meanings, typography, icons, panels, popups, wayfinding, CRT/motion, keyboard, checklist for new UI |
+| [AUDIO.md](docs/AUDIO.md) | Microphone recording: capture pipeline, timing model, encrypted storage, consent hold and recording lifecycle, calibration, speaker attribution (who spoke when), export and deletion, known limits |
 | [AUDIO-TRANSCRIPTION.md](docs/AUDIO-TRANSCRIPTION.md) | **Research, not implemented.** Local transcription engines compared (accuracy on accented speech, timestamps, speed, licence, Node integration), pitfalls, proposed pipeline and data model, per-user and composite document mock-ups, GDPR notes, evaluation plan, recommendation |
 
 Each document has a change log (date, commit, change, reason) in [docs/changelog/](docs/changelog/README.md), maintained with the `/update-docs` skill.

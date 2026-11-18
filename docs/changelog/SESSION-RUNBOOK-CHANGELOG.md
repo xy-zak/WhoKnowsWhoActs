@@ -4,7 +4,19 @@ History of [SESSION-RUNBOOK.md](../SESSION-RUNBOOK.md). Newest first. How entrie
 
 ## Unreleased
 
-### Not yet committed · grid map, scores and game rules (documents the code in the same commit)
+### Not yet committed · documents `0f6971a`…`abcacbe` (microphone audio)
+
+- **Type:** Feature
+- **Change:** A new § 11 *Sessions with audio* (flow diagram) covers preparation, setup step 04, the consent hold, the mic check, the calibration, pausing recording, a failing microphone, a withdrawing participant, the wrap-up audio check and the DATABASE audio actions (attribution, export, delete raw audio). §§ 2 to 7 get matching checklist items, NEXT rows and troubleshooting rows.
+- **Reason:** Audio adds steps the facilitator must do in the right order and decisions to make live (pause for crosstalk, skip a mic, wait for uploads). The runbook is how those are done the same way at every session.
+
+### 2026-11-18 · `fe15759` · Self-signed HTTPS by default (WKWA_TLS=auto) for microphone access (#6)
+
+- **Type:** Risk mitigation
+- **Change:** A new § 10 explains the certificate warning for Chrome, Edge, Firefox and Safari, how to compare the fingerprint, when the warning returns, and how participants can remove the exception afterwards. Setup, session-day and troubleshooting steps use `https://` URLs.
+- **Reason:** Each participant must accept the certificate knowingly, because accepting it blindly would let an impostor on the network capture audio. Nothing is installed on their laptops.
+
+### 2026-11-18 · `fc32ce7` · Grid map with knowledge sub-squares, scores and pluggable game rules
 
 - **Type:** Feature
 - **Change:** The preparation checklist describes the new scenario files (`scenario.json`, `scores.json`) and both demos. Step 01 explains the starting-score preview, the start map score and the game-rules choice; step 08 says the P label decides which sub-square a seat acts on. LIVE describes the composite map with scores and the square comparison, and revoking restores the scores.

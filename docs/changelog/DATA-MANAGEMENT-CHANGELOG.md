@@ -4,7 +4,25 @@ History of [DATA-MANAGEMENT.md](../DATA-MANAGEMENT.md). Newest first. How entrie
 
 ## Unreleased
 
-### Not yet committed · grid map, scores and game rules (documents the code in the same commit)
+### Not yet committed · documents `0f6971a`…`abcacbe` (microphone audio, checked against the build)
+
+- **Type:** Bug fix
+- **Change:** The text written before the build is corrected. The **consent hold** replaces "keep the room quiet during consent" and the open decliner placeholder (no mic opens until every real seat has consented). Raw deletion removes cleaned tracks too, and `--scope all` removes every audio row including speech segments (the text said they stayed). Erasure removes every seat's cleaned track and the session's attribution results (the text said they were kept). Export contents, the register entry, the `audio-deletions` command, the verify checks and the placeholder list are brought in line.
+- **Reason:** The document must describe what the software does, because it supports the ethics application and the consent text. Several claims came from the plan, not the code.
+
+### 2026-11-18 · `fefc596` · Docs: microphone audio in the data management and GDPR design (#2)
+
+- **Type:** Risk mitigation
+- **Change:** The audio design is added to the hand-written sections: summary, legal basis (separate required consent item, voice as personal data, not biometric by design), inventory rows, data-flow and lifecycle diagrams, consent, minimisation, encryption, erasure, exports, retention placeholders, risks 19 to 30, checklist and CLI.
+- **Reason:** Recording voice is the most identifying data the harness collects, so its legal basis, consent, erasure and risks had to be written down before it was built.
+
+### 2026-11-18 · `0f6971a` · Shared audio contracts: config, events, messages, state, projections, REST types (#5)
+
+- **Type:** Feature
+- **Change:** The generated data-class summary gains the class **voice · identifying** and the audio events and the `mic_permission` telemetry type.
+- **Reason:** The classification is generated from the schema metadata, which now includes audio.
+
+### 2026-11-18 · `fc32ce7` · Grid map with knowledge sub-squares, scores and pluggable game rules
 
 - **Type:** Risk mitigation
 - **Change:** The data inventory row for proposals and decisions now names the target sub-square and the score changes, and the minimisation table speaks of sub-squares and squares instead of regions.

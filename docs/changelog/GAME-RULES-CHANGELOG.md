@@ -2,9 +2,7 @@
 
 History of [GAME-RULES.md](../GAME-RULES.md). Newest first. How entries are written: [README.md](README.md).
 
-## Unreleased
-
-### Not yet committed · grid map, scores and game rules (documents the code in the same commit)
+### 2026-11-18 · `fc32ce7` · Grid map with knowledge sub-squares, scores and pluggable game rules
 
 - **Type:** Feature
 - **Change:** Document created. It describes the grid map (squares of four knowledge-type sub-squares, ids such as `C7-Kb`), who sees which scores, targeting by power type (Pa → Ka …), what a proposal and a decision do to the scores (+4 / −1 within 0–10), the map score, rounds, revoking, how the rules are applied and recorded (flowchart), versioning, how to change the rules, and the scenario format. The rule-set table is generated from the code.
