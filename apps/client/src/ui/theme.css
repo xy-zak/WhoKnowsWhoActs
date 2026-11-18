@@ -1269,3 +1269,100 @@ table.grid tr.selected {
   scroll-margin-top: calc(var(--wayfinder-h, 90px) + var(--s2));
   scroll-margin-bottom: calc(var(--statusbar-h) + var(--s2));
 }
+
+/* ─── audio indicators (§ 8.1): level meter, recording tag, recording banner ───
+ * Static by rule: a level redraws instantly (no transition, easing or animation), and nothing pulses or blinks.
+ * Recording is the live tone, never red; warn = attention (paused, no signal, too quiet, clipping). */
+.level-meter {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  white-space: nowrap;
+  font-size: var(--fs-meta);
+  color: var(--muted);
+}
+.level-meter.compact {
+  gap: var(--s1);
+  font-size: var(--fs-micro);
+}
+/* cells drawn as ▮ (filled) / ▯ (hollow), sized in em so they follow the text size, in any font */
+.lm-cells {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  color: var(--text);
+}
+.lm-cell {
+  display: inline-block;
+  width: 0.5em;
+  height: 1em;
+  background: currentColor;
+}
+.lm-cell.off {
+  background: none;
+  border: 1px solid var(--faint);
+}
+/* the recent peak: a bright hollow cell, so it never reads as one more cell of level */
+.lm-cell.peak {
+  background: none;
+  border: 2px solid currentColor;
+}
+/* forced colours drop author backgrounds: paint the lit cells in the system text colour */
+@media (forced-colors: active) {
+  .lm-cell.on {
+    forced-color-adjust: none;
+    background: CanvasText;
+  }
+}
+/* fixed width, so the bar never shifts while the number changes (−∞ … −120 … 0 dB) */
+.lm-db {
+  display: inline-block;
+  min-width: 7ch;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.level-meter.warn .lm-cells,
+.level-meter.warn .lm-db {
+  color: var(--warn);
+}
+.lm-hint {
+  display: inline-grid;
+}
+.lm-hint > span {
+  grid-area: 1 / 1;
+  visibility: hidden;
+}
+.lm-hint > .shown {
+  visibility: visible;
+}
+.rec-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 var(--s2);
+  padding: var(--s1) var(--s3);
+  background: var(--panel);
+  border: 1px solid var(--frame);
+  border-left: 3px solid var(--control);
+  border-radius: var(--radius);
+  font-size: var(--fs-meta);
+  color: var(--text);
+}
+.rec-banner.live {
+  border-left-color: var(--live);
+}
+.rec-banner.warn {
+  border-left-color: var(--warn);
+}
+.rec-banner.danger {
+  border-left-color: var(--danger);
+}
+.rec-banner .tag {
+  flex: none;
+  font-size: inherit;
+}
+/* on a narrow screen the message moves under the tag instead of squeezing into a thin column */
+.rec-banner-text {
+  flex: 1 1 24ch;
+  min-width: 0;
+}
