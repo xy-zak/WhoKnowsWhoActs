@@ -8,11 +8,16 @@ import {
   AudioChunk,
   AudioContentSchema,
   AudioSettingsSchema,
+  AudioStart,
+  AudioStop,
+  audioSendResult,
   ConsentItemSchema,
   canStartFirstRound,
   composeConsent,
+  isMicCheckHeld,
   isOnboardingComplete,
   MicCheckSubmit,
+  micCheckHoldSeats,
   nextOnboardingStep,
   normaliseForPlayers,
   type OnboardingContent,
@@ -359,9 +364,14 @@ describe("shouldRecord", () => {
     const log = onboardingSession();
     expect(shouldRecord(log.state, seat(log, 1))).toBe(false); // consent still pending
     consent(log, 1, fullConsent);
+    // at the mic check, but held: the others are still reading the consent form
+    expect(micCheckHoldSeats(log.state)).toEqual([2, 3, 4]);
+    expect(shouldRecord(log.state, seat(log, 1))).toBe(false);
+    for (const n of [2, 3, 4]) consent(log, n, fullConsent);
+    expect(isMicCheckHeld(log.state)).toBe(false);
     expect(shouldRecord(log.state, seat(log, 1))).toBe(true); // at the mic check
     afterConsent(log, 1);
-    for (const n of [2, 3, 4]) finishOnboarding(log, n);
+    for (const n of [2, 3, 4]) afterConsent(log, n);
     expect(shouldRecord(log.state, seat(log, 1))).toBe(true); // ready, waiting for round 1
     log.push("CalibrationSkipped", { reason: "test" }, { actor: "facilitator" });
     log.push(
@@ -418,7 +428,7 @@ describe("shouldRecord", () => {
 
   it("stops for a withdrawn seat, a skipped mic check and while recording is paused", () => {
     const log = onboardingSession();
-    for (const n of [1, 2, 3]) consent(log, n, fullConsent);
+    for (const n of [1, 2, 3, 4]) consent(log, n, fullConsent);
     log.push(
       "ParticipantWithdrawn",
       { seat: 1, by: "facilitator", phase: "onboarding" },
@@ -437,6 +447,30 @@ describe("shouldRecord", () => {
     expect(shouldRecord(log.state, seat(log, 3))).toBe(false);
     log.push("RecordingResumed", {}, { actor: "facilitator" });
     expect(shouldRecord(log.state, seat(log, 3))).toBe(true);
+  });
+
+  it("holds every mic check until each real seat has consented; a decliner holds until withdrawn", () => {
+    const log = onboardingSession(undefined, { fakeSeats: [4] });
+    for (const n of [1, 2]) consent(log, n, fullConsent);
+    // the fake seat never holds; seat 3 is still reading
+    expect(micCheckHoldSeats(log.state)).toEqual([3]);
+    expect(playerView(log.state, testScenario, 1, content, 0).audio).toMatchObject({
+      micCheckHeld: true,
+      record: false,
+    });
+    consent(log, 3, fullConsent, false); // declined
+    expect(micCheckHoldSeats(log.state)).toEqual([3]);
+    expect(shouldRecord(log.state, seat(log, 1))).toBe(false);
+    log.push(
+      "ParticipantWithdrawn",
+      { seat: 3, by: "facilitator", phase: "onboarding" },
+      { seat: 3, code: code(3), actor: "facilitator" },
+    );
+    expect(micCheckHoldSeats(log.state)).toEqual([]);
+    expect(playerView(log.state, testScenario, 1, content, 0).audio).toMatchObject({
+      micCheckHeld: false,
+      record: true,
+    });
   });
 
   it("does not record when the session started onboarding without a mic check step", () => {
@@ -627,6 +661,7 @@ describe("player view: audio", () => {
       record: false,
       paused: false,
       micCheck: "pending",
+      micCheckHeld: false,
       calibration: {
         status: "pending",
         turnSeat: null,
@@ -640,7 +675,7 @@ describe("player view: audio", () => {
 
   it("tells the browser to record and shows the mic check phrase at the mic check", () => {
     const log = onboardingSession();
-    consent(log, 1, fullConsent);
+    for (const n of [1, 2, 3, 4]) consent(log, n, fullConsent);
     const v = playerView(log.state, testScenario, 1, content, 0);
     expect(v.me.nextStep).toBe("mic_check");
     expect(v.audio).toMatchObject({ enabled: true, record: true, paused: false, micCheck: "pending" });
@@ -709,5 +744,44 @@ describe("audio messages", () => {
       clientTs: 1,
     });
     expect(JSON.stringify(m)).not.toMatch(/deviceId|label|USB/);
+  });
+
+  it("takes the capture engine's start and stop info as it is", () => {
+    // as MicRecorder reports it: Firefox gives no sample rate, newer Chrome a mode string
+    const start = AudioStart.parse({
+      trackId: "1b4e28ba-2fa1-4d2b-883f-0016d3cca427",
+      reason: "context_resumed",
+      sampleRate: 16000,
+      chunkSamples: 80000,
+      clientTs: 1_794_826_000_000,
+      clockOffsetMs: -3,
+      inputLatencyMs: 12,
+      settings: { echoCancellation: "remote-only", noiseSuppression: false, sampleSize: 16, latency: 0.01 },
+      context: { sampleRate: 44100, baseLatencyMs: 5.8, outputLatencyMs: null, timingMethod: "current-time" },
+    });
+    expect(start.settings).toEqual({ sampleRate: 44100, echoCancellation: true, noiseSuppression: false });
+    expect(
+      AudioStart.safeParse({ ...start, settings: { echoCancellation: false }, context: undefined }).success,
+    ).toBe(false);
+    const stop = AudioStop.parse({
+      trackId: start.trackId,
+      reason: "track_ended",
+      chunks: 3,
+      samples: 200_000,
+      clientTs: 1,
+      clockOffsetMs: 0,
+    });
+    expect(stop.droppedChunks).toBe(0);
+    for (const r of ["context_suspended", "context_interrupted", "clock_jump", "discontinuity", "cleared"])
+      expect(AudioStop.safeParse({ ...stop, reason: r }).success).toBe(true);
+    for (const r of ["clock_jump", "discontinuity", "cleared"])
+      expect(AudioStart.safeParse({ ...start, reason: r }).success).toBe(true);
+  });
+
+  it("maps audio acks to the send queue's results", () => {
+    expect(audioSendResult({ ok: true, data: { trackId: "x", seq: 1 } })).toBe(true);
+    expect(audioSendResult({ ok: false, error: "paused", retry: false })).toBe("rejected");
+    expect(audioSendResult({ ok: false, error: "busy", retry: true })).toBe(false);
+    expect(audioSendResult(undefined)).toBe(false);
   });
 });

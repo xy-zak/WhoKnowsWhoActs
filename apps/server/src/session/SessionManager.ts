@@ -1,9 +1,12 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import {
   type ActionKind,
+  AUDIO_CONSENT_ITEM,
+  type AudioSettings,
   activeSeats,
   agentSeed,
   applyEvent,
+  canStartFirstRound,
   checkSimulationConfig,
   DEFAULT_VALIDATORS,
   DISSOCIATED_PAIRINGS,
@@ -14,11 +17,14 @@ import {
   getGameRules,
   getPolicy,
   initialState,
+  isMicCheckHeld,
   isOnboardingComplete,
+  isParticipant,
   isSimulated,
   K_LABELS,
   type KLabel,
   type LabelPairing,
+  micCheckApplies,
   type NewEvent,
   nextOnboardingStep,
   normaliseForPlayers,
@@ -29,6 +35,7 @@ import {
   parseSessionConfig,
   quotaLimit,
   quotaUsed,
+  RECORDING_PHASES,
   randomCrockford,
   resolvePolicyParams,
   roundActiveMs,
@@ -43,10 +50,13 @@ import {
   seatList,
   seatPolicyId,
   seededRandom,
+  shouldRecord,
   type Validator,
   validateIntent,
 } from "@wkwa/shared";
 import type { Logger } from "pino";
+import { calibrationCheckedPayload } from "../audio/calibration";
+import { LiveAudio } from "../audio/live";
 import type { Store } from "../db/store";
 import { harnessVersion, nowTs, wall } from "../runtime";
 
@@ -73,6 +83,27 @@ type LabelAssignment = { seat: number; k: KLabel; view?: string };
 
 const FINAL_PHASES = new Set(["closed", "aborted"]);
 
+/** How often the calibration check looks whether the last turn's audio has arrived (ms). */
+const CALIBRATION_CHECK_POLL_MS = 500;
+/**
+ * Longest wait for the calibration audio after the last turn (ms): a 5 s chunk is uploaded once it
+ * is complete, so the last turn's audio arrives up to about 5 s later. The check then runs with
+ * what arrived; a seat without audio is reported as such.
+ */
+export const CALIBRATION_CHECK_WAIT_MS = 15_000;
+
+/** The mic check result, as it is logged (MicCheckCompleted). */
+export interface MicCheckResult {
+  passed: boolean;
+  attempts: number;
+  durationMs: number;
+  settings: AudioSettings;
+  noiseFloorDb: number;
+  speechDb: number;
+  speechMs: number;
+  clientTs: number;
+}
+
 /**
  * Owns ONE session: validates commands and intents, appends events to the
  * store, applies them to the in-memory state via the shared reducer, and
@@ -84,10 +115,15 @@ export class SessionManager {
   private depth = 0;
   private roundTimer: NodeJS.Timeout | null = null;
   private advanceTimer: NodeJS.Timeout | null = null;
+  private calibrationTimer: NodeJS.Timeout | null = null;
+  /** Counts calibration runs; a timer of an earlier run (after a redo or skip) does nothing. */
+  private calibrationRun = 0;
   private lastClientSeq = new Map<number, number>();
   private ackCache = new Map<number, Map<number, IntentAck>>();
   private readonly clock: () => number;
   private readonly validators: Validator[];
+  /** Live audio ingest: tracks, chunks and the calibration audio of this session (see audio/live.ts). */
+  readonly audio: LiveAudio;
 
   private constructor(
     readonly sessionId: string,
@@ -95,6 +131,16 @@ export class SessionManager {
   ) {
     this.clock = deps.clock ?? nowTs;
     this.validators = deps.validators ?? DEFAULT_VALIDATORS;
+    this.audio = new LiveAudio({
+      sessionId,
+      store: deps.store,
+      clock: this.clock,
+      log: deps.log,
+      state: () => this.state,
+      append: (ev) => this.append(ev),
+      run: (fn) => this.run(fn),
+      isFinal: () => this.isFinal,
+    });
   }
 
   get scenario(): Scenario {
@@ -136,6 +182,20 @@ export class SessionManager {
           `Scenario '${deps.scenario.id}' has no view '${k}' (required for byKnowledgeType)`,
         );
       }
+    }
+    if (config.audio.enabled) {
+      // nobody is recorded without being asked: the consent step, with its required audio item
+      if (!config.onboarding.consent)
+        throw new CommandError("Recording audio needs the consent step (onboarding.consent)");
+      if (!deps.onboarding.consent.items.some((i) => i.id === AUDIO_CONSENT_ITEM && i.required))
+        throw new CommandError(
+          `Recording audio needs the required consent item '${AUDIO_CONSENT_ITEM}' in config/consent.json`,
+        );
+      if (!deps.onboarding.audio)
+        throw new CommandError(
+          "Recording audio needs the mic check and calibration texts (config/audio.json)",
+        );
+      if (!deps.store.audioFiles) throw new CommandError("This database cannot store audio");
     }
     const rules = getGameRules(config.rules);
     if (!rules) throw new CommandError(`Unknown game rules '${config.rules}'`);
@@ -216,6 +276,8 @@ export class SessionManager {
     if (events.length === 0) throw new Error(`Session ${sessionId} has no events`);
     for (const ev of events) {
       applyEvent(m.state, ev);
+      m.audio.observe(ev, true);
+      if (ev.type === "CalibrationStarted") m.calibrationRun++;
       if (ev.clientSeq !== null && ev.seat !== null) {
         m.lastClientSeq.set(ev.seat, Math.max(m.lastClientSeq.get(ev.seat) ?? 0, ev.clientSeq));
       }
@@ -237,6 +299,17 @@ export class SessionManager {
     }
     // connection status is not meaningful across restarts (agents are always there)
     for (const s of seatList(m.state)) if (!s.agent) s.connected = false;
+    m.run(() => {
+      m.audio.recover();
+      // the calibration's timers did not survive the restart: end that run (the facilitator can redo it)
+      if (m.state.audio.calibration.status === "running" && !m.isFinal) {
+        m.append({
+          type: "CalibrationSkipped",
+          actorKind: "system",
+          payload: { reason: "The server restarted during the calibration (run it again)", cancelled: true },
+        });
+      }
+    });
     m.armTimers();
     return m;
   }
@@ -247,6 +320,15 @@ export class SessionManager {
     if (this.advanceTimer) clearTimeout(this.advanceTimer);
     this.roundTimer = null;
     this.advanceTimer = null;
+    this.clearCalibrationTimer();
+    this.audio.endCalibration();
+  }
+
+  /** Close every open audio track (e.g. `interrupted` when the hub switches to another session). */
+  closeAudioTracks(reason: "interrupted") {
+    this.run(() => {
+      if (!this.isFinal) this.audio.closeAll(reason);
+    });
   }
 
   get isFinal(): boolean {
@@ -281,6 +363,8 @@ export class SessionManager {
     applyEvent(this.state, stored);
     this.pending.push(stored);
     if (this.state.phase !== before) this.deps.store.setSessionStatus(this.sessionId, this.state.phase);
+    // close audio tracks the event ends (pause, withdrawal, disconnect, game complete, ...)
+    this.audio.observe(stored);
     return stored;
   }
 
@@ -479,6 +563,8 @@ export class SessionManager {
       const o = this.state.config.onboarding;
       const steps: OnboardingStep[] = [];
       if (o.consent) steps.push("consent");
+      // recording starts at each participant's own mic check, right after consent
+      if (this.state.audio.enabled) steps.push("mic_check");
       if (o.demographics) steps.push("demographics");
       if (o.briefing) steps.push("briefing");
       this.append({ type: "OnboardingStarted", actorKind: "facilitator", payload: { steps } });
@@ -506,9 +592,12 @@ export class SessionManager {
       if (active.length === 0) return "No active seats";
       const waiting = active.filter((s) => !isOnboardingComplete(st, s)).map((s) => s.seat);
       if (waiting.length) return `Waiting for onboarding of seat ${waiting.join(", ")}`;
+      if (st.audio.calibration.status === "running") return "Wait for the calibration to finish (or skip it)";
+      if (!canStartFirstRound(st)) return "Run the calibration first (or skip it)";
       return null;
     }
     if (st.phase === "round_complete") {
+      if (st.audio.calibration.status === "running") return "Wait for the calibration to finish (or skip it)";
       return st.round < st.config.roundCount ? null : "All rounds have been played";
     }
     return `Not possible in phase '${st.phase}'`;
@@ -680,6 +769,7 @@ export class SessionManager {
   close() {
     this.run(() => {
       this.requirePhase("game_complete");
+      this.audio.closeAll("closed");
       this.append({ type: "SessionClosed", actorKind: "facilitator", payload: {} });
       this.dispose();
     });
@@ -688,6 +778,7 @@ export class SessionManager {
   abort(reason: string) {
     this.run(() => {
       if (this.isFinal) throw new CommandError("Session has already ended");
+      this.audio.closeAll("aborted");
       this.append({ type: "SessionAborted", actorKind: "facilitator", payload: { reason } });
       this.dispose();
     });
@@ -824,6 +915,251 @@ export class SessionManager {
         payload: { textSha256: msg.textSha256, durationMs: msg.durationMs },
       });
     });
+  }
+
+  /* ═════════════════════════ audio: mic check ═════════════════════════ */
+
+  private requireAudio() {
+    if (!this.state.audio.enabled) throw new CommandError("This session does not record audio");
+  }
+
+  /**
+   * The player's own mic check (the step after consent). Held while any real seat is still in
+   * consent (see micCheckHoldSeats): no microphone opens before everyone has agreed.
+   */
+  submitMicCheck(seat: number, msg: MicCheckResult) {
+    this.run(() => {
+      this.requireAudio();
+      const s = this.requireStep(seat, "mic_check");
+      if (isMicCheckHeld(this.state))
+        throw new CommandError("Please wait: the others are still reading the consent form");
+      this.append({
+        type: "MicCheckCompleted",
+        actorKind: "player",
+        seat,
+        participantCode: s.participantCode,
+        clientTs: msg.clientTs,
+        payload: {
+          passed: msg.passed,
+          attempts: msg.attempts,
+          durationMs: msg.durationMs,
+          settings: msg.settings,
+          noiseFloorDb: msg.noiseFloorDb,
+          speechDb: msg.speechDb,
+          speechMs: msg.speechMs,
+        },
+      });
+    });
+  }
+
+  /** Facilitator: skip a seat's mic check (e.g. no working microphone). The seat is then not recorded. */
+  skipMicCheck(seat: number, reason: string) {
+    this.run(() => {
+      this.requireAudio();
+      this.requirePhase("onboarding");
+      const s = this.requireSeat(seat);
+      if (!s.bound || s.withdrawn) throw new CommandError(`Seat ${seat} is not active`);
+      if (!micCheckApplies(this.state, s))
+        throw new CommandError(`The mic check does not apply to seat ${seat} (no audio consent)`);
+      if (s.micCheck !== "pending")
+        throw new CommandError(`The mic check of seat ${seat} is already ${s.micCheck}`);
+      this.append({
+        type: "MicCheckSkipped",
+        actorKind: "facilitator",
+        seat,
+        participantCode: s.participantCode,
+        payload: { seat, reason },
+      });
+    });
+  }
+
+  /* ═════════════════════════ audio: recording pause ═════════════════════════ */
+
+  /**
+   * Facilitator: pause recording for every seat. The server closes every open track at once
+   * (reason `paused`) and from now on stores nothing captured after this moment: chunks still in
+   * flight are kept up to the pause and cut there (see audio/live.ts). A running calibration ends.
+   */
+  pauseRecording(reason?: string) {
+    this.run(() => {
+      this.requireAudio();
+      if (!RECORDING_PHASES.has(this.state.phase))
+        throw new CommandError(`Nothing is recorded in phase '${this.state.phase}'`);
+      if (this.state.audio.recordingPaused) throw new CommandError("Recording is already paused");
+      this.append({
+        type: "RecordingPaused",
+        actorKind: "facilitator",
+        payload: reason ? { reason } : {},
+      });
+      if (this.state.audio.calibration.status === "running") {
+        this.clearCalibrationTimer();
+        this.audio.endCalibration();
+        this.append({
+          type: "CalibrationSkipped",
+          actorKind: "system",
+          payload: { reason: "Recording was paused during the calibration (run it again)", cancelled: true },
+        });
+      }
+    });
+  }
+
+  /** Facilitator: resume recording; every recorded seat's browser starts a new track (reason `resume`). */
+  resumeRecording() {
+    this.run(() => {
+      this.requireAudio();
+      if (this.isFinal) throw new CommandError("Session has ended");
+      if (!this.state.audio.recordingPaused) throw new CommandError("Recording is not paused");
+      this.append({ type: "RecordingResumed", actorKind: "facilitator", payload: {} });
+    });
+  }
+
+  /* ═════════════════════════ audio: calibration ═════════════════════════ */
+
+  /** Seats the calibration waits for: active real participants not yet past their mic check. */
+  private calibrationWaiting(): number[] {
+    const st = this.state;
+    return activeSeats(st)
+      .filter(
+        (s) =>
+          isParticipant(s) && (s.consent !== "given" || (micCheckApplies(st, s) && s.micCheck === "pending")),
+      )
+      .map((s) => s.seat);
+  }
+
+  /**
+   * Facilitator: start the calibration (or run it again with `redo`). Possible once every real
+   * seat is past its mic check. Each recorded seat in seat order gets a turn of `turnMs` to read
+   * its sentence, then `gapMs` of silence; the server times the turns (CalibrationTurn), logs
+   * CalibrationCompleted after the last one and then the quick leakage check (CalibrationChecked)
+   * once the turns' audio has arrived. A redo cancels a running calibration and starts afresh.
+   */
+  startCalibration(redo = false) {
+    this.run(() => {
+      this.requireAudio();
+      this.requirePhase("onboarding", "round_complete");
+      const st = this.state;
+      const c = st.audio.calibration;
+      if (!redo && c.status === "running") throw new CommandError("The calibration is already running");
+      if (!redo && c.status !== "pending")
+        throw new CommandError(`The calibration was already ${c.status}: use 'redo' to run it again`);
+      if (st.audio.recordingPaused) throw new CommandError("Recording is paused: resume recording first");
+      const waiting = this.calibrationWaiting();
+      if (waiting.length) throw new CommandError(`Waiting for the mic check of seat ${waiting.join(", ")}`);
+      const order = activeSeats(st)
+        .filter((s) => shouldRecord(st, s))
+        .map((s) => s.seat);
+      if (order.length === 0) throw new CommandError("No seat is recorded: skip the calibration instead");
+      const content = this.onboarding.audio?.calibration;
+      if (!content) throw new CommandError("No calibration texts (config/audio.json)");
+      this.clearCalibrationTimer();
+      const run = ++this.calibrationRun;
+      // a redo reads other sentences than the run before, where there are enough
+      const offset = ((run - 1) * order.length) % content.sentences.length;
+      const sentenceIds = order.map((_, i) => content.sentences[(offset + i) % content.sentences.length]!.id);
+      const { turnMs, gapMs } = content;
+      this.append({
+        type: "CalibrationStarted",
+        actorKind: "facilitator",
+        payload: { order, sentenceIds, turnMs, gapMs },
+      });
+      const start = this.clock();
+      this.audio.beginCalibration(run, order, start);
+      this.calibrationTurn(run, 0);
+    });
+  }
+
+  /** Facilitator: skip the calibration, or cancel a running one (round 1 may then start without it). */
+  skipCalibration(reason: string) {
+    this.run(() => {
+      this.requireAudio();
+      if (this.isFinal) throw new CommandError("Session has ended");
+      const status = this.state.audio.calibration.status;
+      if (status === "done" || status === "skipped")
+        throw new CommandError(`The calibration was already ${status}`);
+      this.clearCalibrationTimer();
+      this.audio.endCalibration();
+      this.append({ type: "CalibrationSkipped", actorKind: "facilitator", payload: { reason } });
+    });
+  }
+
+  private clearCalibrationTimer() {
+    if (this.calibrationTimer) clearTimeout(this.calibrationTimer);
+    this.calibrationTimer = null;
+  }
+
+  /** Is calibration run `run` still the one running? (Timers of an earlier run then do nothing.) */
+  private calibrationCurrent(run: number, status: "running" | "done" = "running"): boolean {
+    return this.calibrationRun === run && this.state.audio.calibration.status === status && !this.isFinal;
+  }
+
+  private calibrationTimeout(fn: () => void, ms: number) {
+    this.clearCalibrationTimer();
+    this.calibrationTimer = setTimeout(() => {
+      this.calibrationTimer = null;
+      try {
+        this.run(fn);
+      } catch (e) {
+        this.deps.log.error({ err: e, sessionId: this.sessionId }, "calibration timer failed");
+      }
+    }, ms);
+  }
+
+  /** Log turn `index` of run `run` and time the next step (inside a command). */
+  private calibrationTurn(run: number, index: number) {
+    const c = this.state.audio.calibration;
+    const seat = c.order[index]!;
+    this.append({
+      type: "CalibrationTurn",
+      actorKind: "system",
+      seat,
+      participantCode: this.codeOf(seat),
+      payload: { index, seat, sentenceId: c.sentenceIds[index]! },
+    });
+    const turnMs = c.turnMs ?? 0;
+    const last = index >= c.order.length - 1;
+    this.calibrationTimeout(
+      () => {
+        if (!this.calibrationCurrent(run)) return;
+        if (last) this.completeCalibration(run);
+        else this.calibrationTurn(run, index + 1);
+      },
+      last ? turnMs : turnMs + (c.gapMs ?? 0),
+    );
+  }
+
+  /** The last turn is over: log CalibrationCompleted, then wait for the audio and check it (inside a command). */
+  private completeCalibration(run: number) {
+    const c = this.state.audio.calibration;
+    const turnMs = c.turnMs ?? 0;
+    const turns = c.turns.map((t) => ({
+      seat: t.seat,
+      sentenceId: t.sentenceId,
+      startTs: t.startTs,
+      endTs: t.endTs ?? t.startTs + turnMs,
+    }));
+    this.append({ type: "CalibrationCompleted", actorKind: "system", payload: { turns } });
+    const lastEnd = Math.max(...turns.map((t) => t.endTs));
+    const deadline = this.clock() + CALIBRATION_CHECK_WAIT_MS;
+    const poll = () => {
+      if (!this.calibrationCurrent(run, "done")) return;
+      const collector = this.audio.calibration(run);
+      if (!collector) return;
+      if (!collector.complete(lastEnd) && this.clock() < deadline) {
+        this.calibrationTimeout(poll, CALIBRATION_CHECK_POLL_MS);
+        return;
+      }
+      try {
+        const report = collector.check(turns);
+        this.append({
+          type: "CalibrationChecked",
+          actorKind: "system",
+          payload: calibrationCheckedPayload(report, c.order),
+        });
+      } finally {
+        this.audio.endCalibration(run);
+      }
+    };
+    this.calibrationTimeout(poll, CALIBRATION_CHECK_POLL_MS);
   }
 
   /* ═════════════════════════ intents ═════════════════════════ */

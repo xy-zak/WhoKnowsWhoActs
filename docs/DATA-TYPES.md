@@ -185,7 +185,7 @@ Columns shared by every event row:
 | [`CalibrationTurn`](#calibrationturn) | A seat's calibration turn began (the event's serverTs is the start of the turn): that seat reads its sentence aloud, the others stay quiet. | system | yes | pseudonymous | 1 per seat per calibration |
 | [`CalibrationCompleted`](#calibrationcompleted) | Every calibration turn has run; the turn windows are used to measure the leakage between microphones. | system | yes | non-personal | 0–1 per calibration |
 | [`CalibrationChecked`](#calibrationchecked) | Quick quality check of the calibration: per seat, how much louder its own voice was on its own microphone than on the loudest other one. | system | yes | pseudonymous | 1 per CalibrationCompleted |
-| [`CalibrationSkipped`](#calibrationskipped) | The facilitator skipped (or cancelled) the calibration; speaker attribution then estimates the leakage between microphones from the recordings. | facilitator | yes | non-personal | 0–1 per session (audio sessions only) |
+| [`CalibrationSkipped`](#calibrationskipped) | The facilitator skipped (or cancelled) the calibration; speaker attribution then estimates the leakage between microphones from the recordings. Logged by the server with `cancelled: true` when it had to stop a running calibration itself (recording paused, server restart): the calibration is then back to not done and has to be run (or skipped) again. | facilitator, system | yes | non-personal | 0–1 per session (audio sessions only), plus 1 per cancelled run |
 | [`RoundStarted`](#roundstarted) | A round began; players may now propose/decide. | facilitator, system | yes | non-personal | roundCount per session (default 3) |
 | [`ProposalMade`](#proposalmade) | A player proposed a sub-square of the map (hatched in its knowledge-type colour for all players). | player | yes | pseudonymous | ≤ quota.propose × seats × rounds (default 60) |
 | [`DecisionMade`](#decisionmade) | A player decided on a sub-square of the map (filled in its knowledge-type colour for all players); the game rules change the scores. | player | yes | pseudonymous | ≤ quota.decide × seats × rounds (default 60) |
@@ -1022,7 +1022,7 @@ A seat's browser started a new audio track: one continuous capture run of its mi
 | `settings.noiseSuppression` | `boolean` | Noise suppression actually applied by the browser (requested off; absent if not reported) |
 | `settings.autoGainControl` | `boolean` | Automatic gain control actually applied by the browser (requested off; absent if not reported) |
 | `settings.channelCount` | `integer 1–32` | Channels the browser delivered (requested 1; mixed to mono before upload) |
-| `reason` | `"mic_check" \| "resume" \| "reconnect" \| "reload" \| "permission_regained"` | Why the track started: 'mic_check' = first capture of the seat (its mic check), 'resume' = recording resumed after a facilitator pause, 'reconnect' = the browser reconnected, 'reload' = the page was reloaded, 'permission_regained' = the microphone came back after a permission or device loss |
+| `reason` | `"mic_check" \| "resume" \| "reconnect" \| "reload" \| "permission_regained" \| "context_resumed" \| "clock_jump" \| "discontinuity" \| "cleared"` | Why the track started: 'mic_check' = first capture of the seat (its mic check), 'resume' = recording resumed after a facilitator pause, 'reconnect' = the browser reconnected, 'reload' = the page was reloaded, 'permission_regained' = the microphone came back after a permission or device loss, 'context_resumed' = the browser's audio engine ran again after the system suspended it (e.g. sleep, another app took the device), 'clock_jump' = the capture clock jumped, so a new track keeps the sample timeline exact, 'discontinuity' = the browser delivered a gap or overlap in the audio too large to patch, 'cleared' = the browser discarded its unsent audio (e.g. the seat was unbound) and capture continued in a new track |
 
 <details><summary>Example row</summary>
 
@@ -1074,7 +1074,7 @@ A seat's audio track ended. The audio itself is stored separately, encrypted (ne
 | Field | Type | Description |
 | --- | --- | --- |
 | `trackId` | `string (uuid)` | Random id of the audio track (one continuous capture run of one seat) |
-| `reason` | `"paused" \| "game_complete" \| "closed" \| "aborted" \| "withdrawn" \| "disconnect" \| "permission_lost" \| "error" \| "client_stop"` | Why the track stopped: 'paused' = facilitator paused recording, 'game_complete' = the game ended, 'closed' / 'aborted' = the session was closed or aborted, 'withdrawn' = the participant withdrew, 'disconnect' = the browser disconnected, 'permission_lost' = the microphone permission or device went away, 'error' = capture failed, 'client_stop' = the browser stopped the track itself (e.g. page unload) |
+| `reason` | `"paused" \| "game_complete" \| "closed" \| "aborted" \| "withdrawn" \| "disconnect" \| "permission_lost" \| "error" \| "client_stop" \| "skipped" \| "interrupted" \| "context_suspended" \| "context_interrupted" \| "clock_jump" \| "discontinuity" \| "track_ended" \| "cleared"` | Why the track stopped: 'paused' = facilitator paused recording, 'game_complete' = the game ended, 'closed' / 'aborted' = the session was closed or aborted, 'withdrawn' = the participant withdrew, 'disconnect' = the browser disconnected (the server closed the track), 'permission_lost' = the microphone permission or device went away, 'error' = capture failed, 'client_stop' = the browser stopped the track itself (e.g. page unload), 'skipped' = the facilitator skipped the seat's mic check (the seat is not recorded), 'interrupted' = the server found the track still open when it loaded the session again (e.g. after a restart) or the seat started another track, 'context_suspended' / 'context_interrupted' = the system suspended or interrupted the browser's audio engine, 'clock_jump' = the capture clock jumped, 'discontinuity' = a gap or overlap in the audio too large to patch, 'track_ended' = the browser ended the microphone track (device unplugged or permission revoked), 'cleared' = the browser discarded its unsent audio (e.g. the seat was unbound) |
 | `samples` | `integer ≥ 0` | Samples the server stored for this track (16 000 per second) |
 | `chunks` | `integer ≥ 0` | Chunks the server stored for this track |
 | `droppedChunks` | `integer ≥ 0` | Chunks the browser had to drop (e.g. its in-memory resend queue overflowed during a long disconnect); their audio is missing |
@@ -1335,22 +1335,23 @@ Quick quality check of the calibration: per seat, how much louder its own voice 
 
 ### `CalibrationSkipped`
 
-The facilitator skipped (or cancelled) the calibration; speaker attribution then estimates the leakage between microphones from the recordings.
+The facilitator skipped (or cancelled) the calibration; speaker attribution then estimates the leakage between microphones from the recordings. Logged by the server with `cancelled: true` when it had to stop a running calibration itself (recording paused, server restart): the calibration is then back to not done and has to be run (or skipped) again.
 
 |  |  |
 | --- | --- |
-| **Trigger** | Facilitator clicks 'Skip calibration' and confirms. |
-| **Caused by** | facilitator |
+| **Trigger** | Facilitator clicks 'Skip calibration' and confirms; or the server stops a running calibration (recording paused, restart). |
+| **Caused by** | facilitator, system |
 | **Changes game state** | yes |
 | **Visible to** | Everyone |
 | **Data class** | non-personal |
-| **Typical frequency** | 0–1 per session (audio sessions only) |
+| **Typical frequency** | 0–1 per session (audio sessions only), plus 1 per cancelled run |
 
 **Payload**
 
 | Field | Type | Description |
 | --- | --- | --- |
 | `reason` | `string (≤ 200 chars)` | Facilitator's reason (free text, no personal data) |
+| `cancelled` | `boolean` | True when the server stopped a running calibration (recording paused, restart): its status goes back to 'pending', so round 1 still waits for a calibration (absent = a facilitator skip) |
 
 <details><summary>Example row</summary>
 

@@ -182,6 +182,11 @@ export function applyEvent(state: GameState, ev: StoredEvent): GameState {
       };
       break;
     case "CalibrationSkipped": {
+      // stopped by the server (recording paused, restart): not done, so it has to run (or be skipped) again
+      if (ev.payload.cancelled) {
+        if (state.audio.calibration.status === "running") state.audio.calibration = emptyCalibration();
+        break;
+      }
       const c = state.audio.calibration;
       // a finished calibration stays done (its measurements are complete)
       if (c.status === "done") break;

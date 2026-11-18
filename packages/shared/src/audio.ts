@@ -69,12 +69,16 @@ export const AUDIO_START_REASONS = [
   "reconnect",
   "reload",
   "permission_regained",
+  "context_resumed",
+  "clock_jump",
+  "discontinuity",
+  "cleared",
 ] as const;
 export type AudioStartReason = (typeof AUDIO_START_REASONS)[number];
 export const AudioStartReasonSchema = z
   .enum(AUDIO_START_REASONS)
   .describe(
-    "Why the track started: 'mic_check' = first capture of the seat (its mic check), 'resume' = recording resumed after a facilitator pause, 'reconnect' = the browser reconnected, 'reload' = the page was reloaded, 'permission_regained' = the microphone came back after a permission or device loss",
+    "Why the track started: 'mic_check' = first capture of the seat (its mic check), 'resume' = recording resumed after a facilitator pause, 'reconnect' = the browser reconnected, 'reload' = the page was reloaded, 'permission_regained' = the microphone came back after a permission or device loss, 'context_resumed' = the browser's audio engine ran again after the system suspended it (e.g. sleep, another app took the device), 'clock_jump' = the capture clock jumped, so a new track keeps the sample timeline exact, 'discontinuity' = the browser delivered a gap or overlap in the audio too large to patch, 'cleared' = the browser discarded its unsent audio (e.g. the seat was unbound) and capture continued in a new track",
   );
 
 /** Why a track stopped. */
@@ -88,21 +92,45 @@ export const AUDIO_STOP_REASONS = [
   "permission_lost",
   "error",
   "client_stop",
+  "skipped",
+  "interrupted",
+  "context_suspended",
+  "context_interrupted",
+  "clock_jump",
+  "discontinuity",
+  "track_ended",
+  "cleared",
 ] as const;
 export type AudioStopReason = (typeof AUDIO_STOP_REASONS)[number];
 export const AudioStopReasonSchema = z
   .enum(AUDIO_STOP_REASONS)
   .describe(
-    "Why the track stopped: 'paused' = facilitator paused recording, 'game_complete' = the game ended, 'closed' / 'aborted' = the session was closed or aborted, 'withdrawn' = the participant withdrew, 'disconnect' = the browser disconnected, 'permission_lost' = the microphone permission or device went away, 'error' = capture failed, 'client_stop' = the browser stopped the track itself (e.g. page unload)",
+    "Why the track stopped: 'paused' = facilitator paused recording, 'game_complete' = the game ended, 'closed' / 'aborted' = the session was closed or aborted, 'withdrawn' = the participant withdrew, 'disconnect' = the browser disconnected (the server closed the track), 'permission_lost' = the microphone permission or device went away, 'error' = capture failed, 'client_stop' = the browser stopped the track itself (e.g. page unload), 'skipped' = the facilitator skipped the seat's mic check (the seat is not recorded), 'interrupted' = the server found the track still open when it loaded the session again (e.g. after a restart) or the seat started another track, 'context_suspended' / 'context_interrupted' = the system suspended or interrupted the browser's audio engine, 'clock_jump' = the capture clock jumped, 'discontinuity' = a gap or overlap in the audio too large to patch, 'track_ended' = the browser ended the microphone track (device unplugged or permission revoked), 'cleared' = the browser discarded its unsent audio (e.g. the seat was unbound)",
   );
 
+/**
+ * How long after its close (or its last late chunk) a track still accepts late chunks (ms; 10 min):
+ * the server closes a seat's track when its browser disconnects, and the browser resends what was
+ * not acknowledged once it is back. Audio captured while recording was paused or after the game was
+ * complete is never stored, late or not (see the server's live audio ingest).
+ */
+export const AUDIO_LATE_CHUNK_GRACE_MS = 10 * 60_000;
+
 /** State of a seat's microphone, as reported by its browser in `audio:level`. */
-export const MIC_LEVEL_STATES = ["recording", "no_signal", "denied", "error", "idle", "paused"] as const;
+export const MIC_LEVEL_STATES = [
+  "recording",
+  "no_signal",
+  "denied",
+  "error",
+  "idle",
+  "paused",
+  "requesting",
+] as const;
 export type MicLevelState = (typeof MIC_LEVEL_STATES)[number];
 export const MicLevelStateSchema = z
   .enum(MIC_LEVEL_STATES)
   .describe(
-    "Microphone state: 'recording' = capturing with signal, 'no_signal' = capturing but silent for a long time (muted or unplugged mic), 'denied' = permission refused, 'error' = capture failed, 'idle' = not capturing (not yet, or not allowed), 'paused' = recording paused by the facilitator",
+    "Microphone state: 'recording' = capturing with signal, 'no_signal' = capturing but silent for a long time (muted or unplugged mic), 'denied' = permission refused, 'error' = capture failed, 'idle' = not capturing (not yet, or not allowed), 'paused' = recording paused by the facilitator (or the browser's audio engine was suspended), 'requesting' = waiting for the permission prompt or setting up capture",
   );
 
 /**
@@ -146,6 +174,108 @@ export const AudioSettingsSchema = z
     "Microphone processing settings reported by the browser (getSettings()); never the device name or id",
   );
 export type AudioSettings = z.infer<typeof AudioSettingsSchema>;
+
+/**
+ * The settings as the browser's capture engine reports them (`MediaStreamTrack.getSettings()`,
+ * whitelisted on the client): the sample rate may be missing (Firefox) and newer Chrome reports
+ * echo cancellation as a mode string. `toAudioSettings` turns this into `AudioSettings`. Unknown
+ * keys (a deviceId, groupId or label sent by mistake) are stripped.
+ */
+export const AudioCaptureSettingsSchema = z
+  .object({
+    sampleRate: z
+      .number()
+      .int()
+      .min(8000)
+      .max(384000)
+      .optional()
+      .describe("Native sample rate of the capture (Hz), if the browser reports it"),
+    echoCancellation: z
+      .union([z.boolean(), z.string().max(40)])
+      .optional()
+      .describe(
+        "Echo cancellation applied: a boolean, or a mode such as 'all' / 'remote-only' (newer Chrome); stored as a boolean",
+      ),
+    noiseSuppression: z.boolean().optional().describe("Noise suppression applied (absent if not reported)"),
+    autoGainControl: z
+      .boolean()
+      .optional()
+      .describe("Automatic gain control applied (absent if not reported)"),
+    channelCount: z
+      .number()
+      .int()
+      .min(1)
+      .max(32)
+      .optional()
+      .describe("Channels the browser delivered (absent if not reported)"),
+  })
+  .describe("Microphone processing settings as reported by the browser; never the device name or id");
+export type AudioCaptureSettings = z.infer<typeof AudioCaptureSettingsSchema>;
+
+/** The browser's AudioContext a track was captured with (timing details; nothing about the device). */
+export const AudioContextInfoSchema = z
+  .object({
+    sampleRate: z
+      .number()
+      .int()
+      .min(8000)
+      .max(384000)
+      .describe("Rate the audio engine captured at, before resampling to 16 000 Hz (Hz)"),
+    baseLatencyMs: z.number().nullable().describe("AudioContext.baseLatency (ms; null = not reported)"),
+    outputLatencyMs: z.number().nullable().describe("AudioContext.outputLatency (ms; null = not reported)"),
+    timingMethod: z
+      .string()
+      .max(40)
+      .describe(
+        "How the browser mapped audio frames to clock time, e.g. 'output-timestamp' or 'current-time'",
+      ),
+  })
+  .describe("The browser's audio engine of the track");
+export type AudioContextInfo = z.infer<typeof AudioContextInfoSchema>;
+
+/**
+ * `AudioSettings` from what the browser reported: the sample rate falls back to the audio
+ * engine's rate, and an echo-cancellation mode string counts as on (unless it is 'none').
+ * Returns null when no sample rate is known at all.
+ */
+export function toAudioSettings(
+  capture: AudioCaptureSettings,
+  contextSampleRate?: number | null,
+): AudioSettings | null {
+  const sampleRate = capture.sampleRate ?? contextSampleRate ?? null;
+  if (sampleRate === null) return null;
+  const ec = capture.echoCancellation;
+  return {
+    sampleRate,
+    ...(ec === undefined ? {} : { echoCancellation: typeof ec === "string" ? ec !== "none" : ec }),
+    ...(capture.noiseSuppression === undefined ? {} : { noiseSuppression: capture.noiseSuppression }),
+    ...(capture.autoGainControl === undefined ? {} : { autoGainControl: capture.autoGainControl }),
+    ...(capture.channelCount === undefined ? {} : { channelCount: capture.channelCount }),
+  };
+}
+
+/**
+ * Acknowledgement of `audio:start`, `audio:chunk` and `audio:stop`. A refusal says whether to send
+ * the item again: `retry: false` is permanent (the browser drops the item: recording not allowed
+ * now, unknown or closed track, bad payload), `retry: true` is transient (not seated yet after a
+ * reconnect, a storage error).
+ */
+export type AudioAck<T = undefined> =
+  | { ok: true; data?: T; duplicate?: boolean }
+  | { ok: false; error: string; retry: boolean };
+
+/**
+ * What the browser's send queue makes of an audio ack: true = stored (drop it from the queue),
+ * "rejected" = refused for good (drop it, counted), false = try again later. A missing or malformed
+ * ack (e.g. a timeout) means try again.
+ */
+export function audioSendResult(ack: unknown): true | false | "rejected" {
+  if (!ack || typeof ack !== "object") return false;
+  const a = ack as { ok?: unknown; retry?: unknown };
+  if (a.ok === true) return true;
+  if (a.ok === false) return a.retry === true ? false : "rejected";
+  return false;
+}
 
 /** Byte length of a binary PCM payload (ArrayBuffer or any view of one: Node Buffer, Uint8Array, Int16Array …); -1 if not binary. */
 export function pcmByteLength(v: unknown): number {

@@ -3,8 +3,15 @@ import {
   AbortMsg,
   type Ack,
   ActionRevoke,
+  AUDIO_SILENCE_DB,
+  type AudioAck,
+  AudioChunk,
+  AudioLevel,
+  AudioStart,
+  AudioStop,
   BriefingAck,
   BroadcastMsg,
+  CalibrationSkip,
   ClockPing,
   ConsentSubmit,
   type DashboardMsg,
@@ -16,15 +23,23 @@ import {
   LabelsRandomise,
   LabelsSet,
   LIVE_TELEMETRY_TYPES,
+  MicCheckSubmit,
+  type MicLevelState,
+  MicSkip,
+  micCheckApplies,
   NoteMsg,
+  normaliseForPlayers,
   PlayerHello,
   Presence,
+  parseSessionConfig,
   parseTelemetryItem,
   playerView,
   REDACTED_EVENT_TYPES,
+  RecordingPause,
   type Scenario,
   SeatBind,
   type SeatLiveStats,
+  type SeatMicStats,
   SeatUnbind,
   type SessionConfig,
   SessionCreate,
@@ -58,6 +73,19 @@ interface PlayerSocketData {
   terminalKey?: string;
   terminal?: number;
   seat?: number | null;
+}
+
+/** Latest `audio:level` of a seat (volatile: never stored). */
+interface MicLevelReading {
+  state: MicLevelState;
+  rmsDb: number;
+  peakDb: number;
+  pendingChunks: number;
+}
+
+/** Does a session with this config record audio? (Never a simulated one.) */
+function recordsAudio(config: unknown): boolean {
+  return normaliseForPlayers(parseSessionConfig(config)).audio.enabled;
 }
 
 export interface HubDeps {
@@ -121,6 +149,7 @@ export class Hub {
   private nextTerminal = 1;
   private seatSockets = new Map<number, Socket>();
   private stats = new Map<number, SeatLiveStats>();
+  private micLevels = new Map<number, MicLevelReading>();
   private liveTelemetry: StoredTelemetry[] = [];
   private statsTimer: NodeJS.Timeout | null = null;
   readonly player: Namespace;
@@ -154,11 +183,12 @@ export class Hub {
     return this.session?.store ?? this.deps.stores.real;
   }
 
-  private sessionDeps(scenario: Scenario, store: Store) {
+  private sessionDeps(scenario: Scenario, store: Store, audio: boolean) {
     return {
       store,
       scenario,
-      onboarding: loadOnboardingContent(this.deps.configDir),
+      // composed for the session: the consent form has its audio section and item only with audio
+      onboarding: loadOnboardingContent(this.deps.configDir, { audio }),
       serverSecret: this.secret,
       log: this.deps.log,
       onEvents: (evs: StoredEvent[]) => this.onEvents(evs),
@@ -168,9 +198,15 @@ export class Hub {
   createSession(scenarioId: string, config: SessionConfig, notes: string): SessionManager {
     const scenario = this.deps.scenarios.load(scenarioId);
     const store = this.deps.stores.of(config.players);
+    let deps: ReturnType<Hub["sessionDeps"]>;
+    try {
+      deps = this.sessionDeps(scenario, store, recordsAudio(config));
+    } catch (e) {
+      throw new CommandError((e as Error).message);
+    }
     this.detach("A new session was created");
     // this.session is null while creating, so the SessionCreated batch is delivered by afterAttach()
-    const created = SessionManager.create(this.sessionDeps(scenario, store), config, notes);
+    const created = SessionManager.create(deps, config, notes);
     this.session = created;
     this.deps.log.info(
       { sessionId: created.sessionId, scenario: scenario.id, players: config.players },
@@ -184,8 +220,15 @@ export class Hub {
     const found = this.deps.stores.find(sessionId);
     if (!found) throw new CommandError(`Unknown session ${sessionId}`);
     const scenario = this.deps.scenarios.load(found.row.scenario_id);
+    let deps: ReturnType<Hub["sessionDeps"]>;
+    try {
+      deps = this.sessionDeps(scenario, found.store, recordsAudio(JSON.parse(found.row.config_json)));
+    } catch (e) {
+      // e.g. consent.json lost its audio item: keep the attached session as it is
+      throw new CommandError((e as Error).message);
+    }
     this.detach("Switching session");
-    const m = SessionManager.load(this.sessionDeps(scenario, found.store), sessionId);
+    const m = SessionManager.load(deps, sessionId);
     this.session = m;
     this.deps.log.info({ sessionId }, "session resumed");
     this.afterAttach();
@@ -209,6 +252,12 @@ export class Hub {
     this.runner = null;
     this.dropFakes();
     if (!this.session) return;
+    // its tracks end here (`interrupted`); a browser's late chunks are accepted when it is loaded again
+    try {
+      this.session.closeAudioTracks("interrupted");
+    } catch (e) {
+      this.deps.log.error({ err: e }, "could not close the audio tracks");
+    }
     this.session.dispose();
     this.session = null;
     for (const [, sock] of this.seatSockets) {
@@ -217,6 +266,7 @@ export class Hub {
     }
     this.seatSockets.clear();
     this.stats.clear();
+    this.micLevels.clear();
     this.liveTelemetry = [];
   }
 
@@ -352,7 +402,11 @@ export class Hub {
         const entry = [...this.terminals.values()].find((t) => t.terminal === ev.payload.terminal);
         const sock = entry ? [...entry.sockets].at(-1) : undefined;
         if (sock) queueMicrotask(() => this.claimSeat(sock, ev.payload.seat));
-      } else if (ev.type === "SeatUnbound") {
+      }
+      // the mic meter of a seat that is no longer recorded goes blank
+      if (ev.type === "SeatUnbound" || ev.type === "ParticipantWithdrawn" || ev.type === "MicCheckSkipped")
+        this.micLevels.delete(ev.payload.seat);
+      if (ev.type === "SeatUnbound") {
         const sock = this.seatSockets.get(ev.payload.seat);
         const key = sock ? (sock.data as PlayerSocketData).terminalKey : undefined;
         if (sock && key && this.fakes.isFake(key)) {
@@ -411,12 +465,32 @@ export class Hub {
       })
       .filter((t) => t.connected || t.seat !== null)
       .sort((a, b) => a.terminal - b.terminal);
+    const audio = m?.state.audio.enabled ? m.state.audio : undefined;
+    const stats: Record<number, SeatLiveStats> = {};
+    for (const [seat, st] of this.stats)
+      stats[seat] = audio && m ? { ...st, mic: this.micStats(m, seat) } : st;
     return {
       state: m?.state ?? null,
       serverTs: nowTs(),
       terminals,
-      stats: Object.fromEntries(this.stats),
+      stats,
       live: Boolean(m && !m.isFinal),
+      ...(audio ? { audio } : {}),
+    };
+  }
+
+  /** LIVE mic figures of a seat: the browser's latest meter reading plus what the server stored. */
+  private micStats(m: SessionManager, seat: number): SeatMicStats {
+    const level = this.micLevels.get(seat);
+    const stored = m.audio.seatStats(seat);
+    return {
+      state: level?.state ?? "idle",
+      rmsDb: level?.rmsDb ?? AUDIO_SILENCE_DB,
+      peakDb: level?.peakDb ?? AUDIO_SILENCE_DB,
+      lastChunkServerTs: stored.lastChunkServerTs,
+      pendingChunks: level?.pendingChunks ?? 0,
+      tracks: stored.tracks,
+      recordedMs: Math.round(stored.recordedMs),
     };
   }
 
@@ -508,7 +582,49 @@ export class Hub {
       });
     };
 
+    /**
+     * Audio uploads: like seatCmd, but every refusal says whether to retry (AudioAck). Not seated
+     * (e.g. right after a reconnect, before hello) is transient; a bad payload is permanent.
+     */
+    const audioCmd = <T>(
+      name: string,
+      schema: ZodType<T>,
+      fn: (m: SessionManager, seat: number, msg: T) => AudioAck<unknown> | Promise<AudioAck<unknown>>,
+    ) => {
+      sock.on(name, (raw, ack?: (a: AudioAck<unknown>) => void) => {
+        const m = this.session;
+        const seat = data.seat;
+        if (!m || seat === null || seat === undefined)
+          return ack?.({ ok: false, error: "Not seated", retry: true });
+        const msg = schema.safeParse(raw);
+        if (!msg.success)
+          return ack?.({
+            ok: false,
+            error: `Invalid message: ${msg.error.issues[0]?.message ?? ""}`,
+            retry: false,
+          });
+        Promise.resolve()
+          .then(() => fn(m, seat, msg.data))
+          .then(
+            (a) => {
+              ack?.(a);
+              // stored audio changes the LIVE mic column (throttled)
+              if (a.ok && this.session === m) this.schedulePush();
+            },
+            (e) => {
+              if (e instanceof CommandError) return ack?.({ ok: false, error: e.message, retry: false });
+              this.deps.log.error({ err: e, msg: name }, "audio upload failed");
+              ack?.({ ok: false, error: "Server error", retry: true });
+            },
+          );
+      });
+    };
+
     seatCmd("consent:submit", ConsentSubmit, (m, seat, msg) => m.submitConsent(seat, msg));
+    seatCmd("mic:check", MicCheckSubmit, (m, seat, msg) => m.submitMicCheck(seat, msg));
+    audioCmd("audio:start", AudioStart, (m, seat, msg) => m.audio.start(seat, msg));
+    audioCmd("audio:chunk", AudioChunk, (m, seat, msg) => m.audio.chunk(seat, msg));
+    audioCmd("audio:stop", AudioStop, (m, seat, msg) => m.audio.stop(seat, msg));
     seatCmd("demographics:submit", DemographicsSubmit, (m, seat, msg) => m.submitDemographics(seat, msg));
     seatCmd("briefing:ack", BriefingAck, (m, seat, msg) => m.acknowledgeBriefing(seat, msg));
     seatCmd("intent", IntentMsg, (m, seat, msg) => m.intent(seat, msg));
@@ -523,12 +639,27 @@ export class Hub {
       this.facilitator.volatile.emit("presence:live", { seat, regionId: msg.data.regionId });
     });
 
+    // volatile meter reading for LIVE: never stored, dropped for seats that are not recorded
+    sock.on("audio:level", (raw) => {
+      const m = this.session;
+      const seat = data.seat;
+      if (!m || !seat || !m.state.audio.enabled) return;
+      const s = m.state.seats[seat];
+      if (!s?.bound || s.withdrawn || !micCheckApplies(m.state, s) || s.micCheck === "skipped") return;
+      const msg = AudioLevel.safeParse(raw);
+      if (!msg.success) return;
+      const { state, rmsDb, peakDb, pendingChunks } = msg.data;
+      this.micLevels.set(seat, { state, rmsDb, peakDb, pendingChunks });
+      this.schedulePush();
+    });
+
     sock.on("disconnect", (reason) => {
       clearTimeout(helloTimeout);
       if (data.terminalKey) this.terminals.get(data.terminalKey)?.sockets.delete(sock);
       const seat = data.seat;
       if (seat && this.seatSockets.get(seat) === sock) {
         this.seatSockets.delete(seat);
+        this.micLevels.delete(seat);
         const st = this.stats.get(seat);
         if (st) st.hoverRegionId = null;
         this.session?.playerDisconnected(seat, reason);
@@ -649,6 +780,12 @@ export class Hub {
     cmd("game:end", Empty, () => s().endGame());
     cmd("session:close", Empty, () => s().close());
     cmd("session:abort", AbortMsg, (msg) => s().abort(msg.reason));
+    cmd("mic:skip", MicSkip, (msg) => s().skipMicCheck(msg.seat, msg.reason));
+    cmd("calibration:start", Empty, () => s().startCalibration(false));
+    cmd("calibration:redo", Empty, () => s().startCalibration(true));
+    cmd("calibration:skip", CalibrationSkip, (msg) => s().skipCalibration(msg.reason));
+    cmd("recording:pause", RecordingPause, (msg) => s().pauseRecording(msg.reason));
+    cmd("recording:resume", Empty, () => s().resumeRecording());
   }
 
   /** Detach a session (e.g. before deleting it); connected players return to the waiting screen. */

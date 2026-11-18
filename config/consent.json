@@ -1,5 +1,5 @@
 {
-  "version": "PLACEHOLDER-v0",
+  "version": "PLACEHOLDER-v1",
   "markdownFile": "consent.md",
   "items": [
     {
@@ -21,6 +21,12 @@
       "id": "demographics",
       "text": "I agree that my answers to the short background questionnaire are stored under the same code.",
       "required": true
+    },
+    {
+      "id": "audio_recording",
+      "text": "[Placeholder: approved wording] I agree that my microphone records my voice, and what is said around me, from the microphone check until the end of the game, and that the recordings are stored encrypted under my code.",
+      "required": true,
+      "when": "audio"
     },
     {
       "id": "future_research",
