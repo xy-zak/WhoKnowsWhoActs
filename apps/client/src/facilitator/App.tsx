@@ -21,6 +21,7 @@ import {
   useShortcuts,
   useSignalClass,
 } from "../ui";
+import { micStatsOf, micsSummary } from "./audioLive";
 import type { FacilitatorConnection } from "./connection";
 import { Database } from "./Database";
 import { LiveStage } from "./live/LiveStage";
@@ -105,6 +106,7 @@ export function App({ conn }: { conn: FacilitatorConnection }) {
   const simulated = st ? isSimulated(st) : false;
   const agents = st ? Object.values(st.seats).filter((s) => s.agent && !s.withdrawn).length : 0;
   const fakes = st ? fakeSeats(st).length : 0;
+  const mics = st ? micsSummary(st, micStatsOf(fs.dashboard?.stats)) : null;
 
   return (
     <div className="app-shell col" style={{ gap: "var(--s2)" }}>
@@ -225,6 +227,26 @@ export function App({ conn }: { conn: FacilitatorConnection }) {
             {bound < st.config.seatCount ? ` · ${bound} bound` : ""}
           </span>
         )}
+        {mics?.show &&
+          (mics.paused ? (
+            <span className="seg" data-tip="Recording is paused for every seat (TOOLS → Resume recording)">
+              <Icon name="microphoneOff" /> <span className="strong t-warn">RECORDING PAUSED</span>
+            </span>
+          ) : mics.expected > 0 ? (
+            <span
+              className="seg"
+              data-tip={
+                mics.missing.length
+                  ? `Seats recording / seats that should record. Not recording: seat ${mics.missing.join(", ")} (see the Mic column)`
+                  : "Seats recording / seats that should record"
+              }
+            >
+              <Icon name={mics.missing.length ? "microphoneWarning" : "microphone"} />{" "}
+              <span className={mics.missing.length ? "strong t-warn" : undefined}>
+                mics {mics.recording}/{mics.expected}
+              </span>
+            </span>
+          ) : null)}
         {st && st.config.tags.length > 0 && (
           <span className="seg">
             <Icon name="tag" /> {st.config.tags.join(", ")}

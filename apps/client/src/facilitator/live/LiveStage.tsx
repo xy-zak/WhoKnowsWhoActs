@@ -36,6 +36,7 @@ import { LabelsEditor, SeatsPanel } from "../seats";
 import { paceText, policySummary } from "../simulation";
 import { Timeline } from "../Timeline";
 import { AudioNext, calibrationNeeded, calibrationWaiting } from "./AudioControls";
+import { AudioCheckView, CalibrationCard, RecordingControl, useAudioCheck } from "./AudioPanels";
 
 function useNow(ms = 1000) {
   const [now, setNow] = useState(Date.now());
@@ -337,6 +338,7 @@ function ToolsPanel({
             Add note
           </Button>
         </form>
+        <RecordingControl conn={conn} st={st} />
         <div className="row">
           <Button
             icon="labels"
@@ -428,6 +430,8 @@ function WrapUp({ conn, st, onClose }: { conn: FacilitatorConnection; st: GameSt
   const id = st.sessionId!;
   const key = steps[step]!.key;
   const last = steps.length - 1;
+  const audio = useAudioCheck(conn, st);
+  const uploading = audio?.lines.some((l) => l.kind === "upload") ?? false;
   const doExport = async () => {
     setBusy(true);
     const r = await conn
@@ -474,15 +478,16 @@ function WrapUp({ conn, st, onClose }: { conn: FacilitatorConnection; st: GameSt
             onClick={next}
             tip={
               key === "close"
-                ? "Archive the session: no further events; it can still be replayed and exported"
+                ? `Archive the session: no further events; it can still be replayed and exported${uploading ? ". Audio is still uploading: what has not arrived is lost" : ""}`
                 : "Next wrap-up step"
             }
           >
-            {key === "close" ? "Close session" : "Next"}
+            {key === "close" ? (uploading ? "Close anyway" : "Close session") : "Next"}
           </Button>
         </>
       }
     >
+      {audio && <AudioCheckView check={audio} />}
       {key === "cards" && (
         <div className="col">
           <p>
@@ -653,6 +658,7 @@ export function LiveStage({ conn }: { conn: FacilitatorConnection }) {
         <NextPanel conn={conn} st={st} onWrapUp={() => setWrapUp(true)} />
         <ToolsPanel conn={conn} st={st} onLabels={() => setLabels(true)} />
       </div>
+      <CalibrationCard st={st} events={fs.events} />
       <SeatsPanel conn={conn} dash={dash} scenario={scenario} />
       {scenario && (
         <div
