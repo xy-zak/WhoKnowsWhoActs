@@ -5,12 +5,17 @@ import { type ActionKind, K_LABELS, type KLabel, type PLabel } from "./labels";
 import { quotaLimit, quotaUsed } from "./rules/roundRules";
 import type { MapGeometry, Scenario } from "./scenario";
 import {
+  type CalibrationStatus,
   type ConsentStatus,
+  currentCalibrationTurn,
   type GameState,
+  type MicCheckStatus,
   nextOnboardingStep,
   type OnboardingStep,
   type Phase,
+  type SeatState,
   seatList,
+  shouldRecord,
   visibleActions,
 } from "./state";
 
@@ -98,6 +103,75 @@ export interface PlayerView {
   /** Study contact details, shown on the end/withdrawn screen next to the takedown code. */
   study: StudyConfig | null;
   visibility: GameState["config"]["visibility"];
+  /** Microphone recording of this seat (sessions that record audio; `enabled` false otherwise). */
+  audio: PlayerAudioView;
+}
+
+/** What a player's browser needs to drive its recorder, mic check and calibration screen. */
+export interface PlayerAudioView {
+  /** The session records audio. */
+  enabled: boolean;
+  /** This browser should be capturing and uploading now (see shouldRecord). */
+  record: boolean;
+  /** The facilitator paused recording for everyone. */
+  paused: boolean;
+  micCheck: MicCheckStatus;
+  /** Sentence to read aloud in the mic check (only while the mic check is this seat's next step). */
+  micCheckPhrase?: string;
+  /** Speech the mic check must hear before it passes (ms; with micCheckPhrase). */
+  micCheckMinSpeechMs?: number;
+  calibration: {
+    status: CalibrationStatus;
+    /** Seat whose turn it is (null = no turn running). */
+    turnSeat: number | null;
+    myTurn: boolean;
+    /** Text of THIS seat's sentence, only while it is this seat's turn. */
+    sentence: string | null;
+    /** Nominal end of the running turn (server clock; null = no turn running). */
+    turnEndsAt: number | null;
+    /** Seats in turn order. */
+    order: number[];
+  };
+}
+
+/**
+ * Onboarding content as sent to a player: without the audio texts. A player gets the mic-check
+ * phrase and their own calibration sentence through `audio`, only when they need them.
+ */
+function withoutAudioTexts(onboarding: OnboardingContent | null): OnboardingContent | null {
+  if (!onboarding?.audio) return onboarding;
+  const { audio: _audio, ...rest } = onboarding;
+  return rest;
+}
+
+function playerAudioView(
+  state: GameState,
+  seat: SeatState,
+  nextStep: OnboardingStep | null,
+  onboarding: OnboardingContent | null,
+): PlayerAudioView {
+  const a = state.audio;
+  const content = onboarding?.audio;
+  const turn = currentCalibrationTurn(state);
+  const myTurn = turn !== null && turn.seat === seat.seat;
+  const check = a.enabled && nextStep === "mic_check" ? content?.micCheck : undefined;
+  return {
+    enabled: a.enabled,
+    record: shouldRecord(state, seat),
+    paused: a.recordingPaused,
+    micCheck: seat.micCheck,
+    ...(check ? { micCheckPhrase: check.phrase, micCheckMinSpeechMs: check.minSpeechMs } : {}),
+    calibration: {
+      status: a.calibration.status,
+      turnSeat: turn?.seat ?? null,
+      myTurn,
+      sentence: myTurn
+        ? (content?.calibration.sentences.find((s) => s.id === turn.sentenceId)?.text ?? null)
+        : null,
+      turnEndsAt: turn && a.calibration.turnMs !== null ? turn.startTs + a.calibration.turnMs : null,
+      order: [...a.calibration.order],
+    },
+  };
 }
 
 function quotaFor(state: GameState, seat: number): Record<ActionKind, QuotaStatus> {
@@ -184,10 +258,11 @@ export function playerView(
       mine: a.seat === seatNo,
     })),
     broadcasts: state.broadcasts.slice(-5),
-    onboarding: nextStep ? onboarding : null,
+    onboarding: nextStep ? withoutAudioTexts(onboarding) : null,
     onboardingSteps: state.onboardingSteps,
     study: END_PHASES.has(state.phase) || seat.withdrawn ? (onboarding?.study ?? null) : null,
     visibility: vis,
+    audio: playerAudioView(state, seat, nextStep, onboarding),
   };
 }
 

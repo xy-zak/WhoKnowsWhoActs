@@ -9,6 +9,7 @@
   "clearHighlightsEachRound": true,
   "pauseOnDisconnect": true,
   "onboarding": { "consent": true, "demographics": true, "briefing": true },
+  "audio": { "enabled": false, "requireCalibration": true },
   "visibility": {
     "showActorToPlayers": true,
     "showOwnLabels": true,

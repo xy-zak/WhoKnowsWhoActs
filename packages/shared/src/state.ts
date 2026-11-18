@@ -1,5 +1,11 @@
 import type { Board, Scores } from "./board";
-import { type FakePlayerPace, type RoundSpec, type SessionConfig, SessionConfigSchema } from "./config";
+import {
+  AUDIO_CONFIG_DEFAULTS,
+  type FakePlayerPace,
+  type RoundSpec,
+  type SessionConfig,
+  SessionConfigSchema,
+} from "./config";
 import type { ActionKind, KLabel, LabelPairing, PLabel } from "./labels";
 
 export const PHASES = [
@@ -14,7 +20,12 @@ export const PHASES = [
 export type Phase = (typeof PHASES)[number];
 
 export type ConsentStatus = "pending" | "given" | "declined" | "skipped";
-export type OnboardingStep = "consent" | "demographics" | "briefing";
+/** Every onboarding step, in the order a player does them. `mic_check` is used only when the session records audio. */
+export const ONBOARDING_STEPS = ["consent", "mic_check", "demographics", "briefing"] as const;
+export type OnboardingStep = (typeof ONBOARDING_STEPS)[number];
+/** A seat's own mic check: still to do, passed, or skipped by the facilitator (then the seat is not recorded). */
+export type MicCheckStatus = "pending" | "passed" | "skipped";
+export type CalibrationStatus = "pending" | "running" | "done" | "skipped";
 
 /** The agent playing a seat of a simulated session, as logged in `AgentBound`. */
 export interface AgentSeat {
@@ -49,6 +60,13 @@ export interface SeatState {
   fake: boolean;
   /** Pace of the fake player (null unless `fake`). */
   fakePace: FakePlayerPace | null;
+  /** The seat's own mic check (audio sessions): pending, passed, or skipped by the facilitator. */
+  micCheck: MicCheckStatus;
+  /**
+   * The participant permitted audio recording: consent was given AND the audio consent item
+   * (`audio_recording`) was ticked. A consent of `skipped` never counts.
+   */
+  audioConsent: boolean;
 }
 
 export interface ActionRecord {
@@ -72,6 +90,60 @@ export interface RoundRecord {
   startedTs: number;
   endedTs: number | null;
   reason: "quota_met" | "time_limit" | "facilitator" | null;
+}
+
+/** One seat's turn in the calibration (server clock). */
+export interface CalibrationTurnRecord {
+  seat: number;
+  sentenceId: string;
+  startTs: number;
+  /** null while the turn is running (nominal end: startTs + turnMs). */
+  endTs: number | null;
+}
+
+/** Quick quality check after the calibration: how much louder each seat's own voice is on its own mic. */
+export interface CalibrationQuality {
+  perSeat: Array<{
+    seat: number;
+    /** Level of the seat's own voice on its own mic during its turn (dBFS; null = no audio). */
+    ownDb: number | null;
+    /** Loudest level of that voice on another seat's mic (dBFS; null = no audio). */
+    bestOtherDb: number | null;
+    /** ownDb − bestOtherDb (dB); null when either is missing. */
+    marginDb: number | null;
+    ok: boolean;
+  }>;
+  ok: boolean;
+  /** When the check was logged (server clock). */
+  checkedTs: number;
+}
+
+export interface CalibrationState {
+  status: CalibrationStatus;
+  /** Seats in turn order (from CalibrationStarted). */
+  order: number[];
+  /** Sentence of each turn, parallel to `order`. */
+  sentenceIds: string[];
+  /** Length of one turn and of the gap between turns (ms; null before calibration started). */
+  turnMs: number | null;
+  gapMs: number | null;
+  /** Index into `order` of the turn running now (null = no turn running). */
+  turnIndex: number | null;
+  turns: CalibrationTurnRecord[];
+  startedTs: number | null;
+  completedTs: number | null;
+  quality: CalibrationQuality | null;
+}
+
+/** Audio recording state of the session (see audio.ts and shouldRecord). */
+export interface AudioState {
+  /** The session records audio (config.audio.enabled; never for simulated sessions). */
+  enabled: boolean;
+  /** Round 1 waits for the calibration to be done or skipped. */
+  requireCalibration: boolean;
+  /** The facilitator paused recording for every seat. */
+  recordingPaused: boolean;
+  calibration: CalibrationState;
 }
 
 export interface GameState {
@@ -106,6 +178,8 @@ export interface GameState {
   broadcasts: Array<{ seq: number; text: string; serverTs: number }>;
   notes: Array<{ seq: number; text: string; serverTs: number }>;
   endReason: string | null;
+  /** Microphone recording and calibration (inactive unless config.audio.enabled). */
+  audio: AudioState;
   lastSeq: number;
   lastTs: number | null;
 }
@@ -133,6 +207,33 @@ export function emptySeat(seat: number): SeatState {
     agent: null,
     fake: false,
     fakePace: null,
+    micCheck: "pending",
+    audioConsent: false,
+  };
+}
+
+export function emptyCalibration(): CalibrationState {
+  return {
+    status: "pending",
+    order: [],
+    sentenceIds: [],
+    turnMs: null,
+    gapMs: null,
+    turnIndex: null,
+    turns: [],
+    startedTs: null,
+    completedTs: null,
+    quality: null,
+  };
+}
+
+/** Audio state of a new session (recording is never on for simulated sessions). */
+export function emptyAudioState(config?: SessionConfig): AudioState {
+  return {
+    enabled: config ? config.audio.enabled && config.players !== "simulated" : AUDIO_CONFIG_DEFAULTS.enabled,
+    requireCalibration: config ? config.audio.requireCalibration : AUDIO_CONFIG_DEFAULTS.requireCalibration,
+    recordingPaused: false,
+    calibration: emptyCalibration(),
   };
 }
 
@@ -164,6 +265,7 @@ export function initialState(): GameState {
     broadcasts: [],
     notes: [],
     endReason: null,
+    audio: emptyAudioState(),
     lastSeq: 0,
     lastTs: null,
   };
@@ -202,23 +304,84 @@ export function hasParticipants(state: GameState): boolean {
   return seatList(state).some((s) => s.bound && isParticipant(s));
 }
 
-/** Fake players and agents have no onboarding: there is nobody to inform or ask. */
-export function isOnboardingComplete(state: GameState, seat: SeatState): boolean {
-  if (!isParticipant(seat)) return true;
-  const steps = state.onboardingSteps;
-  if (steps.includes("consent") && seat.consent !== "given") return false;
-  if (steps.includes("demographics") && !seat.demographics) return false;
-  if (steps.includes("briefing") && !seat.briefing) return false;
-  return true;
+/**
+ * Does the mic check apply to this seat? Only when the session records audio and the participant
+ * permitted it: nobody who refused (or was never asked) is asked to speak into the microphone.
+ */
+export function micCheckApplies(state: GameState, seat: SeatState): boolean {
+  return state.audio.enabled && isParticipant(seat) && seat.audioConsent;
 }
 
-/** The next onboarding step a seat still has to do (null = done). */
+/** Is this onboarding step done for the seat? (The mic check counts as done when passed or skipped.) */
+function stepDone(state: GameState, seat: SeatState, step: OnboardingStep): boolean {
+  switch (step) {
+    case "consent":
+      return seat.consent === "given";
+    case "mic_check":
+      return !micCheckApplies(state, seat) || seat.micCheck !== "pending";
+    case "demographics":
+      return seat.demographics;
+    case "briefing":
+      return seat.briefing;
+  }
+}
+
+/** Fake players and agents have no onboarding: there is nobody to inform or ask. */
+export function isOnboardingComplete(state: GameState, seat: SeatState): boolean {
+  return nextOnboardingStep(state, seat) === null;
+}
+
+/**
+ * The next onboarding step a seat still has to do (null = done), in the order
+ * consent → mic_check → demographics → briefing, skipping steps the session does not use
+ * (and the mic check for a participant who did not permit audio recording).
+ */
 export function nextOnboardingStep(state: GameState, seat: SeatState): OnboardingStep | null {
   if (!isParticipant(seat)) return null;
-  if (state.onboardingSteps.includes("consent") && seat.consent !== "given") return "consent";
-  if (state.onboardingSteps.includes("demographics") && !seat.demographics) return "demographics";
-  if (state.onboardingSteps.includes("briefing") && !seat.briefing) return "briefing";
+  for (const step of ONBOARDING_STEPS) {
+    if (state.onboardingSteps.includes(step) && !stepDone(state, seat, step)) return step;
+  }
   return null;
+}
+
+/** Phases in which audio is recorded: from onboarding (the mic check) until the game is complete. */
+export const RECORDING_PHASES: ReadonlySet<Phase> = new Set(["onboarding", "round_active", "round_complete"]);
+
+/**
+ * Should this seat's microphone be recording now? True only when the session records audio,
+ * the seat is held by a real participant (not a fake player or an agent) who gave consent
+ * including the audio item, has not withdrawn, has reached the mic check (or is past it) and
+ * whose mic check was not skipped, recording is not paused by the facilitator, and the phase
+ * is onboarding, round_active or round_complete (breaks and game pauses are recorded too).
+ */
+export function shouldRecord(state: GameState, seat: SeatState): boolean {
+  if (state.audio.recordingPaused || !RECORDING_PHASES.has(state.phase)) return false;
+  if (!seat.bound || seat.withdrawn || !micCheckApplies(state, seat)) return false;
+  if (seat.consent !== "given" || seat.micCheck === "skipped") return false;
+  // Recording starts at the mic check, so a session without that step never records. Consent is
+  // the only step before it: with consent given, the seat has reached the mic check or is past it.
+  return state.onboardingSteps.includes("mic_check");
+}
+
+/**
+ * Audio gate for round 1: with audio and `requireCalibration` on, the calibration must be done
+ * or skipped first. (The onboarding checks are separate: see isOnboardingComplete.)
+ */
+export function canStartFirstRound(state: GameState): boolean {
+  if (!state.audio.enabled || !state.audio.requireCalibration) return true;
+  const status = state.audio.calibration.status;
+  return status === "done" || status === "skipped";
+}
+
+/**
+ * The latest calibration turn while the calibration runs, or null. Its nominal end is
+ * startTs + turnMs; the gap before the next turn has no event of its own.
+ */
+export function currentCalibrationTurn(state: GameState): CalibrationTurnRecord | null {
+  const c = state.audio.calibration;
+  if (c.status !== "running" || c.turnIndex === null) return null;
+  const turn = c.turns[c.turns.length - 1];
+  return turn && turn.endTs === null ? turn : null;
 }
 
 /** Non-revoked actions of a seat (optionally of one kind) in a round. */

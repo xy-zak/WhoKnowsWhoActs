@@ -3,7 +3,12 @@ import type { ReactNode } from "react";
 import { type IconName, Panel, type StepDef, Stepper } from "../ui";
 
 /** Onboarding wayfinding: the steps this session uses, plus READY. */
-const STEP_LABEL = { consent: "Consent", demographics: "About you", briefing: "Briefing" } as const;
+const STEP_LABEL = {
+  consent: "Consent",
+  mic_check: "Mic check",
+  demographics: "About you",
+  briefing: "Briefing",
+} as const;
 export function onboardingSteps(v: PlayerView): StepDef[] {
   return [
     ...v.onboardingSteps.map((k) => ({ key: k, label: STEP_LABEL[k] })),
