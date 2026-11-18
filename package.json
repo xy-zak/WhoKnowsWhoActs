@@ -18,14 +18,15 @@
     "start": "tsx apps/server/src/index.ts",
     "cli": "tsx apps/server/src/cli.ts",
     "bots": "tsx apps/server/src/tools/bots.ts",
-    "typecheck": "tsc -p packages/shared && tsc -p apps/server && tsc -p apps/client",
+    "typecheck": "tsc -p packages/shared && tsc -p apps/server && tsc -p apps/client && tsc -p e2e",
     "lint": "biome check .",
     "format": "biome format --write .",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "docs:generate": "tsx scripts/generate-docs.ts",
-    "docs:check": "tsx scripts/generate-docs.ts --check"
+    "docs:check": "tsx scripts/generate-docs.ts --check",
+    "screenshots": "tsx scripts/screenshots.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.6.8",

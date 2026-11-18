@@ -4,11 +4,13 @@ A **research game harness** for a four-player, map-based serious game played on 
 
 | Facilitator · LIVE (Catppuccin Mocha) | Facilitator · SETUP wizard (Catppuccin Latte) |
 | --- | --- |
-| ![Facilitator LIVE tab: lifecycle stepper, NEXT panel, seats with K/P label swatches and quota bars, the composite map with every score and the map score, the comparison of one square's four sub-squares, and live mirrors of every player's screen](docs/img/facilitator-live.png) | ![Setup at step 01 of 10: scenario, game rules and a preview of the starting scores of the 10 × 10 demo grid](docs/img/facilitator-setup.png) |
+| ![Facilitator LIVE tab in Mocha: lifecycle stepper, NEXT and TOOLS panels, seats with K/P labels and quota bars, the composite map with every score and the map score, the comparison of one square's four sub-squares, and live mirrors of every player's screen](docs/img/server/theme-mocha.png) | ![Setup at step 01 of 10: scenario, game rules and a preview of the starting scores of the 10 × 10 demo grid](docs/img/server/setup-01-scenario.png) |
 | **Player · game (Latte)** | **Player · game (Mocha)** |
-| ![Player game screen in Latte: status line with labels, map score and quota bars, the propose/decide tools, the grid map with this player's own scores, hatched proposals and filled decisions, and the panel of the selected square](docs/img/player-game.png) | ![The same player screen in Mocha](docs/img/player-game-mocha.png) |
+| ![Player game screen in Latte: status line with labels, map score and quota bars, the propose/decide tools, the grid map with this player's own scores, hatched proposals and filled decisions, the panel of the selected square and a message from the facilitator](docs/img/client/11-game-marks.png) | ![The same player screen in Mocha](docs/img/client/theme-mocha.png) |
 
-*Screenshots use the fictional demo scenario and simulated players. Every player and the facilitator choose their own display settings (colours, font, text size, animations) as accessibility settings; they are never recorded.*
+*Screenshots use the fictional demo scenario and scripted players, at full-screen size (1920 × 1080). **[All screenshots](docs/img/SCREENSHOTS.md)**, grouped by functionality: every setup step, the live panels, popups, wrap-up, database and replay (`docs/img/server/`), and every player screen (`docs/img/client/`).*
+
+*Every player and the facilitator choose their own display settings (colours, font, text size, animations) as accessibility settings; they are never recorded.*
 
 ## What it does
 
@@ -70,6 +72,7 @@ For real sessions, follow the **[session runbook](docs/SESSION-RUNBOOK.md)**.
 | `npm test` | Unit and integration tests (rules, full bot games, GDPR guarantees, docs drift) |
 | `npm run test:e2e` | Playwright: a full game through the real UI with 4 player browsers, plus a render check of every diagram |
 | `npm run docs:generate` | Regenerate the schema-derived parts of `docs/` |
+| `npm run screenshots -- <command>` | Versioned documentation screenshots: `plan` (what changed since the last review), `capture` (Playwright plays the sessions needed, on a temporary database), `publish` (new version `name-v2.png` … in `docs/img/`, gallery regenerated), `check`, `mark`. Not part of `test:e2e`; the `/screenshot-app` skill runs the whole workflow |
 | `npm run lint` / `npm run typecheck` | Biome / TypeScript |
 
 ## Documentation

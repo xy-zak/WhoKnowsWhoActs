@@ -1,0 +1,781 @@
+{
+  "reviewedUpTo": "fc32ce7",
+  "reviewed": {
+    "apps/client/src/facilitator/Timeline.tsx": "0a54957b290825ea869c4a9bb83d2a32dd5ac690",
+    "apps/client/src/player/Game.tsx": "37eee6eb24c2cac6c40548cb67da7ab25dcfe044",
+    "apps/client/src/ui/theme.css": "a173a458ab850fb8718b2224bd92897258472dd0",
+    "config/briefing.md": "4233e5266b468a4c72efdc3a0572245cc5e883f0"
+  },
+  "shots": {
+    "server/setup-01-scenario": [
+      {
+        "v": 1,
+        "file": "server/setup-01-scenario.png",
+        "date": "2026-11-18",
+        "commit": "fc32ce7+",
+        "caption": "Choose the map and game rules; the starting scores are previewed.",
+        "at": "2026-11-18T01:36:05Z"
+      }
+    ],
+    "server/setup-02-rounds": [
+      {
+        "v": 1,
+        "file": "server/setup-02-rounds.png",
+        "date": "2026-11-18",
+        "commit": "fc32ce7+",
+        "caption": "Rounds, quotas per player, time limit, how rounds end and start.",
+        "at": "2026-11-18T01:36:06Z"
+      }
+    ],
+    "server/setup-03-players": [
+      {
+        "v": 1,
+        "file": "server/setup-03-players.png",
+        "date": "2026-11-18",
+        "commit": "fc32ce7+",
+        "caption": "Real participants, seats, map view per seat, what players see.",
+        "at": "2026-11-18T01:36:06Z"
+      }
+    ],
+    "server/setup-04-onboarding": [
+      {
+        "v": 1,
+        "file": "server/setup-04-onboarding.png",
+        "date": "2026-11-18",
+        "commit": "fc32ce7+",
+        "caption": "Consent, questionnaire and briefing, each switched on or off.",
+        "at": "2026-11-18T01:36:07Z"
+      }
+    ],
+    "server/setup-05-tags": [
+      {
+        "v": 1,
+        "file": "server/setup-05-tags.png",
+        "date": "2026-11-18",
+        "commit": "fc32ce7+",
+        "caption": "Tags and a note that describe the session in the dataset.",
+        "at": "2026-11-18T01:36:08Z"
+      }
+    ],
+    "server/setup-06-review": [
+      {
+        "v": 1,
+        "file": "server/setup-06-review.png",
+        "date": "2026-11-18",
+        "commit": "fc32ce7+",
+        "caption": "Every setting in one table before *Create session* locks them.",
+        "at": "2026-11-18T01:36:09Z"
+      }
+    ],
+    "server/setup-08-labels": [
+      {
+        "v": 1,
+        "file": "server/setup-08-labels.png",
+        "date": "2026-11-18",
+        "commit": "fc32ce7+",
+        "caption": "The K–P pairing (here dissociated D6), its matrix, the K per seat.",
+        "at": "2026-11-18T01:36:12Z"
+      }
+    ],
+    "server/setup-09-key-sheet": [
+      {
+        "v": 1,
+        "file": "server/setup-09-key-sheet.png",
+        "date": "2026-11-18",
+        "commit": "fc32ce7+",
+        "caption": "Print the sheet that links codes to names; store it apart.",
+        "at": "2026-11-18T01:36:13Z"
+      }
+    ],
+    "server/setup-10-start": [
+      {
+        "v": 1,
+        "file": "server/setup-10-start.png",
+        "date": "2026-11-18",
+        "commit": "fc32ce7+",
+        "caption": "A final checklist; *Start onboarding* locks the seats and opens LIVE.",
+        "at": "2026-11-18T01:36:13Z"
+      }
+    ],
+    "client/01-waiting-for-seat": [
+      {
+        "v": 1,
+        "file": "client/01-waiting-for-seat.png",
+        "date": "2026-11-18",
+        "commit": "fc32ce7+",
+        "caption": "A PC waiting to be bound; the large number is its client number.",
+        "at": "2026-11-18T01:36:10Z"
+      }
+    ],
+    "server/setup-07-connect": [
+      {
+        "v": 1,
+        "file": "server/setup-07-connect.png",
+        "date": "2026-11-18",
+        "commit": "fc32ce7+",
+        "caption": "Four clients connected, no seat bound yet.",
+        "at": "2026-11-18T01:36:11Z"
+      }
+    ],
+    "server/setup-07-connect-bound": [
+      {
+        "v": 1,
+        "file": "server/setup-07-connect-bound.png",
+        "date": "2026-11-18",
+        "commit": "fc32ce7+",
+        "caption": "Every seat bound to a client and given a participant code.",
+        "at": "2026-11-18T01:36:11Z"
+      }
+    ],
+    "client/02-seat-assigned": [
+      {
+        "v": 1,
+        "file": "client/02-seat-assigned.png",
+        "date": "2026-11-18",
+        "commit": "fc32ce7+",
+        "caption": "Bound to seat 1, waiting for onboarding to start.",
+        "at": "2026-11-18T01:36:12Z"
+      }
+    ],
+    "client/03-consent": [
+      {
+        "v": 1,
+        "file": "client/03-consent.png",
+        "date": "2026-11-18",
+        "commit": "fc32ce7+",
+        "caption": "Information and consent (placeholder text); required statements are starred.",
+        "at": "2026-11-18T01:36:15Z"
+      }
+    ],
+    "client/04-about-you": [
+      {
+        "v": 1,
+        "file": "client/04-about-you.png",
+        "date": "2026-11-18",
+        "commit": "fc32ce7+",
+        "caption": "The short background questionnaire.",
+        "at": "2026-11-18T01:36:17Z"
+      }
+    ],
+    "client/05-briefing": [
+      {
+        "v": 1,
+        "file": "client/05-briefing.png",
+        "date": "2026-11-18",
+        "commit": "fc32ce7+",
+        "caption": "How to play, and this player's roles: sees the Ka scores, acts on Kd.",
+        "at": "2026-11-18T01:49:55Z"
+      }
+    ],
+    "client/06-ready": [
+      {
+        "v": 1,
+        "file": "client/06-ready.png",
+        "date": "2026-11-18",
+        "commit": "fc32ce7+",
+        "caption": "Waiting for the other players and for round 1.",
+        "at": "2026-11-18T01:36:18Z"
+      }
+    ],
+    "server/live-01-onboarding": [
+      {
+        "v": 1,
+        "file": "server/live-01-onboarding.png",
+        "date": "2026-11-18",
+        "commit": "fc32ce7+",
+        "caption": "Every seat at a different onboarding step.",
+        "at": "2026-11-18T01:36:15Z"
+      }
+    ],
+    "server/live-panel-seats-onboarding": [
+      {
+        "v": 1,
+        "file": "server/live-panel-seats-onboarding.png",
+        "date": "2026-11-18",
+        "commit": "fc32ce7+",
+        "caption": "Each seat's onboarding step: consent, demographics, briefing or ready.",
+        "at": "2026-11-18T01:36:16Z"
+      }
+    ],
+    "server/live-panel-next-ready": [
+      {
+        "v": 1,
+        "file": "server/live-panel-next-ready.png",
+        "date": "2026-11-18",
+        "commit": "fc32ce7+",
+        "caption": "Once every seat is ready, NEXT offers *Start round 1 of 2*.",
+        "at": "2026-11-18T01:36:18Z"
+      }
+    ],
+    "client/07-game-round-start": [
+      {
+        "v": 1,
+        "file": "client/07-game-round-start.png",
+        "date": "2026-11-18",
+        "commit": "fc32ce7+",
+        "caption": "Only the Ka scores are shown, in the top-left sub-squares.",
+        "at": "2026-11-18T01:36:19Z"
+      }
+    ],
+    "client/08-game-square-selected": [
+      {
+        "v": 1,
+        "file": "client/08-game-square-selected.png",
+        "date": "2026-11-18",
+        "commit": "fc32ce7+",
+        "caption": "Square D4's four sub-squares in the side panel.",
+        "at": "2026-11-18T01:36:29Z"
+      }
+    ],
+    "client/part-status-line": [
+      {
+        "v": 1,
+        "file": "client/part-status-line.png",
+        "date": "2026-11-18",
+        "commit": "fc32ce7+",
+        "caption": "Round, seat, K/P labels, map score, quota bars and time left.",
+        "at": "2026-11-18T01:36:32Z"
+      }
+    ],
+    "client/part-map-detail": [
+      {
+        "v": 1,
+        "file": "client/part-map-detail.png",
+        "date": "2026-11-18",
+        "commit": "fc32ce7+",
+        "caption": "Sub-squares outlined in K colours; hatched = proposed, filled = decided.",
+        "at": "2026-11-18T01:36:33Z"
+      }
+    ],
+    "client/part-square-panel": [
+      {
+        "v": 1,
+        "file": "client/part-square-panel.png",
+        "date": "2026-11-18",
+        "commit": "fc32ce7+",
+        "caption": "Own score, `?` for unknown ones, marks, and where you act.",
+        "at": "2026-11-18T01:36:30Z"
+      }
+    ],
+    "client/part-map-tooltip": [
+      {
+        "v": 1,
+        "file": "client/part-map-tooltip.png",
+        "date": "2026-11-18",
+        "commit": "fc32ce7+",
+        "caption": "The sub-square, whether you know its score, who proposed it.",
+        "at": "2026-11-18T01:36:34Z"
+      }
+    ],
+    "client/part-tool-bar": [
+      {
+        "v": 1,
+        "file": "client/part-tool-bar.png",
+        "date": "2026-11-18",
+        "commit": "fc32ce7+",
+        "caption": "Propose and Decide with their quotas; the hint says where an action lands.",
+        "at": "2026-11-18T01:36:32Z"
+      }
+    ],
+    "client/10-game-propose-tool": [
+      {
+        "v": 1,
+        "file": "client/10-game-propose-tool.png",
+        "date": "2026-11-18",
+        "commit": "fc32ce7+",
+        "caption": "Hovering E2 outlines the Kd sub-square a proposal would mark.",
+        "at": "2026-11-18T01:36:31Z"
+      }
+    ],
+    "client/09-game-confirm": [
+      {
+        "v": 1,
+        "file": "client/09-game-confirm.png",
+        "date": "2026-11-18",
+        "commit": "fc32ce7+",
+        "caption": "Proposing G5 · Kd asks for confirmation in the side panel.",
+        "at": "2026-11-18T01:36:30Z"
+      }
+    ],
+    "client/part-confirm-prompt": [
+      {
+        "v": 1,
+        "file": "client/part-confirm-prompt.png",
+        "date": "2026-11-18",
+        "commit": "fc32ce7+",
+        "caption": "*Confirm* (Enter) sends the action; *Cancel* (Esc) sends nothing.",
+        "at": "2026-11-18T01:36:31Z"
+      }
+    ],
+    "client/11-game-marks": [
+      {
+        "v": 1,
+        "file": "client/11-game-marks.png",
+        "date": "2026-11-18",
+        "commit": "fc32ce7+",
+        "caption": "Mid-round: everyone's proposals (hatched) and decisions (filled).",
+        "at": "2026-11-18T01:36:40Z"
+      }
+    ],
+    "server/live-02-round": [
+      {
+        "v": 1,
+        "file": "server/live-02-round.png",
+        "date": "2026-11-18",
+        "commit": "fc32ce7+",
+        "caption": "NEXT and TOOLS, the seats, the composite map and every player's view.",
+        "at": "2026-11-18T01:36:34Z"
+      }
+    ],
+    "server/live-panel-session": [
+      {
+        "v": 1,
+        "file": "server/live-panel-session.png",
+        "date": "2026-11-18",
+        "commit": "fc32ce7+",
+        "caption": "The lifecycle (onboarding → rounds → wrap-up), the pairing and the tags.",
+        "at": "2026-11-18T01:36:35Z"
+      }
+    ],
+    "server/live-panel-next": [
+      {
+        "v": 1,
+        "file": "server/live-panel-next.png",
+        "date": "2026-11-18",
+        "commit": "fc32ce7+",
+        "caption": "Actions so far, time used and left, *Pause* and *End round now*.",
+        "at": "2026-11-18T01:36:35Z"
+      }
+    ],
+    "server/live-panel-seats": [
+      {
+        "v": 1,
+        "file": "server/live-panel-seats.png",
+        "date": "2026-11-18",
+        "commit": "fc32ce7+",
+        "caption": "Each seat's client, code, K/P labels, map view, quota bars and last activity.",
+        "at": "2026-11-18T01:36:36Z"
+      }
+    ],
+    "server/live-panel-composite-map": [
+      {
+        "v": 1,
+        "file": "server/live-panel-composite-map.png",
+        "date": "2026-11-18",
+        "commit": "fc32ce7+",
+        "caption": "Every score and the map score; square D4 is selected.",
+        "at": "2026-11-18T01:36:36Z"
+      }
+    ],
+    "server/live-panel-square": [
+      {
+        "v": 1,
+        "file": "server/live-panel-square.png",
+        "date": "2026-11-18",
+        "commit": "fc32ce7+",
+        "caption": "Scores, starting scores, who sees and who acted.",
+        "at": "2026-11-18T01:36:37Z"
+      }
+    ],
+    "server/live-panel-player-views": [
+      {
+        "v": 1,
+        "file": "server/live-panel-player-views.png",
+        "date": "2026-11-18",
+        "commit": "fc32ce7+",
+        "caption": "Live mirrors of what each seat sees, with its labels.",
+        "at": "2026-11-18T01:36:37Z"
+      }
+    ],
+    "server/live-panel-timeline": [
+      {
+        "v": 1,
+        "file": "server/live-panel-timeline.png",
+        "date": "2026-11-18",
+        "commit": "fc32ce7+",
+        "caption": "Both rounds: a lane per seat, the pause shaded, marks in K colours.",
+        "at": "2026-11-18T01:51:55Z"
+      }
+    ],
+    "server/live-panel-timeline-tooltip": [
+      {
+        "v": 1,
+        "file": "server/live-panel-timeline-tooltip.png",
+        "date": "2026-11-18",
+        "commit": "fc32ce7+",
+        "caption": "A decision on the timeline and the score changes it caused.",
+        "at": "2026-11-18T01:51:56Z"
+      }
+    ],
+    "server/live-panel-event-log": [
+      {
+        "v": 1,
+        "file": "server/live-panel-event-log.png",
+        "date": "2026-11-18",
+        "commit": "fc32ce7+",
+        "caption": "Newest first, with score changes and *Revoke* per action.",
+        "at": "2026-11-18T01:36:38Z"
+      }
+    ],
+    "server/live-panel-telemetry": [
+      {
+        "v": 1,
+        "file": "server/live-panel-telemetry.png",
+        "date": "2026-11-18",
+        "commit": "fc32ce7+",
+        "caption": "Hovers, inspections, tool choices and drafts per seat.",
+        "at": "2026-11-18T01:36:38Z"
+      }
+    ],
+    "server/live-panel-tools": [
+      {
+        "v": 1,
+        "file": "server/live-panel-tools.png",
+        "date": "2026-11-18",
+        "commit": "fc32ce7+",
+        "caption": "A broadcast and a log note typed in, next to Edit labels and End game early.",
+        "at": "2026-11-18T01:36:39Z"
+      }
+    ],
+    "client/part-other-players-and-messages": [
+      {
+        "v": 1,
+        "file": "client/part-other-players-and-messages.png",
+        "date": "2026-11-18",
+        "commit": "fc32ce7+",
+        "caption": "The broadcast under *Messages*, below the other seats' progress.",
+        "at": "2026-11-18T01:36:40Z"
+      }
+    ],
+    "server/live-03-paused": [
+      {
+        "v": 1,
+        "file": "server/live-03-paused.png",
+        "date": "2026-11-18",
+        "commit": "fc32ce7+",
+        "caption": "Round 1 paused; NEXT offers *Resume*.",
+        "at": "2026-11-18T01:36:47Z"
+      }
+    ],
+    "client/12-game-paused": [
+      {
+        "v": 1,
+        "file": "client/12-game-paused.png",
+        "date": "2026-11-18",
+        "commit": "fc32ce7+",
+        "caption": "The game is frozen until the facilitator resumes.",
+        "at": "2026-11-18T01:36:46Z"
+      }
+    ],
+    "server/live-popup-revoke": [
+      {
+        "v": 1,
+        "file": "server/live-popup-revoke.png",
+        "date": "2026-11-18",
+        "commit": "fc32ce7+",
+        "caption": "Revoking an action asks first; the original event stays in the log.",
+        "at": "2026-11-18T01:36:41Z"
+      }
+    ],
+    "server/live-popup-edit-labels": [
+      {
+        "v": 1,
+        "file": "server/live-popup-edit-labels.png",
+        "date": "2026-11-18",
+        "commit": "fc32ce7+",
+        "caption": "Labels can change between rounds; the change is logged.",
+        "at": "2026-11-18T01:36:49Z"
+      }
+    ],
+    "server/live-popup-end-round": [
+      {
+        "v": 1,
+        "file": "server/live-popup-end-round.png",
+        "date": "2026-11-18",
+        "commit": "fc32ce7+",
+        "caption": "Asks before it ends the round.",
+        "at": "2026-11-18T01:36:48Z"
+      }
+    ],
+    "server/live-popup-end-game": [
+      {
+        "v": 1,
+        "file": "server/live-popup-end-game.png",
+        "date": "2026-11-18",
+        "commit": "fc32ce7+",
+        "caption": "Asks before it marks the game complete.",
+        "at": "2026-11-18T02:19:05Z"
+      }
+    ],
+    "server/live-04-round-complete": [
+      {
+        "v": 1,
+        "file": "server/live-04-round-complete.png",
+        "date": "2026-11-18",
+        "commit": "fc32ce7+",
+        "caption": "NEXT offers *Start round 2 of 2*.",
+        "at": "2026-11-18T01:36:49Z"
+      }
+    ],
+    "client/13-round-complete": [
+      {
+        "v": 1,
+        "file": "client/13-round-complete.png",
+        "date": "2026-11-18",
+        "commit": "fc32ce7+",
+        "caption": "Round 1 complete, waiting for round 2.",
+        "at": "2026-11-18T01:36:48Z"
+      }
+    ],
+    "server/live-05-game-complete": [
+      {
+        "v": 1,
+        "file": "server/live-05-game-complete.png",
+        "date": "2026-11-18",
+        "commit": "fc32ce7+",
+        "caption": "NEXT leads to the wrap-up.",
+        "at": "2026-11-18T01:36:57Z"
+      }
+    ],
+    "client/14-session-complete": [
+      {
+        "v": 1,
+        "file": "client/14-session-complete.png",
+        "date": "2026-11-18",
+        "commit": "fc32ce7+",
+        "caption": "The end screen with the personal participant code.",
+        "at": "2026-11-18T01:36:56Z"
+      }
+    ],
+    "server/wrap-up-01-takedown-cards": [
+      {
+        "v": 1,
+        "file": "server/wrap-up-01-takedown-cards.png",
+        "date": "2026-11-18",
+        "commit": "fc32ce7+",
+        "caption": "A card PDF per participant, to print and hand out.",
+        "at": "2026-11-18T01:36:59Z"
+      }
+    ],
+    "server/wrap-up-02-export": [
+      {
+        "v": 1,
+        "file": "server/wrap-up-02-export.png",
+        "date": "2026-11-18",
+        "commit": "fc32ce7+",
+        "caption": "The export is written (in this run, to a temporary folder).",
+        "at": "2026-11-18T01:36:59Z"
+      }
+    ],
+    "server/wrap-up-03-close": [
+      {
+        "v": 1,
+        "file": "server/wrap-up-03-close.png",
+        "date": "2026-11-18",
+        "commit": "fc32ce7+",
+        "caption": "Closing archives the session; lock the key sheet away.",
+        "at": "2026-11-18T01:37:00Z"
+      }
+    ],
+    "server/database-01-participants": [
+      {
+        "v": 1,
+        "file": "server/database-01-participants.png",
+        "date": "2026-11-18",
+        "commit": "fc32ce7+",
+        "caption": "Sessions, exports, deletions and the erasure register.",
+        "at": "2026-11-18T01:37:01Z"
+      }
+    ],
+    "server/database-03-simulations": [
+      {
+        "v": 1,
+        "file": "server/database-03-simulations.png",
+        "date": "2026-11-18",
+        "commit": "fc32ce7+",
+        "caption": "A separate database with nothing to erase.",
+        "at": "2026-11-18T01:37:20Z"
+      }
+    ],
+    "server/replay-01-choose": [
+      {
+        "v": 1,
+        "file": "server/replay-01-choose.png",
+        "date": "2026-11-18",
+        "commit": "fc32ce7+",
+        "caption": "Pick a recorded session.",
+        "at": "2026-11-18T01:37:02Z"
+      }
+    ],
+    "server/replay-02-session": [
+      {
+        "v": 1,
+        "file": "server/replay-02-session.png",
+        "date": "2026-11-18",
+        "commit": "fc32ce7+",
+        "caption": "Step through it event by event, here at a pause in round 1.",
+        "at": "2026-11-18T01:50:20Z"
+      }
+    ],
+    "server/database-02-erasure-lookup": [
+      {
+        "v": 1,
+        "file": "server/database-02-erasure-lookup.png",
+        "date": "2026-11-18",
+        "commit": "fc32ce7+",
+        "caption": "A participant code looked up before erasure: the session, seat and exports that hold it.",
+        "at": "2026-11-18T01:37:02Z"
+      }
+    ],
+    "server/setup-07-connect-fake-players": [
+      {
+        "v": 1,
+        "file": "server/setup-07-connect-fake-players.png",
+        "date": "2026-11-18",
+        "commit": "fc32ce7+",
+        "caption": "One player PC, with fake players on the other three seats.",
+        "at": "2026-11-18T01:37:06Z"
+      }
+    ],
+    "server/setup-03-players-simulated": [
+      {
+        "v": 1,
+        "file": "server/setup-03-players-simulated.png",
+        "date": "2026-11-18",
+        "commit": "fc32ce7+",
+        "caption": "An agent policy per seat, a pace and a seed.",
+        "at": "2026-11-18T01:36:07Z"
+      }
+    ],
+    "server/simulation-01-agents": [
+      {
+        "v": 1,
+        "file": "server/simulation-01-agents.png",
+        "date": "2026-11-18",
+        "commit": "fc32ce7+",
+        "caption": "The agent and seed of every seat.",
+        "at": "2026-11-18T01:37:14Z"
+      }
+    ],
+    "server/simulation-02-live": [
+      {
+        "v": 1,
+        "file": "server/simulation-02-live.png",
+        "date": "2026-11-18",
+        "commit": "fc32ce7+",
+        "caption": "Round 1, played by the agents on their own.",
+        "at": "2026-11-18T02:19:05Z"
+      }
+    ],
+    "server/setup-01-scenario-small-grid": [
+      {
+        "v": 1,
+        "file": "server/setup-01-scenario-small-grid.png",
+        "date": "2026-11-18",
+        "commit": "fc32ce7+",
+        "caption": "The small grid selected in step 01.",
+        "at": "2026-11-18T01:37:05Z"
+      }
+    ],
+    "server/live-small-grid": [
+      {
+        "v": 1,
+        "file": "server/live-small-grid.png",
+        "date": "2026-11-18",
+        "commit": "fc32ce7+",
+        "caption": "A round on the small grid, with three fake players.",
+        "at": "2026-11-18T02:19:05Z"
+      }
+    ],
+    "client/game-small-grid": [
+      {
+        "v": 1,
+        "file": "client/game-small-grid.png",
+        "date": "2026-11-18",
+        "commit": "fc32ce7+",
+        "caption": "Square C3 selected.",
+        "at": "2026-11-18T02:19:04Z"
+      }
+    ],
+    "server/theme-mocha": [
+      {
+        "v": 1,
+        "file": "server/theme-mocha.png",
+        "date": "2026-11-18",
+        "commit": "fc32ce7+",
+        "caption": "LIVE in Mocha (dark).",
+        "at": "2026-11-18T01:36:42Z"
+      }
+    ],
+    "server/theme-high-contrast": [
+      {
+        "v": 1,
+        "file": "server/theme-high-contrast.png",
+        "date": "2026-11-18",
+        "commit": "fc32ce7+",
+        "caption": "LIVE in high contrast.",
+        "at": "2026-11-18T01:36:43Z"
+      }
+    ],
+    "client/theme-mocha": [
+      {
+        "v": 1,
+        "file": "client/theme-mocha.png",
+        "date": "2026-11-18",
+        "commit": "fc32ce7+",
+        "caption": "The game in Mocha (dark).",
+        "at": "2026-11-18T01:36:44Z"
+      }
+    ],
+    "client/theme-high-contrast": [
+      {
+        "v": 1,
+        "file": "client/theme-high-contrast.png",
+        "date": "2026-11-18",
+        "commit": "fc32ce7+",
+        "caption": "The game in high contrast.",
+        "at": "2026-11-18T01:36:45Z"
+      }
+    ],
+    "client/display-dyslexic-large": [
+      {
+        "v": 1,
+        "file": "client/display-dyslexic-large.png",
+        "date": "2026-11-18",
+        "commit": "fc32ce7+",
+        "caption": "The side panel widens to fit the larger text.",
+        "at": "2026-11-18T01:50:09Z"
+      }
+    ],
+    "server/popup-display-settings": [
+      {
+        "v": 1,
+        "file": "server/popup-display-settings.png",
+        "date": "2026-11-18",
+        "commit": "fc32ce7+",
+        "caption": "The facilitator's display popup (`D`).",
+        "at": "2026-11-18T01:37:04Z"
+      }
+    ],
+    "client/part-display-panel": [
+      {
+        "v": 1,
+        "file": "client/part-display-panel.png",
+        "date": "2026-11-18",
+        "commit": "fc32ce7+",
+        "caption": "Bottom right of every player screen; not recorded.",
+        "at": "2026-11-18T01:36:10Z"
+      }
+    ],
+    "server/popup-keyboard-shortcuts": [
+      {
+        "v": 1,
+        "file": "server/popup-keyboard-shortcuts.png",
+        "date": "2026-11-18",
+        "commit": "fc32ce7+",
+        "caption": "Every shortcut (`?`).",
+        "at": "2026-11-18T01:37:03Z"
+      }
+    ]
+  }
+}

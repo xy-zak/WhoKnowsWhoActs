@@ -4,6 +4,12 @@ History of [ARCHITECTURE.md](../ARCHITECTURE.md). Newest first. How entries are 
 
 ## Unreleased
 
+### Not yet committed · documentation screenshots
+
+- **Type:** Feature
+- **Change:** The testing table in § 13 gets a **Screenshots** row. `npm run screenshots` (its own Playwright project, not run by `test:e2e`) plays three sessions at 1920 × 1080, takes the shots listed in a catalogue and compares them with the published ones. A real change is published as a new version (`name-v2.png`, …) in `docs/img/server/` or `docs/img/client/`. The gallery `docs/img/SCREENSHOTS.md` is generated from the version history, grouped by functionality.
+- **Reason:** The screenshots are made by a script, so they can be refreshed after UI changes instead of going stale. Old versions are kept, so the gallery also records how the interface developed. The table now lists that script next to the real tests.
+
 ### Not yet committed · grid map, scores and game rules (documents the code in the same commit)
 
 - **Type:** Feature

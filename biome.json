@@ -9,7 +9,8 @@
       "!exports",
       "!**/*.md",
       "!playwright-report",
-      "!test-results"
+      "!test-results",
+      "!.screenshots"
     ]
   },
   "formatter": {

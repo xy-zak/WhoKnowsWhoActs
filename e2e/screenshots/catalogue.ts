@@ -1,0 +1,501 @@
+/**
+ * The screenshot catalogue: every documentation screenshot, the gallery group
+ * it belongs to, its title, its layout in the gallery, the scenario that takes
+ * it and the source files that change it.
+ *
+ * - The version history (files, dates, commits, captions) is in
+ *   docs/img/screenshots.json; `npm run screenshots -- publish` writes it.
+ * - The gallery docs/img/SCREENSHOTS.md is generated from both.
+ *
+ * Add a shot: an entry here, plus a shot()/crop() call in e2e/screenshots.spec.ts
+ * inside the scenario named by `scenario`. Then `npm run screenshots -- capture <id>`
+ * and `npm run screenshots -- publish <id> --caption "…"`.
+ * The workflow is in .claude/skills/screenshot-app/SKILL.md.
+ */
+
+export type Side = "server" | "client";
+/** Gallery layout: full = on its own (700 px wide), half = in pairs (340 px), small = in pairs (320 px). */
+export type Size = "full" | "half" | "small";
+/** A scenario is one session played through the UI by e2e/screenshots.spec.ts. */
+export type ScenarioName = "session" | "small-grid" | "simulation";
+
+export interface GroupDef {
+  readonly id: string;
+  readonly title: string;
+  /** One or two sentences under the group heading. */
+  readonly intro: string;
+  /** Files (globs) whose changes can show in every shot of the group. */
+  readonly sources: readonly string[];
+}
+
+export interface ShotDef {
+  /** `<side>/<name>`: the image is docs/img/<side>/<name>.png (v1), <name>-v2.png, … */
+  readonly id: `${Side}/${string}`;
+  readonly group: string;
+  /** Optional sub-heading inside the group; shots of one subgroup are listed together. */
+  readonly subgroup?: string;
+  readonly title: string;
+  readonly size: Size;
+  /** Display width in px, instead of the size's default. */
+  readonly width?: number;
+  /** The scenario that takes it (default "session"). */
+  readonly scenario?: ScenarioName;
+  /** Extra files (globs) that change this shot, on top of its group's. */
+  readonly sources?: readonly string[];
+}
+
+const C = "apps/client/src";
+
+export const GROUPS = [
+  {
+    id: "setup",
+    title: "Setting up a session",
+    intro:
+      "Facilitator, SETUP tab: a ten-step wizard. Steps 01–06 configure the session, 07–10 prepare the room (step 07 is in § 2).",
+    sources: [`${C}/facilitator/setup/**`, "packages/shared/src/config.ts"],
+  },
+  {
+    id: "connect",
+    title: "Connecting the player PCs",
+    intro:
+      "Each player PC opens the game page and shows a client number; the facilitator binds every client to a seat in step 07.",
+    sources: [`${C}/facilitator/seats.tsx`, `${C}/facilitator/setup/**`, `${C}/player/App.tsx`],
+  },
+  {
+    id: "onboarding",
+    title: "Onboarding",
+    intro:
+      "Players go through consent → about you → briefing; the facilitator sees which step each seat is on.",
+    sources: [`${C}/player/Onboarding.tsx`, `${C}/player/chrome.tsx`, "config/**"],
+  },
+  {
+    id: "map",
+    title: "Reading the map",
+    intro:
+      "Every player sees the same grid but only the scores of their own knowledge type. Each square has four sub-squares: Ka top left, Kb top right, Kc bottom left, Kd bottom right.",
+    sources: [
+      `${C}/map/**`,
+      `${C}/player/Game.tsx`,
+      "packages/shared/src/game/**",
+      "packages/shared/src/board.ts",
+      "packages/shared/src/projections.ts",
+      "scenarios/**",
+    ],
+  },
+  {
+    id: "actions",
+    title: "Proposing and deciding",
+    intro:
+      "A player acts on the sub-square of their power type (here Pd → Kd) in the square they pick. Every action is confirmed first.",
+    sources: [`${C}/map/**`, `${C}/player/Game.tsx`, "packages/shared/src/game/**"],
+  },
+  {
+    id: "following",
+    title: "Following the round",
+    intro: "Facilitator, LIVE tab: the whole session on one page.",
+    sources: [
+      `${C}/facilitator/live/**`,
+      `${C}/facilitator/Composite.tsx`,
+      `${C}/facilitator/seats.tsx`,
+      `${C}/facilitator/App.tsx`,
+      `${C}/map/**`,
+    ],
+  },
+  {
+    id: "timeline",
+    title: "Timeline, event log and telemetry",
+    intro: "What happened when: every action, pause and note, as it is recorded.",
+    sources: [`${C}/facilitator/Timeline.tsx`, `${C}/facilitator/EventLog.tsx`],
+  },
+  {
+    id: "steering",
+    title: "Steering the session",
+    intro: "The facilitator's tools, and what the players see when they are used.",
+    sources: [`${C}/facilitator/live/**`, `${C}/facilitator/seats.tsx`, `${C}/player/Game.tsx`],
+  },
+  {
+    id: "wrap-up",
+    title: "End of the game and wrap-up",
+    intro: "Players see their participant code; the facilitator wraps up in three steps.",
+    sources: [`${C}/facilitator/live/**`, `${C}/player/App.tsx`],
+  },
+  {
+    id: "data",
+    title: "Stored sessions and replay",
+    intro: "Facilitator, DATABASE and REPLAY tabs.",
+    sources: [`${C}/facilitator/Database.tsx`, `${C}/facilitator/Replay.tsx`],
+  },
+  {
+    id: "testing",
+    title: "Testing without participants",
+    intro:
+      "Fake players are test clients the server creates; simulated players are agents that play every seat.",
+    sources: [`${C}/facilitator/seats.tsx`, `${C}/facilitator/setup/**`, "packages/shared/src/simulation/**"],
+  },
+  {
+    id: "small-map",
+    title: "The 5 × 5 map",
+    intro: "The small demo grid: 25 squares, 100 sub-squares.",
+    sources: ["scenarios/demo-small/**", `${C}/map/**`],
+  },
+  {
+    id: "display",
+    title: "Display and accessibility",
+    intro:
+      "Every screen picks its own colours, font, text size and animations; the choice is never recorded.",
+    sources: [
+      `${C}/ui/prefs.ts`,
+      `${C}/ui/DisplaySettings.tsx`,
+      `${C}/ui/tokens.ts`,
+      `${C}/player/DisplayMenu.tsx`,
+      `${C}/ui/shortcuts.ts`,
+    ],
+  },
+] as const satisfies readonly GroupDef[];
+
+export type GroupId = (typeof GROUPS)[number]["id"];
+
+export const SHOTS = [
+  // 1. setup
+  { id: "server/setup-01-scenario", group: "setup", title: "Step 01 · Scenario", size: "half" },
+  { id: "server/setup-02-rounds", group: "setup", title: "Step 02 · Rounds", size: "half" },
+  { id: "server/setup-03-players", group: "setup", title: "Step 03 · Players", size: "half" },
+  { id: "server/setup-04-onboarding", group: "setup", title: "Step 04 · Onboarding", size: "half" },
+  { id: "server/setup-05-tags", group: "setup", title: "Step 05 · Tags", size: "half" },
+  { id: "server/setup-06-review", group: "setup", title: "Step 06 · Review", size: "half" },
+  { id: "server/setup-08-labels", group: "setup", title: "Step 08 · Labels", size: "half" },
+  { id: "server/setup-09-key-sheet", group: "setup", title: "Step 09 · Key sheet", size: "half" },
+  { id: "server/setup-10-start", group: "setup", title: "Step 10 · Start", size: "half" },
+
+  // 2. connect
+  { id: "client/01-waiting-for-seat", group: "connect", title: "Waiting for a seat", size: "half" },
+  { id: "server/setup-07-connect", group: "connect", title: "Step 07 · Connect", size: "half" },
+  { id: "server/setup-07-connect-bound", group: "connect", title: "Step 07 · All seats bound", size: "half" },
+  { id: "client/02-seat-assigned", group: "connect", title: "Seat assigned", size: "half" },
+
+  // 3. onboarding
+  { id: "client/03-consent", group: "onboarding", title: "Consent", size: "half" },
+  { id: "client/04-about-you", group: "onboarding", title: "About you", size: "half" },
+  { id: "client/05-briefing", group: "onboarding", title: "Briefing", size: "half" },
+  { id: "client/06-ready", group: "onboarding", title: "Ready", size: "half" },
+  {
+    id: "server/live-01-onboarding",
+    group: "onboarding",
+    title: "LIVE during onboarding",
+    size: "half",
+    sources: [`${C}/facilitator/live/**`],
+  },
+  {
+    id: "server/live-panel-seats-onboarding",
+    group: "onboarding",
+    title: "Seats panel",
+    size: "full",
+    sources: [`${C}/facilitator/seats.tsx`],
+  },
+  {
+    id: "server/live-panel-next-ready",
+    group: "onboarding",
+    title: "NEXT panel",
+    size: "full",
+    sources: [`${C}/facilitator/live/**`],
+  },
+
+  // 4. map
+  { id: "client/07-game-round-start", group: "map", title: "Start of round 1", size: "half" },
+  { id: "client/08-game-square-selected", group: "map", title: "Square selected", size: "half" },
+  { id: "client/part-status-line", group: "map", title: "Status line", size: "full" },
+  { id: "client/part-map-detail", group: "map", title: "Map close-up", size: "small" },
+  { id: "client/part-square-panel", group: "map", title: "Square panel", size: "small" },
+  {
+    id: "client/part-map-tooltip",
+    group: "map",
+    title: "Hover info",
+    size: "small",
+    sources: [`${C}/ui/Tooltip.tsx`],
+  },
+
+  // 5. actions
+  { id: "client/part-tool-bar", group: "actions", title: "Tools", size: "full" },
+  { id: "client/10-game-propose-tool", group: "actions", title: "Propose tool", size: "half" },
+  { id: "client/09-game-confirm", group: "actions", title: "Confirmation", size: "half" },
+  { id: "client/part-confirm-prompt", group: "actions", title: "Confirm or cancel", size: "small" },
+  { id: "client/11-game-marks", group: "actions", title: "Marks on the map", size: "half" },
+
+  // 6. following
+  { id: "server/live-02-round", group: "following", title: "LIVE during round 1", size: "full" },
+  { id: "server/live-panel-session", group: "following", title: "Session panel", size: "full" },
+  { id: "server/live-panel-next", group: "following", title: "NEXT panel", size: "full" },
+  { id: "server/live-panel-seats", group: "following", title: "Seats panel", size: "full" },
+  { id: "server/live-panel-composite-map", group: "following", title: "Composite map", size: "full" },
+  {
+    id: "server/live-panel-square",
+    group: "following",
+    title: "Square comparison",
+    size: "small",
+    width: 300,
+  },
+  {
+    id: "server/live-panel-player-views",
+    group: "following",
+    title: "Player views",
+    size: "half",
+    width: 360,
+  },
+
+  // 7. timeline
+  { id: "server/live-panel-timeline", group: "timeline", title: "Timeline", size: "full" },
+  {
+    id: "server/live-panel-timeline-tooltip",
+    group: "timeline",
+    title: "Timeline hover info",
+    size: "full",
+    sources: [`${C}/ui/Tooltip.tsx`],
+  },
+  { id: "server/live-panel-event-log", group: "timeline", title: "Event log", size: "half" },
+  { id: "server/live-panel-telemetry", group: "timeline", title: "Live telemetry", size: "half" },
+
+  // 8. steering
+  {
+    id: "server/live-panel-tools",
+    group: "steering",
+    subgroup: "Messages and notes",
+    title: "TOOLS panel",
+    size: "half",
+  },
+  {
+    id: "client/part-other-players-and-messages",
+    group: "steering",
+    subgroup: "Messages and notes",
+    title: "Messages",
+    size: "small",
+  },
+  { id: "server/live-03-paused", group: "steering", subgroup: "Pausing", title: "Paused", size: "half" },
+  { id: "client/12-game-paused", group: "steering", subgroup: "Pausing", title: "Game paused", size: "half" },
+  {
+    id: "server/live-popup-revoke",
+    group: "steering",
+    subgroup: "Corrections",
+    title: "Revoke",
+    size: "half",
+    sources: [`${C}/facilitator/EventLog.tsx`, `${C}/ui/Popup.tsx`],
+  },
+  {
+    id: "server/live-popup-edit-labels",
+    group: "steering",
+    subgroup: "Corrections",
+    title: "Edit labels",
+    size: "half",
+  },
+  {
+    id: "server/live-popup-end-round",
+    group: "steering",
+    subgroup: "Ending rounds and the game",
+    title: "End round now",
+    size: "half",
+    sources: [`${C}/ui/Popup.tsx`],
+  },
+  {
+    id: "server/live-popup-end-game",
+    group: "steering",
+    subgroup: "Ending rounds and the game",
+    title: "End game early",
+    size: "half",
+    scenario: "small-grid",
+    sources: [`${C}/ui/Popup.tsx`],
+  },
+  {
+    id: "server/live-04-round-complete",
+    group: "steering",
+    subgroup: "Ending rounds and the game",
+    title: "Between rounds",
+    size: "half",
+  },
+  {
+    id: "client/13-round-complete",
+    group: "steering",
+    subgroup: "Ending rounds and the game",
+    title: "Round complete",
+    size: "half",
+  },
+
+  // 9. wrap-up
+  { id: "server/live-05-game-complete", group: "wrap-up", title: "Game complete", size: "half" },
+  { id: "client/14-session-complete", group: "wrap-up", title: "Session complete", size: "half" },
+  {
+    id: "server/wrap-up-01-takedown-cards",
+    group: "wrap-up",
+    title: "Wrap-up 1 · Takedown cards",
+    size: "half",
+  },
+  { id: "server/wrap-up-02-export", group: "wrap-up", title: "Wrap-up 2 · Export", size: "half" },
+  { id: "server/wrap-up-03-close", group: "wrap-up", title: "Wrap-up 3 · Close", size: "half" },
+
+  // 10. data
+  { id: "server/database-01-participants", group: "data", title: "DATABASE · Participants", size: "half" },
+  {
+    id: "server/database-03-simulations",
+    group: "data",
+    title: "DATABASE · Simulations",
+    size: "half",
+    scenario: "simulation",
+  },
+  { id: "server/replay-01-choose", group: "data", title: "REPLAY · Choose a session", size: "half" },
+  {
+    id: "server/replay-02-session",
+    group: "data",
+    title: "REPLAY · A session",
+    size: "half",
+    sources: [`${C}/facilitator/Timeline.tsx`, `${C}/facilitator/Composite.tsx`],
+  },
+  {
+    id: "server/database-02-erasure-lookup",
+    group: "data",
+    title: "Erasure lookup",
+    size: "full",
+    width: 560,
+  },
+
+  // 11. testing
+  {
+    id: "server/setup-07-connect-fake-players",
+    group: "testing",
+    title: "Fake players",
+    size: "half",
+    scenario: "small-grid",
+  },
+  {
+    id: "server/setup-03-players-simulated",
+    group: "testing",
+    title: "Simulated players · Step 03",
+    size: "half",
+  },
+  {
+    id: "server/simulation-01-agents",
+    group: "testing",
+    title: "Simulated players · Step 07",
+    size: "half",
+    scenario: "simulation",
+  },
+  {
+    id: "server/simulation-02-live",
+    group: "testing",
+    title: "Simulated players · LIVE",
+    size: "half",
+    scenario: "simulation",
+    sources: [`${C}/facilitator/live/**`],
+  },
+
+  // 12. small map
+  {
+    id: "server/setup-01-scenario-small-grid",
+    group: "small-map",
+    title: "Step 01 · Small grid",
+    size: "half",
+    scenario: "small-grid",
+    sources: [`${C}/facilitator/setup/**`],
+  },
+  {
+    id: "server/live-small-grid",
+    group: "small-map",
+    title: "LIVE on the small grid",
+    size: "half",
+    scenario: "small-grid",
+    sources: [`${C}/facilitator/live/**`, `${C}/facilitator/Composite.tsx`],
+  },
+  {
+    id: "client/game-small-grid",
+    group: "small-map",
+    title: "Game on the small grid",
+    size: "half",
+    scenario: "small-grid",
+    sources: [`${C}/player/Game.tsx`],
+  },
+
+  // 13. display
+  { id: "server/theme-mocha", group: "display", title: "Mocha", size: "half" },
+  { id: "server/theme-high-contrast", group: "display", title: "High contrast", size: "half" },
+  { id: "client/theme-mocha", group: "display", title: "Mocha", size: "half" },
+  { id: "client/theme-high-contrast", group: "display", title: "High contrast", size: "half" },
+  {
+    id: "client/display-dyslexic-large",
+    group: "display",
+    title: "OpenDyslexic, large text",
+    size: "half",
+    sources: [`${C}/player/Game.tsx`],
+  },
+  {
+    id: "server/popup-display-settings",
+    group: "display",
+    title: "Display settings",
+    size: "half",
+    sources: [`${C}/facilitator/App.tsx`],
+  },
+  { id: "client/part-display-panel", group: "display", title: "DISPLAY panel", size: "small", width: 300 },
+  {
+    id: "server/popup-keyboard-shortcuts",
+    group: "display",
+    title: "Keyboard shortcuts",
+    size: "half",
+    sources: [`${C}/facilitator/App.tsx`],
+  },
+] as const satisfies readonly ShotDef[];
+
+export type ShotId = (typeof SHOTS)[number]["id"];
+
+/**
+ * Files used by almost every screen (theme, shared components, icons). A change
+ * here is not mapped to single shots; `plan` asks for the REPRESENTATIVE ones.
+ */
+export const GLOBAL_SOURCES = [
+  `${C}/ui/theme.css`,
+  `${C}/ui/crt.css`,
+  `${C}/ui/components.tsx`,
+  `${C}/ui/icons.ts`,
+  `${C}/ui/Icon.tsx`,
+  `${C}/ui/index.ts`,
+  "apps/client/*.html",
+] as const;
+
+/** Shots that together show most of the shared UI: captured when a GLOBAL_SOURCES file changes. */
+export const REPRESENTATIVE: readonly ShotId[] = [
+  "server/setup-01-scenario",
+  "server/live-02-round",
+  "server/theme-mocha",
+  "client/03-consent",
+  "client/11-game-marks",
+  "client/theme-high-contrast",
+];
+
+/** Files that can change what the UI shows; `plan` ignores everything else. */
+export const UI_PATHS = ["apps/client/**", "packages/shared/src/**", "config/**", "scenarios/**"] as const;
+
+/* ─────────────────────────── helpers ─────────────────────────── */
+
+export const allShots: readonly ShotDef[] = SHOTS;
+export const allGroups: readonly GroupDef[] = GROUPS;
+
+export const shotById = (id: string): ShotDef | undefined => allShots.find((s) => s.id === id);
+export const groupById = (id: string): GroupDef | undefined => allGroups.find((g) => g.id === id);
+export const sideOf = (id: string): Side => (id.startsWith("client/") ? "client" : "server");
+export const scenarioOf = (s: ShotDef): ScenarioName => s.scenario ?? "session";
+/** Every source glob of a shot: its own plus its group's. */
+export const sourcesOf = (s: ShotDef): readonly string[] => [
+  ...(s.sources ?? []),
+  ...(groupById(s.group)?.sources ?? []),
+];
+
+/** Glob → RegExp: `**` any path, `*` any characters except `/`. */
+export function globToRegExp(glob: string): RegExp {
+  let re = "";
+  for (let i = 0; i < glob.length; i++) {
+    const ch = glob[i]!;
+    if (ch === "*" && glob[i + 1] === "*") {
+      re += ".*";
+      i++;
+    } else if (ch === "*") re += "[^/]*";
+    else re += ch.replace(/[.+?^${}()|[\]\\]/g, "\\$&");
+  }
+  return new RegExp(`^${re}$`);
+}
+export const matchesAny = (file: string, globs: readonly string[]) =>
+  globs.some((g) => globToRegExp(g).test(file));
