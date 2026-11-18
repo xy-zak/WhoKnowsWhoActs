@@ -14,7 +14,7 @@ export class WrongPassphraseError extends Error {
   }
 }
 
-export const SCHEMA_VERSION = 6;
+export const SCHEMA_VERSION = 7;
 
 /** A migration is SQL, or a function for data changes that need JavaScript. */
 const MIGRATIONS: Record<number, string | ((db: DB) => void)> = {
@@ -213,6 +213,11 @@ const MIGRATIONS: Record<number, string | ((db: DB) => void)> = {
       note           TEXT NOT NULL DEFAULT ''
     );
     CREATE INDEX audio_deletions_session ON audio_deletions(session_id);
+  `,
+  // v7: the export register also records "Export audio" (kind 'audio'); details_json says who asked,
+  // the note and what was exported (never a participant code: those stay hashed in code_hashes_json)
+  7: `
+    ALTER TABLE exports ADD COLUMN details_json TEXT NOT NULL DEFAULT '{}';
   `,
 };
 

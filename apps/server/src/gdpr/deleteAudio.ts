@@ -1,3 +1,4 @@
+import { fileBytes } from "../audio/records";
 import { compactAfterDelete } from "../db/database";
 import type { AudioDeletionRow, AudioDeletionScope, AudioTrackStatus, Store } from "../db/store";
 import { nowTs, wall } from "../runtime";
@@ -18,7 +19,7 @@ export const NON_AUDIO_DERIVATIVE_KINDS: ReadonlySet<string> = new Set([
 ]);
 
 /** Derivative kinds known to hold sound (the rule is isAudioDerivativeKind, not this list). */
-export const AUDIO_DERIVATIVE_KINDS: ReadonlySet<string> = new Set(["clean_track", "aligned_track"]);
+export const AUDIO_DERIVATIVE_KINDS: ReadonlySet<string> = new Set(["clean", "clean_track", "aligned_track"]);
 
 /** Does a derivative of this kind hold sound (and so go with the raw audio)? */
 export function isAudioDerivativeKind(kind: string): boolean {
@@ -59,6 +60,10 @@ export interface AudioDeletionCounts {
   jobs: number;
   /** Encrypted files whose keys were deleted (and which were then unlinked). */
   files: number;
+  /** Their size on disk before the deletion (bytes). */
+  bytes: number;
+  /** Seats whose audio was deleted, as a bit mask (bit n = seat n), so the register keeps plain numbers. */
+  seatMask: number;
 }
 
 export interface AudioDeletionResult {
@@ -99,7 +104,16 @@ export function deleteSessionAudio(
   if (isSessionRunning(ctx.hub, sessionId)) throw new SessionRunningError();
   const db = store.db;
   const requestedWall = wall(nowTs());
-  const counts: AudioDeletionCounts = { tracks: 0, audioMs: 0, chunks: 0, derivatives: 0, jobs: 0, files: 0 };
+  const counts: AudioDeletionCounts = {
+    tracks: 0,
+    audioMs: 0,
+    chunks: 0,
+    derivatives: 0,
+    jobs: 0,
+    files: 0,
+    bytes: 0,
+    seatMask: 0,
+  };
   const files: Array<{ sessionId: string; fileName: string }> = [];
   let entry!: AudioDeletionRow;
 
@@ -107,10 +121,11 @@ export function deleteSessionAudio(
     const tracks = (
       db
         .prepare(
-          "SELECT track_id, file_name, samples, sample_rate, status FROM audio_tracks WHERE session_id = ?",
+          "SELECT track_id, seat, file_name, samples, sample_rate, status FROM audio_tracks WHERE session_id = ?",
         )
         .all(sessionId) as Array<{
         track_id: string;
+        seat: number;
         file_name: string | null;
         samples: number;
         sample_rate: number;
@@ -119,11 +134,17 @@ export function deleteSessionAudio(
     ).filter((t) => scope === "all" || t.status !== "deleted");
     const derived = (
       db
-        .prepare("SELECT derivative_id, kind, file_name FROM audio_derivatives WHERE session_id = ?")
-        .all(sessionId) as Array<{ derivative_id: string; kind: string; file_name: string | null }>
+        .prepare("SELECT derivative_id, seat, kind, file_name FROM audio_derivatives WHERE session_id = ?")
+        .all(sessionId) as Array<{
+        derivative_id: string;
+        seat: number | null;
+        kind: string;
+        file_name: string | null;
+      }>
     ).filter((d) => scope === "all" || isAudioDerivativeKind(d.kind));
 
     for (const t of tracks) {
+      if (t.seat > 0 && t.seat < 31) counts.seatMask |= 1 << t.seat;
       counts.audioMs += t.sample_rate > 0 ? (t.samples * 1000) / t.sample_rate : 0;
       if (t.file_name && t.status !== "deleted") files.push({ sessionId, fileName: t.file_name });
       if (scope === "raw") {
@@ -136,6 +157,7 @@ export function deleteSessionAudio(
       }
     }
     for (const d of derived) {
+      if (d.seat !== null && d.seat > 0 && d.seat < 31) counts.seatMask |= 1 << d.seat;
       if (d.file_name) files.push({ sessionId, fileName: d.file_name });
       counts.derivatives += db
         .prepare("DELETE FROM audio_derivatives WHERE derivative_id = ?")
@@ -145,6 +167,7 @@ export function deleteSessionAudio(
       counts.jobs = db.prepare("DELETE FROM audio_jobs WHERE session_id = ?").run(sessionId).changes;
     counts.audioMs = Math.round(counts.audioMs);
     counts.files = files.length;
+    counts.bytes = files.reduce((n, f) => n + fileBytes(store, f.sessionId, f.fileName), 0);
     entry = store.insertAudioDeletion({
       sessionId,
       scope,

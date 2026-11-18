@@ -44,9 +44,11 @@ describe("database migrations", () => {
     expect(tablesV5.map((t) => t.name)).not.toContain("audio_tracks");
     v5.close();
 
-    expect(SCHEMA_VERSION).toBe(6);
+    expect(SCHEMA_VERSION).toBeGreaterThanOrEqual(6);
     const db = openDatabase(file, "migration test pass");
-    expect(db.prepare("SELECT value FROM meta WHERE key='schema_version'").get()).toEqual({ value: "6" });
+    expect(db.prepare("SELECT value FROM meta WHERE key='schema_version'").get()).toEqual({
+      value: String(SCHEMA_VERSION),
+    });
     const names = (db.prepare("SELECT name FROM sqlite_master").all() as Array<{ name: string }>).map(
       (t) => t.name,
     );
@@ -102,6 +104,32 @@ describe("database migrations", () => {
     expect(store.codeExists("WK-7F3K-Q9XM-4")).toBe(true);
     // the status is constrained
     expect(() => db.prepare("UPDATE audio_tracks SET status = 'lost'").run()).toThrow(/CHECK/);
+    db.close();
+    cleanup(dir);
+  });
+
+  it("upgrades a schema-v6 database: the export register gains details_json (v7)", () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), "wkwa-mig-"));
+    const file = path.join(dir, "wkwa.db");
+    const v6 = openDatabase(file, "migration test pass", { targetVersion: 6 });
+    v6.prepare(
+      `INSERT INTO exports (id, session_id, kind, created_wall, path, code_hashes_json, files_json)
+       VALUES ('E-OLD', 'S-V6', 'standard', '2026-01-01T00:00:00Z', 'exports/old', '[]', '[]')`,
+    ).run();
+    v6.close();
+
+    expect(SCHEMA_VERSION).toBe(7);
+    const db = openDatabase(file, "migration test pass");
+    expect(db.prepare("SELECT value FROM meta WHERE key='schema_version'").get()).toEqual({ value: "7" });
+    // existing rows get an empty object; audio exports record who asked and what was exported
+    expect(db.prepare("SELECT details_json FROM exports WHERE id = 'E-OLD'").get()).toEqual({
+      details_json: "{}",
+    });
+    db.prepare(
+      `INSERT INTO exports (id, session_id, kind, created_wall, path, code_hashes_json, files_json, details_json)
+       VALUES ('AU-NEW', 'S-V6', 'audio', '2026-01-02T00:00:00Z', 'exports/new', '[]', '[]', '{"audioKind":"raw"}')`,
+    ).run();
+    expect(db.prepare("SELECT count(*) AS n FROM exports").get()).toEqual({ n: 2 });
     db.close();
     cleanup(dir);
   });
