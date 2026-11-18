@@ -1,5 +1,5 @@
 import { isSimulatedSessionId, normaliseParticipantCode, type PlayerMode } from "@wkwa/shared";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Button,
   Callout,
@@ -14,6 +14,15 @@ import {
   useConfirm,
 } from "../ui";
 import type { FacilitatorConnection } from "./connection";
+import { AudioPopup } from "./database/AudioPopup";
+import {
+  type AudioSessionView,
+  audioCell,
+  formatDuration,
+  formatMinutes,
+  plural,
+  whenWall as when,
+} from "./database/audioModel";
 
 interface SessionSummary {
   id: string;
@@ -30,6 +39,9 @@ interface SessionSummary {
   telemetryCount: number;
   /** Seats played by fake players (test clients the server created). */
   fakeSeats: number[];
+  /** Tracks whose audio is still stored (raw-deleted tracks not counted), and their recorded duration (ms). */
+  audioTracks?: number;
+  audioMs?: number;
 }
 interface ExportResult {
   /** Database of the exported session (set here, from the session row). */
@@ -48,7 +60,14 @@ interface ExportRow {
 }
 interface Lookup {
   code: string;
-  occurrences: Array<{ sessionId: string; seat: number | null; events: number; telemetry: number }>;
+  occurrences: Array<{
+    sessionId: string;
+    seat: number | null;
+    events: number;
+    telemetry: number;
+    audioTracks?: number;
+    audioMs?: number;
+  }>;
   exports: ExportRow[];
   previouslyErased: Array<{ executedWall: string }>;
 }
@@ -56,7 +75,7 @@ interface Deletion {
   id: number;
   sessionId: string;
   deletedWall: string;
-  rows: { events: number; telemetry: number };
+  rows: { events: number; telemetry: number; audioTracks?: number };
   participants: number;
 }
 interface Erasure {
@@ -64,11 +83,33 @@ interface Erasure {
   codeSha256: string;
   executedWall: string;
   sessions: Array<{ sessionId: string }>;
-  rows: { events: number; telemetry: number };
+  rows: { events: number; telemetry: number; audioTracks?: number; audioFiles?: number };
   note: string;
 }
-
-const when = (w: string) => w.replace("T", " ").slice(0, 16);
+/** Audio rows and files removed by an erasure (the server adds these to the result). */
+interface ErasureAudio {
+  rows: {
+    events: number;
+    telemetry: number;
+    audioTracks?: number;
+    audioChunks?: number;
+    audioDerivatives?: number;
+  };
+  audioFiles?: { removed: number; failed: string[] };
+}
+interface SessionDeleteResult {
+  rows: {
+    events: number;
+    telemetry: number;
+    audioTracks?: number;
+    audioChunks?: number;
+    audioDerivatives?: number;
+    audioJobs?: number;
+  };
+  exportPaths: string[];
+  exportsDeleted: boolean;
+  audio?: { dirRemoved: boolean; files: number; error?: string };
+}
 
 const STATUS_TONE: Record<string, "live" | "warn" | "danger" | "neutral" | "primary"> = {
   lobby: "primary",
@@ -111,6 +152,7 @@ export function Database({
   const [lastExport, setLastExport] = useState<ExportResult | null>(null);
   const [filter, setFilter] = useState("");
   const [cardsFor, setCardsFor] = useState<string | null>(null);
+  const [audioFor, setAudioFor] = useState<string | null>(null);
   const [deletions, setDeletions] = useState<InDb<Deletion>[]>([]);
   const [db, setDb] = useState<PlayerMode>(() =>
     attachedId && isSimulatedSessionId(attachedId) ? "simulated" : "real",
@@ -136,8 +178,14 @@ export function Database({
     }
   };
 
+  /** True while the audio counts for a delete confirmation load (a second click does nothing). */
+  const countingAudio = useRef(false);
   const removeSession = async (s: SessionSummary) => {
+    if (countingAudio.current) return;
     const deleteExports = { current: false };
+    countingAudio.current = true;
+    const audio = await (s.players === "real" ? sessionAudioCounts(conn, s) : null);
+    countingAudio.current = false;
     const ok = await confirm({
       title: `Delete session ${s.id}`,
       icon: "erase",
@@ -148,9 +196,21 @@ export function Database({
         <div className="col">
           <p>
             Deletes <strong>everything</strong> of this session from the database: {s.eventCount} events and{" "}
-            {s.telemetryCount} telemetry rows, including the participants' consent and demographics. This
-            cannot be undone.
+            {s.telemetryCount} telemetry rows, including the participants' consent and demographics
+            {audio && audio.tracks > 0 && (
+              <>
+                , and its audio: {plural(audio.tracks, "track")} ({formatMinutes(audio.ms)} recorded) and{" "}
+                {plural(audio.files, "encrypted audio file")} with their keys
+                {audio.files === 0 && " (the raw audio was already deleted: metadata only)"}
+              </>
+            )}
+            . This cannot be undone.
           </p>
+          {audio && audio.tracks > 0 && (
+            <p className="muted">
+              Audio exports already written are export folders: they are deleted only with the option below.
+            </p>
+          )}
           <p className="muted">
             A register entry (session id, row counts, hashes of the codes) is kept so the deletion can be
             re-applied after restoring an older backup. Backups made before now still contain the session.
@@ -161,18 +221,23 @@ export function Database({
     });
     if (!ok) return;
     const r = await conn
-      .api<{ rows: { events: number; telemetry: number }; exportPaths: string[]; exportsDeleted: boolean }>(
-        `/api/sessions/${s.id}/delete`,
-        { method: "POST", body: JSON.stringify({ confirm: s.id, deleteExports: deleteExports.current }) },
-      )
+      .api<SessionDeleteResult>(`/api/sessions/${s.id}/delete`, {
+        method: "POST",
+        body: JSON.stringify({ confirm: s.id, deleteExports: deleteExports.current }),
+      })
       .catch(() => null);
     if (!r) return;
+    const audioText = r.rows.audioTracks
+      ? `, ${plural(r.rows.audioTracks, "audio track")}, ${plural(r.audio?.files ?? 0, "audio file")} removed`
+      : "";
+    const audioError = r.audio?.error ? ` — audio folder not removed: ${r.audio.error}` : "";
+    const exportsLeft =
+      r.exportPaths.length && !r.exportsDeleted
+        ? ` — export folders still on disk: ${r.exportPaths.join(", ")}`
+        : "";
     conn.toast(
-      `Session ${s.id} deleted (${r.rows.events} events, ${r.rows.telemetry} telemetry rows)` +
-        (r.exportPaths.length && !r.exportsDeleted
-          ? ` — export folders still on disk: ${r.exportPaths.join(", ")}`
-          : ""),
-      r.exportPaths.length && !r.exportsDeleted ? "warn" : "ok",
+      `Session ${s.id} deleted (${r.rows.events} events, ${r.rows.telemetry} telemetry rows${audioText})${audioError}${exportsLeft}`,
+      audioError || exportsLeft ? "warn" : "ok",
     );
     refresh();
   };
@@ -249,6 +314,7 @@ export function Database({
                   <th>Tags</th>
                   <th>Events</th>
                   <th>Telemetry</th>
+                  <th>Audio</th>
                   <th />
                 </tr>
               </thead>
@@ -284,6 +350,27 @@ export function Database({
                     </td>
                     <td>{s.eventCount}</td>
                     <td>{s.telemetryCount}</td>
+                    <td className="mono small">
+                      {s.players === "simulated" ? (
+                        <span className="faint" data-tip="Simulated sessions never record audio">
+                          —
+                        </span>
+                      ) : (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          icon="voice"
+                          tip={
+                            s.audioTracks
+                              ? `${plural(s.audioTracks, "audio track")}, ${formatDuration(s.audioMs)} recorded. Open the audio of this session: seats, speaker attribution, export audio, delete audio.`
+                              : "No stored audio. Open to see the audio metadata and deletion register of this session."
+                          }
+                          onClick={() => setAudioFor(s.id)}
+                        >
+                          {audioCell(s.audioTracks, s.audioMs)}
+                        </Button>
+                      )}
+                    </td>
                     <td>
                       <div className="row" style={{ gap: 4, justifyContent: "flex-end" }}>
                         {s.id !== attachedId && !["closed", "aborted"].includes(s.status) && (
@@ -370,7 +457,7 @@ export function Database({
                 ))}
                 {shown.length === 0 && (
                   <tr>
-                    <td colSpan={8} className="faint">
+                    <td colSpan={9} className="faint">
                       {inDb.length
                         ? "No session matches the filter."
                         : simulated
@@ -461,6 +548,7 @@ export function Database({
                       <td className="small">{when(d.deletedWall)}</td>
                       <td className="small">
                         {d.participants} participants · {d.rows.events} ev · {d.rows.telemetry} tel
+                        {d.rows.audioTracks ? ` · ${d.rows.audioTracks} audio tr` : ""}
                       </td>
                     </tr>
                   ))}
@@ -497,6 +585,7 @@ export function Database({
                         <td className="mono small">{e.codeSha256.slice(0, 12)}…</td>
                         <td className="small">
                           {e.rows.events} ev · {e.rows.telemetry} tel
+                          {e.rows.audioTracks ? ` · ${e.rows.audioTracks} audio tr` : ""}
                         </td>
                         <td className="small">{e.note}</td>
                       </tr>
@@ -516,8 +605,32 @@ export function Database({
         </div>
       </div>
       {cardsFor && <CardsPopup conn={conn} sessionId={cardsFor} onClose={() => setCardsFor(null)} />}
+      {audioFor && (
+        <AudioPopup conn={conn} sessionId={audioFor} onClose={() => setAudioFor(null)} onChanged={refresh} />
+      )}
     </div>
   );
+}
+
+/**
+ * Audio of a session for the delete confirmation: every track row (also raw-deleted ones), their
+ * recorded time, and the encrypted files still stored (raw tracks + cleaned tracks). Falls back to
+ * the session row's counts when the audio summary cannot be read.
+ */
+async function sessionAudioCounts(
+  conn: FacilitatorConnection,
+  s: SessionSummary,
+): Promise<{ tracks: number; ms: number; files: number }> {
+  const fallback = { tracks: s.audioTracks ?? 0, ms: s.audioMs ?? 0, files: s.audioTracks ?? 0 };
+  const v = await conn.api<AudioSessionView>(`/api/sessions/${s.id}/audio`).catch(() => null);
+  if (!v) return fallback;
+  const stored = v.tracks.filter((t) => t.status !== "deleted");
+  // recorded time of every track (a raw-deleted track keeps its length); files = what is still stored
+  return {
+    tracks: v.tracks.length,
+    ms: v.tracks.reduce((n, t) => n + t.durationMs, 0),
+    files: stored.length + v.derivatives.length,
+  };
 }
 
 function DeleteExportsCheck({ onChange }: { onChange: (v: boolean) => void }) {
@@ -606,8 +719,12 @@ function ErasurePanel({ conn, onDone }: { conn: FacilitatorConnection; onDone: (
   const [input, setInput] = useState("");
   const [look, setLook] = useState<Lookup | null>(null);
   const [note, setNote] = useState("");
-  const [result, setResult] = useState<string | null>(null);
+  const [result, setResult] = useState<{ text: string; audio: string | null; failed: string[] } | null>(null);
   const code = normaliseParticipantCode(input);
+  const audioTracks = look?.occurrences.reduce((n, o) => n + (o.audioTracks ?? 0), 0) ?? 0;
+  const audioMs = look?.occurrences.reduce((n, o) => n + (o.audioMs ?? 0), 0) ?? 0;
+  const audioSessions =
+    look?.occurrences.filter((o) => (o.audioTracks ?? 0) > 0).map((o) => o.sessionId) ?? [];
 
   const lookup = async () => {
     setResult(null);
@@ -625,9 +742,24 @@ function ErasurePanel({ conn, onDone }: { conn: FacilitatorConnection; onDone: (
         <div className="col">
           <p>
             Deletes <strong>every event and telemetry row</strong> of{" "}
-            <span className="mono">{look.code}</span> in {look.occurrences.length} session(s). This cannot be
-            undone.
+            <span className="mono">{look.code}</span> in {look.occurrences.length} session(s)
+            {audioTracks > 0 && (
+              <>
+                , and their audio: {plural(audioTracks, "track")} ({formatDuration(audioMs)}) with their
+                encrypted files and keys where still stored
+              </>
+            )}
+            . This cannot be undone.
           </p>
+          {audioTracks > 0 && (
+            <p className="muted">
+              Every result made from this participant's audio in{" "}
+              {audioSessions.length === 1 ? "that session" : "those sessions"} goes too: the speaker
+              attribution (speech segments, talk time, quality report) and the cleaned tracks of every seat.
+              Run the speaker attribution again there if the raw audio is still stored. The other
+              participants' raw audio stays.
+            </p>
+          )}
           {look.exports.length > 0 && (
             <p className="t-warn">
               {look.exports.length} export(s) contain this participant and must be deleted and regenerated.
@@ -638,22 +770,26 @@ function ErasurePanel({ conn, onDone }: { conn: FacilitatorConnection; onDone: (
     });
     if (!ok) return;
     const r = await conn
-      .api<{ rows: { events: number; telemetry: number }; exports: ExportRow[] }>(
-        `/api/participants/${look.code}/erase`,
-        {
-          method: "POST",
-          body: JSON.stringify({ confirm: look.code, note }),
-        },
-      )
+      .api<ErasureAudio & { exports: ExportRow[] }>(`/api/participants/${look.code}/erase`, {
+        method: "POST",
+        body: JSON.stringify({ confirm: look.code, note }),
+      })
       .catch(() => null);
     if (!r) return;
-    setResult(
-      `Erased ${r.rows.events} events and ${r.rows.telemetry} telemetry rows.` +
+    const audioRows = (r.rows.audioTracks ?? 0) + (r.rows.audioDerivatives ?? 0);
+    setResult({
+      text:
+        `Erased ${r.rows.events} events and ${r.rows.telemetry} telemetry rows.` +
         (r.exports.length
           ? ` Delete and regenerate on every copy: ${r.exports.map((e) => e.path).join(", ")}.`
           : "") +
         " Cross out the line on the key sheet. Backups made earlier still contain the data.",
-    );
+      audio:
+        audioRows > 0
+          ? `Audio: ${plural(r.rows.audioTracks ?? 0, "track")} (${plural(r.rows.audioChunks ?? 0, "chunk")}) and ${plural(r.rows.audioDerivatives ?? 0, "derived result")} deleted with their keys; ${plural(r.audioFiles?.removed ?? 0, "encrypted file")} removed. The attribution results and every seat's cleaned tracks of ${audioSessions.join(", ") || "the session"} were removed with them: run the speaker attribution again there (if its raw audio is still stored).`
+          : null,
+      failed: r.audioFiles?.failed ?? [],
+    });
     setLook(null);
     setInput("");
     setNote("");
@@ -715,6 +851,13 @@ function ErasurePanel({ conn, onDone }: { conn: FacilitatorConnection; onDone: (
                         <td>seat {o.seat}</td>
                         <td>{o.events} events</td>
                         <td>{o.telemetry} telemetry</td>
+                        <td>
+                          {o.audioTracks ? (
+                            `${plural(o.audioTracks, "audio track")} (${formatDuration(o.audioMs)})`
+                          ) : (
+                            <span className="faint">no audio</span>
+                          )}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -743,8 +886,26 @@ function ErasurePanel({ conn, onDone }: { conn: FacilitatorConnection; onDone: (
           </div>
         )}
         {result && (
-          <Callout tone="live" icon="ok">
-            {result}
+          <Callout
+            tone={result.failed.length ? "warn" : "live"}
+            icon={result.failed.length ? "warning" : "ok"}
+          >
+            {result.text}
+            {result.audio && (
+              <>
+                <br />
+                {result.audio}
+              </>
+            )}
+            {result.failed.length > 0 && (
+              <>
+                <br />
+                <span className="t-danger">
+                  <Icon name="error" /> Audio files that could not be removed (unreadable: their keys are
+                  gone; delete them by hand): {result.failed.join(", ")}
+                </span>
+              </>
+            )}
           </Callout>
         )}
       </div>
