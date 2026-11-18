@@ -213,7 +213,8 @@ export function Game({ conn, view }: { conn: PlayerConnection; view: PlayerView 
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "minmax(0, 1fr) 360px",
+          // side panel: 360 px at the small text size, wider with large text (27em = 432 px)
+          gridTemplateColumns: "minmax(0, 1fr) max(360px, 27em)",
           gap: "var(--s3)",
           minHeight: 0,
         }}
@@ -351,7 +352,8 @@ function SquarePanel({
             return (
               <tr key={k} data-cell={id}>
                 <td>
-                  <span className="row nowrap" style={{ gap: 6 }}>
+                  {/* sq-type: may wrap with large text or a wide font, so the other columns keep their room */}
+                  <span className="row nowrap sq-type" style={{ gap: 6 }}>
                     <LabelTag
                       label={k}
                       tip={`${view.map.views[k]?.name ?? k}: ${view.map.views[k]?.description ?? ""}`}

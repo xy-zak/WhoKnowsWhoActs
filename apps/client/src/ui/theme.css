@@ -1168,6 +1168,13 @@ table.grid tr.selected {
   outline-offset: 2px;
 }
 
+/* ─── player: square panel — with large text or a wide font the type cell may wrap,
+   so the score and "on the map" columns keep their room (the side panel also widens: Game.tsx) ─── */
+:root[data-scale="large"] .sq-type,
+:root[data-font="dyslexic"] .sq-type {
+  flex-wrap: wrap;
+}
+
 /* ─── player: DISPLAY button + panel (bottom right, above popups) ─── */
 .display-menu {
   position: fixed;

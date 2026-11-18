@@ -4,6 +4,12 @@ History of [AESTHETIC-RULES.md](../AESTHETIC-RULES.md). Newest first. How entrie
 
 ## Unreleased
 
+### Not yet committed · timeline and large-text fixes
+
+- **Type:** Bug fix
+- **Change:** § 3 adds two rules: SVG charts such as the timeline are drawn at their panel's real width with `--fs-*` text, and fixed-width columns grow with the text size. The player's side panel widens at Large, and its type column may wrap with Large text or OpenDyslexic.
+- **Reason:** The full-screen screenshots showed the timeline's text stretched to almost twice the body size at 1920 px, and the player's square panel squeezing its *On the map* column to nothing with OpenDyslexic at Large text.
+
 ### Not yet committed · grid map, scores and game rules (documents the code in the same commit)
 
 - **Type:** Feature

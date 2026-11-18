@@ -167,6 +167,9 @@ The font is a display setting (§ 2.1). **OpenDyslexic** (also self-hosted) and 
 
 The sizes below are the **Small** (default) text size. **Large** steps every token up: 14 / 15 / 16 / 19 / 25 px. Use the `--fs-*` tokens, never fixed pixel sizes, so both sizes work.
 
+- **Charts in SVG** (the timeline) are drawn at the real width of their panel, one SVG unit per pixel, and their text uses the same tokens. Never let a `viewBox` stretch a chart to fit: its text would grow with the screen width (almost twice the body size on a 1920 px screen).
+- **Fixed-width columns grow with the text.** The player's side panel is 360 px at Small and `27em` (432 px) at Large. With Large text or OpenDyslexic, the type column of the square panel may wrap, so the score and *On the map* columns keep their room.
+
 | Step | Size | Use |
 | --- | --- | --- |
 | micro | 11 px | Status tags, table headers, key hints |
