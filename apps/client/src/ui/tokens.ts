@@ -365,6 +365,8 @@ export const CONTRAST_PAIRS: Array<[string, string, number]> = [
   ["primary", "panel", 4.5],
   ["live", "panel", 4.5],
   ["warn", "panel", 4.5],
+  // status bar (sunken): "mics 3/4" and RECORDING PAUSED in warn
+  ["warn", "sunken", 4.5],
   ["danger", "panel", 4.5],
   // empty level-meter / progress cells: a graphic that shows the scale (≥ 3:1)
   ["faint", "panel", 3],

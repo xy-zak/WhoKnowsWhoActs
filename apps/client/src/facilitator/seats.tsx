@@ -19,10 +19,11 @@ import {
   quotaLimit,
   quotaUsed,
   type Scenario,
+  type SeatMicStats,
   type SeatState,
   seatList,
 } from "@wkwa/shared";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { fmtDuration } from "../common/format";
 import {
   ActSwatch,
@@ -33,11 +34,23 @@ import {
   Field,
   Icon,
   LabelTag,
+  LevelMeter,
   Panel,
+  RecTag,
   SeatDot,
   StatusTag,
   useConfirm,
 } from "../ui";
+import {
+  type BacklogTrend,
+  backlogTone,
+  chunkAge,
+  fmtMinutes,
+  micCell,
+  micCheckText,
+  nextBacklogTrend,
+  STALE_CHUNK_MS,
+} from "./audioLive";
 import type { FacilitatorConnection } from "./connection";
 import { policyLabel } from "./simulation";
 
@@ -553,6 +566,93 @@ export function LabelsEditor({
   );
 }
 
+/* ─────────────────────────── Mic column (sessions that record audio) ─────────────────────────── */
+
+/**
+ * A seat's microphone in the seats table: recording state, level, upload backlog (`↑ n`), age of
+ * the last stored chunk (warn when stale while recording), audio stored so far and, during
+ * onboarding, the mic check status. Static: nothing animates (AESTHETIC-RULES § 8.1).
+ */
+export function MicColumn({
+  st,
+  seat,
+  mic,
+  trend,
+  serverNow,
+}: {
+  st: GameState;
+  seat: SeatState;
+  mic: SeatMicStats | undefined;
+  trend: BacklogTrend | undefined;
+  serverNow: number;
+}) {
+  const cell = micCell(st, seat, mic);
+  const check = st.phase === "onboarding" ? micCheckText(st, seat) : null;
+  const meter = cell.state !== "off" && cell.state !== "skipped";
+  if (!meter && !check) return <RecTag compact state={cell.state} tip={cell.tip} />;
+  const pending = mic?.pendingChunks ?? 0;
+  const pendingWarn = backlogTone(pending, trend?.growing ?? false) === "warn";
+  const live = cell.state === "recording" || cell.state === "no_signal";
+  const age = live ? chunkAge(mic, serverNow) : { ageMs: null, stale: false };
+  return (
+    <span className="col" style={{ gap: 2 }}>
+      <span className="row nowrap" style={{ gap: 6 }}>
+        <RecTag compact state={cell.state} tip={cell.tip} />
+        {meter && (
+          <LevelMeter
+            compact
+            quietDb={null}
+            db={cell.db}
+            peakDb={cell.peakDb}
+            label={`Microphone level of seat ${seat.seat}`}
+          />
+        )}
+      </span>
+      <span className="row nowrap small" style={{ gap: 8 }}>
+        {pending > 0 && (
+          <span
+            className={`row nowrap ${pendingWarn ? "t-warn" : "muted"}`}
+            style={{ gap: 2 }}
+            data-tip={`Upload backlog: ${pending} chunk${pending === 1 ? "" : "s"} (about ${pending * 5} s of audio) recorded but not yet on the server${pendingWarn ? ". Growing or large: check this browser's network connection" : ""}`}
+          >
+            <Icon name="upload" /> ↑ {pending}
+          </span>
+        )}
+        {age.ageMs !== null && (
+          <span
+            className={age.stale ? "row nowrap t-warn" : "faint"}
+            style={{ gap: 2 }}
+            data-tip={
+              age.stale
+                ? `No audio stored from this seat for more than ${STALE_CHUNK_MS / 1000} s although it says it records: check its browser and network`
+                : "Time since the server last stored audio from this seat (chunks arrive every 5 s)"
+            }
+          >
+            {age.stale && <Icon name="clock" />}
+            {fmtDuration(age.ageMs)} ago
+          </span>
+        )}
+        {mic && mic.tracks > 0 && (
+          <span
+            className="faint"
+            data-tip={`Audio stored for this seat so far, in ${mic.tracks} track${mic.tracks === 1 ? "" : "s"}`}
+          >
+            {fmtMinutes(mic.recordedMs)}
+          </span>
+        )}
+        {check && (
+          <span
+            className={check === "check pending" ? "muted" : "faint"}
+            data-tip="The seat's own mic check (onboarding step after consent)"
+          >
+            {check}
+          </span>
+        )}
+      </span>
+    </span>
+  );
+}
+
 /* ─────────────────────────── Seats overview (setup page + live) ─────────────────────────── */
 
 export function SeatsPanel({
@@ -572,6 +672,12 @@ export function SeatsPanel({
   const dLim = quotaLimit(st, "decide");
   const final = ["closed", "aborted"].includes(st.phase);
   const simulated = isSimulated(st);
+  const audio = st.audio.enabled;
+  // the server's clock now, for the age of the last stored chunk (the dashboard carries serverTs)
+  const offset = useMemo(() => Date.now() - dash.serverTs, [dash.serverTs]);
+  const trends = useRef({ sessionId: st.sessionId, bySeat: new Map<number, BacklogTrend>() });
+  if (trends.current.sessionId !== st.sessionId)
+    trends.current = { sessionId: st.sessionId, bySeat: new Map() };
 
   const withdraw = async (seat: number) => {
     if (
@@ -612,6 +718,7 @@ export function SeatsPanel({
               <th>P</th>
               <th>View</th>
               <th>Onboarding</th>
+              {audio && <th>Mic</th>}
               <th>Quota</th>
               <th>Activity</th>
               <th />
@@ -621,6 +728,9 @@ export function SeatsPanel({
             {seats.map((s) => {
               const stats = dash.stats[s.seat];
               const step = st.phase === "onboarding" ? nextOnboardingStep(st, s) : null;
+              const mic = stats?.mic;
+              const trend = nextBacklogTrend(trends.current.bySeat.get(s.seat), mic?.pendingChunks ?? 0);
+              trends.current.bySeat.set(s.seat, trend);
               return (
                 <tr key={s.seat}>
                   <td>
@@ -683,6 +793,11 @@ export function SeatsPanel({
                       <StatusTag tone="warn">{step ?? "…"}</StatusTag>
                     )}
                   </td>
+                  {audio && (
+                    <td className="small">
+                      <MicColumn st={st} seat={s} mic={mic} trend={trend} serverNow={now - offset} />
+                    </td>
+                  )}
                   <td className="small">
                     {st.round > 0 && s.bound ? (
                       <span className="col" style={{ gap: 0 }}>
