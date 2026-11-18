@@ -2,6 +2,11 @@ import { z } from "zod";
 import {
   AUDIO_BYTES_PER_SAMPLE,
   AUDIO_MAX_CHUNK_SAMPLES,
+  AUDIO_SAMPLE_RATE,
+  AudioCaptureSettingsSchema,
+  AudioContextInfoSchema,
+  type AudioSettings,
+  AudioStartReasonSchema,
   AudioStopReasonSchema,
   Dbfs,
   type MicLevelState,
@@ -9,6 +14,7 @@ import {
   PcmSchema,
   pcmByteLength,
   TrackIdSchema,
+  toAudioSettings,
 } from "./audio";
 import { FakePaceSchema, SessionConfigSchema } from "./config";
 import { EVENT_DEFS } from "./events";
@@ -85,17 +91,71 @@ const ClockOffsetMs = z
   .describe("Clock offset (server minus client, ms) the client applied to its timestamps");
 const Count = (d: string) => z.number().int().min(0).describe(d);
 
-/** Result of the player's own mic check (logged as MicCheckCompleted). */
-export const MicCheckSubmit = EVENT_DEFS.MicCheckCompleted.payload.extend({
-  durationMs: DurationMs,
-  clientTs: ClientTs,
-});
+const NO_SAMPLE_RATE = {
+  message: "settings.sampleRate (or the audio engine's sample rate) is needed",
+  path: ["settings", "sampleRate"],
+};
+const ContextSampleRate = z
+  .number()
+  .int()
+  .min(8000)
+  .max(384000)
+  .optional()
+  .describe("Rate of the browser's audio engine (Hz): used as the sample rate when settings has none");
 
-/** A new track (logged as AudioTrackStarted), plus the timing of its first sample. */
-export const AudioStart = EVENT_DEFS.AudioTrackStarted.payload.extend({
-  clientTs: ClientTs.describe("Time of the track's first sample, corrected to server time (epoch ms)"),
-  clockOffsetMs: ClockOffsetMs,
-});
+/**
+ * Result of the player's own mic check (logged as MicCheckCompleted). The settings are taken as the
+ * browser reports them and normalised to AudioSettings (see toAudioSettings).
+ */
+export const MicCheckSubmit = EVENT_DEFS.MicCheckCompleted.payload
+  .extend({
+    settings: AudioCaptureSettingsSchema,
+    contextSampleRate: ContextSampleRate,
+    durationMs: DurationMs,
+    clientTs: ClientTs,
+  })
+  .refine((m) => toAudioSettings(m.settings, m.contextSampleRate) !== null, NO_SAMPLE_RATE)
+  .transform(({ contextSampleRate, ...m }) => ({
+    ...m,
+    settings: toAudioSettings(m.settings, contextSampleRate) as AudioSettings,
+  }));
+
+/**
+ * A new track (logged as AudioTrackStarted), plus the timing of its first sample. Accepts the
+ * capture engine's start info as it is: the timing fields `context`, `chunkSamples` and
+ * `inputLatencyMs` are optional, the settings are normalised to AudioSettings, unknown keys are
+ * stripped.
+ */
+export const AudioStart = z
+  .object({
+    trackId: TrackIdSchema,
+    reason: AudioStartReasonSchema,
+    sampleRate: z
+      .literal(AUDIO_SAMPLE_RATE)
+      .describe("Sample rate of the uploaded audio (Hz; always 16 000)"),
+    chunkSamples: z
+      .number()
+      .int()
+      .min(1)
+      .max(AUDIO_MAX_CHUNK_SAMPLES)
+      .optional()
+      .describe("Samples in a full chunk (nominally 80 000 = 5 s); the last chunk of a track may be shorter"),
+    clientTs: ClientTs.describe("Time of the track's first sample, corrected to server time (epoch ms)"),
+    clockOffsetMs: ClockOffsetMs,
+    inputLatencyMs: z
+      .number()
+      .min(0)
+      .max(10_000)
+      .optional()
+      .describe("Capture latency the browser already subtracted from every clientTs (ms)"),
+    settings: AudioCaptureSettingsSchema,
+    context: AudioContextInfoSchema.optional(),
+  })
+  .refine((m) => toAudioSettings(m.settings, m.context?.sampleRate) !== null, NO_SAMPLE_RATE)
+  .transform((m) => ({
+    ...m,
+    settings: toAudioSettings(m.settings, m.context?.sampleRate) as AudioSettings,
+  }));
 
 export const AudioChunk = z
   .object({
@@ -127,9 +187,13 @@ export const AudioChunk = z
 export const AudioStop = z.object({
   trackId: TrackIdSchema,
   reason: AudioStopReasonSchema,
-  totalSamples: Count("Samples the browser captured in this track"),
-  droppedChunks: Count("Chunks the browser had to drop (resend queue full); their audio is missing"),
-  clientTs: ClientTs,
+  chunks: Count("Chunks the browser produced in this track (seq 0 … chunks − 1)"),
+  samples: Count("Samples the browser captured in this track (16 000 per second)"),
+  droppedChunks: Count(
+    "Chunks the browser had to drop (resend queue full); their audio is missing (absent = 0)",
+  ).default(0),
+  clientTs: ClientTs.describe("End of the track's last sample, corrected to server time (epoch ms)"),
+  clockOffsetMs: ClockOffsetMs.optional(),
 });
 
 export const AudioLevel = z.object({
@@ -260,7 +324,7 @@ export const MESSAGES: Record<string, MessageDef> = {
     namespace: "/player",
     direction: "client→server",
     description:
-      "Result of the player's own mic check (sessions that record audio; the onboarding step after consent). Only processing flags and the sample rate are sent, never the device name or id.",
+      "Result of the player's own mic check (sessions that record audio; the onboarding step after consent). Refused while PlayerView.audio.micCheckHeld (another seat is still in consent). Only processing flags and the sample rate are sent, never the device name or id.",
     schema: MicCheckSubmit,
     ack: "Ack",
     logged: "MicCheckCompleted",
@@ -300,27 +364,27 @@ export const MESSAGES: Record<string, MessageDef> = {
     namespace: "/player",
     direction: "client→server",
     description:
-      "A new audio track starts (one continuous capture run). Accepted only while the seat should record (audio consent given, mic check reached and not skipped, recording not paused, not a fake player or agent).",
+      "A new audio track starts (one continuous capture run). Accepted only while the seat should record (PlayerView.audio.record: audio consent given, every seat done with consent, mic check reached and not skipped, recording not paused, game not complete, not a fake player or agent). A refused start is permanent (retry false): the browser drops the track's chunks too.",
     schema: AudioStart,
-    ack: "Ack",
+    ack: "AudioAck (ok, or refused with retry true = send again later / false = drop)",
     logged: "AudioTrackStarted (the track is opened in the encrypted audio store)",
   },
   "audio:chunk": {
     namespace: "/player",
     direction: "client→server",
     description:
-      "About 5 s of audio of an open track (16 kHz mono s16le, binary). The browser keeps unacknowledged chunks in memory only and resends them in order after a reconnect; a resend with the same trackId and seq is stored once.",
+      "About 5 s of audio of an open track (16 kHz mono s16le, binary). The browser keeps unacknowledged chunks in memory only and resends them in order after a reconnect; a resend with the same trackId and seq is stored once (ack ok, duplicate true). Late chunks of a closed track (the server closes it on a disconnect, restart, recording pause or at game complete) are accepted for 10 minutes after the close or the previous late chunk; audio captured while recording was paused or after the game was complete is never stored (a chunk that starts before such a moment is cut there, one that starts after it is refused).",
     schema: AudioChunk,
-    ack: "Ack<{ trackId, seq }>",
+    ack: "AudioAck<{ trackId, seq }>",
     logged: "Encrypted audio store only (audio_chunks + the track's .wka file), never the event log",
   },
   "audio:stop": {
     namespace: "/player",
     direction: "client→server",
     description:
-      "The browser stopped capturing a track (pause, game complete, unload, permission lost, error).",
+      "The browser stopped capturing a track (pause, game complete, unload, permission lost, error). Always accepted for the seat's own tracks, also after the server closed the track itself.",
     schema: AudioStop,
-    ack: "Ack",
+    ack: "AudioAck",
     logged: "AudioTrackStopped",
   },
   "audio:level": {

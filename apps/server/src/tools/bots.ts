@@ -1,5 +1,5 @@
 /**
- * npm run bots -- [--url https://localhost:3000] [--count 3] [--delay 2000-6000] [--auto] [--admin-token T]
+ * npm run bots -- [--url https://localhost:3000] [--count 3] [--delay 2000-6000] [--auto] [--audio] [--admin-token T]
  *
  * Starts simulated players that connect like real browsers. Use it to fill
  * empty seats while developing or piloting, or to load-test a setup.
@@ -13,8 +13,15 @@
  *
  * --auto also drives the facilitator side: creates a session if none is
  * active, binds every client (bots AND humans) to the next free seat,
- * randomises labels, starts onboarding and starts each round. Never use
- * --auto during a real session.
+ * randomises labels, starts onboarding, starts the calibration (sessions
+ * with audio) and starts each round. Never use --auto during a real session.
+ *
+ * --audio: in a session that records audio, the bots tick the audio consent
+ * item, pass their mic check and upload synthetic audio (noise plus
+ * speech-like bursts, a different level per seat, louder in their own
+ * calibration turn). With --auto, a new session is created with audio on.
+ * Without --audio a bot declines the required audio item of such a session and
+ * waits (the facilitator sees the decline).
  */
 import https from "node:https";
 import { parseArgs } from "node:util";
@@ -30,6 +37,7 @@ const { values } = parseArgs({
     "admin-token": { type: "string" },
     "round-pause": { type: "string", default: "3000" },
     insecure: { type: "boolean", default: false },
+    audio: { type: "boolean", default: false },
   },
 });
 
@@ -72,6 +80,7 @@ const bots = Array.from(
       minDelayMs: minDelay,
       maxDelayMs: maxDelay ?? minDelay,
       insecureTls,
+      audio: values.audio,
       log,
     }),
 );
@@ -85,6 +94,7 @@ async function autoFacilitate() {
   log("auto-facilitator connected");
   const seatCount = Number(values.seats);
   let busy = false;
+  let loggedQuality = false;
   const tick = async () => {
     if (busy) return;
     busy = true;
@@ -96,7 +106,7 @@ async function autoFacilitate() {
         if (!st) {
           const r = await fac.cmd<{ sessionId: string }>("session:create", {
             scenarioId: "demo",
-            config: { seatCount },
+            config: { seatCount, ...(values.audio ? { audio: { enabled: true } } : {}) },
             notes: "auto-facilitated test session (bots)",
           });
           log(`created session ${r.sessionId}`);
@@ -115,6 +125,29 @@ async function autoFacilitate() {
           else await fac.cmd("onboarding:start");
         }
       } else if (st.phase === "onboarding" || st.phase === "round_complete") {
+        const cal = st.audio.calibration;
+        if (st.phase === "onboarding" && st.audio.enabled && cal.status === "pending") {
+          try {
+            await fac.cmd("calibration:start");
+            log("calibration started");
+          } catch (e) {
+            // nobody records (all mic checks skipped): nothing to calibrate
+            if (/No seat is recorded/.test((e as Error).message)) {
+              await fac.cmd("calibration:skip", { reason: "auto-facilitator: no seat records audio" });
+              log("calibration skipped (no seat records audio)");
+            }
+            /* else: waiting for the mic checks */
+          }
+          return;
+        }
+        if (cal.status === "done" && cal.quality && !loggedQuality) {
+          loggedQuality = true;
+          log(
+            `calibration ${cal.quality.ok ? "ok" : "NOT ok"}: ${cal.quality.perSeat
+              .map((q) => `seat ${q.seat} ${q.marginDb === null ? "no audio" : `${q.marginDb} dB`}`)
+              .join(", ")}`,
+          );
+        }
         try {
           if (st.phase === "round_complete")
             await new Promise((r) => setTimeout(r, Number(values["round-pause"])));

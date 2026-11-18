@@ -312,6 +312,28 @@ export function micCheckApplies(state: GameState, seat: SeatState): boolean {
   return state.audio.enabled && isParticipant(seat) && seat.audioConsent;
 }
 
+/**
+ * Seats that hold the mic checks: active real participants (bound, not withdrawn, not a fake player
+ * or agent) whose consent is not `given` yet, i.e. still reading the form or declined. Empty unless
+ * the session has the mic check step.
+ *
+ * Every microphone in the room also hears the others, so NO seat may open its mic (start its mic
+ * check, and so its recording) while anyone is still in consent: their voice would be recorded
+ * before they agreed, or although they then decline. To go on without a decliner, the facilitator
+ * withdraws that seat.
+ */
+export function micCheckHoldSeats(state: GameState): number[] {
+  if (!state.audio.enabled || !state.onboardingSteps.includes("mic_check")) return [];
+  return seatList(state)
+    .filter((s) => s.bound && !s.withdrawn && isParticipant(s) && s.consent !== "given")
+    .map((s) => s.seat);
+}
+
+/** Are the mic checks held because a seat is still in consent (see micCheckHoldSeats)? */
+export function isMicCheckHeld(state: GameState): boolean {
+  return micCheckHoldSeats(state).length > 0;
+}
+
 /** Is this onboarding step done for the seat? (The mic check counts as done when passed or skipped.) */
 function stepDone(state: GameState, seat: SeatState, step: OnboardingStep): boolean {
   switch (step) {
@@ -351,13 +373,15 @@ export const RECORDING_PHASES: ReadonlySet<Phase> = new Set(["onboarding", "roun
  * Should this seat's microphone be recording now? True only when the session records audio,
  * the seat is held by a real participant (not a fake player or an agent) who gave consent
  * including the audio item, has not withdrawn, has reached the mic check (or is past it) and
- * whose mic check was not skipped, recording is not paused by the facilitator, and the phase
- * is onboarding, round_active or round_complete (breaks and game pauses are recorded too).
+ * whose mic check was not skipped, no other seat is still in consent (micCheckHoldSeats),
+ * recording is not paused by the facilitator, and the phase is onboarding, round_active or
+ * round_complete (breaks and game pauses are recorded too).
  */
 export function shouldRecord(state: GameState, seat: SeatState): boolean {
   if (state.audio.recordingPaused || !RECORDING_PHASES.has(state.phase)) return false;
   if (!seat.bound || seat.withdrawn || !micCheckApplies(state, seat)) return false;
   if (seat.consent !== "given" || seat.micCheck === "skipped") return false;
+  if (isMicCheckHeld(state)) return false;
   // Recording starts at the mic check, so a session without that step never records. Consent is
   // the only step before it: with consent given, the seat has reached the mic check or is past it.
   return state.onboardingSteps.includes("mic_check");

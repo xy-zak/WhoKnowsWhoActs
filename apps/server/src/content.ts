@@ -2,8 +2,11 @@ import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import {
+  AUDIO_CONSENT_ITEM,
+  AudioContentSchema,
   ConsentFormSchema,
   checkInitialScores,
+  composeConsent,
   DemographicsFormSchema,
   K_LABELS,
   type OnboardingContent,
@@ -122,34 +125,49 @@ export class ScenarioLibrary {
 
 /* ─────────────────────────── Onboarding content ─────────────────────────── */
 
+/** Suffix of the consent form version in sessions that record audio (the text then has the audio section). */
+export const AUDIO_CONSENT_VERSION_SUFFIX = "+audio";
+
 /**
- * Load study info, consent form, demographics and briefing from config/.
- * Loaded fresh whenever a session is created or resumed, so edits apply
- * without restarting the server. The SHA-256 of each text is recorded with
- * the participant's answers.
+ * Load study info, consent form, demographics and briefing from config/ (and, for a session that
+ * records audio, the mic check and calibration texts of `audio.json`). Loaded fresh whenever a
+ * session is created or resumed, so edits apply without restarting the server.
+ *
+ * The consent form is composed for the session (`composeConsent`): the `<!-- if audio -->` blocks
+ * of consent.md and the items with `when: "audio"` are kept only when it records audio. The
+ * version gets the suffix "+audio" then, and the SHA-256 covers the composed text, its items and
+ * the study details, so the version and hash recorded in ConsentRecorded identify exactly what the
+ * participant saw. Throws when a session with audio would not ask for the required audio item.
  */
-export function loadOnboardingContent(configDir: string): OnboardingContent {
+export function loadOnboardingContent(configDir: string, opts: { audio?: boolean } = {}): OnboardingContent {
+  const audio = opts.audio === true;
   const read = (f: string) => readFileSync(path.join(configDir, f), "utf8");
   const study = StudyConfigSchema.parse(JSON.parse(read("study.json")));
-  const consent = ConsentFormSchema.parse(JSON.parse(read("consent.json")));
+  const form = ConsentFormSchema.parse(JSON.parse(read("consent.json")));
   const demographics = DemographicsFormSchema.parse(JSON.parse(read("demographics.json")));
   for (const q of demographics.questions) {
     if (!q.options.some((o) => o.value === PREFER_NOT_TO_SAY)) {
       throw new Error(`Demographic question '${q.id}' must offer '${PREFER_NOT_TO_SAY}'`);
     }
   }
-  const consentMd = read(consent.markdownFile);
+  const consent = composeConsent({ markdown: read(form.markdownFile), items: form.items }, { audio });
+  if (audio && !consent.items.some((i) => i.id === AUDIO_CONSENT_ITEM && i.required)) {
+    throw new Error(
+      `Recording audio needs the required consent item '${AUDIO_CONSENT_ITEM}' (with "when": "audio") in consent.json`,
+    );
+  }
   const briefingMd = read(study.briefingMarkdownFile);
   return {
     study,
     consent: {
-      version: consent.version,
-      markdown: consentMd,
+      version: audio ? `${form.version}${AUDIO_CONSENT_VERSION_SUFFIX}` : form.version,
+      markdown: consent.markdown,
       // hash covers everything the participant sees on the consent screen
-      sha256: sha256(JSON.stringify({ md: consentMd, items: consent.items, study })),
+      sha256: sha256(JSON.stringify({ md: consent.markdown, items: consent.items, study })),
       items: consent.items,
     },
     demographics,
     briefing: { markdown: briefingMd, sha256: sha256(briefingMd) },
+    ...(audio ? { audio: AudioContentSchema.parse(JSON.parse(read("audio.json"))) } : {}),
   };
 }

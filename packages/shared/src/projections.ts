@@ -9,6 +9,7 @@ import {
   type ConsentStatus,
   currentCalibrationTurn,
   type GameState,
+  isMicCheckHeld,
   type MicCheckStatus,
   nextOnboardingStep,
   type OnboardingStep,
@@ -116,6 +117,12 @@ export interface PlayerAudioView {
   /** The facilitator paused recording for everyone. */
   paused: boolean;
   micCheck: MicCheckStatus;
+  /**
+   * The mic check is this seat's next step but is held: another seat is still reading the consent
+   * form (or declined and was not withdrawn yet). Show "waiting for the others to finish consent"
+   * and do NOT open the microphone; `mic:check` and `audio:start` are refused meanwhile.
+   */
+  micCheckHeld: boolean;
   /** Sentence to read aloud in the mic check (only while the mic check is this seat's next step). */
   micCheckPhrase?: string;
   /** Speech the mic check must hear before it passes (ms; with micCheckPhrase). */
@@ -160,6 +167,7 @@ function playerAudioView(
     record: shouldRecord(state, seat),
     paused: a.recordingPaused,
     micCheck: seat.micCheck,
+    micCheckHeld: a.enabled && nextStep === "mic_check" && isMicCheckHeld(state),
     ...(check ? { micCheckPhrase: check.phrase, micCheckMinSpeechMs: check.minSpeechMs } : {}),
     calibration: {
       status: a.calibration.status,

@@ -590,15 +590,22 @@ export const EVENT_DEFS = {
 
   CalibrationSkipped: defineRecord({
     summary:
-      "The facilitator skipped (or cancelled) the calibration; speaker attribution then estimates the leakage between microphones from the recordings.",
-    trigger: "Facilitator clicks 'Skip calibration' and confirms.",
-    actors: ["facilitator"],
+      "The facilitator skipped (or cancelled) the calibration; speaker attribution then estimates the leakage between microphones from the recordings. Logged by the server with `cancelled: true` when it had to stop a running calibration itself (recording paused, server restart): the calibration is then back to not done and has to be run (or skipped) again.",
+    trigger:
+      "Facilitator clicks 'Skip calibration' and confirms; or the server stops a running calibration (recording paused, restart).",
+    actors: ["facilitator", "system"],
     changesState: true,
     visibleTo: "Everyone",
     dataClass: "non-personal",
-    frequency: "0–1 per session (audio sessions only)",
+    frequency: "0–1 per session (audio sessions only), plus 1 per cancelled run",
     payload: z.object({
       reason: z.string().max(200).describe("Facilitator's reason (free text, no personal data)"),
+      cancelled: z
+        .boolean()
+        .optional()
+        .describe(
+          "True when the server stopped a running calibration (recording paused, restart): its status goes back to 'pending', so round 1 still waits for a calibration (absent = a facilitator skip)",
+        ),
     }),
     example: { reason: "everyone uses a headset" },
   }),

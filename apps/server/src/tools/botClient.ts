@@ -1,6 +1,13 @@
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import {
   type Ack,
+  AUDIO_CONSENT_ITEM,
+  AUDIO_MAX_CHUNK_SAMPLES,
+  AUDIO_SAMPLE_RATE,
+  type AudioStartReason,
+  type AudioStopReason,
+  audioSendResult,
+  clampDb,
   type DashboardMsg,
   type PlayerView,
   randomPolicy,
@@ -27,8 +34,10 @@ export interface BotOptions {
   log?: (msg: string) => void;
   /** Probability per turn of proposing (vs deciding) when both are available. */
   proposeBias?: number;
-  /** Take propose/decide actions automatically during rounds (default true). Onboarding is always automatic. */
+  /** Take propose/decide actions automatically during rounds (default true). */
   autoPlay?: boolean;
+  /** Go through onboarding automatically (default true; tests that drive each step themselves turn it off). */
+  autoOnboard?: boolean;
   /** Use this terminal key instead of a random one (the server registers fake players' keys before they connect). */
   terminalKey?: string;
   /** Re-claim a seat with this token on connect (fake players restored after a server restart). */
@@ -39,7 +48,47 @@ export interface BotOptions {
   record?: boolean;
   /** Accept a self-signed certificate (the server connecting to itself over TLS). */
   insecureTls?: boolean;
+  /**
+   * Sessions that record audio: tick the audio consent item, pass the mic check and upload
+   * synthetic audio (a quiet noise floor with speech-like bursts, louder in this seat's
+   * calibration turn) whenever the server says the seat should record. Without it, a bot in a
+   * session with audio declines the (required) audio item and waits, so it never takes part.
+   */
+  audio?: boolean;
+  /** Level of the bot's synthetic speech (dBFS; default −18 dB minus 3 dB per seat after the first). */
+  voiceDb?: number;
+  /** Length of one uploaded chunk (ms; default 5000, at most 6000). Tests use shorter chunks. */
+  audioChunkMs?: number;
 }
+
+/** A synthetic capture run of a bot. */
+interface BotTrack {
+  trackId: string;
+  /** Server time of sample 0 (the bot's clock is the server's: same machine, offset 0). */
+  t0: number;
+  nextSeq: number;
+  nextSample: number;
+  timer: NodeJS.Timeout;
+}
+
+/** What a bot uploaded (tests read it). */
+export interface BotAudioStats {
+  tracks: number;
+  chunksAcked: number;
+  rejected: number;
+  stopReasons: string[];
+}
+
+const BOT_NOISE_DB = -62;
+/** How much quieter another seat's voice is on this bot's "mic" (headset-like crosstalk). */
+const BOT_LEAKAGE_DB = 22;
+const BOT_SETTINGS = {
+  sampleRate: 48_000,
+  echoCancellation: false,
+  noiseSuppression: false,
+  autoGainControl: false,
+  channelCount: 1,
+};
 
 export class Bot {
   readonly socket: Socket;
@@ -55,6 +104,15 @@ export class Bot {
   private timer: NodeJS.Timeout | null = null;
   private stopped = false;
   private telemetryBuffer: TelemetryItem[] = [];
+  private audioTrack: BotTrack | null = null;
+  /** Every send goes through this chain, so start, chunks and stop arrive in order. */
+  private audioChain: Promise<void> = Promise.resolve();
+  private recordedBefore = false;
+  private declinedLogged = false;
+  /** Calibration turns seen in the state pushes (server time). */
+  private turns: Array<{ seat: number; from: number; to: number }> = [];
+  private rng = 0x9e3779b9;
+  readonly audioStats: BotAudioStats = { tracks: 0, chunksAcked: 0, rejected: 0, stopReasons: [] };
 
   constructor(private readonly opts: BotOptions) {
     this.terminalKey = opts.terminalKey ?? randomBytes(16).toString("hex");
@@ -66,7 +124,11 @@ export class Bot {
       forceNew: true,
       ...(opts.insecureTls ? { rejectUnauthorized: false } : {}),
     });
-    this.socket.on("connect", () => this.hello());
+    this.socket.on("connect", () => {
+      // the server closed the track at the disconnect: finish it (its chunks are resent) and start a new one
+      if (this.audioTrack) this.stopTrack("disconnect");
+      this.hello();
+    });
     this.socket.on("rehello", () => this.hello());
     this.socket.on("terminal", (m: { terminal: number }) => {
       this.terminal = m.terminal;
@@ -85,6 +147,7 @@ export class Bot {
       if (opts.record !== false) this.states.push(v);
       opts.onState?.(v);
       if (opts.telemetry !== false) this.track("state_received", { seq: v.seq });
+      this.syncAudio(v);
       this.schedule();
     });
   }
@@ -176,19 +239,43 @@ export class Bot {
   }
 
   private async decide(v: PlayerView): Promise<boolean> {
+    if (v.phase === "onboarding" && this.opts.autoOnboard === false) return false;
     if (v.phase === "onboarding" && v.onboarding && v.me.nextStep) {
       const o = v.onboarding;
+      let ack: unknown = null;
       if (v.me.nextStep === "consent") {
-        const answers = Object.fromEntries(o.consent.items.map((i) => [i.id, true]));
-        this.recordAck(
-          await this.emit("consent:submit", {
-            formVersion: o.consent.version,
-            textSha256: o.consent.sha256,
-            answers,
-            durationMs: 1000,
-            clientTs: Date.now(),
-          }),
+        if (v.me.consent === "declined") {
+          // nothing more to do: the facilitator sees the decline (and may withdraw the seat)
+          if (!this.declinedLogged) {
+            this.declinedLogged = true;
+            this.log("declined consent (this session records audio: run the bots with --audio)");
+          }
+          return false;
+        }
+        // the audio item only with --audio: a bot never pretends to agree to being recorded otherwise
+        const answers = Object.fromEntries(
+          o.consent.items.map((i) => [i.id, i.id === AUDIO_CONSENT_ITEM ? this.opts.audio === true : true]),
         );
+        ack = await this.emit("consent:submit", {
+          formVersion: o.consent.version,
+          textSha256: o.consent.sha256,
+          answers,
+          durationMs: 1000,
+          clientTs: Date.now(),
+        });
+      } else if (v.me.nextStep === "mic_check") {
+        // held while another seat is still in consent: wait for the next state push
+        if (v.audio.micCheckHeld || !this.opts.audio) return false;
+        ack = await this.emit("mic:check", {
+          passed: true,
+          attempts: 1,
+          durationMs: 1500,
+          settings: BOT_SETTINGS,
+          noiseFloorDb: BOT_NOISE_DB,
+          speechDb: this.voiceDb(),
+          speechMs: 1500,
+          clientTs: Date.now(),
+        });
       } else if (v.me.nextStep === "demographics") {
         const answers = Object.fromEntries(
           o.demographics.questions.map((q) => [
@@ -196,24 +283,23 @@ export class Bot {
             q.options[Math.floor(Math.random() * q.options.length)]!.value,
           ]),
         );
-        this.recordAck(
-          await this.emit("demographics:submit", {
-            formVersion: o.demographics.version,
-            answers,
-            durationMs: 1000,
-            clientTs: Date.now(),
-          }),
-        );
+        ack = await this.emit("demographics:submit", {
+          formVersion: o.demographics.version,
+          answers,
+          durationMs: 1000,
+          clientTs: Date.now(),
+        });
       } else if (v.me.nextStep === "briefing") {
-        this.recordAck(
-          await this.emit("briefing:ack", {
-            textSha256: o.briefing.sha256,
-            durationMs: 1000,
-            clientTs: Date.now(),
-          }),
-        );
+        ack = await this.emit("briefing:ack", {
+          textSha256: o.briefing.sha256,
+          durationMs: 1000,
+          clientTs: Date.now(),
+        });
       }
-      return true;
+      if (ack === null) return false;
+      this.recordAck(ack);
+      // a refused step is not retried at once (that would spin); the next state push tries again
+      return (ack as { ok?: boolean }).ok === true;
     } else if (this.opts.autoPlay !== false) {
       // the same random play as the `random` agent policy of simulated sessions
       const action = randomPolicy.act(v, {
@@ -244,9 +330,216 @@ export class Bot {
     if (this.opts.record !== false) this.acks.push(ack);
   }
 
+  /* ─────────── synthetic audio (opts.audio) ─────────── */
+
+  private voiceDb(): number {
+    return this.opts.voiceDb ?? -18 - 3 * ((this.seat ?? 1) - 1);
+  }
+
+  /** Start or stop the synthetic recording as the server's `audio.record` says. */
+  private syncAudio(v: PlayerView) {
+    const c = v.audio.calibration;
+    if (c.turnSeat !== null && c.turnEndsAt !== null) {
+      const last = this.turns[this.turns.length - 1];
+      if (!last || last.seat !== c.turnSeat || last.to !== c.turnEndsAt)
+        this.turns.push({ seat: c.turnSeat, from: Math.min(Date.now(), c.turnEndsAt), to: c.turnEndsAt });
+    }
+    if (!this.opts.audio || this.stopped) return;
+    if (v.audio.record && !this.audioTrack) {
+      const reason: AudioStartReason = !this.recordedBefore
+        ? "mic_check"
+        : this.wasPaused
+          ? "resume"
+          : "reconnect";
+      this.wasPaused = false;
+      this.startTrack(reason);
+    } else if (!v.audio.record && this.audioTrack) {
+      const reason: AudioStopReason = v.audio.paused
+        ? "paused"
+        : v.phase === "game_complete"
+          ? "game_complete"
+          : v.me.withdrawn
+            ? "withdrawn"
+            : "client_stop";
+      this.wasPaused = v.audio.paused;
+      this.stopTrack(reason);
+    }
+  }
+
+  private wasPaused = false;
+
+  private startTrack(reason: AudioStartReason) {
+    const chunkMs = Math.min(6000, Math.max(200, this.opts.audioChunkMs ?? 5000));
+    const t0 = Date.now();
+    const track: BotTrack = {
+      trackId: randomUUID(),
+      t0,
+      nextSeq: 0,
+      nextSample: 0,
+      timer: setInterval(() => this.emitChunk(track, false), chunkMs),
+    };
+    this.audioTrack = track;
+    this.recordedBefore = true;
+    this.audioStats.tracks++;
+    this.sendAudio("audio:start", {
+      trackId: track.trackId,
+      reason,
+      sampleRate: AUDIO_SAMPLE_RATE,
+      chunkSamples: Math.round((chunkMs * AUDIO_SAMPLE_RATE) / 1000),
+      clientTs: t0,
+      clockOffsetMs: 0,
+      inputLatencyMs: 0,
+      settings: BOT_SETTINGS,
+      context: {
+        sampleRate: 48_000,
+        baseLatencyMs: null,
+        outputLatencyMs: null,
+        timingMethod: "current-time",
+      },
+    });
+  }
+
+  private stopTrack(reason: AudioStopReason) {
+    const track = this.audioTrack;
+    if (!track) return;
+    clearInterval(track.timer);
+    this.audioTrack = null;
+    this.emitChunk(track, true);
+    this.audioStats.stopReasons.push(reason);
+    this.sendAudio("audio:stop", {
+      trackId: track.trackId,
+      reason,
+      chunks: track.nextSeq,
+      samples: track.nextSample,
+      droppedChunks: 0,
+      clientTs: track.t0 + (track.nextSample * 1000) / AUDIO_SAMPLE_RATE,
+      clockOffsetMs: 0,
+    });
+  }
+
+  /** Upload the samples captured since the last chunk (all up to now). */
+  private emitChunk(track: BotTrack, final: boolean) {
+    const due = Math.floor(((Date.now() - track.t0) * AUDIO_SAMPLE_RATE) / 1000);
+    let n = Math.min(due - track.nextSample, AUDIO_MAX_CHUNK_SAMPLES);
+    if (n <= 0 || (!final && n < AUDIO_SAMPLE_RATE / 10)) return;
+    n = Math.max(1, n);
+    const startSample = track.nextSample;
+    const pcm = this.synthesise(track.t0, startSample, n);
+    let sum = 0;
+    let peak = 0;
+    for (let i = 0; i < n; i++) {
+      const x = pcm.readInt16LE(i * 2);
+      sum += x * x;
+      peak = Math.max(peak, Math.abs(x));
+    }
+    const toDb = (v: number) => clampDb(20 * Math.log10(v / 32768));
+    this.sendAudio("audio:chunk", {
+      trackId: track.trackId,
+      seq: track.nextSeq++,
+      startSample,
+      sampleCount: n,
+      clientTs: track.t0 + (startSample * 1000) / AUDIO_SAMPLE_RATE,
+      clockOffsetMs: 0,
+      rmsDb: Math.round(toDb(Math.sqrt(sum / n)) * 10) / 10,
+      peakDb: Math.round(toDb(peak) * 10) / 10,
+      clippedSamples: 0,
+      pcm,
+    });
+    track.nextSample += n;
+    if (this.view?.audio.enabled) {
+      this.socket.volatile.emit("audio:level", {
+        state: "recording",
+        rmsDb: Math.round(toDb(Math.sqrt(sum / n)) * 10) / 10,
+        peakDb: Math.round(toDb(peak) * 10) / 10,
+        pendingChunks: 0,
+        pendingBytes: 0,
+      });
+    }
+  }
+
+  private random(): number {
+    // xorshift32: cheap and good enough for noise
+    let x = this.rng;
+    x ^= x << 13;
+    x ^= x >>> 17;
+    x ^= x << 5;
+    this.rng = x >>> 0;
+    return this.rng / 4294967296;
+  }
+
+  /**
+   * Synthetic 16 kHz s16le audio: a noise floor, plus speech-like bursts (noise with a 4 Hz
+   * syllable rhythm). In a calibration turn the speaking seat is loud on its own mic and
+   * BOT_LEAKAGE_DB quieter on the others; during rounds a bot talks now and then at its own level.
+   */
+  private synthesise(t0: number, startSample: number, n: number): Buffer {
+    const out = Buffer.alloc(n * 2);
+    const me = this.seat;
+    const voice = 32768 * 10 ** (this.voiceDb() / 20);
+    const leak = 32768 * 10 ** ((this.voiceDb() - BOT_LEAKAGE_DB) / 20);
+    const noise = 32768 * 10 ** (BOT_NOISE_DB / 20);
+    const inRound = this.view?.phase === "round_active";
+    let talkUntil = -1;
+    let talking = false;
+    for (let i = 0; i < n; i++) {
+      const t = t0 + ((startSample + i) * 1000) / AUDIO_SAMPLE_RATE;
+      let amp = 0;
+      const turn = this.turns.find((x) => t >= x.from && t < x.to);
+      if (turn) amp = turn.seat === me ? voice : leak;
+      else if (inRound) {
+        if (t >= talkUntil) {
+          talking = this.random() < 0.3;
+          talkUntil = t + 1000;
+        }
+        if (talking) amp = voice;
+      }
+      const syllable = 0.5 + 0.5 * Math.sin((2 * Math.PI * 4 * t) / 1000);
+      const v = (this.random() * 2 - 1) * (noise + amp * syllable * syllable * 1.7);
+      out.writeInt16LE(Math.max(-32767, Math.min(32767, Math.round(v))), i * 2);
+    }
+    return out;
+  }
+
+  /** Send an audio message in order, retrying transient refusals and timeouts (not "rejected" ones). */
+  private sendAudio(event: string, payload: unknown) {
+    const deliver = async () => {
+      for (let attempt = 0; attempt < 30 && !this.stopped; attempt++) {
+        const ack = await new Promise<unknown>((resolve) =>
+          this.socket
+            .timeout(10_000)
+            .emit(event, payload, (err: unknown, a: unknown) => resolve(err ? null : a)),
+        );
+        const r = audioSendResult(ack);
+        if (r === true) {
+          if (event === "audio:chunk") this.audioStats.chunksAcked++;
+          return;
+        }
+        if (r === "rejected") {
+          this.audioStats.rejected++;
+          this.log(`${event} refused: ${(ack as { error?: string }).error ?? "?"}`);
+          return;
+        }
+        await new Promise((res) => setTimeout(res, Math.min(5000, 250 * (attempt + 1))));
+      }
+    };
+    this.audioChain = this.audioChain.then(deliver, deliver);
+  }
+
+  /** Resolves when every audio message queued so far was acknowledged (or given up). */
+  audioSent(): Promise<void> {
+    return this.audioChain;
+  }
+
+  /** Stop recording now (uploads the rest of the track and its stop). */
+  stopAudio(reason: AudioStopReason = "client_stop") {
+    this.stopTrack(reason);
+  }
+
   stop() {
     this.stopped = true;
     if (this.timer) clearTimeout(this.timer);
+    if (this.audioTrack) clearInterval(this.audioTrack.timer);
+    this.audioTrack = null;
     this.socket.close();
   }
 }
