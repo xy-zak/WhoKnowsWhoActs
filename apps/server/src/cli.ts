@@ -10,14 +10,17 @@
  *   delete-session --session S [--yes] [--delete-exports] [--note TEXT]
  *                                    delete an ENTIRE session (irreversible)
  *   deletions                        show the session-deletion register
- *   backup   --out FILE              encrypted backup copy of the database
+ *   delete-audio S --scope raw|all [--confirm S] [--note TEXT]
+ *                                    delete a session's audio: raw = recordings (timing kept), all = everything
+ *   audio-deletions                  show the audio-deletion register
+ *   backup   --out FILE              encrypted backup copy of the database (+ FILE.audio/: the audio folder)
  *   rekey                            change the passphrase (of BOTH databases: they share one)
- *   verify                           integrity check of the database
+ *   verify                           integrity check of the database and of every audio file
  *
  * --sim runs sessions / export / anonymise / delete-session / deletions /
  * backup / verify on the simulation database (data/wkwa-sim.db) instead of
- * the participant database (data/wkwa.db). Participant look-up and erasure
- * only exist for the participant database.
+ * the participant database (data/wkwa.db). Participant look-up, erasure and
+ * audio only exist for the participant database (simulations never record).
  *
  * Every command asks for the database passphrase (WKWA_DB_PASSPHRASE is
  * accepted for scripted development use only).
@@ -27,24 +30,33 @@ import path from "node:path";
 import readline from "node:readline/promises";
 import { parseArgs } from "node:util";
 import { EVENT_DEFS, type EventType, TELEMETRY_DEFS, type TelemetryType } from "@wkwa/shared";
+import { AudioFileStore, audioDirOf } from "./audio/fileStore";
+import { verifyAudio } from "./audio/verify";
 import { ScenarioLibrary } from "./content";
 import { backupDatabase, getMeta, openDatabase, rekeyDatabase } from "./db/database";
 import { Store } from "./db/store";
 import { dbFile as dbFileOf, exportsDirFor } from "./db/stores";
+import { deleteSessionAudio } from "./gdpr/deleteAudio";
 import { deleteSession, listSessionDeletions } from "./gdpr/deleteSession";
 import { eraseParticipant, listErasures, lookupParticipant } from "./gdpr/erase";
 import { exportSession } from "./gdpr/exporter";
 import { obtainPassphrase, promptHidden } from "./passphrase";
 import { runtimeFromEnv } from "./runtime";
 
-const USAGE = `Usage: npm run cli -- <sessions|lookup|export|anonymise|erase|erasures|delete-session|deletions|backup|rekey|verify> [options]
+const USAGE = `Usage: npm run cli -- <sessions|lookup|export|anonymise|erase|erasures|delete-session|deletions|delete-audio|audio-deletions|backup|rekey|verify> [options]
   lookup --code C          export --session S       anonymise --session S
   erase --code C [--yes] [--note TEXT]               backup --out FILE
   delete-session --session S [--yes] [--delete-exports] [--note TEXT]
+  delete-audio S --scope raw|all [--confirm S] [--note TEXT]
   --sim   use the simulation database (data/wkwa-sim.db) instead of the participant database`;
 
 /** Commands that only make sense for participants (and so not with --sim). */
-const PARTICIPANT_ONLY = new Set(["lookup", "erase", "erasures"]);
+const PARTICIPANT_ONLY = new Set(["lookup", "erase", "erasures", "delete-audio", "audio-deletions"]);
+
+/** 754000 → "12.6 min", 42000 → "42 s". */
+function duration(ms: number): string {
+  return ms >= 60_000 ? `${(ms / 60_000).toFixed(1)} min` : `${Math.round(ms / 1000)} s`;
+}
 
 async function confirm(question: string): Promise<boolean> {
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
@@ -55,8 +67,9 @@ async function confirm(question: string): Promise<boolean> {
 
 async function main() {
   const [command, ...rest] = process.argv.slice(2);
-  const { values } = parseArgs({
+  const { values, positionals } = parseArgs({
     args: rest,
+    allowPositionals: true,
     options: {
       code: { type: "string" },
       session: { type: "string" },
@@ -65,12 +78,17 @@ async function main() {
       yes: { type: "boolean", default: false },
       "delete-exports": { type: "boolean", default: false },
       sim: { type: "boolean", default: false },
+      scope: { type: "string" },
+      confirm: { type: "string" },
     },
   });
   if (!command || command === "help" || command === "--help") {
     console.log(USAGE);
     return;
   }
+  // only delete-audio takes a positional argument (the session id); elsewhere a stray one is a typo
+  if (positionals.length > (command === "delete-audio" ? 1 : 0))
+    throw new Error(`Unexpected argument '${positionals.at(-1)}'\n${USAGE}`);
   const mode = values.sim ? "simulated" : "real";
   if (values.sim && PARTICIPANT_ONLY.has(command)) {
     throw new Error(
@@ -87,7 +105,9 @@ async function main() {
   const db = openDatabase(dbFile, passphrase);
   const exportsDir = exportsDirFor(runtime.exportsDir, mode);
   console.log(`Database: ${dbFile} (${values.sim ? "simulations" : "participants"})`);
-  const store = new Store(db);
+  // audio belongs to the participant database only (simulated sessions never record)
+  const audioFiles = values.sim ? null : new AudioFileStore(audioDirOf(runtime.dataDir));
+  const store = new Store(db, audioFiles);
   const scenarios = new ScenarioLibrary(runtime.scenariosDir);
   const need = (v: string | undefined, flag: string) => {
     if (!v) throw new Error(`Missing --${flag}\n${USAGE}`);
@@ -101,7 +121,7 @@ async function main() {
         if (rows.length === 0) console.log("No sessions.");
         for (const s of rows) {
           console.log(
-            `${s.id}  ${s.status.padEnd(14)} ${s.createdWall.slice(0, 16)}  scenario=${s.scenarioId} v${s.scenarioVersion}  events=${s.eventCount} telemetry=${s.telemetryCount}${s.tags.length ? `  tags=${s.tags.join(",")}` : ""}${s.fakeSeats.length ? `  FAKE PLAYERS in seat ${s.fakeSeats.join(",")}` : ""}`,
+            `${s.id}  ${s.status.padEnd(14)} ${s.createdWall.slice(0, 16)}  scenario=${s.scenarioId} v${s.scenarioVersion}  events=${s.eventCount} telemetry=${s.telemetryCount}${s.audioTracks ? `  audio=${s.audioTracks} tracks (${duration(s.audioMs)})` : ""}${s.tags.length ? `  tags=${s.tags.join(",")}` : ""}${s.fakeSeats.length ? `  FAKE PLAYERS in seat ${s.fakeSeats.join(",")}` : ""}`,
           );
         }
         break;
@@ -111,7 +131,9 @@ async function main() {
         console.log(`Participant ${r.code}`);
         if (r.occurrences.length === 0) console.log("  no data found");
         for (const o of r.occurrences)
-          console.log(`  ${o.sessionId}  seat ${o.seat ?? "?"}  events=${o.events} telemetry=${o.telemetry}`);
+          console.log(
+            `  ${o.sessionId}  seat ${o.seat ?? "?"}  events=${o.events} telemetry=${o.telemetry} audio=${o.audioTracks} tracks (${duration(o.audioMs)})`,
+          );
         for (const e of r.exports) console.log(`  contained in export ${e.id} (${e.kind}) → ${e.path}`);
         for (const p of r.previouslyErased) console.log(`  previously erased on ${p.executedWall}`);
         break;
@@ -138,11 +160,16 @@ async function main() {
           break;
         }
         for (const o of look.occurrences)
-          console.log(`  ${o.sessionId}  seat ${o.seat ?? "?"}  events=${o.events} telemetry=${o.telemetry}`);
+          console.log(
+            `  ${o.sessionId}  seat ${o.seat ?? "?"}  events=${o.events} telemetry=${o.telemetry} audio=${o.audioTracks} tracks (${duration(o.audioMs)})`,
+          );
         console.log(
           "If the server is running with one of these sessions attached, use the dashboard instead.",
         );
-        if (!values.yes && !(await confirm("Permanently erase all of this participant's data?"))) {
+        if (
+          !values.yes &&
+          !(await confirm("Permanently erase all of this participant's data, audio included?"))
+        ) {
           console.log("Cancelled.");
           break;
         }
@@ -150,6 +177,17 @@ async function main() {
         console.log(
           `Erased ${r.rows.events} events and ${r.rows.telemetry} telemetry rows. Register entry added.`,
         );
+        console.log(
+          `Audio: ${r.rows.audioTracks} tracks (${r.rows.audioChunks} chunks) and ${r.rows.audioDerivatives} derived results deleted with their keys; ${r.audioFiles.removed} encrypted files removed.`,
+        );
+        if (r.rows.audioDerivatives)
+          console.log(
+            "Results computed from their audio are gone too: re-run the speaker attribution if needed.",
+          );
+        for (const f of r.audioFiles.failed)
+          console.log(
+            `  ⚠  could not remove audio file ${f} (unreadable without its key): delete it by hand`,
+          );
         if (r.exports.length) {
           console.log("These exports contained the participant — delete them on every copy and re-export:");
           for (const e of r.exports) console.log(`  ${e.id} (${e.kind}) → ${e.path}`);
@@ -164,7 +202,7 @@ async function main() {
         if (rows.length === 0) console.log("Erasure register is empty.");
         for (const e of rows) {
           console.log(
-            `#${e.id} ${e.executedWall}  sha256=${e.codeSha256.slice(0, 16)}…  sessions=${e.sessions.map((s) => s.sessionId).join(",")}  rows=${e.rows.events}+${e.rows.telemetry}${e.note ? `  note=${e.note}` : ""}`,
+            `#${e.id} ${e.executedWall}  sha256=${e.codeSha256.slice(0, 16)}…  sessions=${e.sessions.map((s) => s.sessionId).join(",")}  rows=${e.rows.events}+${e.rows.telemetry}  audio tracks=${e.rows.audioTracks} files=${e.rows.audioFiles}${e.note ? `  note=${e.note}` : ""}`,
           );
         }
         break;
@@ -175,7 +213,7 @@ async function main() {
         if (!row) throw new Error(`Unknown session ${id}`);
         const counts = store.listSessions().find((x) => x.id === id)!;
         console.log(
-          `Session ${id} (${row.status}, created ${row.created_wall.slice(0, 16)}): ${counts.eventCount} events, ${counts.telemetryCount} telemetry rows.`,
+          `Session ${id} (${row.status}, created ${row.created_wall.slice(0, 16)}): ${counts.eventCount} events, ${counts.telemetryCount} telemetry rows, ${counts.audioTracks} audio tracks (${duration(counts.audioMs)}).`,
         );
         console.log(
           "If the server is running with this session attached, use the manager (DATABASE) instead.",
@@ -197,6 +235,16 @@ async function main() {
         console.log(
           `Deleted ${r.rows.events} events, ${r.rows.telemetry} telemetry rows, ${r.rows.exports} export register rows. Register entry added.`,
         );
+        console.log(
+          `Audio: ${r.rows.audioTracks} tracks, ${r.rows.audioChunks} chunks, ${r.rows.audioDerivatives} derived results and ${r.rows.audioJobs} jobs deleted; ` +
+            (r.audio.dirRemoved
+              ? `audio folder removed (${r.audio.files} files).`
+              : "no audio folder on disk."),
+        );
+        if (r.audio.error)
+          console.log(
+            `  ⚠  could not remove the audio folder (${r.audio.error}); its files are unreadable without their keys.`,
+          );
         if (r.exportPaths.length) {
           console.log(
             r.exportsDeleted
@@ -213,15 +261,85 @@ async function main() {
         if (rows.length === 0) console.log("Session-deletion register is empty.");
         for (const d of rows)
           console.log(
-            `#${d.id} ${d.deletedWall}  ${d.sessionId}  participants=${d.participants}  rows=${d.rows.events}+${d.rows.telemetry}${d.note ? `  note=${d.note}` : ""}`,
+            `#${d.id} ${d.deletedWall}  ${d.sessionId}  participants=${d.participants}  rows=${d.rows.events}+${d.rows.telemetry}  audio tracks=${d.rows.audioTracks}${d.note ? `  note=${d.note}` : ""}`,
+          );
+        break;
+      }
+      case "delete-audio": {
+        const id = positionals[0] ?? need(values.session, "session");
+        const scope = values.scope;
+        if (scope !== "raw" && scope !== "all")
+          throw new Error(`Missing or unknown --scope (raw or all)\n${USAGE}`);
+        const row = store.getSession(id);
+        if (!row) throw new Error(`Unknown session ${id}`);
+        const tracks = store.listAudioTracks(id);
+        const stored = tracks.filter((t) => t.status !== "deleted");
+        const derived = store.listAudioDerivatives(id);
+        console.log(
+          `Session ${id} (${row.status}): ${stored.length} tracks with audio (${duration(stored.reduce((n, t) => n + t.durationMs, 0))}), ` +
+            `${tracks.length - stored.length} with raw audio already deleted, ${derived.length} derived results.`,
+        );
+        console.log(
+          scope === "raw"
+            ? "Deletes the raw recordings and the cleaned/aligned tracks (files and keys). Track timing, chunk levels, speech segments and transcripts stay."
+            : "Deletes ALL audio of this session: tracks, chunks, derived results, jobs and the audio folder.",
+        );
+        // the CLI cannot see the server's attached session (the server's own deletion refuses a running one)
+        if (
+          !["game_complete", "closed", "aborted"].includes(row.status) ||
+          stored.some((t) => t.status === "recording")
+        )
+          console.log(
+            `⚠  The session is '${row.status}'${stored.some((t) => t.status === "recording") ? " and has tracks still marked recording" : ""}. ` +
+              "If the server is running with this session attached, end the session (or stop the server) first.",
+          );
+        let typed = values.confirm;
+        if (typed === undefined) {
+          const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+          typed = (await rl.question(`Type the session id (${id}) to delete its audio permanently: `)).trim();
+          rl.close();
+        }
+        if (typed.trim() !== id) {
+          console.log("Confirmation does not match the session id. Cancelled.");
+          process.exitCode = 1;
+          break;
+        }
+        const r = deleteSessionAudio({ store }, id, { scope, note: values.note });
+        console.log(
+          `Deleted (${scope}): ${r.counts.tracks} tracks (${duration(r.counts.audioMs)}), ${r.counts.chunks} chunk rows, ` +
+            `${r.counts.derivatives} derived results, ${r.counts.jobs} jobs; ${r.audioFiles.removed} encrypted files removed` +
+            `${r.audioFiles.dirRemoved ? ", audio folder removed" : ""}. Register entry #${r.entry.id} added.`,
+        );
+        for (const f of r.audioFiles.failed)
+          console.log(`  ⚠  could not remove ${f} (unreadable without its key): delete it by hand`);
+        console.log("Backups made before now still contain the audio.");
+        break;
+      }
+      case "audio-deletions": {
+        const rows = store.listAudioDeletions();
+        if (rows.length === 0) console.log("Audio-deletion register is empty.");
+        for (const d of rows)
+          console.log(
+            `#${d.id} ${d.executedWall}  ${d.sessionId}  scope=${d.scope}  tracks=${d.counts.tracks ?? 0} files=${d.counts.files ?? 0}${d.note ? `  note=${d.note}` : ""}`,
           );
         break;
       }
       case "backup": {
         const out = path.resolve(need(values.out, "out"));
+        const audioOut = `${out}.audio`;
         if (existsSync(out)) throw new Error(`${out} already exists`);
+        if (audioFiles && existsSync(audioOut)) throw new Error(`${audioOut} already exists`);
         await backupDatabase(db, out);
         console.log(`Encrypted backup written to ${out} (same passphrase).`);
+        if (audioFiles) {
+          // after the database copy: every file the copy has a key for is complete (newer chunks may be extra)
+          const a = audioFiles.copyTo(audioOut);
+          console.log(
+            a.files
+              ? `Audio folder copied to ${audioOut} (${a.files} encrypted files, ${(a.bytes / 1e6).toFixed(1)} MB; keys are in the database copy).`
+              : "No audio files to copy.",
+          );
+        }
         break;
       }
       case "rekey": {
@@ -247,6 +365,8 @@ async function main() {
             process.exitCode = 1;
           }
         }
+        // Audio files need nothing: each has its own random key, stored as a row of this
+        // database, so the keys were re-encrypted with it. (Backups keep the old passphrase.)
         console.log("Existing backups keep their old passphrase.");
         break;
       }
@@ -282,6 +402,24 @@ async function main() {
               report(`${s.id} telemetry #${t.id}: invalid ${t.type}`);
           }
           console.log(`  ${s.id}: ${events.length} events checked`);
+        }
+        if (audioFiles) {
+          const a = await verifyAudio(store, audioFiles);
+          for (const p of a.problems) report(`audio: ${p}`);
+          for (const w of a.warnings) console.log(`  ⚠ audio: ${w}`);
+          console.log(
+            `  audio: ${a.filesChecked} encrypted files, ${a.records} records authenticated, ${a.orphans.length} orphan files`,
+          );
+        } else {
+          const n = db
+            .prepare(
+              "SELECT (SELECT count(*) FROM audio_tracks) + (SELECT count(*) FROM audio_derivatives) AS n",
+            )
+            .get() as {
+            n: number;
+          };
+          if (n.n > 0)
+            report(`${n.n} audio rows in the simulation database (simulations never record audio)`);
         }
         console.log(problems === 0 ? "✓ Database OK" : `${problems} problem(s) found`);
         if (problems) process.exitCode = 1;

@@ -6,6 +6,7 @@ import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest }
 import type { Logger } from "pino";
 import { Server } from "socket.io";
 import { registerApi } from "./api/routes";
+import { AudioFileStore, audioDirOf } from "./audio/fileStore";
 import { ScenarioLibrary } from "./content";
 import { type DB, openDatabase, WrongPassphraseError } from "./db/database";
 import { Store } from "./db/store";
@@ -21,6 +22,8 @@ export interface AppContext {
   /** The participant database (data/wkwa.db). */
   store: Store;
   db: DB;
+  /** Encrypted audio files of the participant database (data/audio; keys in its audio tables). Same as store.audioFiles. */
+  audioFiles: AudioFileStore;
   /** Both databases (`stores.simulated` = data/wkwa-sim.db); `stores.find(id)` says which one holds a session. */
   stores: SessionStores;
   log: Logger;
@@ -53,7 +56,9 @@ export async function createApp(
     }
     throw e;
   }
-  const store = new Store(db);
+  // only the participant database has audio: simulated sessions never record
+  const audioFiles = new AudioFileStore(audioDirOf(runtime.dataDir));
+  const store = new Store(db, audioFiles);
   const stores = new SessionStores(store, new Store(simDb));
   const scenarios = new ScenarioLibrary(runtime.scenariosDir);
 
@@ -112,6 +117,7 @@ export async function createApp(
     hub,
     store,
     db,
+    audioFiles,
     stores,
     log,
     runtime,

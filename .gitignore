@@ -9,6 +9,13 @@ exports/
 *.bak
 *.csv
 !scenarios/**/*.csv
+# audio: encrypted recordings (data/audio/…) and any decrypted or exported sound
+*.wka
+*.wav
+*.webm
+*.ogg
+*.opus
+*.flac
 .env
 .env.*
 
