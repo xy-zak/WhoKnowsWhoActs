@@ -14,7 +14,7 @@ export class WrongPassphraseError extends Error {
   }
 }
 
-export const SCHEMA_VERSION = 5;
+export const SCHEMA_VERSION = 6;
 
 /** A migration is SQL, or a function for data changes that need JavaScript. */
 const MIGRATIONS: Record<number, string | ((db: DB) => void)> = {
@@ -121,6 +121,99 @@ const MIGRATIONS: Record<number, string | ((db: DB) => void)> = {
   5: `
     CREATE INDEX events_type ON events(type, session_id, seq);
   `,
+  // v6: microphone audio. The audio itself is in encrypted files (data/audio/<session>/<fileId>.wka);
+  // these tables hold each file's key and the metadata. Codes appear only in participant_code columns.
+  6: `
+    -- one continuous capture run of one seat (a new track after a reload, a pause or a lost permission)
+    CREATE TABLE audio_tracks (
+      track_id          TEXT PRIMARY KEY,
+      session_id        TEXT NOT NULL REFERENCES sessions(id),
+      seat              INTEGER NOT NULL,
+      participant_code  TEXT NOT NULL,
+      file_name         TEXT,
+      file_key          BLOB,
+      sample_rate       INTEGER NOT NULL,
+      settings_json     TEXT NOT NULL DEFAULT '{}',
+      reason            TEXT NOT NULL DEFAULT '',
+      started_server_ts REAL NOT NULL,
+      started_client_ts REAL NOT NULL,
+      clock_offset_ms   REAL NOT NULL,
+      closed_server_ts  REAL,
+      stop_reason       TEXT,
+      samples           INTEGER NOT NULL DEFAULT 0,
+      chunks            INTEGER NOT NULL DEFAULT 0,
+      dropped_chunks    INTEGER NOT NULL DEFAULT 0,
+      bytes             INTEGER NOT NULL DEFAULT 0,
+      status            TEXT NOT NULL DEFAULT 'recording' CHECK (status IN ('recording', 'closed', 'deleted'))
+    );
+    CREATE INDEX audio_tracks_session ON audio_tracks(session_id, seat);
+    CREATE INDEX audio_tracks_code ON audio_tracks(participant_code);
+
+    -- one chunk (about 5 s) of a track; the PCM is record <seq> of the track's file. Idempotent per (track, seq).
+    CREATE TABLE audio_chunks (
+      track_id        TEXT NOT NULL REFERENCES audio_tracks(track_id),
+      seq             INTEGER NOT NULL,
+      start_sample    INTEGER NOT NULL,
+      sample_count    INTEGER NOT NULL,
+      client_ts       REAL NOT NULL,
+      clock_offset_ms REAL NOT NULL,
+      server_ts       REAL NOT NULL,
+      server_wall     TEXT NOT NULL,
+      round           INTEGER NOT NULL,
+      phase           TEXT NOT NULL,
+      rms_db          REAL,
+      peak_db         REAL,
+      clipped         INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (track_id, seq)
+    );
+
+    -- results computed from tracks: speech segments, cleaned or aligned tracks, later transcripts.
+    -- A result is either an encrypted file (file_name + file_key) or small JSON (data_json).
+    CREATE TABLE audio_derivatives (
+      derivative_id      TEXT PRIMARY KEY,
+      session_id         TEXT NOT NULL REFERENCES sessions(id),
+      seat               INTEGER,
+      participant_code   TEXT,
+      kind               TEXT NOT NULL,
+      source_tracks_json TEXT NOT NULL DEFAULT '[]',
+      file_name          TEXT,
+      file_key           BLOB,
+      data_json          TEXT,
+      params_json        TEXT NOT NULL DEFAULT '{}',
+      engine_version     TEXT NOT NULL,
+      created_server_ts  REAL NOT NULL,
+      created_wall       TEXT NOT NULL
+    );
+    CREATE INDEX audio_derivatives_session ON audio_derivatives(session_id, kind);
+    CREATE INDEX audio_derivatives_code ON audio_derivatives(participant_code);
+
+    -- processing runs (e.g. speaker attribution) started from the DATABASE tab
+    CREATE TABLE audio_jobs (
+      job_id        TEXT PRIMARY KEY,
+      session_id    TEXT NOT NULL REFERENCES sessions(id),
+      kind          TEXT NOT NULL,
+      status        TEXT NOT NULL,
+      progress      REAL NOT NULL DEFAULT 0,
+      params_json   TEXT NOT NULL DEFAULT '{}',
+      result_json   TEXT,
+      error         TEXT,
+      started_wall  TEXT NOT NULL,
+      finished_wall TEXT
+    );
+    CREATE INDEX audio_jobs_session ON audio_jobs(session_id, started_wall);
+
+    -- register of audio deletions ("delete raw audio" / "delete all audio" of a session)
+    CREATE TABLE audio_deletions (
+      id             INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id     TEXT NOT NULL,
+      scope          TEXT NOT NULL CHECK (scope IN ('raw', 'all')),
+      requested_wall TEXT NOT NULL,
+      executed_wall  TEXT NOT NULL,
+      counts_json    TEXT NOT NULL,
+      note           TEXT NOT NULL DEFAULT ''
+    );
+    CREATE INDEX audio_deletions_session ON audio_deletions(session_id);
+  `,
 };
 
 function applyKey(db: DB, passphrase: string) {
@@ -190,7 +283,11 @@ export function getMeta(db: DB, key: string): string | null {
   return row?.value ?? null;
 }
 
-/** Change the database passphrase in place. */
+/**
+ * Change the database passphrase in place. Audio files need nothing: each is
+ * encrypted with its own random key, and those keys are rows inside this
+ * database, so they are re-encrypted along with it.
+ */
 export function rekeyDatabase(db: DB, newPassphrase: string) {
   if (!newPassphrase) throw new Error("New passphrase must not be empty.");
   db.pragma("wal_checkpoint(TRUNCATE)");

@@ -145,7 +145,7 @@ Columns shared by every event row:
 | --- | --- | --- | --- |
 | `session_id` | `sessionId` | `string` | Session id, e.g. S-20261116-7KQ2 |
 | `seq` | `seq` | `integer ≥ 1` | Position in the session's event log (1, 2, 3, …; gaps only after erasure) |
-| `type` | `type` | `"SessionCreated" \| "SessionNote" \| "SeatBound" \| "SeatUnbound" \| "AgentBound" \| "LabelsAssigned" \| "OnboardingStarted" \| "ConsentRecorded" \| "DemographicsSubmitted" \| "BriefingAcknowledged" \| "PlayerConnected" \| "PlayerDisconnected" \| "RoundStarted" \| "ProposalMade" \| "DecisionMade" \| "IntentRejected" \| "ActionRevoked" \| "RoundCompleted" \| "GamePaused" \| "GameResumed" \| "FacilitatorBroadcast" \| "ParticipantWithdrawn" \| "GameCompleted" \| "SessionClosed" \| "SessionAborted"` | Event type |
+| `type` | `type` | `"SessionCreated" \| "SessionNote" \| "SeatBound" \| "SeatUnbound" \| "AgentBound" \| "LabelsAssigned" \| "OnboardingStarted" \| "ConsentRecorded" \| "MicCheckCompleted" \| "MicCheckSkipped" \| "DemographicsSubmitted" \| "BriefingAcknowledged" \| "PlayerConnected" \| "PlayerDisconnected" \| "AudioTrackStarted" \| "AudioTrackStopped" \| "CalibrationStarted" \| "CalibrationTurn" \| "CalibrationCompleted" \| "CalibrationChecked" \| "CalibrationSkipped" \| "RoundStarted" \| "ProposalMade" \| "DecisionMade" \| "IntentRejected" \| "ActionRevoked" \| "RoundCompleted" \| "GamePaused" \| "GameResumed" \| "RecordingPaused" \| "RecordingResumed" \| "FacilitatorBroadcast" \| "ParticipantWithdrawn" \| "GameCompleted" \| "SessionClosed" \| "SessionAborted"` | Event type |
 | `actor_kind` | `actorKind` | `"player" \| "facilitator" \| "system"` | Who caused the event |
 | `seat` | `seat` | `integer 1–4 \| null` | Seat the event is about/caused by (null for session-level events) |
 | `participant_code` | `participantCode` | `string \| null` | Pseudonymous participant code of that seat — the ONLY place codes are stored |
@@ -171,12 +171,21 @@ Columns shared by every event row:
 | [`SeatUnbound`](#seatunbound) | A seat binding was removed before the game started. | facilitator | yes | pseudonymous | rare |
 | [`AgentBound`](#agentbound) | A simulated player (agent) took a seat. Simulated sessions only: the seat gets no participant code and no client. | system | yes | non-personal | 1 per seat (simulated sessions only) |
 | [`LabelsAssigned`](#labelsassigned) | Knowledge-type, power-type and map view were (re)assigned to seats, with the K–P pairing used. | facilitator | yes | pseudonymous | 1–n per session |
-| [`OnboardingStarted`](#onboardingstarted) | Seats are locked; players move to the consent / demographics / briefing screens. | facilitator | yes | non-personal | 1 per session |
+| [`OnboardingStarted`](#onboardingstarted) | Seats are locked; players move to the consent / mic check / demographics / briefing screens. | facilitator | yes | non-personal | 1 per session |
 | [`ConsentRecorded`](#consentrecorded) | Participant answered the in-game consent form. | player | yes | pseudonymous · sensitive | 1 per seat |
+| [`MicCheckCompleted`](#miccheckcompleted) | A player finished their own mic check (sessions that record audio): how loud the room and their voice were, and whether it passed. | player | yes | pseudonymous | 1 per seat (audio sessions only; more if failed checks are logged) |
+| [`MicCheckSkipped`](#miccheckskipped) | The facilitator skipped a seat's mic check: the player continues onboarding, but the seat is NOT recorded. | facilitator | yes | pseudonymous | rare (audio sessions only) |
 | [`DemographicsSubmitted`](#demographicssubmitted) | Participant submitted the demographics questionnaire. | player | yes | pseudonymous · sensitive | 1 per seat |
 | [`BriefingAcknowledged`](#briefingacknowledged) | Participant confirmed they read the briefing / instructions. | player | yes | pseudonymous | 1 per seat |
 | [`PlayerConnected`](#playerconnected) | A bound player's browser (re)connected. | system | yes | pseudonymous | 1 + number of reconnects per seat |
 | [`PlayerDisconnected`](#playerdisconnected) | A bound player's browser disconnected. | system | yes | pseudonymous | 0–n per seat |
+| [`AudioTrackStarted`](#audiotrackstarted) | A seat's browser started a new audio track: one continuous capture run of its microphone, uploaded in 5 s chunks of 16 kHz mono audio. | player | no | pseudonymous | 1 per seat, plus 1 per reconnect, reload and recording pause (audio sessions only) |
+| [`AudioTrackStopped`](#audiotrackstopped) | A seat's audio track ended. The audio itself is stored separately, encrypted (never in the event log). | player, system | no | pseudonymous | 1 per AudioTrackStarted |
+| [`CalibrationStarted`](#calibrationstarted) | The calibration started: each seat in turn reads a sentence aloud while the others stay quiet, which measures how much each voice leaks into the other microphones. | facilitator | yes | non-personal | 0–1 per session, plus 1 per redo (audio sessions only) |
+| [`CalibrationTurn`](#calibrationturn) | A seat's calibration turn began (the event's serverTs is the start of the turn): that seat reads its sentence aloud, the others stay quiet. | system | yes | pseudonymous | 1 per seat per calibration |
+| [`CalibrationCompleted`](#calibrationcompleted) | Every calibration turn has run; the turn windows are used to measure the leakage between microphones. | system | yes | non-personal | 0–1 per calibration |
+| [`CalibrationChecked`](#calibrationchecked) | Quick quality check of the calibration: per seat, how much louder its own voice was on its own microphone than on the loudest other one. | system | yes | pseudonymous | 1 per CalibrationCompleted |
+| [`CalibrationSkipped`](#calibrationskipped) | The facilitator skipped (or cancelled) the calibration; speaker attribution then estimates the leakage between microphones from the recordings. | facilitator | yes | non-personal | 0–1 per session (audio sessions only) |
 | [`RoundStarted`](#roundstarted) | A round began; players may now propose/decide. | facilitator, system | yes | non-personal | roundCount per session (default 3) |
 | [`ProposalMade`](#proposalmade) | A player proposed a sub-square of the map (hatched in its knowledge-type colour for all players). | player | yes | pseudonymous | ≤ quota.propose × seats × rounds (default 60) |
 | [`DecisionMade`](#decisionmade) | A player decided on a sub-square of the map (filled in its knowledge-type colour for all players); the game rules change the scores. | player | yes | pseudonymous | ≤ quota.decide × seats × rounds (default 60) |
@@ -185,6 +194,8 @@ Columns shared by every event row:
 | [`RoundCompleted`](#roundcompleted) | A round ended. | system, facilitator | yes | non-personal | roundCount per session |
 | [`GamePaused`](#gamepaused) | The game was paused; actions are refused until resumed. | facilitator, system | yes | non-personal | 0–n |
 | [`GameResumed`](#gameresumed) | The game was resumed after a pause. | facilitator | yes | non-personal | 0–n |
+| [`RecordingPaused`](#recordingpaused) | The facilitator paused audio recording for every seat (players cannot mute themselves). The game itself goes on. | facilitator | yes | non-personal | 0–n (audio sessions only) |
+| [`RecordingResumed`](#recordingresumed) | The facilitator resumed audio recording; every recorded seat starts a new track. | facilitator | yes | non-personal | 1 per RecordingPaused |
 | [`FacilitatorBroadcast`](#facilitatorbroadcast) | Facilitator sent a message shown on every player's screen. | facilitator | yes | non-personal | 0–n |
 | [`ParticipantWithdrawn`](#participantwithdrawn) | A participant withdrew (during the session) or their data was erased afterwards. | facilitator, system | yes | non-personal | rare |
 | [`GameCompleted`](#gamecompleted) | The last round finished (or the facilitator ended the game early). | system, facilitator | yes | non-personal | 1 per session |
@@ -280,6 +291,10 @@ A new session was created with a scenario and configuration.
         "consent": true,
         "demographics": true,
         "briefing": true
+      },
+      "audio": {
+        "enabled": false,
+        "requireCalibration": true
       },
       "visibility": {
         "showActorToPlayers": true,
@@ -593,7 +608,7 @@ Knowledge-type, power-type and map view were (re)assigned to seats, with the K�
 
 ### `OnboardingStarted`
 
-Seats are locked; players move to the consent / demographics / briefing screens.
+Seats are locked; players move to the consent / mic check / demographics / briefing screens.
 
 |  |  |
 | --- | --- |
@@ -608,7 +623,7 @@ Seats are locked; players move to the consent / demographics / briefing screens.
 
 | Field | Type | Description |
 | --- | --- | --- |
-| `steps` | `array<"consent" \| "demographics" \| "briefing">` | Onboarding steps enabled for this session |
+| `steps` | `array<"consent" \| "mic_check" \| "demographics" \| "briefing">` | Onboarding steps enabled for this session, in order ('mic_check' only when the session records audio) |
 
 <details><summary>Example row</summary>
 
@@ -685,6 +700,115 @@ Participant answered the in-game consent form.
     },
     "consented": true,
     "durationMs": 84213
+  }
+}
+```
+
+</details>
+
+### `MicCheckCompleted`
+
+A player finished their own mic check (sessions that record audio): how loud the room and their voice were, and whether it passed.
+
+|  |  |
+| --- | --- |
+| **Trigger** | The player's browser ends the mic check (the onboarding step after consent). Passed: it heard enough speech above the background noise, and the step is done. Not passed: the step stays open (the player tries again, or the facilitator skips the check). Recording starts with the mic check. |
+| **Caused by** | player |
+| **Changes game state** | yes |
+| **Visible to** | Facilitator (mic check status and levels) |
+| **Data class** | pseudonymous |
+| **Typical frequency** | 1 per seat (audio sessions only; more if failed checks are logged) |
+
+**Payload**
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `passed` | `boolean` | True if enough speech was heard above the background noise; the mic check step is then done |
+| `attempts` | `integer 1–100` | Attempts the player made, including the last one |
+| `durationMs` | `number ≥ 0` | Time the mic check screen was open (milliseconds) |
+| `settings` | `object` | Microphone processing settings reported by the browser (getSettings()); never the device name or id |
+| `settings.sampleRate` | `integer 8000–384000` | Native sample rate of the capture, before resampling to 16 000 Hz (Hz): from getSettings(), or the AudioContext's rate where the browser does not report it (e.g. Firefox) |
+| `settings.echoCancellation` | `boolean` | Echo cancellation actually applied by the browser (requested off; absent if not reported) |
+| `settings.noiseSuppression` | `boolean` | Noise suppression actually applied by the browser (requested off; absent if not reported) |
+| `settings.autoGainControl` | `boolean` | Automatic gain control actually applied by the browser (requested off; absent if not reported) |
+| `settings.channelCount` | `integer 1–32` | Channels the browser delivered (requested 1; mixed to mono before upload) |
+| `noiseFloorDb` | `number -120–0` | Background level measured before the player spoke (dBFS, -120–0; 0 = full scale) |
+| `speechDb` | `number -120–0` | Level of the player's speech (dBFS, -120–0; 0 = full scale) |
+| `speechMs` | `number ≥ 0` | Speech heard (milliseconds) |
+
+<details><summary>Example row</summary>
+
+```json
+{
+  "sessionId": "S-20261116-7KQ2",
+  "seq": 42,
+  "type": "MicCheckCompleted",
+  "actorKind": "player",
+  "seat": 2,
+  "participantCode": "WK-7F3K-Q9XM-Z",
+  "round": 0,
+  "serverTs": 1794826000000.512,
+  "serverWall": "2026-11-16T10:46:40.000Z",
+  "clientTs": 1794825999995.8,
+  "clientSeq": null,
+  "payload": {
+    "passed": true,
+    "attempts": 1,
+    "durationMs": 14250,
+    "settings": {
+      "sampleRate": 48000,
+      "echoCancellation": false,
+      "noiseSuppression": false,
+      "autoGainControl": false,
+      "channelCount": 1
+    },
+    "noiseFloorDb": -58.2,
+    "speechDb": -21.7,
+    "speechMs": 2840
+  }
+}
+```
+
+</details>
+
+### `MicCheckSkipped`
+
+The facilitator skipped a seat's mic check: the player continues onboarding, but the seat is NOT recorded.
+
+|  |  |
+| --- | --- |
+| **Trigger** | Facilitator clicks 'Skip mic check' for a seat (e.g. no working microphone); the seat's recording stops. |
+| **Caused by** | facilitator |
+| **Changes game state** | yes |
+| **Visible to** | Facilitator; the player moves on to the next onboarding step |
+| **Data class** | pseudonymous |
+| **Typical frequency** | rare (audio sessions only) |
+
+**Payload**
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `seat` | `integer 1–4` | Seat number (1–4) within the session |
+| `reason` | `string (≤ 200 chars)` | Facilitator's reason, e.g. 'no working microphone' (free text, no personal data) |
+
+<details><summary>Example row</summary>
+
+```json
+{
+  "sessionId": "S-20261116-7KQ2",
+  "seq": 42,
+  "type": "MicCheckSkipped",
+  "actorKind": "facilitator",
+  "seat": 3,
+  "participantCode": "WK-7F3K-Q9XM-Z",
+  "round": 0,
+  "serverTs": 1794826000000.512,
+  "serverWall": "2026-11-16T10:46:40.000Z",
+  "clientTs": null,
+  "clientSeq": null,
+  "payload": {
+    "seat": 3,
+    "reason": "no working microphone"
   }
 }
 ```
@@ -867,6 +991,384 @@ A bound player's browser disconnected.
   "payload": {
     "seat": 2,
     "reason": "transport close"
+  }
+}
+```
+
+</details>
+
+### `AudioTrackStarted`
+
+A seat's browser started a new audio track: one continuous capture run of its microphone, uploaded in 5 s chunks of 16 kHz mono audio.
+
+|  |  |
+| --- | --- |
+| **Trigger** | Recording (re)starts for a seat: at its mic check, after the facilitator resumes recording, after a reconnect or page reload, or when the microphone comes back after a permission or device loss. |
+| **Caused by** | player |
+| **Changes game state** | no |
+| **Visible to** | Facilitator (LIVE mic column) |
+| **Data class** | pseudonymous |
+| **Typical frequency** | 1 per seat, plus 1 per reconnect, reload and recording pause (audio sessions only) |
+
+**Payload**
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `trackId` | `string (uuid)` | Random id of the audio track (one continuous capture run of one seat) |
+| `sampleRate` | `16000` | Sample rate of the uploaded audio (Hz; always 16 000) |
+| `settings` | `object` | Microphone processing settings reported by the browser (getSettings()); never the device name or id |
+| `settings.sampleRate` | `integer 8000–384000` | Native sample rate of the capture, before resampling to 16 000 Hz (Hz): from getSettings(), or the AudioContext's rate where the browser does not report it (e.g. Firefox) |
+| `settings.echoCancellation` | `boolean` | Echo cancellation actually applied by the browser (requested off; absent if not reported) |
+| `settings.noiseSuppression` | `boolean` | Noise suppression actually applied by the browser (requested off; absent if not reported) |
+| `settings.autoGainControl` | `boolean` | Automatic gain control actually applied by the browser (requested off; absent if not reported) |
+| `settings.channelCount` | `integer 1–32` | Channels the browser delivered (requested 1; mixed to mono before upload) |
+| `reason` | `"mic_check" \| "resume" \| "reconnect" \| "reload" \| "permission_regained"` | Why the track started: 'mic_check' = first capture of the seat (its mic check), 'resume' = recording resumed after a facilitator pause, 'reconnect' = the browser reconnected, 'reload' = the page was reloaded, 'permission_regained' = the microphone came back after a permission or device loss |
+
+<details><summary>Example row</summary>
+
+```json
+{
+  "sessionId": "S-20261116-7KQ2",
+  "seq": 42,
+  "type": "AudioTrackStarted",
+  "actorKind": "player",
+  "seat": 2,
+  "participantCode": "WK-7F3K-Q9XM-Z",
+  "round": 0,
+  "serverTs": 1794826000000.512,
+  "serverWall": "2026-11-16T10:46:40.000Z",
+  "clientTs": 1794825999995.8,
+  "clientSeq": null,
+  "payload": {
+    "trackId": "1b4e28ba-2fa1-4d2b-883f-0016d3cca427",
+    "sampleRate": 16000,
+    "settings": {
+      "sampleRate": 48000,
+      "echoCancellation": false,
+      "noiseSuppression": false,
+      "autoGainControl": false,
+      "channelCount": 1
+    },
+    "reason": "mic_check"
+  }
+}
+```
+
+</details>
+
+### `AudioTrackStopped`
+
+A seat's audio track ended. The audio itself is stored separately, encrypted (never in the event log).
+
+|  |  |
+| --- | --- |
+| **Trigger** | The browser stops capturing (recording paused, game complete, page unload, microphone lost, capture error), or the server closes the track (disconnect, withdrawal, session closed or aborted). |
+| **Caused by** | player, system |
+| **Changes game state** | no |
+| **Visible to** | Facilitator (LIVE mic column) |
+| **Data class** | pseudonymous |
+| **Typical frequency** | 1 per AudioTrackStarted |
+
+**Payload**
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `trackId` | `string (uuid)` | Random id of the audio track (one continuous capture run of one seat) |
+| `reason` | `"paused" \| "game_complete" \| "closed" \| "aborted" \| "withdrawn" \| "disconnect" \| "permission_lost" \| "error" \| "client_stop"` | Why the track stopped: 'paused' = facilitator paused recording, 'game_complete' = the game ended, 'closed' / 'aborted' = the session was closed or aborted, 'withdrawn' = the participant withdrew, 'disconnect' = the browser disconnected, 'permission_lost' = the microphone permission or device went away, 'error' = capture failed, 'client_stop' = the browser stopped the track itself (e.g. page unload) |
+| `samples` | `integer ≥ 0` | Samples the server stored for this track (16 000 per second) |
+| `chunks` | `integer ≥ 0` | Chunks the server stored for this track |
+| `droppedChunks` | `integer ≥ 0` | Chunks the browser had to drop (e.g. its in-memory resend queue overflowed during a long disconnect); their audio is missing |
+
+<details><summary>Example row</summary>
+
+```json
+{
+  "sessionId": "S-20261116-7KQ2",
+  "seq": 42,
+  "type": "AudioTrackStopped",
+  "actorKind": "player",
+  "seat": 2,
+  "participantCode": "WK-7F3K-Q9XM-Z",
+  "round": 1,
+  "serverTs": 1794826000000.512,
+  "serverWall": "2026-11-16T10:46:40.000Z",
+  "clientTs": 1794825999995.8,
+  "clientSeq": null,
+  "payload": {
+    "trackId": "1b4e28ba-2fa1-4d2b-883f-0016d3cca427",
+    "reason": "paused",
+    "samples": 9600000,
+    "chunks": 120,
+    "droppedChunks": 0
+  }
+}
+```
+
+</details>
+
+### `CalibrationStarted`
+
+The calibration started: each seat in turn reads a sentence aloud while the others stay quiet, which measures how much each voice leaks into the other microphones.
+
+|  |  |
+| --- | --- |
+| **Trigger** | Facilitator clicks 'Start calibration' (or 'Redo calibration') in the NEXT panel once every seat is ready (sessions that record audio). |
+| **Caused by** | facilitator |
+| **Changes game state** | yes |
+| **Visible to** | Everyone (players see whose turn it is) |
+| **Data class** | non-personal |
+| **Typical frequency** | 0–1 per session, plus 1 per redo (audio sessions only) |
+
+**Payload**
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `order` | `array<integer 1–4>` | Seats in turn order |
+| `sentenceIds` | `array<string (≤ 40 chars)>` | Sentence each turn reads (ids from config/audio.json), parallel to order |
+| `turnMs` | `number ≥ 0` | Length of one seat's turn (milliseconds) |
+| `gapMs` | `number ≥ 0` | Silence between two turns (milliseconds) |
+
+<details><summary>Example row</summary>
+
+```json
+{
+  "sessionId": "S-20261116-7KQ2",
+  "seq": 42,
+  "type": "CalibrationStarted",
+  "actorKind": "facilitator",
+  "seat": null,
+  "participantCode": null,
+  "round": 0,
+  "serverTs": 1794826000000.512,
+  "serverWall": "2026-11-16T10:46:40.000Z",
+  "clientTs": null,
+  "clientSeq": null,
+  "payload": {
+    "order": [
+      1,
+      2,
+      3,
+      4
+    ],
+    "sentenceIds": [
+      "h01-01",
+      "h01-02",
+      "h01-03",
+      "h01-04"
+    ],
+    "turnMs": 6000,
+    "gapMs": 1000
+  }
+}
+```
+
+</details>
+
+### `CalibrationTurn`
+
+A seat's calibration turn began (the event's serverTs is the start of the turn): that seat reads its sentence aloud, the others stay quiet.
+
+|  |  |
+| --- | --- |
+| **Trigger** | Server timer during the calibration: right after CalibrationStarted, then every turnMs + gapMs. |
+| **Caused by** | system |
+| **Changes game state** | yes |
+| **Visible to** | Everyone (only the seat whose turn it is sees the sentence) |
+| **Data class** | pseudonymous |
+| **Typical frequency** | 1 per seat per calibration |
+
+**Payload**
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `index` | `integer ≥ 0` | Position of the turn in the order (0-based) |
+| `seat` | `integer 1–4` | Seat whose turn it is |
+| `sentenceId` | `string (≤ 40 chars)` | Id of the calibration sentence (config/audio.json) |
+
+<details><summary>Example row</summary>
+
+```json
+{
+  "sessionId": "S-20261116-7KQ2",
+  "seq": 42,
+  "type": "CalibrationTurn",
+  "actorKind": "system",
+  "seat": 3,
+  "participantCode": "WK-7F3K-Q9XM-Z",
+  "round": 0,
+  "serverTs": 1794826000000.512,
+  "serverWall": "2026-11-16T10:46:40.000Z",
+  "clientTs": null,
+  "clientSeq": null,
+  "payload": {
+    "index": 2,
+    "seat": 3,
+    "sentenceId": "h01-03"
+  }
+}
+```
+
+</details>
+
+### `CalibrationCompleted`
+
+Every calibration turn has run; the turn windows are used to measure the leakage between microphones.
+
+|  |  |
+| --- | --- |
+| **Trigger** | Server timer, at the end of the last turn. |
+| **Caused by** | system |
+| **Changes game state** | yes |
+| **Visible to** | Everyone |
+| **Data class** | non-personal |
+| **Typical frequency** | 0–1 per calibration |
+
+**Payload**
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `turns` | `array<object>` | Every turn with its window, in order |
+| `turns[].seat` | `integer 1–4` | Seat number (1–4) within the session |
+| `turns[].sentenceId` | `string (≤ 40 chars)` | Id of the calibration sentence (config/audio.json) |
+| `turns[].startTs` | `number` | Start of the turn (server clock, Unix epoch ms) |
+| `turns[].endTs` | `number` | End of the turn (server clock, Unix epoch ms) |
+
+<details><summary>Example row</summary>
+
+```json
+{
+  "sessionId": "S-20261116-7KQ2",
+  "seq": 42,
+  "type": "CalibrationCompleted",
+  "actorKind": "system",
+  "seat": null,
+  "participantCode": null,
+  "round": 0,
+  "serverTs": 1794826000000.512,
+  "serverWall": "2026-11-16T10:46:40.000Z",
+  "clientTs": null,
+  "clientSeq": null,
+  "payload": {
+    "turns": [
+      {
+        "seat": 1,
+        "sentenceId": "h01-01",
+        "startTs": 1794825979000.4,
+        "endTs": 1794825985000.4
+      },
+      {
+        "seat": 2,
+        "sentenceId": "h01-02",
+        "startTs": 1794825986000.9,
+        "endTs": 1794825992000.9
+      }
+    ]
+  }
+}
+```
+
+</details>
+
+### `CalibrationChecked`
+
+Quick quality check of the calibration: per seat, how much louder its own voice was on its own microphone than on the loudest other one.
+
+|  |  |
+| --- | --- |
+| **Trigger** | Server, right after CalibrationCompleted, from the audio of the calibration turns. |
+| **Caused by** | system |
+| **Changes game state** | yes |
+| **Visible to** | Facilitator (LIVE: per-seat margins and advice, e.g. 'move closer or use a headset') |
+| **Data class** | pseudonymous |
+| **Typical frequency** | 1 per CalibrationCompleted |
+
+**Payload**
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `perSeat` | `array<object>` | Result per seat |
+| `perSeat[].seat` | `integer 1–4` | Seat number (1–4) within the session |
+| `perSeat[].ownDb` | `number -120–0 \| null` | Level of the seat's voice on its own mic during its turn (dBFS, -120–0; 0 = full scale) |
+| `perSeat[].bestOtherDb` | `number -120–0 \| null` | Loudest level of that voice on another seat's mic (dBFS, -120–0; 0 = full scale) |
+| `perSeat[].marginDb` | `number \| null` | ownDb − bestOtherDb (dB); null when the seat's audio is missing |
+| `perSeat[].ok` | `boolean` | True if the margin is large enough to tell this seat's speech apart |
+| `ok` | `boolean` | True if every seat passed |
+
+<details><summary>Example row</summary>
+
+```json
+{
+  "sessionId": "S-20261116-7KQ2",
+  "seq": 42,
+  "type": "CalibrationChecked",
+  "actorKind": "system",
+  "seat": null,
+  "participantCode": null,
+  "round": 0,
+  "serverTs": 1794826000000.512,
+  "serverWall": "2026-11-16T10:46:40.000Z",
+  "clientTs": null,
+  "clientSeq": null,
+  "payload": {
+    "perSeat": [
+      {
+        "seat": 1,
+        "ownDb": -22.4,
+        "bestOtherDb": -38.9,
+        "marginDb": 16.5,
+        "ok": true
+      },
+      {
+        "seat": 3,
+        "ownDb": -30.1,
+        "bestOtherDb": -34.2,
+        "marginDb": 4.1,
+        "ok": false
+      }
+    ],
+    "ok": false
+  }
+}
+```
+
+</details>
+
+### `CalibrationSkipped`
+
+The facilitator skipped (or cancelled) the calibration; speaker attribution then estimates the leakage between microphones from the recordings.
+
+|  |  |
+| --- | --- |
+| **Trigger** | Facilitator clicks 'Skip calibration' and confirms. |
+| **Caused by** | facilitator |
+| **Changes game state** | yes |
+| **Visible to** | Everyone |
+| **Data class** | non-personal |
+| **Typical frequency** | 0–1 per session (audio sessions only) |
+
+**Payload**
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `reason` | `string (≤ 200 chars)` | Facilitator's reason (free text, no personal data) |
+
+<details><summary>Example row</summary>
+
+```json
+{
+  "sessionId": "S-20261116-7KQ2",
+  "seq": 42,
+  "type": "CalibrationSkipped",
+  "actorKind": "facilitator",
+  "seat": null,
+  "participantCode": null,
+  "round": 0,
+  "serverTs": 1794826000000.512,
+  "serverWall": "2026-11-16T10:46:40.000Z",
+  "clientTs": null,
+  "clientSeq": null,
+  "payload": {
+    "reason": "everyone uses a headset"
   }
 }
 ```
@@ -1325,6 +1827,86 @@ The game was resumed after a pause.
 
 </details>
 
+### `RecordingPaused`
+
+The facilitator paused audio recording for every seat (players cannot mute themselves). The game itself goes on.
+
+|  |  |
+| --- | --- |
+| **Trigger** | Facilitator clicks 'Pause recording' in TOOLS and confirms; every seat's track stops. |
+| **Caused by** | facilitator |
+| **Changes game state** | yes |
+| **Visible to** | Everyone (players see that recording is paused) |
+| **Data class** | non-personal |
+| **Typical frequency** | 0–n (audio sessions only) |
+
+**Payload**
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `reason` | `string (≤ 200 chars)` | Facilitator's reason, e.g. 'private conversation' (free text, no personal data) |
+
+<details><summary>Example row</summary>
+
+```json
+{
+  "sessionId": "S-20261116-7KQ2",
+  "seq": 42,
+  "type": "RecordingPaused",
+  "actorKind": "facilitator",
+  "seat": null,
+  "participantCode": null,
+  "round": 1,
+  "serverTs": 1794826000000.512,
+  "serverWall": "2026-11-16T10:46:40.000Z",
+  "clientTs": null,
+  "clientSeq": null,
+  "payload": {
+    "reason": "break"
+  }
+}
+```
+
+</details>
+
+### `RecordingResumed`
+
+The facilitator resumed audio recording; every recorded seat starts a new track.
+
+|  |  |
+| --- | --- |
+| **Trigger** | Facilitator clicks 'Resume recording' in TOOLS. |
+| **Caused by** | facilitator |
+| **Changes game state** | yes |
+| **Visible to** | Everyone |
+| **Data class** | non-personal |
+| **Typical frequency** | 1 per RecordingPaused |
+
+**Payload**
+
+_No payload fields._
+
+<details><summary>Example row</summary>
+
+```json
+{
+  "sessionId": "S-20261116-7KQ2",
+  "seq": 42,
+  "type": "RecordingResumed",
+  "actorKind": "facilitator",
+  "seat": null,
+  "participantCode": null,
+  "round": 1,
+  "serverTs": 1794826000000.512,
+  "serverWall": "2026-11-16T10:46:40.000Z",
+  "clientTs": null,
+  "clientSeq": null,
+  "payload": {}
+}
+```
+
+</details>
+
 ### `FacilitatorBroadcast`
 
 Facilitator sent a message shown on every player's screen.
@@ -1555,7 +2137,7 @@ Telemetry is fine-grained interface behaviour. It **never changes game state** a
 | `seat` | `seat` | `integer 1–4` | Seat that produced the telemetry |
 | `participant_code` | `participantCode` | `string` | Pseudonymous participant code of that seat |
 | `round` | `round` | `integer ≥ 0` | Round when the batch was received (0 = before round 1) |
-| `type` | `type` | `"screen_view" \| "region_hover" \| "region_inspect" \| "map_view_change" \| "tool_select" \| "action_draft" \| "focus_change" \| "visibility_change" \| "idle" \| "state_received" \| "clock_sync"` | Telemetry type |
+| `type` | `type` | `"screen_view" \| "region_hover" \| "region_inspect" \| "map_view_change" \| "tool_select" \| "action_draft" \| "focus_change" \| "visibility_change" \| "idle" \| "state_received" \| "clock_sync" \| "mic_permission"` | Telemetry type |
 | `client_ts` | `clientTs` | `number` | Client timestamp corrected to server time (epoch ms) |
 | `client_offset_ms` | `clientOffsetMs` | `number` | Clock offset applied by the client when correcting clientTs (ms) |
 | `server_ts` | `serverTs` | `number` | Server receive time, epoch ms |
@@ -1582,6 +2164,7 @@ Telemetry is fine-grained interface behaviour. It **never changes game state** a
 | [`idle`](#idle) | No pointer/keyboard input for 30 s (start), or input resumed (end). | player | no | pseudonymous | 0–n |
 | [`state_received`](#state_received) | Acknowledgement that the client received and rendered a state update. | player | no | pseudonymous | 1 per state push (hundreds per seat) |
 | [`clock_sync`](#clock_sync) | Result of a clock synchronisation between client and server. | player | no | non-personal | ~1 per minute per seat |
+| [`mic_permission`](#mic_permission) | The browser's answer when the game asked for the microphone, or a later change of that permission. | player | no | pseudonymous | 1–few per seat (audio sessions only) |
 
 <!-- END GENERATED: telemetry-index -->
 
@@ -1605,7 +2188,7 @@ The player's client showed a new screen.
 
 | Field | Type | Description |
 | --- | --- | --- |
-| `screen` | `"waiting" \| "lobby" \| "consent" \| "declined" \| "demographics" \| "briefing" \| "ready" \| "game" \| "round_break" \| "paused" \| "end" \| "withdrawn"` | Screen now shown |
+| `screen` | `"waiting" \| "lobby" \| "consent" \| "declined" \| "mic_check" \| "demographics" \| "briefing" \| "ready" \| "calibration" \| "game" \| "round_break" \| "paused" \| "end" \| "withdrawn"` | Screen now shown |
 
 <details><summary>Example row</summary>
 
@@ -2063,6 +2646,49 @@ Result of a clock synchronisation between client and server.
 
 </details>
 
+### `mic_permission`
+
+The browser's answer when the game asked for the microphone, or a later change of that permission.
+
+|  |  |
+| --- | --- |
+| **Trigger** | The player's client asks for the microphone (mic check, reload, reconnect, after a loss) and gets an answer, or the permission or device changes during the session (sessions that record audio). |
+| **Caused by** | player |
+| **Changes game state** | no |
+| **Visible to** | Facilitator (LIVE mic column) |
+| **Data class** | pseudonymous |
+| **Typical frequency** | 1–few per seat (audio sessions only) |
+
+**Payload**
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `state` | `"prompt" \| "granted" \| "denied" \| "error"` | 'prompt' = the browser is asking the player, 'granted' = microphone available, 'denied' = permission refused, 'error' = no usable microphone (missing, busy, or not a secure page) |
+| `errorName` | `string (≤ 64 chars, pattern)` | Name of the browser error for 'denied' / 'error', e.g. 'NotAllowedError', 'NotFoundError', 'NotReadableError' (never the device name) |
+
+<details><summary>Example row</summary>
+
+```json
+{
+  "id": 1234,
+  "sessionId": "S-20261116-7KQ2",
+  "seat": 2,
+  "participantCode": "WK-7F3K-Q9XM-Z",
+  "round": 1,
+  "type": "mic_permission",
+  "clientTs": 1794825998799.6,
+  "clientOffsetMs": -12.4,
+  "serverTs": 1794826000000.9,
+  "serverWall": "2026-11-16T10:46:40.000Z",
+  "payload": {
+    "state": "denied",
+    "errorName": "NotAllowedError"
+  }
+}
+```
+
+</details>
+
 <!-- END GENERATED: telemetry-sections -->
 
 ## One action, all its traces
@@ -2155,6 +2781,9 @@ Stored verbatim in `SessionCreated.config` and in `sessions.config_json`. Defaul
 | `onboarding.consent` | `boolean` | `true` | Show the in-game consent screen (keep ON for real sessions) |
 | `onboarding.demographics` | `boolean` | `true` | Show the demographics questionnaire |
 | `onboarding.briefing` | `boolean` | `true` | Show the briefing / instructions screen |
+| `audio` | `object` | — | Microphone recording (research data: see DATA-MANAGEMENT.md) |
+| `audio.enabled` | `boolean` | `false` | Record each participant's microphone, from their mic check (an onboarding step after consent) until the game is complete. Needs the consent step with the audio consent item, and HTTPS; never used for simulated sessions or fake players |
+| `audio.requireCalibration` | `boolean` | `true` | With audio on: round 1 can start only once the calibration (each seat reads a sentence aloud in turn while the others stay quiet) is done or skipped |
 | `visibility` | `object` | — | What players can see about each other |
 | `visibility.showActorToPlayers` | `boolean` | `true` | Players see which seat made each proposal/decision |
 | `visibility.showOwnLabels` | `boolean` | `true` | Players see their own K/P labels |

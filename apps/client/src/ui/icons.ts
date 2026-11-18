@@ -61,6 +61,18 @@ export const ICON_TABLE = {
   timeline: { iconoir: "Timer", meaning: "Timeline, round timer" },
   telemetry: { iconoir: "Activity", meaning: "Live telemetry" },
   clock: { iconoir: "Clock", meaning: "Session clock" },
+  // audio (microphone recording, § 8.1)
+  microphone: { iconoir: "Microphone", meaning: "Microphone being recorded ([REC]), mic OK" },
+  microphoneOff: {
+    iconoir: "MicrophoneMute",
+    meaning: "Not recording: recording paused, audio off, mic skipped",
+  },
+  microphoneWarning: {
+    iconoir: "MicrophoneWarning",
+    meaning: "Microphone problem: no signal, permission denied, error",
+  },
+  voice: { iconoir: "Voice", meaning: "Mic calibration, a seat's speaking turn" },
+  upload: { iconoir: "CloudUpload", meaning: "Audio upload backlog (recorded chunks not yet on the server)" },
   // data
   export: { iconoir: "DatabaseExport", meaning: "Export a session" },
   anonymise: { iconoir: "Fingerprint", meaning: "Anonymised export" },

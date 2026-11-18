@@ -22,6 +22,7 @@ type Screen =
   | "lobby"
   | "consent"
   | "declined"
+  | "mic_check"
   | "demographics"
   | "briefing"
   | "ready"
@@ -86,6 +87,14 @@ export function App({ conn }: { conn: PlayerConnection }) {
         return <ConsentScreen conn={conn} view={v!} />;
       case "declined":
         return <DeclinedScreen />;
+      case "mic_check":
+        // placeholder until the mic check screen exists (audio sessions only): wait for the facilitator
+        return (
+          <Centered title="Mic check" icon="seat">
+            <OnboardingStepper v={v!} current="mic_check" />
+            <p className="muted cursor">The facilitator will help you with the next step. Please wait</p>
+          </Centered>
+        );
       case "demographics":
         return <DemographicsScreen conn={conn} view={v!} />;
       case "briefing":

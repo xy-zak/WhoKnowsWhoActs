@@ -27,9 +27,11 @@ export const TELEMETRY_DEFS = {
           "lobby",
           "consent",
           "declined",
+          "mic_check",
           "demographics",
           "briefing",
           "ready",
+          "calibration",
           "game",
           "round_break",
           "paused",
@@ -190,6 +192,34 @@ export const TELEMETRY_DEFS = {
       samples: z.number().int().min(1).describe("Number of ping/pong samples"),
     }),
     example: { offsetMs: -12.4, rttMs: 3.1, samples: 5 },
+  }),
+
+  mic_permission: defineRecord({
+    summary:
+      "The browser's answer when the game asked for the microphone, or a later change of that permission.",
+    trigger:
+      "The player's client asks for the microphone (mic check, reload, reconnect, after a loss) and gets an answer, or the permission or device changes during the session (sessions that record audio).",
+    actors: ["player"],
+    changesState: false,
+    visibleTo: "Facilitator (LIVE mic column)",
+    dataClass: "pseudonymous",
+    frequency: "1–few per seat (audio sessions only)",
+    payload: z.object({
+      state: z
+        .enum(["prompt", "granted", "denied", "error"])
+        .describe(
+          "'prompt' = the browser is asking the player, 'granted' = microphone available, 'denied' = permission refused, 'error' = no usable microphone (missing, busy, or not a secure page)",
+        ),
+      errorName: z
+        .string()
+        .regex(/^[A-Za-z]+$/)
+        .max(64)
+        .optional()
+        .describe(
+          "Name of the browser error for 'denied' / 'error', e.g. 'NotAllowedError', 'NotFoundError', 'NotReadableError' (never the device name)",
+        ),
+    }),
+    example: { state: "denied", errorName: "NotAllowedError" },
   }),
 } as const;
 

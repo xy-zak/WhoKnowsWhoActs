@@ -324,9 +324,12 @@ Generated from the metadata of each record type (see [DATA-TYPES.md](DATA-TYPES.
 
 | Data class | Game events | Telemetry types |
 | --- | --- | --- |
+| voice · identifying | — | — |
 | pseudonymous · sensitive | `ConsentRecorded`, `DemographicsSubmitted` | — |
-| pseudonymous | `SeatBound`, `SeatUnbound`, `LabelsAssigned`, `BriefingAcknowledged`, `PlayerConnected`, `PlayerDisconnected`, `ProposalMade`, `DecisionMade`, `IntentRejected`, `ActionRevoked` | `screen_view`, `region_hover`, `region_inspect`, `map_view_change`, `tool_select`, `action_draft`, `focus_change`, `visibility_change`, `idle`, `state_received` |
-| non-personal | `SessionCreated`, `SessionNote`, `AgentBound`, `OnboardingStarted`, `RoundStarted`, `RoundCompleted`, `GamePaused`, `GameResumed`, `FacilitatorBroadcast`, `ParticipantWithdrawn`, `GameCompleted`, `SessionClosed`, `SessionAborted` | `clock_sync` |
+| pseudonymous | `SeatBound`, `SeatUnbound`, `LabelsAssigned`, `MicCheckCompleted`, `MicCheckSkipped`, `BriefingAcknowledged`, `PlayerConnected`, `PlayerDisconnected`, `AudioTrackStarted`, `AudioTrackStopped`, `CalibrationTurn`, `CalibrationChecked`, `ProposalMade`, `DecisionMade`, `IntentRejected`, `ActionRevoked` | `screen_view`, `region_hover`, `region_inspect`, `map_view_change`, `tool_select`, `action_draft`, `focus_change`, `visibility_change`, `idle`, `state_received`, `mic_permission` |
+| non-personal | `SessionCreated`, `SessionNote`, `AgentBound`, `OnboardingStarted`, `CalibrationStarted`, `CalibrationCompleted`, `CalibrationSkipped`, `RoundStarted`, `RoundCompleted`, `GamePaused`, `GameResumed`, `RecordingPaused`, `RecordingResumed`, `FacilitatorBroadcast`, `ParticipantWithdrawn`, `GameCompleted`, `SessionClosed`, `SessionAborted` | `clock_sync` |
+
+voice · identifying: recordings of a participant's voice. No event or telemetry payload carries voice: the audio is stored as encrypted files (`data/audio/<sessionId>/*.wka`, one key per file in the database) and is never part of an anonymised export.
 
 <!-- END GENERATED: data-class-summary -->
 
