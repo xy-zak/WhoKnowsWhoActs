@@ -35,6 +35,7 @@ import { EventLog, TelemetryFeed } from "../EventLog";
 import { LabelsEditor, SeatsPanel } from "../seats";
 import { paceText, policySummary } from "../simulation";
 import { Timeline } from "../Timeline";
+import { AudioNext, calibrationNeeded, calibrationWaiting } from "./AudioControls";
 import { AudioCheckView, CalibrationCard, RecordingControl, useAudioCheck } from "./AudioPanels";
 
 function useNow(ms = 1000) {
@@ -92,10 +93,31 @@ function NextPanel({
   let secondary: React.ReactNode = null;
   let action: (() => void) | null = null;
 
+  // sessions that record audio: the calibration runs between the mic checks and round 1
+  const calStatus = st.audio.calibration.status;
+  const calPrimary =
+    st.phase === "onboarding" &&
+    calibrationNeeded(st) &&
+    calStatus === "pending" &&
+    !st.audio.recordingPaused &&
+    calibrationWaiting(st).length === 0;
+  const showAudio = st.audio.enabled && (st.phase === "onboarding" || st.phase === "round_complete");
+
   if (st.phase === "onboarding") {
     const waiting = active.filter((s) => !isOnboardingComplete(st, s));
     const declined = waiting.filter((s) => s.consent === "declined");
-    if (waiting.length === 0) {
+    if (calPrimary) {
+      prompt =
+        waiting.length === 0
+          ? "Everyone is ready. Run the calibration: each seat reads a sentence aloud in turn while the others stay quiet."
+          : `Every mic check is done: run the calibration now (still onboarding: ${waiting.map((s) => `seat ${s.seat}`).join(", ")}).`;
+      action = () => run("calibration:start", {}, "Calibration started");
+    } else if (waiting.length === 0 && calStatus === "running") {
+      prompt = "Calibration running: each seat reads its sentence in turn. Keep the room quiet.";
+    } else if (waiting.length === 0 && calibrationNeeded(st)) {
+      // round 1 waits for the calibration, which cannot run while recording is paused
+      prompt = "Everyone is ready. Resume recording, then run the calibration (or skip it).";
+    } else if (waiting.length === 0) {
       prompt = "Everyone is ready.";
       action = () => run("round:start", {}, "Round 1 started");
       primary = (
@@ -176,6 +198,8 @@ function NextPanel({
         End round now
       </Button>
     );
+  } else if (st.phase === "round_complete" && calStatus === "running") {
+    prompt = `Round ${st.round} complete. Calibration running again: keep the room quiet.`;
   } else if (st.phase === "round_complete") {
     prompt = `Round ${st.round} complete.${st.config.roundAdvance === "auto" ? ` Round ${st.round + 1} starts automatically in ${st.config.autoAdvanceDelaySec} s.` : ""}`;
     action = () => run("round:start", {}, `Round ${st.round + 1} started`);
@@ -236,6 +260,7 @@ function NextPanel({
           {primary}
         </div>
         {secondary && <div className="row">{secondary}</div>}
+        {showAudio && <AudioNext conn={conn} st={st} primary={calPrimary} />}
       </div>
     </Panel>
   );

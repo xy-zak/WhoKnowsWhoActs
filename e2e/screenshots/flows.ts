@@ -129,11 +129,30 @@ export async function newPlayer(browser: Browser): Promise<{ page: Page; termina
   return { page, terminal: Number(await page.locator(".client-number").textContent()) };
 }
 
+/** Consent, ticking every item (in a session that records audio, also the audio item). */
 export async function consent(page: Page) {
   await expect(page.getByText("Information and consent").first()).toBeVisible({ timeout: 20_000 });
   for (const cb of await page.locator("input[type=checkbox]").all()) await cb.check();
   await page.getByRole("button", { name: /I agree/ }).click();
-  await expect(page.locator(".panel-title", { hasText: "About you" })).toBeVisible();
+  await expect(page.locator(".panel-title", { hasText: /About you|Mic check/ })).toBeVisible();
+}
+
+/** The mic check's panel title (sessions that record audio). */
+export const onMicCheck = (page: Page) => page.locator(".panel-title", { hasText: "Mic check" });
+
+/**
+ * Sessions that record audio: the player's own mic check, the real way. Waits while it is held
+ * (another seat still in consent), clicks Start (Playwright's Chromium has a fake microphone that
+ * plays a synthetic voice: playwright.config.ts, e2e/fakeVoice.ts) and waits until it passes and
+ * the player has moved on.
+ */
+export async function micCheck(page: Page) {
+  await expect(onMicCheck(page)).toBeVisible();
+  const start = page.getByRole("button", { name: /Start mic check/ });
+  await expect(start).toBeVisible({ timeout: 60_000 }); // shown once the consent hold is lifted
+  await start.click();
+  await expect(page.getByText("Mic check passed")).toBeVisible({ timeout: 30_000 });
+  await expect(onMicCheck(page)).toHaveCount(0, { timeout: 10_000 });
 }
 
 export async function aboutYou(page: Page) {
@@ -148,11 +167,44 @@ export async function briefing(page: Page) {
   await expect(page.getByText("You're all set")).toBeVisible();
 }
 
-/** Consent → about you → briefing. */
+/** Consent → (mic check, in a session that records audio) → about you → briefing. */
 export async function onboard(page: Page) {
   await consent(page);
+  if (await onMicCheck(page).count()) await micCheck(page);
+  await expect(page.locator(".panel-title", { hasText: "About you" })).toBeVisible();
   await aboutYou(page);
   await briefing(page);
+}
+
+/**
+ * NEXT panel (sessions that record audio): start the calibration and wait until every seat had its
+ * turn. `players` (in seat order) are checked to show "Your turn" in turn; each turn takes ~7 s.
+ */
+export async function calibrate(fac: Page, players: Page[] = []) {
+  await fac.getByRole("button", { name: "Start calibration" }).click();
+  for (const p of players)
+    await expect(p.getByText("Your turn: read this sentence aloud")).toBeVisible({ timeout: 60_000 });
+  await expect(fac.getByText(/done · (separation ok|weak separation|checking)/)).toBeVisible({
+    timeout: 60_000,
+  });
+}
+
+/** NEXT panel: skip a seat's mic check (confirmation with a logged reason). */
+export async function skipMicCheck(fac: Page, seat: number, reason = "no working microphone") {
+  await fac
+    .locator(".row", { hasText: `Seat ${seat}: in the mic check` })
+    .getByRole("button", { name: /Skip mic check/ })
+    .click();
+  await fac.locator(".popup").getByRole("textbox", { name: "Reason" }).fill(reason);
+  await popupFoot(fac)
+    .getByRole("button", { name: /Skip mic check/ })
+    .click();
+}
+
+/** Step 04: switch audio recording on (needs the consent screen, which is on by default). */
+export async function enableAudio(fac: Page) {
+  await current(fac, "onboarding");
+  await fac.getByRole("checkbox", { name: /Record audio/ }).check();
 }
 
 /** A square of the grid map ("C3"). */

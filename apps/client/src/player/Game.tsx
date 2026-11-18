@@ -14,6 +14,7 @@ import { fmtDuration, quotaText } from "../common/format";
 import { MapLegend, MapScore, MapView } from "../map/MapView";
 import { ActSwatch, AsciiProgress, Button, Icon, LabelTag, Panel, Popup, SeatDot, StatusTag } from "../ui";
 import type { PlayerConnection } from "./connection";
+import { RecordingProblem, RecordingTag } from "./RecordingIndicator";
 
 const HOVER_MIN_MS = 150;
 
@@ -175,7 +176,11 @@ export function Game({ conn, view }: { conn: PlayerConnection; view: PlayerView 
         padding: "var(--s2) var(--s3) var(--s3)",
       }}
     >
-      <StatusLine view={view} conn={conn} scoreMax={scoreMax} decimals={rules?.mapScoreDecimals ?? 2} />
+      <div className="col">
+        {/* sessions that record audio: a non-blocking banner while the microphone needs the participant */}
+        <RecordingProblem conn={conn} view={view} />
+        <StatusLine view={view} conn={conn} scoreMax={scoreMax} decimals={rules?.mapScoreDecimals ?? 2} />
+      </div>
       <div className="row panel" style={{ padding: "var(--s2) var(--s3)", marginTop: 0 }}>
         <span className="small upper muted">Tool</span>
         <Button
@@ -479,6 +484,7 @@ function StatusLine({
       <span className="row nowrap" style={{ gap: 4 }}>
         <SeatDot seat={view.me.seat} /> <strong>SEAT {view.me.seat}</strong>
       </span>
+      <RecordingTag conn={conn} view={view} />
       {view.me.k && (
         <LabelTag
           label={view.me.k}

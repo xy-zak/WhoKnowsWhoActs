@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 import { defineConfig } from "@playwright/test";
+import { fakeVoiceFile } from "./e2e/fakeVoice";
 
 /**
  * Playwright projects:
@@ -11,6 +12,10 @@ import { defineConfig } from "@playwright/test";
  *
  * Uses the system Chromium when available (Playwright's bundled browsers are not
  * needed): set CHROMIUM_PATH to override, or unset to use Playwright's own.
+ *
+ * Microphone: Chromium gets a fake microphone that plays a synthetic voice (e2e/fakeVoice.ts:
+ * room noise with speech-like bursts, so the real mic check passes) and grants the permission
+ * without a prompt; audio may start without a click (a reload resumes recording by itself).
  */
 const systemChromium =
   process.env.CHROMIUM_PATH ?? (existsSync("/usr/bin/chromium") ? "/usr/bin/chromium" : undefined);
@@ -24,7 +29,15 @@ export default defineConfig({
   testDir: "e2e",
   reporter: [["list"]],
   use: {
-    launchOptions: systemChromium ? { executablePath: systemChromium } : {},
+    launchOptions: {
+      ...(systemChromium ? { executablePath: systemChromium } : {}),
+      args: [
+        "--use-fake-ui-for-media-stream",
+        "--use-fake-device-for-media-stream",
+        `--use-file-for-fake-audio-capture=${fakeVoiceFile()}`,
+        "--autoplay-policy=no-user-gesture-required",
+      ],
+    },
   },
   projects: [
     {
@@ -34,6 +47,8 @@ export default defineConfig({
     {
       name: "app",
       testMatch: /app-.*\.spec\.ts/,
+      // one server holds one live session at a time: the spec files that run a session must not overlap
+      workers: 1,
       use: { baseURL: `http://127.0.0.1:${E2E_PORT}`, viewport: { width: 1500, height: 950 } },
     },
     ...(screenshots

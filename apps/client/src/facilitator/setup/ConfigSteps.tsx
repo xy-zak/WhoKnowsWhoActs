@@ -654,9 +654,19 @@ export function PlayersStep({ d, upd }: { d: Draft; upd: Upd }) {
 
 /* ─── 04 ONBOARDING ─── */
 
-export function OnboardingStep({ d, upd }: { d: Draft; upd: Upd }) {
+export function OnboardingStep({
+  d,
+  upd,
+  httpsEnabled = null,
+}: {
+  d: Draft;
+  upd: Upd;
+  /** The server serves HTTPS (GET /api/server-info `tls.enabled`); null while unknown. */
+  httpsEnabled?: boolean | null;
+}) {
   const confirm = useConfirm();
   const o = d.config.onboarding;
+  const audio = d.config.audio;
   if (d.config.players === "simulated") {
     return (
       <Callout icon="agent">
@@ -699,9 +709,41 @@ export function OnboardingStep({ d, upd }: { d: Draft; upd: Upd }) {
             confirmLabel: "Disable consent",
             danger: true,
           });
-          if (ok) set({ consent: false });
+          // nobody is recorded without consent: audio goes off with it
+          if (ok)
+            setCfg(d, upd, {
+              onboarding: { ...o, consent: false },
+              audio: { ...audio, enabled: false },
+            });
         }}
       />
+      <div style={{ paddingLeft: "var(--s4)" }} className="col">
+        <Check
+          label={
+            <>
+              <Icon name="microphone" /> Record audio
+            </>
+          }
+          disabled={!o.consent}
+          hint={
+            !o.consent
+              ? "Needs the consent screen: nobody is recorded without consent."
+              : audio.enabled
+                ? "Each participant's microphone is recorded from their mic check (right after consent) until the game is complete. Adds the audio item to the consent form, the mic check step and the calibration before round 1. Players cannot mute; you can pause recording for everyone."
+                : "Off: no microphone is used."
+          }
+          checked={o.consent && audio.enabled}
+          onChange={(v) => setCfg(d, upd, { audio: { ...audio, enabled: v } })}
+        />
+        {o.consent && audio.enabled && httpsEnabled === false && (
+          <Callout tone="warn" icon="microphoneWarning">
+            This server runs on plain HTTP, so the players' browsers will block the microphone (only{" "}
+            <span className="mono">https://</span> pages, or this laptop itself, may use it). Restart the
+            server with <span className="mono">WKWA_TLS=auto</span> (the default) for HTTPS with a self-signed
+            certificate: each player accepts the browser's warning once.
+          </Callout>
+        )}
+      </div>
       <Check
         label={
           <>
@@ -880,11 +922,21 @@ export function ReviewStep({
         ? "none (simulated players)"
         : [
             c.onboarding.consent && "consent",
+            c.onboarding.consent && c.audio.enabled && "mic check",
             c.onboarding.demographics && "demographics",
             c.onboarding.briefing && "briefing",
           ]
             .filter(Boolean)
             .join(" → ") || "none",
+    ],
+    [
+      3,
+      "Audio",
+      simulated
+        ? "off (simulated players have no microphone)"
+        : c.audio.enabled
+          ? `on · each microphone recorded from the mic check until game complete (fake players never) · calibration ${c.audio.requireCalibration ? "required before round 1" : "optional"}`
+          : "off",
     ],
     [4, "Tags", c.tags.length ? c.tags.join(", ") : "none"],
     [4, "Notes", d.notes || "—"],

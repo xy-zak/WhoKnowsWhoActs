@@ -5,7 +5,7 @@ import { ActSwatch, Button, Callout, Check, type IconName, LabelTag, Panel, Stat
 import { Centered, OnboardingStepper } from "./chrome";
 import type { PlayerConnection } from "./connection";
 
-function Page({
+export function Page({
   view,
   step,
   title,
@@ -35,7 +35,7 @@ function Page({
   );
 }
 
-function useOpenedAt() {
+export function useOpenedAt() {
   return useRef(performance.now()).current;
 }
 

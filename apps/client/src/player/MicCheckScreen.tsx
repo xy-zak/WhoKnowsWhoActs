@@ -1,0 +1,332 @@
+import { type AudioCaptureSettings, clampDb, type PlayerView } from "@wkwa/shared";
+import { useEffect, useRef, useState } from "react";
+import {
+  classifyMicError,
+  MicError,
+  micSupportProblem,
+  type SpeechCheckResult,
+  SpeechDetector,
+} from "../audio";
+import { Button, Callout, Icon, LevelMeter, RecTag, StatusTag } from "../ui";
+import type { PlayerConnection } from "./connection";
+import { Page, useOpenedAt } from "./Onboarding";
+import { MicFixSteps, useRecording } from "./RecordingIndicator";
+import { recStateFor } from "./recording";
+
+/** A try that has heard this much audio without passing counts as failed (logged once; "Start again"). */
+const GIVE_UP_MS = 20_000;
+/** The "passed" confirmation stays this long before the next step. */
+const PASSED_HOLD_MS = 1200;
+
+/** Only the processing flags and the sample rate: never a device id, group id or label. */
+function micSettings(raw: object): AudioCaptureSettings {
+  const s = raw as Record<string, unknown>;
+  const out: AudioCaptureSettings = {};
+  if (typeof s.sampleRate === "number" && Number.isInteger(s.sampleRate)) out.sampleRate = s.sampleRate;
+  if (typeof s.echoCancellation === "boolean" || typeof s.echoCancellation === "string")
+    out.echoCancellation = s.echoCancellation;
+  if (typeof s.noiseSuppression === "boolean") out.noiseSuppression = s.noiseSuppression;
+  if (typeof s.autoGainControl === "boolean") out.autoGainControl = s.autoGainControl;
+  if (typeof s.channelCount === "number" && Number.isInteger(s.channelCount))
+    out.channelCount = s.channelCount;
+  return out;
+}
+
+/** `▰▰▰▱▱ 0.6/1.0 s`: speech heard so far, out of what the check needs. */
+function SpeechProgress({ ms, need }: { ms: number; need: number }) {
+  const n = 10;
+  const filled = Math.min(n, Math.floor((Math.min(ms, need) / need) * n));
+  return (
+    <span
+      className={`ascii-progress${ms >= need ? " full" : ""}`}
+      role="progressbar"
+      aria-label="Speech heard"
+      aria-valuemin={0}
+      aria-valuemax={need}
+      aria-valuenow={Math.min(ms, need)}
+    >
+      <span className="on">{"▰".repeat(filled)}</span>
+      <span className="off">{"▱".repeat(n - filled)}</span> {(Math.min(ms, need) / 1000).toFixed(1)}/
+      {(need / 1000).toFixed(1)} s
+    </span>
+  );
+}
+
+/**
+ * Onboarding step `mic_check` (sessions that record audio). Held while another seat is still in
+ * consent (no microphone opens before everyone agreed). Then: what is recorded and for how long,
+ * a Start button (the user gesture the browser needs), the live level, the phrase to read aloud
+ * and the speech heard so far. Passing sends `mic:check` and moves on; there is no skip for the
+ * player (the facilitator can skip a seat). Recording starts here and runs until the game ends.
+ */
+export function MicCheckScreen({ conn, view }: { conn: PlayerConnection; view: PlayerView }) {
+  const a = view.audio;
+  const snap = useRecording(conn);
+  const openedAt = useOpenedAt();
+  const need = a.micCheckMinSpeechMs ?? 1000;
+  const [attempt, setAttempt] = useState(0);
+  const [result, setResult] = useState<SpeechCheckResult | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [passedShown, setPassedShown] = useState(false);
+  const submitted = useRef(false);
+  /** a passed result the server did not take (e.g. a timeout): sent again with "Continue" */
+  const [unsent, setUnsent] = useState<SpeechCheckResult | null>(null);
+  const passTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (passTimer.current) clearTimeout(passTimer.current);
+    },
+    [],
+  );
+  const failLogged = useRef(0);
+  const support = useRef(micSupportProblem()).current;
+
+  const st = snap.status.state;
+  const capturing = st === "recording" || st === "no_signal";
+  const failed = st === "denied" || st === "error";
+  // the participant clicked Start in this page (a reload asks again)
+  const started = attempt > 0 && snap.gesture;
+
+  // feed the recorder's 16 kHz blocks into a fresh speech detector per attempt
+  useEffect(() => {
+    if (attempt === 0) return;
+    const det = new SpeechDetector({ minSpeechMs: need });
+    let last = 0;
+    setResult(null);
+    const off = conn.recording.addTap((s) => {
+      const r = det.push(s);
+      const t = performance.now();
+      if (r.passed || t - last > 150) {
+        last = t;
+        setResult(r);
+      }
+    });
+    return off;
+  }, [attempt, conn, need]);
+
+  const submit = async (r: SpeechCheckResult, passed: boolean) => {
+    setBusy(true);
+    try {
+      await conn.request("mic:check", {
+        passed,
+        attempts: Math.max(1, attempt),
+        durationMs: Math.round(performance.now() - openedAt),
+        settings: micSettings(conn.recording.captureSettings),
+        ...(snap.contextSampleRate ? { contextSampleRate: snap.contextSampleRate } : {}),
+        noiseFloorDb: clampDb(r.noiseFloorDb),
+        speechDb: clampDb(r.speechDb),
+        speechMs: Math.max(0, r.speechMs),
+        clientTs: conn.clock.now(),
+      });
+      return true;
+    } catch (e) {
+      conn.showToast((e as Error).message);
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // passed: show it briefly, then report it (the server moves this seat on to the next step)
+  const passed = result?.passed === true;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: once per pass
+  useEffect(() => {
+    if (!passed || submitted.current || !result) return;
+    submitted.current = true;
+    setPassedShown(true);
+    const r = result;
+    passTimer.current = setTimeout(() => {
+      passTimer.current = null;
+      void submit(r, true).then((ok) => setUnsent(ok ? null : r));
+    }, PASSED_HOLD_MS);
+  }, [passed]);
+
+  // not passed after a while: log the failed try once (the facilitator sees the levels)
+  const gaveUp = !passed && started && (result?.analysedMs ?? 0) >= GIVE_UP_MS;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: once per attempt
+  useEffect(() => {
+    if (gaveUp && result && failLogged.current !== attempt) {
+      failLogged.current = attempt;
+      void submit(result, false);
+    }
+  }, [gaveUp]);
+
+  const start = () => {
+    // inside the click: the browser only lets audio start from a user gesture
+    conn.recording.startFromClick();
+    submitted.current = false;
+    setPassedShown(false);
+    setUnsent(null);
+    setAttempt((n) => n + 1);
+  };
+
+  if (a.micCheckHeld) {
+    return (
+      <Page
+        view={view}
+        step="mic_check"
+        title="Mic check"
+        icon="microphone"
+        footer={
+          <>
+            <StatusTag tone="warn" icon="idle">
+              waiting
+            </StatusTag>
+            <span className="spacer" />
+          </>
+        }
+      >
+        <h2 style={{ margin: 0 }}>Waiting for the other players to finish the consent form</h2>
+        <p className="muted cursor">
+          Your microphone stays off until everyone in the room has agreed. This takes a moment
+        </p>
+      </Page>
+    );
+  }
+
+  const recState = recStateFor(view, snap) ?? "off";
+  const supportError = support ? classifyMicError(new MicError(support)) : null;
+  const error = failed ? snap.status.error : supportError;
+  const needsResume = started && snap.status.needsGesture;
+
+  let primary: React.ReactNode;
+  if (!started || failed) {
+    primary = (
+      <Button
+        variant="primary"
+        size="lg"
+        icon={failed ? "refresh" : "microphone"}
+        disabled={busy}
+        onClick={start}
+        tip="Your browser asks to use the microphone: choose Allow"
+      >
+        {failed ? "Try again" : "Start mic check"}
+      </Button>
+    );
+  } else if (needsResume) {
+    primary = (
+      <Button
+        variant="primary"
+        size="lg"
+        icon="microphone"
+        onClick={() => conn.recording.fixFromClick()}
+        tip="Your browser needs a click to use the microphone"
+      >
+        Resume
+      </Button>
+    );
+  } else if (unsent) {
+    primary = (
+      <Button
+        variant="primary"
+        size="lg"
+        icon="next"
+        disabled={busy}
+        onClick={() => void submit(unsent, true).then((ok) => ok && setUnsent(null))}
+        tip="The mic check passed: send the result again and go on"
+      >
+        Continue
+      </Button>
+    );
+  } else if (gaveUp) {
+    primary = (
+      <Button
+        variant="primary"
+        size="lg"
+        icon="refresh"
+        disabled={busy}
+        onClick={start}
+        tip="Listen again from the start"
+      >
+        Start again
+      </Button>
+    );
+  } else {
+    primary = null;
+  }
+
+  return (
+    <Page
+      view={view}
+      step="mic_check"
+      title="Mic check"
+      icon="microphone"
+      footer={
+        <>
+          {started && !failed && <RecTag state={recState} />}
+          <span className="spacer" />
+          {primary}
+        </>
+      }
+    >
+      <p style={{ margin: 0 }}>
+        <strong>From now until the end of the game, your microphone is recorded</strong> (you agreed to this
+        in the consent form). There is no mute button: the facilitator can pause the recording for everyone.
+      </p>
+      <p className="muted small" style={{ margin: 0 }}>
+        <Icon name="info" /> A headset works best: keep its microphone close to your mouth. Only your own
+        voice should be loud on your microphone.
+      </p>
+
+      {error ? (
+        <Callout tone="danger" icon="microphoneWarning">
+          <strong>{error.title}</strong>
+          <MicFixSteps error={error} />
+        </Callout>
+      ) : !started ? (
+        <Callout icon="microphone">
+          Click <strong>Start mic check</strong>. Your browser will ask to use the microphone: choose{" "}
+          <strong>Allow</strong>. Then read a short sentence aloud.
+        </Callout>
+      ) : (
+        <div className="col" style={{ gap: "var(--s3)" }}>
+          <div className="row" style={{ gap: "var(--s3)" }}>
+            <span className="small upper muted">Your microphone</span>
+            <LevelMeter
+              db={capturing ? (snap.level?.rmsDb ?? null) : null}
+              peakDb={snap.level?.peakDb ?? null}
+            />
+          </div>
+          {passedShown ? (
+            <Callout tone="live" icon="ok">
+              <strong>Mic check passed.</strong> We can hear you clearly. Recording continues while you go on
+            </Callout>
+          ) : (
+            <>
+              <span className="small upper muted">Read this aloud, in your normal voice</span>
+              <blockquote
+                className="strong"
+                style={{
+                  margin: 0,
+                  padding: "var(--s3) var(--s4)",
+                  borderLeft: "3px solid var(--primary)",
+                  background: "var(--sunken)",
+                  fontSize: "var(--fs-title)",
+                }}
+              >
+                {a.micCheckPhrase ?? "One, two, three, four, five."}
+              </blockquote>
+              <span className="row" style={{ gap: "var(--s2)" }}>
+                <span className="small upper muted">Speech heard</span>
+                <SpeechProgress ms={result?.speechMs ?? 0} need={need} />
+              </span>
+            </>
+          )}
+          {st === "no_signal" && (
+            <Callout tone="warn" icon="microphoneWarning">
+              No sound from your microphone. Check that it is plugged in, switched on and not muted (some
+              headsets have a mute switch on the cable).
+            </Callout>
+          )}
+          {gaveUp && (
+            <Callout tone="warn" icon="microphoneWarning">
+              <strong>We could not hear you clearly yet.</strong> Move the microphone closer and speak a
+              little louder, or check that the right microphone is selected in your browser. Then click{" "}
+              <strong>Start again</strong>. The facilitator can also help you.
+            </Callout>
+          )}
+        </div>
+      )}
+    </Page>
+  );
+}
