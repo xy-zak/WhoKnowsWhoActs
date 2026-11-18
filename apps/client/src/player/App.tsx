@@ -11,11 +11,14 @@ import {
   useDisplayPrefs,
   useSignalClass,
 } from "../ui";
+import { CalibrationScreen, isCalibrating } from "./CalibrationScreen";
 import { Centered, OnboardingStepper } from "./chrome";
 import type { PlayerConnection } from "./connection";
 import { DisplayMenu } from "./DisplayMenu";
 import { Game } from "./Game";
+import { MicCheckScreen } from "./MicCheckScreen";
 import { BriefingScreen, ConsentScreen, DeclinedScreen, DemographicsScreen } from "./Onboarding";
+import { RecordingLine } from "./RecordingIndicator";
 
 type Screen =
   | "waiting"
@@ -26,6 +29,7 @@ type Screen =
   | "demographics"
   | "briefing"
   | "ready"
+  | "calibration"
   | "game"
   | "round_break"
   | "paused"
@@ -50,9 +54,22 @@ function screenFor(seat: number | null, v: PlayerView | null): Screen {
   }
 }
 
+/**
+ * Onboarding screens that keep what the participant typed while the calibration covers them. The
+ * game (a redo in a round break) is replaced instead: its popups are portals that a hidden parent
+ * would not hide; between rounds it only loses the tool and the selected square.
+ */
+const KEEP_UNDER_CALIBRATION: ReadonlySet<Screen> = new Set(["demographics", "briefing"]);
+/** Onboarding screens with the recording line on top (the mic check shows its own state). */
+const RECORDING_LINE: ReadonlySet<Screen> = new Set(["demographics", "briefing", "ready", "calibration"]);
+
 export function App({ conn }: { conn: PlayerConnection }) {
   const st = useStore(conn.store);
-  const screen = screenFor(st.seat, st.view);
+  const base = screenFor(st.seat, st.view);
+  // the facilitator's calibration covers the onboarding screens and the round break
+  const calibrating = base !== "waiting" && isCalibrating(st.view);
+  const screen: Screen = calibrating ? "calibration" : base;
+  const keepBase = calibrating && KEEP_UNDER_CALIBRATION.has(base);
 
   // Display settings (colours, font, text size, animations): the participant's own choice, not logged.
   useDisplayPrefs(playerPrefs);
@@ -69,11 +86,12 @@ export function App({ conn }: { conn: PlayerConnection }) {
   useGlobalTelemetry(conn);
   const signal = useSignalClass(st.connected);
   // the game screen stays mounted through pauses and round breaks (keeps tool / selection)
-  const screenKey = screen === "paused" || screen === "round_break" ? "game" : screen;
+  const shown = keepBase ? base : screen;
+  const screenKey = shown === "paused" || shown === "round_break" ? "game" : shown;
 
   const body = useMemo(() => {
     const v = st.view;
-    switch (screen) {
+    switch (shown) {
       case "waiting":
         return <Waiting terminal={st.terminal} connected={st.connected} notice={st.notice} />;
       case "lobby":
@@ -88,18 +106,17 @@ export function App({ conn }: { conn: PlayerConnection }) {
       case "declined":
         return <DeclinedScreen />;
       case "mic_check":
-        // placeholder until the mic check screen exists (audio sessions only): wait for the facilitator
-        return (
-          <Centered title="Mic check" icon="seat">
-            <OnboardingStepper v={v!} current="mic_check" />
-            <p className="muted cursor">The facilitator will help you with the next step. Please wait</p>
-          </Centered>
-        );
+        return <MicCheckScreen conn={conn} view={v!} />;
       case "demographics":
         return <DemographicsScreen conn={conn} view={v!} />;
       case "briefing":
         return <BriefingScreen conn={conn} view={v!} />;
+      case "calibration":
+        return <CalibrationScreen conn={conn} view={v!} />;
       case "ready": {
+        // audio sessions: the waiting state of the calibration, until the facilitator runs or skips it
+        if (v?.audio.enabled && v.audio.calibration.status === "pending")
+          return <CalibrationScreen conn={conn} view={v} />;
         const ready = (v?.others ?? []).filter((o) => o.ready).length + 1;
         const total = (v?.others.length ?? 0) + 1;
         return (
@@ -118,9 +135,10 @@ export function App({ conn }: { conn: PlayerConnection }) {
         return <Game conn={conn} view={v!} />;
       case "end":
       case "withdrawn":
-        return <EndScreen view={v!} withdrawn={screen === "withdrawn"} />;
+        return <EndScreen view={v!} withdrawn={shown === "withdrawn"} />;
     }
-  }, [screen, st.view, st.terminal, st.connected, st.notice, st.seat, conn]);
+  }, [shown, st.view, st.terminal, st.connected, st.notice, st.seat, conn]);
+  const line = st.view && RECORDING_LINE.has(screen) ? <RecordingLine conn={conn} view={st.view} /> : null;
 
   return (
     <>
@@ -129,8 +147,25 @@ export function App({ conn }: { conn: PlayerConnection }) {
           <p className="cursor">Reconnecting to the game server. Please do not close this window</p>
         </Popup>
       )}
-      <div key={screenKey} className={`screen-switch ${signal}`} style={{ height: "100%" }}>
-        {body}
+      <div className="col" style={{ height: "100%", gap: 0 }}>
+        {line && <div style={{ padding: "var(--s2) var(--s3) 0" }}>{line}</div>}
+        <div
+          key={screenKey}
+          className={`screen-switch ${signal}`}
+          style={{ flex: "1 1 0", minHeight: 0 }}
+          hidden={keepBase}
+        >
+          {body}
+        </div>
+        {keepBase && (
+          <div
+            key="calibration"
+            className={`screen-switch ${signal}`}
+            style={{ flex: "1 1 0", minHeight: 0 }}
+          >
+            <CalibrationScreen conn={conn} view={st.view!} />
+          </div>
+        )}
       </div>
       <DisplayMenu />
       <TooltipLayer />

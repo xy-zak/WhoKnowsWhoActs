@@ -386,6 +386,7 @@ export function SetupStage({ conn }: { conn: FacilitatorConnection }) {
         return (
           [
             cfg.onboarding.consent && "consent",
+            cfg.onboarding.consent && cfg.audio.enabled && "mic check (audio)",
             cfg.onboarding.demographics && "demographics",
             cfg.onboarding.briefing && "briefing",
           ]
@@ -451,7 +452,7 @@ export function SetupStage({ conn }: { conn: FacilitatorConnection }) {
       case 2:
         return <PlayersStep d={d} upd={upd} />;
       case 3:
-        return <OnboardingStep d={d} upd={upd} />;
+        return <OnboardingStep d={d} upd={upd} httpsEnabled={info ? info.tls.enabled : null} />;
       case 4:
         return <TagsStep d={d} upd={upd} />;
       case REVIEW:
@@ -560,6 +561,7 @@ export function SetupStage({ conn }: { conn: FacilitatorConnection }) {
               player to{" "}
               {[
                 st!.config.onboarding.consent && "consent",
+                st!.config.onboarding.consent && st!.config.audio.enabled && "the mic check",
                 st!.config.onboarding.demographics && "demographics",
                 st!.config.onboarding.briefing && "the briefing",
               ]

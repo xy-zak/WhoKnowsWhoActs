@@ -16,10 +16,17 @@ async function newPlayer(browser: Browser): Promise<{ page: Page; terminal: numb
   return { page, terminal };
 }
 
+/** Consent → (mic check, in a session that records audio: e2e/app-audio.spec.ts) → about you → briefing. */
 async function onboard(page: Page) {
   await expect(page.getByText("Information and consent").first()).toBeVisible({ timeout: 20_000 });
   for (const cb of await page.locator("input[type=checkbox]").all()) await cb.check();
   await page.getByRole("button", { name: /I agree/ }).click();
+  await expect(page.locator(".panel-title", { hasText: /About you|Mic check/ })).toBeVisible();
+  if (await page.locator(".panel-title", { hasText: "Mic check" }).count()) {
+    // Chromium's fake microphone plays a synthetic voice (playwright.config.ts): the real check passes
+    await page.getByRole("button", { name: /Start mic check/ }).click({ timeout: 60_000 });
+    await expect(page.getByText("Mic check passed")).toBeVisible({ timeout: 30_000 });
+  }
   await expect(page.locator(".panel-title", { hasText: "About you" })).toBeVisible();
   for (const fs of await page.locator("fieldset").all())
     await fs.locator("input[type=radio]").first().check();
