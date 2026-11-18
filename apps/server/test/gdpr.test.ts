@@ -91,6 +91,23 @@ describe("GDPR tooling", () => {
     );
     const files = readdirSync(r.dir).sort();
     expect(files).toEqual(EXPORT_FILES.map((f) => f.file).sort());
+    // the contract, spelled out: audio content (WAV) is never part of a CSV export
+    expect(files).toEqual([
+      "actions.csv",
+      "audio_tracks.csv",
+      "codebook.md",
+      "consent.csv",
+      "demographics.csv",
+      "events.csv",
+      "manifest.json",
+      "players.csv",
+      "session.json",
+      "speech_segments.csv",
+      "telemetry.csv",
+    ]);
+    // this session recorded no audio: the audio files are there, header only
+    for (const f of ["audio_tracks.csv", "speech_segments.csv"])
+      expect(readFileSync(path.join(r.dir, f), "utf8").trimEnd().split("\n")).toHaveLength(1);
     for (const def of EXPORT_FILES.filter((f) => f.format === "csv")) {
       const text = readFileSync(path.join(r.dir, def.file), "utf8");
       const header = text.split("\n")[0]!.split(",");

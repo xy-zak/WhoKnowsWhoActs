@@ -21,11 +21,14 @@ import {
   type StoredEvent,
   type StoredTelemetry,
 } from "@wkwa/shared";
+import { speechSegmentsOf, trackViews } from "../audio/records";
 import { type ScenarioLibrary, sha256 } from "../content";
 import type { Store } from "../db/store";
 import { nowTs, wall } from "../runtime";
 
 export type ExportKind = "standard" | "anonymised";
+/** Kinds in the export register: the two CSV exports and the separate "Export audio" action. */
+export type RegisteredExportKind = ExportKind | "audio";
 
 export interface ExportResult {
   exportId: string;
@@ -95,6 +98,13 @@ export function exportSession(
   const codes = new Set<string>();
   for (const e of events) if (e.participantCode) codes.add(e.participantCode);
   for (const t of telemetry) codes.add(t.participantCode);
+  // audio metadata carries the code too (a participant can have audio rows and few events)
+  const tracks = trackViews(store, sessionId).sort(
+    (a, b) => a.row.seat - b.row.seat || a.row.startedServerTs - b.row.startedServerTs,
+  );
+  const speech = speechSegmentsOf(store, sessionId).segments;
+  for (const t of tracks) codes.add(t.row.participantCode);
+  for (const s of speech) if (s.participantCode) codes.add(s.participantCode);
   const anon = new Map<string, string>();
   if (kind === "anonymised") {
     const used = new Set<string>();
@@ -297,6 +307,59 @@ export function exportSession(
     { demographicQuestions },
   );
 
+  /* audio_tracks.csv — the index only: no keys, no file names, no audio */
+  const flag = (v: unknown) => (typeof v === "boolean" ? v : null);
+  const int = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : null);
+  csv(
+    "audio_tracks.csv",
+    tracks.map(({ row: t, summary }) => ({
+      session_id: sessionId,
+      seat: t.seat,
+      participant_code: pid(t.participantCode),
+      track_id: t.trackId,
+      status: summary.status,
+      start_reason: t.reason,
+      stop_reason: t.stopReason,
+      started_server_ts: t.startedServerTs,
+      first_sample_ts: t.startedClientTs,
+      closed_server_ts: t.closedServerTs,
+      duration_ms: t.durationMs,
+      samples: t.samples,
+      chunks: t.chunks,
+      dropped_chunks: t.droppedChunks,
+      gaps: summary.gaps,
+      sample_rate: t.sampleRate,
+      capture_sample_rate: int(t.settings.sampleRate),
+      echo_cancellation: flag(t.settings.echoCancellation),
+      noise_suppression: flag(t.settings.noiseSuppression),
+      auto_gain_control: flag(t.settings.autoGainControl),
+      channel_count: int(t.settings.channelCount),
+    })),
+  );
+
+  /* speech_segments.csv — who spoke when (timing only, never voice content) */
+  csv(
+    "speech_segments.csv",
+    speech.map((g) => ({
+      session_id: sessionId,
+      seat: g.seat,
+      participant_code: pid(g.participantCode),
+      start_server_ts: g.startTs,
+      end_server_ts: g.endTs,
+      duration_ms: g.durationMs,
+      round: g.round,
+      phase: g.phase,
+      paused: g.paused,
+      recording_paused: g.recordingPaused,
+      mean_db: g.meanDb,
+      confidence: g.confidence,
+      overlap: g.overlap,
+      overlap_ms: g.overlapMs,
+      overlap_with: g.overlapWith,
+      engine_version: g.engineVersion,
+    })),
+  );
+
   /* session.json */
   const created = events.find(
     (e): e is Extract<StoredEvent, { type: "SessionCreated" }> => e.type === "SessionCreated",
@@ -340,6 +403,8 @@ export function exportSession(
       telemetry: telemetry.length,
       actions: actions.length,
       players: players.length,
+      audioTracks: tracks.length,
+      speechSegments: speech.length,
     },
   };
   write("session.json", `${JSON.stringify(session, null, 2)}\n`, 1);
@@ -371,17 +436,55 @@ export function exportSession(
     codeHashes: kind === "anonymised" ? [] : codeHashes,
   };
   writeFileSync(path.join(dir, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
-  store.db
-    .prepare(
-      "INSERT INTO exports (id, session_id, kind, created_wall, path, code_hashes_json, files_json) VALUES (?, ?, ?, ?, ?, ?, ?)",
-    )
-    .run(id, sessionId, kind, wall(now), dir, JSON.stringify(codeHashes), JSON.stringify(written));
+  registerExport(store, {
+    id,
+    sessionId,
+    kind,
+    createdWall: wall(now),
+    path: dir,
+    codeHashes,
+    files: written,
+  });
 
   // sanity: every defined file exists
   const present = new Set(readdirSync(dir));
   for (const f of EXPORT_FILES) if (!present.has(f.file)) throw new Error(`export is missing ${f.file}`);
 
   return { exportId: id, kind, sessionId, dir, files: written, participants: codes.size };
+}
+
+/**
+ * Add an entry to the export register (`exports`). `codeHashes` are the SHA-256
+ * of every participant code the export contains, so an erasure request finds it.
+ */
+export function registerExport(
+  store: Store,
+  e: {
+    id: string;
+    sessionId: string;
+    kind: RegisteredExportKind;
+    createdWall: string;
+    path: string;
+    codeHashes: string[];
+    files: unknown[];
+    details?: Record<string, unknown>;
+  },
+) {
+  store.db
+    .prepare(
+      `INSERT INTO exports (id, session_id, kind, created_wall, path, code_hashes_json, files_json, details_json)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .run(
+      e.id,
+      e.sessionId,
+      e.kind,
+      e.createdWall,
+      e.path,
+      JSON.stringify([...e.codeHashes].sort()),
+      JSON.stringify(e.files),
+      JSON.stringify(e.details ?? {}),
+    );
 }
 
 function unique(xs: string[]): string[] {
@@ -391,7 +494,7 @@ function unique(xs: string[]): string[] {
 export interface ExportRow {
   id: string;
   sessionId: string;
-  kind: ExportKind;
+  kind: RegisteredExportKind;
   createdWall: string;
   path: string;
 }
@@ -400,7 +503,7 @@ export function listExports(store: Store): ExportRow[] {
   const rows = store.db.prepare("SELECT * FROM exports ORDER BY created_wall DESC").all() as Array<{
     id: string;
     session_id: string;
-    kind: ExportKind;
+    kind: RegisteredExportKind;
     created_wall: string;
     path: string;
   }>;
@@ -419,7 +522,7 @@ export function exportsContaining(store: Store, code: string): ExportRow[] {
   const rows = store.db.prepare("SELECT * FROM exports ORDER BY created_wall").all() as Array<{
     id: string;
     session_id: string;
-    kind: ExportKind;
+    kind: RegisteredExportKind;
     created_wall: string;
     path: string;
     code_hashes_json: string;

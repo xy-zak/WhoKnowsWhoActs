@@ -7,6 +7,7 @@ import type { AppContext } from "../app";
 import { redactEvent } from "../net/hub";
 import { harnessVersion } from "../runtime";
 import { playerUrls, type TlsInfo } from "../tls";
+import { registerAudioApi } from "./audioRoutes";
 import { registerGdprApi } from "./gdprRoutes";
 import { sessionOr404 } from "./sessionLookup";
 
@@ -101,4 +102,5 @@ export function registerApi(ctx: AppContext, guard: Guard) {
   });
 
   registerGdprApi(ctx, guard);
+  registerAudioApi(ctx, guard);
 }

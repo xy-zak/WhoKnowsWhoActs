@@ -3072,6 +3072,57 @@ Questionnaire answers (option values), one column per question. _Unit:_ one row 
 
 Plus one column `q_<id>` (string) per question in `config/demographics.json`: Selected option value for question <id> ('prefer_not_to_say' allowed).
 
+#### `audio_tracks.csv`
+
+Index of the recorded microphone audio: when each track ran, how much audio arrived and how the browser processed it. Metadata only: the audio itself stays encrypted on the server and is never part of this export (see 'Export audio'). Empty (header only) for sessions without audio. _Unit:_ one row per stored audio track (one continuous microphone capture run of one seat). _Data class:_ pseudonymous.
+
+| Column | Type | Description | Source |
+| --- | --- | --- | --- |
+| `session_id` | string | Session id, e.g. S-20261116-7KQ2 | envelope.sessionId |
+| `seat` | integer | Seat number (1–4) | envelope.seat / SeatBound.seat |
+| `participant_code` | string | Pseudonymous participant code (anonymised export: random A-XXXXXX id) | envelope.participantCode |
+| `track_id` | string | Random id of the track (UUID) | AudioTrackStarted.trackId |
+| `status` | string | open (still recording) \| closed (stopped normally) \| interrupted (the browser or microphone went away, or the server restarted) \| deleted (raw audio deleted, metadata kept) | audio_tracks.status + stop_reason |
+| `start_reason` | string | Why the track started: mic_check \| resume \| reconnect \| reload \| permission_regained | AudioTrackStarted.reason |
+| `stop_reason` | string | Why the track stopped: paused \| game_complete \| closed \| aborted \| withdrawn \| disconnect \| permission_lost \| error \| client_stop (empty while open) | AudioTrackStopped.reason |
+| `started_server_ts` | epoch-ms | When the server opened the track | audio_tracks.started_server_ts |
+| `first_sample_ts` | epoch-ms | Capture time of the first sample, as estimated by the browser's synchronised clock | audio_tracks.started_client_ts |
+| `closed_server_ts` | epoch-ms | When the track was closed (empty while open) | audio_tracks.closed_server_ts |
+| `duration_ms` | number | Audio stored: samples / sample_rate | audio_tracks.samples |
+| `samples` | integer | Samples stored (16 000 per second) | audio_tracks.samples |
+| `chunks` | integer | Chunks (about 5 s each) stored | audio_tracks.chunks |
+| `dropped_chunks` | integer | Chunks the browser reported as lost (their audio is missing) | AudioTrackStopped.droppedChunks |
+| `gaps` | integer | Missing chunks: sequence numbers or sample ranges never received | derived: audio_chunks seq / start_sample |
+| `sample_rate` | integer | Sample rate of the stored audio (Hz; always 16000) | AudioTrackStarted.sampleRate |
+| `capture_sample_rate` | integer | Native sample rate of the microphone before resampling (Hz) | AudioTrackStarted.settings.sampleRate |
+| `echo_cancellation` | bool01 | 1 if the browser applied echo cancellation (requested off; empty if not reported) | AudioTrackStarted.settings.echoCancellation |
+| `noise_suppression` | bool01 | 1 if the browser applied noise suppression (requested off; empty if not reported) | AudioTrackStarted.settings.noiseSuppression |
+| `auto_gain_control` | bool01 | 1 if the browser applied automatic gain control (requested off; empty if not reported) | AudioTrackStarted.settings.autoGainControl |
+| `channel_count` | integer | Channels the browser delivered (mixed to mono before upload; empty if not reported) | AudioTrackStarted.settings.channelCount |
+
+#### `speech_segments.csv`
+
+Who spoke when, from the speaker attribution run in the DATABASE tab: it compares the loudness of the seats' microphones and never identifies a voice. Timing only, no voice content. Empty (header only) until an attribution has been run, and for sessions without audio. A participant's rows disappear when their data is erased. _Unit:_ one row per stretch of speech of one seat. _Data class:_ pseudonymous.
+
+| Column | Type | Description | Source |
+| --- | --- | --- | --- |
+| `session_id` | string | Session id, e.g. S-20261116-7KQ2 | envelope.sessionId |
+| `seat` | integer | Seat number (1–4) | envelope.seat / SeatBound.seat |
+| `participant_code` | string | Pseudonymous participant code (anonymised export: random A-XXXXXX id) | envelope.participantCode |
+| `start_server_ts` | epoch-ms | Start of the speech (server clock, aligned across seats) | attribution segment.startTs |
+| `end_server_ts` | epoch-ms | End of the speech (server clock) | attribution segment.endTs |
+| `duration_ms` | number | end_server_ts − start_server_ts | attribution segment.durationMs |
+| `round` | integer | Round in progress when the speech started (0 = before round 1) | event log at start_server_ts |
+| `phase` | string | Session phase when the speech started, e.g. onboarding, round_active, round_complete | event log at start_server_ts |
+| `paused` | bool01 | 1 if the game was paused when the speech started | GamePaused / GameResumed |
+| `recording_paused` | bool01 | 1 if recording was paused when the speech started (only possible at the edge of a pause) | RecordingPaused / RecordingResumed |
+| `mean_db` | number | Mean level of the seat's own microphone over the speech (dBFS) | attribution segment.meanDb |
+| `confidence` | number | 0–1: how clearly the speech was attributed to this seat (mean per 10 ms frame) | attribution segment.confidence |
+| `overlap` | bool01 | 1 if another seat spoke at the same time for part of the segment | attribution segment.overlap |
+| `overlap_ms` | number | Time within the segment during which another seat also spoke | attribution segment.overlapMs |
+| `overlap_with` | seat-list | Seats that spoke at the same time | attribution segment.overlapWith |
+| `engine_version` | string | Version of the attribution engine that produced the segment | audio_derivatives.engine_version |
+
 #### `manifest.json`
 
 Inventory of the export, used to trace which exports contain a participant after an erasure request. _Unit:_ one document per export. _Data class:_ pseudonymous.

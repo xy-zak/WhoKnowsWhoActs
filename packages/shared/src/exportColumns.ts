@@ -609,6 +609,221 @@ export const EXPORT_FILES: ExportFileDef[] = [
     },
   },
   {
+    file: "audio_tracks.csv",
+    format: "csv",
+    rowUnit: "one row per stored audio track (one continuous microphone capture run of one seat)",
+    description:
+      "Index of the recorded microphone audio: when each track ran, how much audio arrived and how the browser processed it. Metadata only: the audio itself stays encrypted on the server and is never part of this export (see 'Export audio'). Empty (header only) for sessions without audio.",
+    dataClass: "pseudonymous",
+    columns: [
+      SESSION_ID,
+      SEAT,
+      CODE,
+      {
+        name: "track_id",
+        type: "string",
+        description: "Random id of the track (UUID)",
+        source: "AudioTrackStarted.trackId",
+      },
+      {
+        name: "status",
+        type: "string",
+        description:
+          "open (still recording) | closed (stopped normally) | interrupted (the browser or microphone went away, or the server restarted) | deleted (raw audio deleted, metadata kept)",
+        source: "audio_tracks.status + stop_reason",
+      },
+      {
+        name: "start_reason",
+        type: "string",
+        description: "Why the track started: mic_check | resume | reconnect | reload | permission_regained",
+        source: "AudioTrackStarted.reason",
+      },
+      {
+        name: "stop_reason",
+        type: "string",
+        description:
+          "Why the track stopped: paused | game_complete | closed | aborted | withdrawn | disconnect | permission_lost | error | client_stop (empty while open)",
+        source: "AudioTrackStopped.reason",
+      },
+      {
+        name: "started_server_ts",
+        type: "epoch-ms",
+        description: "When the server opened the track",
+        source: "audio_tracks.started_server_ts",
+      },
+      {
+        name: "first_sample_ts",
+        type: "epoch-ms",
+        description: "Capture time of the first sample, as estimated by the browser's synchronised clock",
+        source: "audio_tracks.started_client_ts",
+      },
+      {
+        name: "closed_server_ts",
+        type: "epoch-ms",
+        description: "When the track was closed (empty while open)",
+        source: "audio_tracks.closed_server_ts",
+      },
+      {
+        name: "duration_ms",
+        type: "number",
+        description: "Audio stored: samples / sample_rate",
+        source: "audio_tracks.samples",
+      },
+      {
+        name: "samples",
+        type: "integer",
+        description: "Samples stored (16 000 per second)",
+        source: "audio_tracks.samples",
+      },
+      {
+        name: "chunks",
+        type: "integer",
+        description: "Chunks (about 5 s each) stored",
+        source: "audio_tracks.chunks",
+      },
+      {
+        name: "dropped_chunks",
+        type: "integer",
+        description: "Chunks the browser reported as lost (their audio is missing)",
+        source: "AudioTrackStopped.droppedChunks",
+      },
+      {
+        name: "gaps",
+        type: "integer",
+        description: "Missing chunks: sequence numbers or sample ranges never received",
+        source: "derived: audio_chunks seq / start_sample",
+      },
+      {
+        name: "sample_rate",
+        type: "integer",
+        description: "Sample rate of the stored audio (Hz; always 16000)",
+        source: "AudioTrackStarted.sampleRate",
+      },
+      {
+        name: "capture_sample_rate",
+        type: "integer",
+        description: "Native sample rate of the microphone before resampling (Hz)",
+        source: "AudioTrackStarted.settings.sampleRate",
+      },
+      {
+        name: "echo_cancellation",
+        type: "bool01",
+        description: "1 if the browser applied echo cancellation (requested off; empty if not reported)",
+        source: "AudioTrackStarted.settings.echoCancellation",
+      },
+      {
+        name: "noise_suppression",
+        type: "bool01",
+        description: "1 if the browser applied noise suppression (requested off; empty if not reported)",
+        source: "AudioTrackStarted.settings.noiseSuppression",
+      },
+      {
+        name: "auto_gain_control",
+        type: "bool01",
+        description: "1 if the browser applied automatic gain control (requested off; empty if not reported)",
+        source: "AudioTrackStarted.settings.autoGainControl",
+      },
+      {
+        name: "channel_count",
+        type: "integer",
+        description: "Channels the browser delivered (mixed to mono before upload; empty if not reported)",
+        source: "AudioTrackStarted.settings.channelCount",
+      },
+    ],
+  },
+  {
+    file: "speech_segments.csv",
+    format: "csv",
+    rowUnit: "one row per stretch of speech of one seat",
+    description:
+      "Who spoke when, from the speaker attribution run in the DATABASE tab: it compares the loudness of the seats' microphones and never identifies a voice. Timing only, no voice content. Empty (header only) until an attribution has been run, and for sessions without audio. A participant's rows disappear when their data is erased.",
+    dataClass: "pseudonymous",
+    columns: [
+      SESSION_ID,
+      SEAT,
+      CODE,
+      {
+        name: "start_server_ts",
+        type: "epoch-ms",
+        description: "Start of the speech (server clock, aligned across seats)",
+        source: "attribution segment.startTs",
+      },
+      {
+        name: "end_server_ts",
+        type: "epoch-ms",
+        description: "End of the speech (server clock)",
+        source: "attribution segment.endTs",
+      },
+      {
+        name: "duration_ms",
+        type: "number",
+        description: "end_server_ts − start_server_ts",
+        source: "attribution segment.durationMs",
+      },
+      {
+        name: "round",
+        type: "integer",
+        description: "Round in progress when the speech started (0 = before round 1)",
+        source: "event log at start_server_ts",
+      },
+      {
+        name: "phase",
+        type: "string",
+        description: "Session phase when the speech started, e.g. onboarding, round_active, round_complete",
+        source: "event log at start_server_ts",
+      },
+      {
+        name: "paused",
+        type: "bool01",
+        description: "1 if the game was paused when the speech started",
+        source: "GamePaused / GameResumed",
+      },
+      {
+        name: "recording_paused",
+        type: "bool01",
+        description:
+          "1 if recording was paused when the speech started (only possible at the edge of a pause)",
+        source: "RecordingPaused / RecordingResumed",
+      },
+      {
+        name: "mean_db",
+        type: "number",
+        description: "Mean level of the seat's own microphone over the speech (dBFS)",
+        source: "attribution segment.meanDb",
+      },
+      {
+        name: "confidence",
+        type: "number",
+        description: "0–1: how clearly the speech was attributed to this seat (mean per 10 ms frame)",
+        source: "attribution segment.confidence",
+      },
+      {
+        name: "overlap",
+        type: "bool01",
+        description: "1 if another seat spoke at the same time for part of the segment",
+        source: "attribution segment.overlap",
+      },
+      {
+        name: "overlap_ms",
+        type: "number",
+        description: "Time within the segment during which another seat also spoke",
+        source: "attribution segment.overlapMs",
+      },
+      {
+        name: "overlap_with",
+        type: "seat-list",
+        description: "Seats that spoke at the same time",
+        source: "attribution segment.overlapWith",
+      },
+      {
+        name: "engine_version",
+        type: "string",
+        description: "Version of the attribution engine that produced the segment",
+        source: "audio_derivatives.engine_version",
+      },
+    ],
+  },
+  {
     file: "manifest.json",
     format: "json",
     rowUnit: "one document per export",
@@ -650,6 +865,53 @@ export const EXPORT_FILES: ExportFileDef[] = [
     columns: [],
   },
 ];
+
+/* ─────────────────────────── Audio export ("Export audio") ─────────────────────────── */
+
+/**
+ * The separate, explicit and registered "Export audio" action of the DATABASE tab writes
+ *   exports/<sessionId>/audio-<exportId>/
+ * with one WAV per seat and kind, plus a manifest. Audio is never part of the CSV exports above.
+ * File names hold the session id and the seat number only, never a participant code.
+ */
+export type AudioExportKind = "raw" | "clean";
+
+export interface AudioExportFileDef {
+  /** File name pattern; `<sessionId>` and `<seat>` are replaced. */
+  pattern: string;
+  format: "wav" | "json";
+  description: string;
+  dataClass: DataClass;
+}
+
+export const AUDIO_EXPORT_FILES: AudioExportFileDef[] = [
+  {
+    pattern: "<sessionId>_seat<seat>_raw.wav",
+    format: "wav",
+    description:
+      "The seat's raw microphone audio on the session timeline: 16 kHz mono 16-bit PCM, sample 0 = the timeline start in manifest.json, clock drift corrected, silence where the seat has no audio. Every seat's file has the same length, so the files line up sample for sample. Other seats' voices are audible (same room).",
+    dataClass: "voice",
+  },
+  {
+    pattern: "<sessionId>_seat<seat>_clean.wav",
+    format: "wav",
+    description:
+      "The same, with everything not attributed to the seat attenuated by 30 dB (speaker attribution by loudness comparison). Overlapping speech stays at full level.",
+    dataClass: "voice",
+  },
+  {
+    pattern: "manifest.json",
+    format: "json",
+    description:
+      "{ exportId, kind: 'audio', audioKind, sessionId, createdWall, requestedBy, note, format, timeline, files: [{ name, seat, kind, samples, durationMs, bytes, sha256 }] } — no participant codes. The export is also recorded in the export register.",
+    dataClass: "non-personal",
+  },
+];
+
+/** File name of one seat's WAV in an audio export (never contains a participant code). */
+export function audioExportFileName(sessionId: string, seat: number, kind: AudioExportKind): string {
+  return `${sessionId}_seat${seat}_${kind}.wav`;
+}
 
 export function exportFile(name: string): ExportFileDef {
   const f = EXPORT_FILES.find((x) => x.file === name);
