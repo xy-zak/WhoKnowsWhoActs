@@ -607,20 +607,7 @@ function CardsPopup({
     );
   }, [conn, sessionId, latest]);
   return (
-    <Popup
-      title="Takedown cards"
-      icon="cards"
-      width={560}
-      onClose={onClose}
-      footer={
-        <>
-          <span className="spacer" />
-          <Button icon="close" kbd="Esc" onClick={onClose}>
-            Done
-          </Button>
-        </>
-      }
-    >
+    <Popup title="Takedown cards" icon="cards" width={560} onClose={onClose} done>
       <p className="small muted">
         One A6 PDF per participant ({sessionId}). Print each and hand it to the participant of that seat. The
         PDFs contain the participant code: delete the downloaded files after printing.

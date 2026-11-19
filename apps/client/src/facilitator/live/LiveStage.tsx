@@ -664,20 +664,7 @@ export function LiveStage({ conn, now }: { conn: FacilitatorConnection; now: num
         <WrapUp conn={conn} st={st} onClose={() => setWrapUp(false)} />
       )}
       {labels && (
-        <Popup
-          title="Edit labels"
-          icon="labels"
-          width={820}
-          onClose={() => setLabels(false)}
-          footer={
-            <>
-              <span className="spacer" />
-              <Button icon="close" kbd="Esc" onClick={() => setLabels(false)} tip="Close the label editor">
-                Done
-              </Button>
-            </>
-          }
-        >
+        <Popup title="Edit labels" icon="labels" width={820} onClose={() => setLabels(false)} done>
           <Callout tone="warn" icon="warning">
             Each change of the pairing is saved at once, logged (<code>LabelsAssigned</code>) and changes what
             players see from now on.

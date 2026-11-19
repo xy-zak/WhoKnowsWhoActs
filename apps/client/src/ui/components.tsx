@@ -339,7 +339,15 @@ export function Stepper({
 }
 
 /** A labelled form field. */
-export function Field({ label, hint, children }: { label: string; hint?: ReactNode; children: ReactNode }) {
+export function Field({
+  label,
+  hint,
+  children,
+}: {
+  label: ReactNode;
+  hint?: ReactNode;
+  children: ReactNode;
+}) {
   return (
     // biome-ignore lint/a11y/noLabelWithoutControl: the control is passed as children
     <label className="field">

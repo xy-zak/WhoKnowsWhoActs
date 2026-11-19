@@ -256,20 +256,15 @@ export function AudioPopup({
       width={980}
       onClose={onClose}
       footer={
-        <>
-          <Button
-            icon="refresh"
-            tip="Reload this session's audio (e.g. while it is still recording)"
-            onClick={() => void load()}
-          >
-            Refresh
-          </Button>
-          <span className="spacer" />
-          <Button icon="close" kbd="Esc" onClick={onClose}>
-            Done
-          </Button>
-        </>
+        <Button
+          icon="refresh"
+          tip="Reload this session's audio (e.g. while it is still recording)"
+          onClick={() => void load()}
+        >
+          Refresh
+        </Button>
       }
+      done
     >
       <div className="col" style={{ gap: "var(--s3)" }}>
         {!view && !loadError && <span className="muted cursor">Loading</span>}
