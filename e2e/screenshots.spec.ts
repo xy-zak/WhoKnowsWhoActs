@@ -1,34 +1,36 @@
 import { spawn } from "node:child_process";
 import path from "node:path";
-import { expect, type Page, test } from "@playwright/test";
-import { CONTEXT, crop, prime, scenario, shot, writeReport } from "./screenshots/capture";
+import { type Browser, expect, type Page, test } from "@playwright/test";
 import {
   aboutYou,
   acts,
+  BASE,
   bind,
   blur,
   briefing,
   calibrate,
-  chooseScenario,
-  confirmKeySheet,
   consent,
-  current,
-  enableAudio,
-  fillRounds,
-  hoverTip,
+  currentStep,
+  endGameEarly,
+  fillWithFakePlayers,
+  liveSessionId,
   micCheck,
   newPlayer,
-  next,
-  nextThrough,
   onboard,
   onMicCheck,
+  openPlayer,
+  openSkipMicCheck,
+  type Player,
   panel,
   playerDisplay,
   popupFoot,
-  saveLabels,
+  setupSession,
   square,
+  tab,
   wrapUp,
-} from "./screenshots/flows";
+} from "./flows";
+import { CONTEXT, crop, hoverTip, prime, scenario, shot, writeReport } from "./screenshots/capture";
+import { type ShotId, shotById } from "./screenshots/catalogue";
 
 /**
  * Documentation screenshots: three scenarios play whole sessions through the
@@ -49,81 +51,55 @@ test.describe.configure({ mode: "serial" });
 test.setTimeout(600_000);
 test.afterAll(async ({ browser }) => writeReport(browser));
 
+/** A full-screen player PC, primed for captures. */
+const player = (browser: Browser) => newPlayer(browser, { context: CONTEXT, prepare: prime });
+
+/** The catalogued shot of a setup step (server/setup-<data-step>), if there is one. */
+async function setupShot(fac: Page, key: string, suffix = "") {
+  const id = `server/setup-${key}${suffix}`;
+  if (shotById(id)) await shot(fac, id as ShotId);
+}
+
 /* ─────────────────────────── 1. a full session ─────────────────────────── */
 
 scenario(
   "session",
   "full session: setup → onboarding → two rounds → wrap-up → database → replay",
   async ({ page: fac, browser }) => {
-    await fac.goto("/facilitator");
-
-    /* ── setup 01–06 ── */
-    await chooseScenario(fac, "Demo grid");
-    await shot(fac, "server/setup-01-scenario");
-    await next(fac).click();
-
-    await fillRounds(fac, { rounds: 2, propose: 3, decide: 2, timeLimitSec: 600 });
-    await shot(fac, "server/setup-02-rounds");
-    await next(fac).click();
-
-    await current(fac, "players");
-    await shot(fac, "server/setup-03-players");
-    await fac.getByRole("radio", { name: "Simulated players" }).check();
-    await shot(fac, "server/setup-03-players-simulated");
-    await fac.getByRole("radio", { name: "Real participants" }).check();
-    await next(fac).click();
-
-    await current(fac, "onboarding");
-    await enableAudio(fac);
-    await shot(fac, "server/setup-04-onboarding");
-    await next(fac).click();
-
-    await current(fac, "tags");
-    await fac.getByRole("textbox", { name: "Tags" }).fill("pilot, condition-A");
-    await fac
-      .getByRole("textbox", { name: "Notes" })
-      .fill("Screenshot run with scripted, fictional players.");
-    await shot(fac, "server/setup-05-tags");
-    await next(fac).click();
-
-    await current(fac, "review");
-    await shot(fac, "server/setup-06-review");
-    await next(fac).click();
-
-    /* ── 07 connect: four player PCs ── */
-    await current(fac, "connect");
-    const players = [];
-    for (let i = 0; i < 4; i++) players.push(await newPlayer(browser));
+    /* ── setup: a shot of every step; four player PCs connect ── */
+    const players: Player[] = [];
+    await setupSession(fac, {
+      rounds: { rounds: 2, propose: 3, decide: 2, timeLimitSec: 600 },
+      audio: true,
+      tags: "pilot, condition-A",
+      notes: "Screenshot run with scripted, fictional players.",
+      // fully dissociated pairing D6 (Ka–Pd, Kb–Pc, Kc–Pa, Kd–Pb)
+      labels: { dissociated: 6 },
+      connect: async () => {
+        for (let i = 0; i < 4; i++) players.push(await player(browser));
+        const p1 = players[0]!.page;
+        await shot(p1, "client/01-waiting-for-seat");
+        await p1.getByRole("button", { name: /Display settings/ }).click();
+        await crop(p1, "client/part-display-panel", p1.locator(".display-menu"), { fixed: true, pad: 16 });
+        await p1.keyboard.press("Escape");
+        await blur(p1);
+        await shot(fac, "server/setup-connect");
+        for (const [i, p] of players.entries()) await bind(fac, i + 1, p);
+        await expect(currentStep(fac).getByText("4/4 seats bound")).toBeVisible();
+        await shot(fac, "server/setup-connect-bound");
+        await shot(p1, "client/02-seat-assigned");
+      },
+      onStep: async (key) => {
+        if (key === "connect") return; // taken above, between the bindings
+        await setupShot(fac, key);
+        if (key === "players") {
+          await currentStep(fac).getByRole("radio", { name: "Simulated players" }).check();
+          await setupShot(fac, key, "-simulated");
+          await currentStep(fac).getByRole("radio", { name: "Real participants" }).check();
+        }
+      },
+    });
     const [p1, p2, p3, p4] = players.map((p) => p.page) as [Page, Page, Page, Page];
-    await shot(p1, "client/01-waiting-for-seat");
-    await p1.getByRole("button", { name: /Display settings/ }).click();
-    await crop(p1, "client/part-display-panel", p1.locator(".display-menu"), { fixed: true, pad: 16 });
-    await p1.keyboard.press("Escape");
-    await blur(p1);
-    await shot(fac, "server/setup-07-connect");
-    for (const [i, p] of players.entries()) {
-      await bind(fac, i + 1, p.terminal);
-      await expect(p.page.getByText(`Seat ${i + 1}`)).toBeVisible();
-    }
-    await expect(fac.locator(".acc-step.current").getByText("4/4 seats bound")).toBeVisible();
-    await shot(fac, "server/setup-07-connect-bound");
-    await shot(p1, "client/02-seat-assigned");
-    await next(fac).click();
-
-    /* ── 08 labels: fully dissociated pairing D6 (Ka–Pd, Kb–Pc, Kc–Pa, Kd–Pb) ── */
-    await saveLabels(fac, { dissociated: 6 });
-    await shot(fac, "server/setup-08-labels");
-    await next(fac).click();
-
-    await current(fac, "keysheet");
-    await shot(fac, "server/setup-09-key-sheet");
-    await confirmKeySheet(fac);
-    await next(fac).click();
-
-    await current(fac, "start");
-    await shot(fac, "server/setup-10-start");
-    await next(fac).click();
-    await expect(fac.locator(".live-indicator")).toBeVisible();
 
     /* ── onboarding: the seats at different steps (audio: consent hold → mic checks) ── */
     await consent(p4); // held: seats 1–3 have not agreed yet, so no microphone opens
@@ -323,7 +299,10 @@ scenario(
     // recording paused for everyone (TOOLS): confirmation, the paused state, what the player sees
     await crop(fac, "server/audio-status-bar", fac.locator(".statusbar"), { fixed: true, pad: 0 });
     await tools.getByRole("button", { name: "Pause recording" }).click();
-    await fac.getByRole("textbox", { name: "Reason for pausing the recording" }).fill("break");
+    await fac
+      .locator(".popup")
+      .getByRole("textbox", { name: /^Reason/ })
+      .fill("break");
     await shot(fac, "server/audio-popup-pause-recording");
     await popupFoot(fac).getByRole("button", { name: "Pause recording" }).click();
     await expect(p1.locator(".rec-tag.rec-paused").first()).toBeVisible();
@@ -499,44 +478,37 @@ scenario(
 /* ─────────────────────────── 2. the 5 × 5 grid with fake players ─────────────────────────── */
 
 scenario("small-grid", "small grid: one player PC and three fake players", async ({ page: fac, browser }) => {
-  await fac.goto("/facilitator");
-  await chooseScenario(fac, "Small demo grid");
-  await shot(fac, "server/setup-01-scenario-small-grid");
-  await next(fac).click();
-  await fillRounds(fac, { rounds: 1, propose: 3, decide: 2 });
-  await nextThrough(fac, ["rounds", "players", "onboarding", "tags", "review"]);
+  let real: Player | undefined;
+  await setupSession(fac, {
+    scenario: "Small demo grid",
+    rounds: { rounds: 1, propose: 3, decide: 2 },
+    connect: async () => {
+      real = await player(browser);
+      await bind(fac, 1, real);
+      await fillWithFakePlayers(fac);
+      await expect(currentStep(fac).getByText("4/4 seats bound")).toBeVisible();
+      await shot(fac, "server/setup-connect-fake-players");
+    },
+    onStep: async (key) => {
+      if (key === "scenario") await shot(fac, "server/setup-scenario-small-grid");
+    },
+  });
 
-  await current(fac, "connect");
-  const real = await newPlayer(browser);
-  await bind(fac, 1, real.terminal);
-  await fac.getByRole("combobox", { name: "Fake player pace" }).selectOption("fast");
-  await fac.getByRole("button", { name: /Fill empty seats with fake players/ }).click();
-  await expect(fac.locator(".acc-step.current").getByText("4/4 seats bound")).toBeVisible();
-  await shot(fac, "server/setup-07-connect-fake-players");
-  await next(fac).click();
-  await saveLabels(fac, "aligned");
-  await next(fac).click();
-  await confirmKeySheet(fac);
-  await next(fac).click();
-  await nextThrough(fac, ["start"]);
-
-  await onboard(real.page);
+  const rp = real!.page;
+  await onboard(rp);
   await fac.getByRole("button", { name: /Start round 1 of 1/ }).click();
-  await expect(real.page.getByText(/Round 1\/1/)).toBeVisible();
-  await acts(real.page, [
+  await expect(rp.getByText(/Round 1\/1/)).toBeVisible();
+  await acts(rp, [
     ["Propose", "B2"],
     ["Decide", "C3"],
     ["Propose", "D4"],
   ]);
-  await real.page.waitForTimeout(4000); // the fake players act too
-  await square(real.page, "C3").click();
-  await shot(real.page, "client/game-small-grid");
+  await rp.waitForTimeout(4000); // the fake players act too
+  await square(rp, "C3").click();
+  await shot(rp, "client/game-small-grid");
   await shot(fac, "server/live-small-grid");
 
-  await panel(fac, "Tools")
-    .getByRole("button", { name: /End game early/ })
-    .click();
-  await expect(fac.locator(".popup")).toBeVisible();
+  await endGameEarly(fac);
   await shot(fac, "server/live-popup-end-game");
   await popupFoot(fac)
     .getByRole("button", { name: /End game/ })
@@ -547,23 +519,13 @@ scenario("small-grid", "small grid: one player PC and three fake players", async
 /* ─────────────────────────── 3. simulated players ─────────────────────────── */
 
 scenario("simulation", "simulated players: agents play, simulation database", async ({ page: fac }) => {
-  await fac.goto("/facilitator");
-  await chooseScenario(fac, "Demo grid");
-  await next(fac).click();
-  await fillRounds(fac, { rounds: 2, propose: 3, decide: 2 });
-  await next(fac).click();
-  await current(fac, "players");
-  await fac.getByRole("radio", { name: "Simulated players" }).check();
-  const step3 = fac.locator(".acc-step.current");
-  await step3.getByRole("combobox").filter({ hasText: "Watchable" }).selectOption("quick");
-  await step3.getByPlaceholder("random", { exact: true }).fill("DOCS");
-  await nextThrough(fac, ["players", "onboarding", "tags", "review"]);
-  await current(fac, "connect");
-  await shot(fac, "server/simulation-01-agents");
-  await next(fac).click();
-  await saveLabels(fac, "aligned");
-  await next(fac).click();
-  await nextThrough(fac, ["keysheet", "start"]);
+  await setupSession(fac, {
+    rounds: { rounds: 2, propose: 3, decide: 2 },
+    simulated: { pace: "quick", seed: "DOCS" },
+    onStep: async (key) => {
+      if (key === "connect") await shot(fac, "server/simulation-01-agents");
+    },
+  });
   await expect(fac.locator(".live-indicator")).toContainText("SIM-");
 
   const start2 = fac.getByRole("button", { name: /Start round 2 of 2/ });
@@ -573,60 +535,44 @@ scenario("simulation", "simulated players: agents play, simulation database", as
   await expect(fac.getByText("Simulation complete")).toBeVisible({ timeout: 60_000 });
   await wrapUp(fac, false);
 
-  await blur(fac);
-  await fac.keyboard.press("3");
+  await tab(fac, 3);
   await expect(fac.locator("nav.subtabs .tab.active")).toContainText("Simulations");
   await shot(fac, "server/database-03-simulations");
 });
 
 /* ─────────────────────────── 4. audio: microphone problems ─────────────────────────── */
 
-const BASE = `http://127.0.0.1:${process.env.E2E_PORT ?? "3999"}`;
-
 scenario(
   "audio-edge",
   "audio: blocked microphone, skipping a mic check, a microphone that stops in the game",
   async ({ page: fac, browser }) => {
-    await fac.goto("/facilitator");
-    await chooseScenario(fac, "Demo grid");
-    await next(fac).click();
-    await fillRounds(fac, { rounds: 1, propose: 1, decide: 1 });
-    await nextThrough(fac, ["rounds", "players"]);
-    await enableAudio(fac);
-    await nextThrough(fac, ["onboarding", "tags", "review"]);
-
     // one real PC whose browser can be told to refuse the microphone, and whose track can be ended
-    await current(fac, "connect");
-    const ctx = await browser.newContext(CONTEXT);
-    await ctx.addInitScript(() => {
-      const w = window as unknown as { __deny: boolean; __streams: MediaStream[] };
-      w.__deny = false;
-      w.__streams = [];
-      const md = navigator.mediaDevices;
-      if (!md) return;
-      const orig = md.getUserMedia.bind(md);
-      md.getUserMedia = async (c) => {
-        if (w.__deny) throw new DOMException("Permission denied", "NotAllowedError");
-        const stream = await orig(c);
-        w.__streams.push(stream);
-        return stream;
-      };
+    let p1!: Page;
+    await setupSession(fac, {
+      audio: true,
+      connect: async () => {
+        const ctx = await browser.newContext(CONTEXT);
+        await ctx.addInitScript(() => {
+          const w = window as unknown as { __deny: boolean; __streams: MediaStream[] };
+          w.__deny = false;
+          w.__streams = [];
+          const md = navigator.mediaDevices;
+          if (!md) return;
+          const orig = md.getUserMedia.bind(md);
+          md.getUserMedia = async (c) => {
+            if (w.__deny) throw new DOMException("Permission denied", "NotAllowedError");
+            const stream = await orig(c);
+            w.__streams.push(stream);
+            return stream;
+          };
+        });
+        p1 = await ctx.newPage();
+        await prime(p1);
+        await bind(fac, 1, await openPlayer(p1));
+        await fillWithFakePlayers(fac);
+        await expect(currentStep(fac).getByText("4/4 seats bound")).toBeVisible();
+      },
     });
-    const p1 = await ctx.newPage();
-    await prime(p1);
-    await p1.goto("/");
-    await expect(p1.getByText("Waiting for the facilitator to assign a seat")).toBeVisible();
-    await bind(fac, 1, Number(await p1.locator(".client-number").textContent()));
-    await fac.getByRole("combobox", { name: "Fake player pace" }).selectOption("fast");
-    await fac.getByRole("button", { name: /Fill empty seats with fake players/ }).click();
-    await expect(fac.locator(".acc-step.current").getByText("4/4 seats bound")).toBeVisible();
-    await next(fac).click();
-    await saveLabels(fac, "aligned");
-    await next(fac).click();
-    await confirmKeySheet(fac);
-    await next(fac).click();
-    await nextThrough(fac, ["start"]);
-    await expect(fac.locator(".live-indicator")).toBeVisible();
 
     // permission refused: what the player sees, and the facilitator's way out
     await consent(p1);
@@ -638,11 +584,7 @@ scenario(
     await start.click();
     await expect(p1.getByText("Microphone access is blocked").first()).toBeVisible();
     await shot(p1, "client/audio-05-mic-denied");
-    await fac
-      .locator(".row", { hasText: "Seat 1: in the mic check" })
-      .getByRole("button", { name: /Skip mic check/ })
-      .click();
-    await fac.locator(".popup").getByRole("textbox", { name: "Reason" }).fill("no working microphone");
+    await openSkipMicCheck(fac, 1);
     await shot(fac, "server/audio-popup-skip-mic-check");
     await popupFoot(fac)
       .getByRole("button", { name: /Cancel/ })
@@ -673,9 +615,7 @@ scenario(
     await fac.waitForTimeout(2000);
     await shot(fac, "server/audio-live-mic-error");
 
-    await panel(fac, "Tools")
-      .getByRole("button", { name: /End game early/ })
-      .click();
+    await endGameEarly(fac);
     await popupFoot(fac)
       .getByRole("button", { name: /End game/ })
       .click();
@@ -692,15 +632,12 @@ scenario(
     // player PCs of the earlier scenarios are still connected (unseated): close them, so that
     // `--auto` binds the bots and not those pages
     for (const c of browser.contexts()) if (c !== fac.context()) await c.close();
-    await fac.goto("/facilitator");
     // the session is created here (audio on); `--auto` then binds the bots, calibrates and runs the rounds
-    await chooseScenario(fac, "Demo grid");
-    await next(fac).click();
-    await fillRounds(fac, { rounds: 2, propose: 2, decide: 2 });
-    await nextThrough(fac, ["rounds", "players"]);
-    await enableAudio(fac);
-    await nextThrough(fac, ["onboarding", "tags", "review"]);
-    await current(fac, "connect");
+    await setupSession(fac, {
+      rounds: { rounds: 2, propose: 2, decide: 2 },
+      audio: true,
+      onStep: async (key) => (key === "connect" ? "stop" : undefined),
+    });
     // tsx directly (not through npx), so that SIGTERM at the end reaches the bots
     const bots = spawn(
       path.resolve("node_modules/.bin/tsx"),
@@ -728,15 +665,11 @@ scenario(
     const whileBots = <T>(p: Promise<T>) => Promise.race([p, botsDied]);
     try {
       await whileBots(expect(fac.locator(".live-indicator")).toBeVisible({ timeout: 60_000 }));
-      const sessionId = (await fac.locator(".live-indicator").textContent())?.match(
-        /\bS-\d{8}-[0-9A-Z]{4}\b/,
-      )?.[0];
-      expect(sessionId).toBeTruthy();
+      const sessionId = await liveSessionId(fac);
       await whileBots(expect(fac.getByText(/Game complete/).first()).toBeVisible({ timeout: 400_000 }));
       await wrapUp(fac, true);
 
-      await blur(fac);
-      await fac.keyboard.press("3");
+      await tab(fac, 3);
       await expect(fac.locator("nav.subtabs .tab.active")).toContainText("Participants");
       const row = fac.getByRole("row", { name: new RegExp(`^${sessionId}\\b`) });
       await expect(row).toBeVisible();
@@ -767,7 +700,7 @@ scenario(
           .last()
           .getByText(/to confirm/),
       ).toBeVisible();
-      await fac.locator(".popup").last().getByRole("textbox").last().fill(sessionId!);
+      await fac.locator(".popup").last().getByRole("textbox").last().fill(sessionId);
       await shot(fac, "server/audio-db-05-delete", { keepScroll: true });
       await fac.keyboard.press("Escape");
     } finally {

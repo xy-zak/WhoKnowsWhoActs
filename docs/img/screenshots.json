@@ -1,40 +1,40 @@
 {
   "reviewedUpTo": "3f93e17",
   "shots": {
-    "server/setup-01-scenario": [
+    "server/setup-scenario": [
       {
         "v": 1,
-        "file": "server/setup-01-scenario.png",
+        "file": "server/setup-scenario.png",
         "date": "2026-11-18",
         "commit": "fc32ce7+",
         "caption": "Choose the map and game rules; the starting scores are previewed.",
         "at": "2026-11-18T01:36:05Z"
       }
     ],
-    "server/setup-02-rounds": [
+    "server/setup-rounds": [
       {
         "v": 1,
-        "file": "server/setup-02-rounds.png",
+        "file": "server/setup-rounds.png",
         "date": "2026-11-18",
         "commit": "fc32ce7+",
         "caption": "Rounds, quotas per player, time limit, how rounds end and start.",
         "at": "2026-11-18T01:36:06Z"
       }
     ],
-    "server/setup-03-players": [
+    "server/setup-players": [
       {
         "v": 1,
-        "file": "server/setup-03-players.png",
+        "file": "server/setup-players.png",
         "date": "2026-11-18",
         "commit": "fc32ce7+",
         "caption": "Real participants, seats, map view per seat, what players see.",
         "at": "2026-11-18T01:36:06Z"
       }
     ],
-    "server/setup-04-onboarding": [
+    "server/setup-onboarding": [
       {
         "v": 1,
-        "file": "server/setup-04-onboarding.png",
+        "file": "server/setup-onboarding.png",
         "date": "2026-11-18",
         "commit": "fc32ce7+",
         "caption": "Consent, questionnaire and briefing, each switched on or off.",
@@ -42,27 +42,27 @@
       },
       {
         "v": 2,
-        "file": "server/setup-04-onboarding-v2.png",
+        "file": "server/setup-onboarding-v2.png",
         "date": "2026-11-19",
         "at": "2026-11-19T00:49:01Z",
         "commit": "125d503",
         "caption": "Record audio option under the consent screen, with the warning shown on a plain-HTTP server."
       }
     ],
-    "server/setup-05-tags": [
+    "server/setup-tags": [
       {
         "v": 1,
-        "file": "server/setup-05-tags.png",
+        "file": "server/setup-tags.png",
         "date": "2026-11-18",
         "commit": "fc32ce7+",
         "caption": "Tags and a note that describe the session in the dataset.",
         "at": "2026-11-18T01:36:08Z"
       }
     ],
-    "server/setup-06-review": [
+    "server/setup-review": [
       {
         "v": 1,
-        "file": "server/setup-06-review.png",
+        "file": "server/setup-review.png",
         "date": "2026-11-18",
         "commit": "fc32ce7+",
         "caption": "Every setting in one table before *Create session* locks them.",
@@ -70,37 +70,37 @@
       },
       {
         "v": 2,
-        "file": "server/setup-06-review-v2.png",
+        "file": "server/setup-review-v2.png",
         "date": "2026-11-19",
         "at": "2026-11-19T00:49:01Z",
         "commit": "125d503",
         "caption": "Review lists the mic check step and a new AUDIO row."
       }
     ],
-    "server/setup-08-labels": [
+    "server/setup-labels": [
       {
         "v": 1,
-        "file": "server/setup-08-labels.png",
+        "file": "server/setup-labels.png",
         "date": "2026-11-18",
         "commit": "fc32ce7+",
         "caption": "The K–P pairing (here dissociated D6), its matrix, the K per seat.",
         "at": "2026-11-18T01:36:12Z"
       }
     ],
-    "server/setup-09-key-sheet": [
+    "server/setup-keysheet": [
       {
         "v": 1,
-        "file": "server/setup-09-key-sheet.png",
+        "file": "server/setup-keysheet.png",
         "date": "2026-11-18",
         "commit": "fc32ce7+",
         "caption": "Print the sheet that links codes to names; store it apart.",
         "at": "2026-11-18T01:36:13Z"
       }
     ],
-    "server/setup-10-start": [
+    "server/setup-start": [
       {
         "v": 1,
-        "file": "server/setup-10-start.png",
+        "file": "server/setup-start.png",
         "date": "2026-11-18",
         "commit": "fc32ce7+",
         "caption": "A final checklist; *Start onboarding* locks the seats and opens LIVE.",
@@ -117,10 +117,10 @@
         "at": "2026-11-18T01:36:10Z"
       }
     ],
-    "server/setup-07-connect": [
+    "server/setup-connect": [
       {
         "v": 1,
-        "file": "server/setup-07-connect.png",
+        "file": "server/setup-connect.png",
         "date": "2026-11-18",
         "commit": "fc32ce7+",
         "caption": "Four clients connected, no seat bound yet.",
@@ -128,17 +128,17 @@
       },
       {
         "v": 2,
-        "file": "server/setup-07-connect-v2.png",
+        "file": "server/setup-connect-v2.png",
         "date": "2026-11-19",
         "at": "2026-11-19T00:49:01Z",
         "commit": "125d503",
         "caption": "Connect notes that browsers on other PCs cannot use the microphone over plain HTTP."
       }
     ],
-    "server/setup-07-connect-bound": [
+    "server/setup-connect-bound": [
       {
         "v": 1,
-        "file": "server/setup-07-connect-bound.png",
+        "file": "server/setup-connect-bound.png",
         "date": "2026-11-18",
         "commit": "fc32ce7+",
         "caption": "Every seat bound to a client and given a participant code.",
@@ -1031,20 +1031,20 @@
         "caption": "Delete audio: raw or all audio, a warning about exports still on disk, type the session id."
       }
     ],
-    "server/setup-07-connect-fake-players": [
+    "server/setup-connect-fake-players": [
       {
         "v": 1,
-        "file": "server/setup-07-connect-fake-players.png",
+        "file": "server/setup-connect-fake-players.png",
         "date": "2026-11-18",
         "commit": "fc32ce7+",
         "caption": "One player PC, with fake players on the other three seats.",
         "at": "2026-11-18T01:37:06Z"
       }
     ],
-    "server/setup-03-players-simulated": [
+    "server/setup-players-simulated": [
       {
         "v": 1,
-        "file": "server/setup-03-players-simulated.png",
+        "file": "server/setup-players-simulated.png",
         "date": "2026-11-18",
         "commit": "fc32ce7+",
         "caption": "An agent policy per seat, a pace and a seed.",
@@ -1071,10 +1071,10 @@
         "at": "2026-11-18T02:19:05Z"
       }
     ],
-    "server/setup-01-scenario-small-grid": [
+    "server/setup-scenario-small-grid": [
       {
         "v": 1,
-        "file": "server/setup-01-scenario-small-grid.png",
+        "file": "server/setup-scenario-small-grid.png",
         "date": "2026-11-18",
         "commit": "fc32ce7+",
         "caption": "The small grid selected in step 01.",

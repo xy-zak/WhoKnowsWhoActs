@@ -27,36 +27,36 @@ Facilitator, SETUP tab: a ten-step wizard. Steps 01–06 configure the session, 
 
 | | |
 | --- | --- |
-| ![Step 01 · Scenario\|340](./server/setup-01-scenario.png) | ![Step 02 · Rounds\|340](./server/setup-02-rounds.png) |
-| **Step 01 · Scenario:** Choose the map and game rules; the starting scores are previewed. | **Step 02 · Rounds:** Rounds, quotas per player, time limit, how rounds end and start. |
-| ![Step 03 · Players\|340](./server/setup-03-players.png) |  |
-| **Step 03 · Players:** Real participants, seats, map view per seat, what players see. |  |
+| ![Setup · Scenario\|340](./server/setup-scenario.png) | ![Setup · Rounds\|340](./server/setup-rounds.png) |
+| **Setup · Scenario:** Choose the map and game rules; the starting scores are previewed. | **Setup · Rounds:** Rounds, quotas per player, time limit, how rounds end and start. |
+| ![Setup · Players\|340](./server/setup-players.png) |  |
+| **Setup · Players:** Real participants, seats, map view per seat, what players see. |  |
 
-**Step 04 · Onboarding** · 2 versions, oldest first
+**Setup · Onboarding** · 2 versions, oldest first
 
 | v1 · 2026-11-18 | v2 · 2026-11-19 |
 | --- | --- |
-| ![Step 04 · Onboarding v1\|340](./server/setup-04-onboarding.png) | ![Step 04 · Onboarding v2\|340](./server/setup-04-onboarding-v2.png) |
+| ![Setup · Onboarding v1\|340](./server/setup-onboarding.png) | ![Setup · Onboarding v2\|340](./server/setup-onboarding-v2.png) |
 | Consent, questionnaire and briefing, each switched on or off. | Record audio option under the consent screen, with the warning shown on a plain-HTTP server. |
 
 | | |
 | --- | --- |
-| ![Step 05 · Tags\|340](./server/setup-05-tags.png) |  |
-| **Step 05 · Tags:** Tags and a note that describe the session in the dataset. |  |
+| ![Setup · Tags\|340](./server/setup-tags.png) |  |
+| **Setup · Tags:** Tags and a note that describe the session in the dataset. |  |
 
-**Step 06 · Review** · 2 versions, oldest first
+**Setup · Review** · 2 versions, oldest first
 
 | v1 · 2026-11-18 | v2 · 2026-11-19 |
 | --- | --- |
-| ![Step 06 · Review v1\|340](./server/setup-06-review.png) | ![Step 06 · Review v2\|340](./server/setup-06-review-v2.png) |
+| ![Setup · Review v1\|340](./server/setup-review.png) | ![Setup · Review v2\|340](./server/setup-review-v2.png) |
 | Every setting in one table before *Create session* locks them. | Review lists the mic check step and a new AUDIO row. |
 
 | | |
 | --- | --- |
-| ![Step 08 · Labels\|340](./server/setup-08-labels.png) | ![Step 09 · Key sheet\|340](./server/setup-09-key-sheet.png) |
-| **Step 08 · Labels:** The K–P pairing (here dissociated D6), its matrix, the K per seat. | **Step 09 · Key sheet:** Print the sheet that links codes to names; store it apart. |
-| ![Step 10 · Start\|340](./server/setup-10-start.png) |  |
-| **Step 10 · Start:** A final checklist; *Start onboarding* locks the seats and opens LIVE. |  |
+| ![Setup · Labels\|340](./server/setup-labels.png) | ![Setup · Key sheet\|340](./server/setup-keysheet.png) |
+| **Setup · Labels:** The K–P pairing (here dissociated D6), its matrix, the K per seat. | **Setup · Key sheet:** Print the sheet that links codes to names; store it apart. |
+| ![Setup · Start\|340](./server/setup-start.png) |  |
+| **Setup · Start:** A final checklist; *Start onboarding* locks the seats and opens LIVE. |  |
 
 ---
 
@@ -69,17 +69,17 @@ Each player PC opens the game page and shows a client number; the facilitator bi
 | ![Player · Waiting for a seat\|340](./client/01-waiting-for-seat.png) |  |
 | **Player · Waiting for a seat:** A PC waiting to be bound; the large number is its client number. |  |
 
-**Facilitator · Step 07 · Connect** · 2 versions, oldest first
+**Facilitator · Setup · Connect** · 2 versions, oldest first
 
 | v1 · 2026-11-18 | v2 · 2026-11-19 |
 | --- | --- |
-| ![Facilitator · Step 07 · Connect v1\|340](./server/setup-07-connect.png) | ![Facilitator · Step 07 · Connect v2\|340](./server/setup-07-connect-v2.png) |
+| ![Facilitator · Setup · Connect v1\|340](./server/setup-connect.png) | ![Facilitator · Setup · Connect v2\|340](./server/setup-connect-v2.png) |
 | Four clients connected, no seat bound yet. | Connect notes that browsers on other PCs cannot use the microphone over plain HTTP. |
 
 | | |
 | --- | --- |
-| ![Facilitator · Step 07 · All seats bound\|340](./server/setup-07-connect-bound.png) | ![Player · Seat assigned\|340](./client/02-seat-assigned.png) |
-| **Facilitator · Step 07 · All seats bound:** Every seat bound to a client and given a participant code. | **Player · Seat assigned:** Bound to seat 1, waiting for onboarding to start. |
+| ![Facilitator · Setup · All seats bound\|340](./server/setup-connect-bound.png) | ![Player · Seat assigned\|340](./client/02-seat-assigned.png) |
+| **Facilitator · Setup · All seats bound:** Every seat bound to a client and given a participant code. | **Player · Seat assigned:** Bound to seat 1, waiting for onboarding to start. |
 
 ---
 
@@ -372,10 +372,10 @@ Fake players are test clients the server creates; simulated players are agents t
 
 | | |
 | --- | --- |
-| ![Fake players\|340](./server/setup-07-connect-fake-players.png) | ![Simulated players · Step 03\|340](./server/setup-03-players-simulated.png) |
-| **Fake players:** One player PC, with fake players on the other three seats. | **Simulated players · Step 03:** An agent policy per seat, a pace and a seed. |
-| ![Simulated players · Step 07\|340](./server/simulation-01-agents.png) | ![Simulated players · LIVE\|340](./server/simulation-02-live.png) |
-| **Simulated players · Step 07:** The agent and seed of every seat. | **Simulated players · LIVE:** Round 1, played by the agents on their own. |
+| ![Fake players\|340](./server/setup-connect-fake-players.png) | ![Simulated players · Setup\|340](./server/setup-players-simulated.png) |
+| **Fake players:** One player PC, with fake players on the other three seats. | **Simulated players · Setup:** An agent policy per seat, a pace and a seed. |
+| ![Simulated players · Agents\|340](./server/simulation-01-agents.png) | ![Simulated players · LIVE\|340](./server/simulation-02-live.png) |
+| **Simulated players · Agents:** The agent and seed of every seat. | **Simulated players · LIVE:** Round 1, played by the agents on their own. |
 
 ---
 
@@ -385,8 +385,8 @@ The small demo grid: 25 squares, 100 sub-squares.
 
 | | |
 | --- | --- |
-| ![Facilitator · Step 01 · Small grid\|340](./server/setup-01-scenario-small-grid.png) | ![Facilitator · LIVE on the small grid\|340](./server/live-small-grid.png) |
-| **Facilitator · Step 01 · Small grid:** The small grid selected in step 01. | **Facilitator · LIVE on the small grid:** A round on the small grid, with three fake players. |
+| ![Facilitator · Setup · Small grid\|340](./server/setup-scenario-small-grid.png) | ![Facilitator · LIVE on the small grid\|340](./server/live-small-grid.png) |
+| **Facilitator · Setup · Small grid:** The small grid selected in step 01. | **Facilitator · LIVE on the small grid:** A round on the small grid, with three fake players. |
 | ![Player · Game on the small grid\|340](./client/game-small-grid.png) |  |
 | **Player · Game on the small grid:** Square C3 selected. |  |
 
@@ -502,9 +502,9 @@ Newest first: every new version of a screen, and when new screens were added.
 
 | Date | Screen | Version | What changed |
 | --- | --- | --- | --- |
-| 2026-11-19 | Step 04 · Onboarding | v2 | Record audio option under the consent screen, with the warning shown on a plain-HTTP server. |
-| 2026-11-19 | Step 06 · Review | v2 | Review lists the mic check step and a new AUDIO row. |
-| 2026-11-19 | Step 07 · Connect | v2 | Connect notes that browsers on other PCs cannot use the microphone over plain HTTP. |
+| 2026-11-19 | Setup · Onboarding | v2 | Record audio option under the consent screen, with the warning shown on a plain-HTTP server. |
+| 2026-11-19 | Setup · Review | v2 | Review lists the mic check step and a new AUDIO row. |
+| 2026-11-19 | Setup · Connect | v2 | Connect notes that browsers on other PCs cannot use the microphone over plain HTTP. |
 | 2026-11-19 | Consent | v2 | Mic check step in the progress bar; the consent text gains an Audio recording section. |
 | 2026-11-19 | About you | v2 | REC bar on top while the microphone records; the mic check step is done in the progress bar. |
 | 2026-11-19 | Ready | v2 | Ready with audio: REC bar on top, and a note that a short sound calibration comes next. |

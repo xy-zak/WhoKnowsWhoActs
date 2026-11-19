@@ -4,6 +4,12 @@ History of [ARCHITECTURE.md](../ARCHITECTURE.md). Newest first. How entries are 
 
 ## Unreleased
 
+### Not yet committed · branch `testing-harness`
+
+- **Type:** Maintenance
+- **Change:** The testing table's *Browser* row describes the slimmer e2e suite: one real player browser and three socket bots instead of four browsers, no separate fake-player test (its checks moved into the audio test), and the shared `e2e/flows.ts` whose `setupSession()` walks the setup by step key. The *Audio* row says the recording verdict is checked as a table of cases (the comparison with the pre-refactor rule is gone). The *Screenshots* row counts five scenarios and names setup shots by step key.
+- **Reason:** Every change to the setup steps broke the e2e tests in about 30 places; the suite was trimmed to what only a browser can prove, with no loss of unit-test coverage.
+
 ### Not yet committed · documents `ead1760`
 
 - **Type:** Risk mitigation
