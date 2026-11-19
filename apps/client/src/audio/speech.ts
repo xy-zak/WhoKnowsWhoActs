@@ -1,3 +1,4 @@
+import { AUDIO_SAMPLE_RATE } from "@wkwa/shared";
 import { MIN_DB, roundDb, toDb } from "./levels";
 
 /**
@@ -71,7 +72,7 @@ export class SpeechDetector {
   private speechFrames = 0;
 
   constructor(o: SpeechDetectorOptions = {}) {
-    const rate = o.sampleRate ?? 16000;
+    const rate = o.sampleRate ?? AUDIO_SAMPLE_RATE;
     this.frameMs = o.frameMs ?? 20;
     this.frameLen = Math.max(1, Math.round((rate * this.frameMs) / 1000));
     this.minSpeechMs = o.minSpeechMs ?? 1000;

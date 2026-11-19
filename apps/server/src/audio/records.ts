@@ -7,23 +7,43 @@
  * shows `open | closed | interrupted | deleted`.
  */
 import { statSync } from "node:fs";
+import { stat } from "node:fs/promises";
 import {
+  AUDIO_SAMPLE_RATE,
   AUDIO_STOP_REASONS,
+  type AudioDerivativeKind,
   type AudioDerivativeSummary,
   type AudioStopReason,
   type AudioTrackSummary,
+  type SeatAudioSummary,
+  type SpeechSegmentRow,
 } from "@wkwa/shared";
 import type { AudioChunkRow, AudioDerivativeRow, AudioTrackRow, Store } from "../db/store";
 
+/**
+ * What each derivative kind holds. `sound`: voice audio, so it goes with "delete raw audio" (a kind
+ * not listed here counts as sound: a kind added later errs on the side of deleting voice).
+ * `attribution`: an attribution run writes it, and a re-run replaces the previous run's.
+ */
+export const DERIVATIVE_KINDS = {
+  speech_segments: { sound: false, attribution: true },
+  talk_time: { sound: false, attribution: true },
+  quality_report: { sound: false, attribution: true },
+  leakage_matrix: { sound: false, attribution: true },
+  clean: { sound: true, attribution: true },
+  /** Not produced yet: transcripts are text (personal data, but not voice recordings). */
+  transcript: { sound: false, attribution: false },
+} as const satisfies Record<AudioDerivativeKind | "transcript", { sound: boolean; attribution: boolean }>;
+
 /** Derivative kinds one attribution run produces (replaced together when it is re-run). */
-export const ATTRIBUTION_DERIVATIVE_KINDS = [
-  "speech_segments",
-  "talk_time",
-  "quality_report",
-  "leakage_matrix",
-  "clean",
-] as const;
-export type AttributionDerivativeKind = (typeof ATTRIBUTION_DERIVATIVE_KINDS)[number];
+export const ATTRIBUTION_DERIVATIVE_KINDS = (
+  Object.keys(DERIVATIVE_KINDS) as Array<keyof typeof DERIVATIVE_KINDS>
+).filter((k): k is AudioDerivativeKind => DERIVATIVE_KINDS[k].attribution);
+
+/** Does a derivative of this kind hold sound (and so go with the raw audio)? Unknown kinds do. */
+export function isAudioDerivativeKind(kind: string): boolean {
+  return (DERIVATIVE_KINDS as Record<string, { sound: boolean } | undefined>)[kind]?.sound ?? true;
+}
 
 /**
  * Stop reasons after which a track did not end cleanly: the browser or its microphone went away, or
@@ -80,14 +100,26 @@ export function fileBytes(store: Store, sessionId: string, fileName: string | nu
   }
 }
 
+/** fileBytes without blocking the event loop (for REST). */
+async function fileBytesAsync(store: Store, sessionId: string, fileName: string | null): Promise<number> {
+  if (!fileName || !store.audioFiles) return 0;
+  try {
+    return (await stat(store.audioFiles.pathOf(sessionId, fileName))).size;
+  } catch {
+    return 0;
+  }
+}
+
 export interface TrackView {
   row: AudioTrackRow;
   chunks: AudioChunkRow[];
-  summary: AudioTrackSummary;
+  /** The REST summary without the size on disk (trackSummaries adds it). */
+  summary: Omit<AudioTrackSummary, "bytes">;
   /** Server time just after the track's last sample (from its last chunk's client timestamp). */
   endTs: number;
 }
 
+/** A session's tracks in start order with their chunk index (database rows only: no file is read). */
 export function trackViews(store: Store, sessionId: string): TrackView[] {
   return store
     .listAudioTracks(sessionId)
@@ -95,7 +127,7 @@ export function trackViews(store: Store, sessionId: string): TrackView[] {
     .map((row) => {
       const chunks = store.listAudioChunks(row.trackId);
       const last = chunks[chunks.length - 1];
-      const rate = row.sampleRate > 0 ? row.sampleRate : 16_000;
+      const rate = row.sampleRate > 0 ? row.sampleRate : AUDIO_SAMPLE_RATE;
       const endTs = last ? last.clientTs + (last.sampleCount * 1000) / rate : row.startedServerTs;
       return {
         row,
@@ -111,30 +143,20 @@ export function trackViews(store: Store, sessionId: string): TrackView[] {
           durationMs: row.durationMs,
           chunks: row.chunks,
           gaps: trackGaps(chunks, row.droppedChunks),
-          bytes: row.status === "deleted" ? 0 : fileBytes(store, sessionId, row.fileName),
           status: trackStatusOf(row),
         },
       };
     });
 }
 
-/** Per-seat totals for the DATABASE tab. */
-export interface SeatAudioSummary {
-  seat: number;
-  tracks: number;
-  /** Audio stored (sum of the tracks' durations, ms). */
-  durationMs: number;
-  /** Missing chunks inside tracks. */
-  gaps: number;
-  /** Breaks between consecutive tracks (a pause, a reload, a reconnect). */
-  trackBreaks: number;
-  /** First sample to last sample (ms), and the part of it without audio. */
-  spanMs: number;
-  missingMs: number;
-  firstServerTs: number | null;
-  lastServerTs: number | null;
-  /** True once the seat's raw audio was deleted (metadata kept). */
-  rawDeleted: boolean;
+/** The REST summaries of `views`, with the size of each file on disk (stat calls run in parallel). */
+export function trackSummaries(store: Store, views: readonly TrackView[]): Promise<AudioTrackSummary[]> {
+  return Promise.all(
+    views.map(async ({ row, summary }) => ({
+      ...summary,
+      bytes: row.status === "deleted" ? 0 : await fileBytesAsync(store, row.sessionId, row.fileName),
+    })),
+  );
 }
 
 export function seatSummaries(views: readonly TrackView[]): SeatAudioSummary[] {
@@ -173,7 +195,10 @@ export interface CleanParams {
   [k: string]: unknown;
 }
 
-export function derivativeSummary(store: Store, d: AudioDerivativeRow): AudioDerivativeSummary {
+export async function derivativeSummary(
+  store: Store,
+  d: AudioDerivativeRow,
+): Promise<AudioDerivativeSummary> {
   const p = d.params as Partial<CleanParams>;
   const samples = typeof p.samples === "number" ? p.samples : 0;
   return {
@@ -186,26 +211,9 @@ export function derivativeSummary(store: Store, d: AudioDerivativeRow): AudioDer
     params: d.params,
     createdServerTs: d.createdServerTs,
     samples,
-    durationMs: Math.round((samples * 1000) / (p.sampleRate ?? 16_000)),
-    bytes: fileBytes(store, d.sessionId, d.fileName),
+    durationMs: Math.round((samples * 1000) / (p.sampleRate ?? AUDIO_SAMPLE_RATE)),
+    bytes: await fileBytesAsync(store, d.sessionId, d.fileName),
   };
-}
-
-/** One row of speech_segments (stored per seat in the `speech_segments` derivative, and in the CSV). */
-export interface SpeechSegmentRow {
-  seat: number;
-  startTs: number;
-  endTs: number;
-  durationMs: number;
-  round: number | null;
-  phase: string | null;
-  paused: boolean;
-  recordingPaused: boolean;
-  meanDb: number;
-  confidence: number;
-  overlap: boolean;
-  overlapMs: number;
-  overlapWith: number[];
 }
 
 /** The stored speech segments of a session, every seat, in time order (with the derivative that holds them). */

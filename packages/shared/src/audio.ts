@@ -1,5 +1,7 @@
 import { z } from "zod";
+import type { AudioExportKind, AudioExportRequestKind } from "./exportColumns";
 import { SeatSchema } from "./labels";
+import type { AudioChunk } from "./protocol";
 
 /* ═══════════════════════════════════════════════════════════════════════════
  * AUDIO — shared constants and data contracts for microphone recording.
@@ -55,6 +57,36 @@ export function clampDb(db: number): number {
 /** Duration of `samples` at the stored sample rate (ms). */
 export function samplesToMs(samples: number): number {
   return (samples / AUDIO_SAMPLE_RATE) * 1000;
+}
+
+/* ─────────────────────────── s16le PCM ─────────────────────────── */
+
+/** True on little-endian hosts (every browser and server this runs on in practice). */
+export const LITTLE_ENDIAN = new Uint8Array(new Uint16Array([1]).buffer)[0] === 1;
+
+/**
+ * Samples as signed 16-bit little-endian bytes: a view of the same memory on little-endian hosts,
+ * else a byte-swapped copy. Copy it (`.slice()`) when the samples' buffer is reused.
+ */
+export function int16ToLeBytes(samples: Int16Array): Uint8Array {
+  if (LITTLE_ENDIAN) return new Uint8Array(samples.buffer, samples.byteOffset, samples.byteLength);
+  const out = new Uint8Array(samples.byteLength);
+  const v = new DataView(out.buffer);
+  for (let i = 0; i < samples.length; i++) v.setInt16(i * 2, samples[i]!, true);
+  return out;
+}
+
+/**
+ * Signed 16-bit little-endian bytes as samples (a trailing odd byte is ignored): a view of the
+ * same memory on little-endian hosts when the bytes are 2-byte aligned, else a copy.
+ */
+export function int16FromLeBytes(bytes: Uint8Array): Int16Array {
+  const n = Math.floor(bytes.byteLength / 2);
+  if (LITTLE_ENDIAN && bytes.byteOffset % 2 === 0) return new Int16Array(bytes.buffer, bytes.byteOffset, n);
+  const out = new Int16Array(n);
+  const v = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  for (let i = 0; i < n; i++) out[i] = v.getInt16(i * 2, true);
+  return out;
 }
 
 /* ─────────────────────────── Shared field schemas ─────────────────────────── */
@@ -297,6 +329,9 @@ export const TrackIdSchema = z
   .uuid()
   .describe("Random id of the audio track (one continuous capture run of one seat)");
 
+/** An `audio:chunk` message as the browser sends it (the input of `AudioChunk` in protocol.ts). */
+export type AudioChunkInput = z.input<typeof AudioChunk>;
+
 /* ─────────────────────────── REST response types (DATABASE tab) ─────────────────────────── */
 
 const Ts = (d: string) => z.number().describe(`${d} (server clock, Unix epoch ms)`);
@@ -329,8 +364,18 @@ export const AudioTrackSummarySchema = z
   .describe("One stored track of one seat");
 export type AudioTrackSummary = z.infer<typeof AudioTrackSummarySchema>;
 
-/** Kinds of derived audio files (raw audio is never modified; derivatives are new encrypted files). */
-export const AUDIO_DERIVATIVE_KINDS = ["clean"] as const;
+/**
+ * Kinds of derived results an attribution run stores (raw audio is never modified): per seat
+ * `speech_segments` (JSON) and `clean` (a new encrypted file), per session `talk_time`,
+ * `quality_report` and `leakage_matrix` (JSON). Only `clean` holds sound.
+ */
+export const AUDIO_DERIVATIVE_KINDS = [
+  "speech_segments",
+  "talk_time",
+  "quality_report",
+  "leakage_matrix",
+  "clean",
+] as const;
 export type AudioDerivativeKind = (typeof AUDIO_DERIVATIVE_KINDS)[number];
 
 export const AudioDerivativeSummarySchema = z
@@ -338,7 +383,7 @@ export const AudioDerivativeSummarySchema = z
     derivativeId: z.string().min(1).describe("Random id of the derived file"),
     seat: SeatSchema,
     kind: z
-      .enum(AUDIO_DERIVATIVE_KINDS)
+      .literal("clean")
       .describe(
         "'clean' = the seat's aligned track with frames attributed to other seats attenuated by 30 dB",
       ),
@@ -426,8 +471,8 @@ export const AttributionJobSchema = z
   .describe("An audio processing job, triggered from the DATABASE tab");
 export type AttributionJob = z.infer<typeof AttributionJobSchema>;
 
-/** What a deletion removed: raw tracks only (derived files kept), derived files only, or both. */
-export const AUDIO_DELETION_SCOPES = ["raw", "derived", "all"] as const;
+/** What a deletion removed: the raw tracks and every derivative that holds sound, or all audio. */
+export const AUDIO_DELETION_SCOPES = ["raw", "all"] as const;
 export type AudioDeletionScope = (typeof AUDIO_DELETION_SCOPES)[number];
 
 export const AudioDeletionRecordSchema = z
@@ -437,7 +482,7 @@ export const AudioDeletionRecordSchema = z
     scope: z
       .enum(AUDIO_DELETION_SCOPES)
       .describe(
-        "'raw' = raw tracks deleted, derived files and speech segments kept; 'derived' = derived files deleted; 'all' = both",
+        "'raw' = raw tracks and cleaned tracks deleted, speech segments and metadata kept; 'all' = every audio row and file",
       ),
     seats: z.array(SeatSchema).describe("Seats whose audio was deleted"),
     tracks: Count("Raw tracks deleted"),
@@ -462,3 +507,182 @@ export const AudioSessionSummarySchema = z
   })
   .describe("Everything the DATABASE tab shows about one session's audio");
 export type AudioSessionSummary = z.infer<typeof AudioSessionSummarySchema>;
+
+/*
+ * The views the server builds around the summaries above (plain types: the server writes them,
+ * the DATABASE tab reads them).
+ */
+
+/** Overall quality of an attribution run: `good` = no warnings, `fair` = usable with care, `poor` = unreliable. */
+export type AttributionGrade = "good" | "fair" | "poor";
+
+/** The attribution summary of a job, plus the overall quality grade of the run. */
+export type AttributionSummaryView = AttributionSummary & { grade: AttributionGrade };
+
+/** GET /api/audio/jobs/:jobId */
+export type AttributionJobView = Omit<AttributionJob, "summary"> & {
+  sessionId: string;
+  summary?: AttributionSummaryView;
+};
+
+/** Per-seat totals for the DATABASE tab. */
+export interface SeatAudioSummary {
+  seat: number;
+  tracks: number;
+  /** Audio stored (sum of the tracks' durations, ms). */
+  durationMs: number;
+  /** Missing chunks inside tracks. */
+  gaps: number;
+  /** Breaks between consecutive tracks (a pause, a reload, a reconnect). */
+  trackBreaks: number;
+  /** First sample to last sample (ms), and the part of it without audio. */
+  spanMs: number;
+  missingMs: number;
+  firstServerTs: number | null;
+  lastServerTs: number | null;
+  /** True once the seat's raw audio was deleted (metadata kept). */
+  rawDeleted: boolean;
+}
+
+/** One entry of a session's audio exports (from the export register). */
+export interface AudioExportEntry {
+  exportId: string;
+  createdWall: string;
+  audioKind: AudioExportRequestKind | null;
+  seats: number[];
+  files: number;
+  /** Where the WAVs were written; `onDisk` = the folder still exists. */
+  path: string;
+  onDisk: boolean;
+}
+
+/** GET /api/sessions/:id/audio: the shared summary plus per-seat totals. */
+export type AudioSessionView = AudioSessionSummary & {
+  jobs: AttributionJobView[];
+  seats: SeatAudioSummary[];
+  /** Summary of the latest finished attribution, or null. */
+  attribution: (AttributionSummaryView & { jobId: string | null; createdServerTs: number }) | null;
+  audioExports: AudioExportEntry[];
+  /** True while the session runs: attribution, export and deletion wait until it has ended. */
+  running: boolean;
+};
+
+/** One speech segment (stored per seat in the `speech_segments` derivative, and in the CSV). */
+export interface SpeechSegmentRow {
+  seat: number;
+  startTs: number;
+  endTs: number;
+  durationMs: number;
+  round: number | null;
+  phase: string | null;
+  paused: boolean;
+  recordingPaused: boolean;
+  meanDb: number;
+  confidence: number;
+  overlap: boolean;
+  overlapMs: number;
+  overlapWith: number[];
+}
+
+/** GET /api/sessions/:id/audio/segments: who spoke when (timing only, never audio). */
+export interface SpeechSegmentsView {
+  sessionId: string;
+  engineVersion: string | null;
+  jobId: string | null;
+  segments: SpeechSegmentRow[];
+}
+
+export interface AudioExportFile {
+  name: string;
+  seat: number;
+  kind: AudioExportKind;
+  samples: number;
+  durationMs: number;
+  bytes: number;
+  sha256: string;
+}
+
+/** POST /api/sessions/:id/audio/export */
+export interface AudioExportResult {
+  exportId: string;
+  sessionId: string;
+  dir: string;
+  files: AudioExportFile[];
+  /** `attribution` = the alignment of the latest attribution; `timestamps` = the chunks' timestamps only. */
+  timing: "attribution" | "timestamps";
+  /** Read problems (damaged or missing records play as silence), also in the manifest. */
+  warnings: string[];
+}
+
+export interface AudioDeletionCounts {
+  /** raw: tracks whose audio was deleted (rows kept as `deleted`); all: track rows deleted. */
+  tracks: number;
+  /** Recorded duration of those tracks, in ms. */
+  audioMs: number;
+  /** Chunk rows deleted (raw keeps them: they are timing metadata). */
+  chunks: number;
+  derivatives: number;
+  jobs: number;
+  /** Encrypted files whose keys were deleted (and which were then unlinked). */
+  files: number;
+  /** Their size on disk before the deletion (bytes). */
+  bytes: number;
+  /** Seats whose audio was deleted, as a bit mask (bit n = seat n), so the register keeps plain numbers. */
+  seatMask: number;
+}
+
+/** Encrypted audio files unlinked after a deletion was committed. */
+export interface AudioFilesRemoved {
+  removed: number;
+  /**
+   * Files that could not be unlinked, as `<sessionId>/<fileName>`. Their keys
+   * are gone with the rows, so they are unreadable; delete them by hand.
+   */
+  failed: string[];
+}
+
+/** POST /api/sessions/:id/audio/delete */
+export interface AudioDeleteResult {
+  sessionId: string;
+  scope: AudioDeletionScope;
+  counts: AudioDeletionCounts;
+  /** Files unlinked; `all` also removes the session's audio folder. */
+  audioFiles: AudioFilesRemoved & { dirRemoved: boolean };
+  record: AudioDeletionRecord;
+  /** Audio export folders of the session still on disk (deleting the audio does not touch them). */
+  audioExportsOnDisk: string[];
+}
+
+/** Rows deleted by an erasure (also the shape of `erasures.rows_json`; older entries lack the audio counts). */
+export interface ErasureRows {
+  events: number;
+  telemetry: number;
+  audioTracks: number;
+  audioChunks: number;
+  audioDerivatives: number;
+}
+
+/** Rows deleted with a session (also the shape of `session_deletions.rows_json`; older entries lack audio). */
+export interface SessionDeletionRows {
+  events: number;
+  telemetry: number;
+  exports: number;
+  audioTracks: number;
+  audioChunks: number;
+  audioDerivatives: number;
+  audioJobs: number;
+}
+
+/** POST /api/sessions/:id/delete */
+export interface SessionDeletionResult {
+  sessionId: string;
+  rows: SessionDeletionRows;
+  /** Export folders of this session (deleted from disk only when requested). */
+  exportPaths: string[];
+  exportsDeleted: boolean;
+  /**
+   * The session's encrypted audio folder (data/audio/<sessionId>), always removed.
+   * `error` says why it could not be (its files are unreadable: their keys are gone).
+   */
+  audio: { dirRemoved: boolean; files: number; error?: string };
+}

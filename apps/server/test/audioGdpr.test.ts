@@ -4,14 +4,15 @@ import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { HEADER_BYTES, RECORD_PREFIX_BYTES } from "../src/audio/crypto";
+import { isAudioDerivativeKind } from "../src/audio/records";
 import { verifyAudio } from "../src/audio/verify";
 import { openDatabase } from "../src/db/database";
 import { Store } from "../src/db/store";
-import { deleteSessionAudio, isAudioDerivativeKind, SessionRunningError } from "../src/gdpr/deleteAudio";
+import { deleteSessionAudio, SessionRunningError } from "../src/gdpr/deleteAudio";
 import { deleteSession, listSessionDeletions } from "../src/gdpr/deleteSession";
 import { listErasures, lookupParticipant } from "../src/gdpr/erase";
 import { nowTs, REPO_ROOT, wall } from "../src/runtime";
-import { addTrack, type TestTrack } from "./audioFixtures";
+import { addTrack, readTrackPcm, type TestTrack } from "./audioFixtures";
 import { cleanup, PASSPHRASE, setupSession, startTestServer, type TestServer } from "./harness";
 
 const TSX = path.join(REPO_ROOT, "node_modules", ".bin", "tsx");
@@ -120,7 +121,8 @@ describe("audio: store, GDPR hooks and CLI", () => {
     expect(occ).toMatchObject([{ sessionId, seat: 1, audioTracks: 1, audioMs: 300 }]);
     expect(occ[0]!.events).toBeGreaterThan(0);
     // the file holds what the database says
-    const pcm = await srv.ctx.audioFiles.readTrackPcm(
+    const pcm = await readTrackPcm(
+      srv.ctx.audioFiles,
       sessionId,
       t.fileName!,
       store.getAudioTrackKey(t.trackId)!,

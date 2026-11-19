@@ -24,6 +24,7 @@ import { Store } from "../src/db/store";
 import { REPO_ROOT } from "../src/runtime";
 import { CALIBRATION_CHECK_WAIT_MS, CommandError, SessionManager } from "../src/session/SessionManager";
 import { Bot, FacilitatorClient } from "../src/tools/botClient";
+import { readTrackPcm } from "./audioFixtures";
 import { cleanup, PASSPHRASE, setupSession, startTestServer, type TestServer } from "./harness";
 
 const CONFIG_DIR = path.join(REPO_ROOT, "config");
@@ -371,7 +372,8 @@ describe("chunk ingest", () => {
     );
     expect(refused(await d.m.audio.chunk(1, chunkMsg(t, 5, N, now + 60_000)))).toBe(true); // future
     // the stored audio decrypts to what was sent, in seq order
-    const back = await d.files.readTrackPcm(
+    const back = await readTrackPcm(
+      d.files,
       d.m.sessionId,
       d.store.getAudioTrack(t)!.fileName!,
       d.store.getAudioTrackKey(t)!,
@@ -737,7 +739,8 @@ describe("live recording with audio bots (sockets)", () => {
     const all = filesUnder(audioDir);
     expect(all.length).toBe(tracks.length);
     const sample = tracks.find((t) => t.chunks > 0)!;
-    const plain = await srv.ctx.audioFiles.readTrackPcm(
+    const plain = await readTrackPcm(
+      srv.ctx.audioFiles,
       sessionId,
       sample.fileName!,
       store.getAudioTrackKey(sample.trackId)!,

@@ -7,7 +7,7 @@
  * quality report. It is synchronous and CPU-bound; run it in a `worker_thread`.
  */
 
-import { driftFromMsPerSample, fitClocks } from "./clock";
+import { driftFromMsPerSample, fitClocks, trackSampleEnd } from "./clock";
 import { attributeFrames, type FrameDecisions } from "./frames";
 import { measureLags, solveOffsets } from "./lag";
 import {
@@ -197,8 +197,7 @@ export function analyse(input: AnalysisInput, hooks: AnalysisHooks = {}): Attrib
   for (const t of usable) {
     const fit = fitById.get(t.trackId);
     if (!fit) continue;
-    let samples = 0;
-    for (const c of t.chunks) samples = Math.max(samples, c.startSample + c.sampleCount);
+    let samples = trackSampleEnd(t.chunks);
     if (!(samples > 0)) samples = t.envelope.frames * t.envelope.hopSamples;
     placements.push({
       trackId: t.trackId,

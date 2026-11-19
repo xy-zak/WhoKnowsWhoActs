@@ -1,9 +1,13 @@
 import type {
-  AttributionJob,
-  AttributionSummary,
-  AudioDeletionRecord,
-  AudioDerivativeSummary,
-  AudioTrackSummary,
+  AttributionGrade,
+  AttributionJobView,
+  AttributionSummaryView,
+  AudioDeletionScope,
+  AudioExportRequestKind,
+  AudioSessionView,
+  SeatAudioSummary,
+  SpeechSegmentRow,
+  SpeechSegmentsView,
 } from "@wkwa/shared";
 import { fmtDuration } from "../../common/format";
 
@@ -16,115 +20,26 @@ import { fmtDuration } from "../../common/format";
 
 /* ─────────────────────────── REST response shapes ─────────────────────────── */
 
-export type AttributionGrade = "good" | "fair" | "poor";
-export type AttributionSummaryView = AttributionSummary & { grade: AttributionGrade };
-export type AttributionJobView = Omit<AttributionJob, "summary"> & {
-  sessionId: string;
-  summary?: AttributionSummaryView;
-};
-
+/* The server's views, from packages/shared/src/audio.ts (under the names this tab uses). */
+export type {
+  AttributionGrade,
+  AttributionJobView,
+  AttributionSummaryView,
+  AudioDeleteResult,
+  AudioExportEntry,
+  AudioExportFile,
+  AudioExportResult,
+  AudioSessionView,
+} from "@wkwa/shared";
 /** Per-seat totals of GET /api/sessions/:id/audio. */
-export interface SeatAudio {
-  seat: number;
-  tracks: number;
-  durationMs: number;
-  gaps: number;
-  trackBreaks: number;
-  spanMs: number;
-  missingMs: number;
-  firstServerTs: number | null;
-  lastServerTs: number | null;
-  rawDeleted: boolean;
-}
-
-export interface AudioExportEntry {
-  exportId: string;
-  createdWall: string;
-  audioKind: "raw" | "clean" | "both" | null;
-  seats: number[];
-  files: number;
-  path: string;
-  onDisk: boolean;
-}
-
-/** GET /api/sessions/:id/audio */
-export interface AudioSessionView {
-  sessionId: string;
-  tracks: AudioTrackSummary[];
-  derivatives: AudioDerivativeSummary[];
-  jobs: AttributionJobView[];
-  deletions: AudioDeletionRecord[];
-  seats: SeatAudio[];
-  attribution: (AttributionSummaryView & { jobId: string | null; createdServerTs: number }) | null;
-  audioExports: AudioExportEntry[];
-  running: boolean;
-}
-
-export interface SpeechSegment {
-  seat: number;
-  startTs: number;
-  endTs: number;
-  durationMs: number;
-  round: number | null;
-  phase: string | null;
-  paused: boolean;
-  recordingPaused: boolean;
-  meanDb: number;
-  confidence: number;
-  overlap: boolean;
-  overlapMs: number;
-  overlapWith: number[];
-}
-
+export type SeatAudio = SeatAudioSummary;
+export type SpeechSegment = SpeechSegmentRow;
 /** GET /api/sessions/:id/audio/segments */
-export interface SegmentsView {
-  sessionId: string;
-  engineVersion: string | null;
-  jobId: string | null;
-  segments: SpeechSegment[];
-}
-
-export type AudioExportKind = "raw" | "clean" | "both";
-
-export interface AudioExportFile {
-  name: string;
-  seat: number;
-  kind: "raw" | "clean";
-  samples: number;
-  durationMs: number;
-  bytes: number;
-  sha256: string;
-}
-
-/** POST /api/sessions/:id/audio/export */
-export interface AudioExportResult {
-  exportId: string;
-  sessionId: string;
-  dir: string;
-  files: AudioExportFile[];
-  timing: "attribution" | "timestamps";
-  warnings: string[];
-}
-
-export type AudioDeleteScope = "raw" | "all";
-
-/** POST /api/sessions/:id/audio/delete */
-export interface AudioDeleteResult {
-  sessionId: string;
-  scope: AudioDeleteScope;
-  counts: {
-    tracks: number;
-    audioMs: number;
-    chunks: number;
-    derivatives: number;
-    jobs: number;
-    files: number;
-    bytes: number;
-  };
-  audioFiles: { removed: number; failed: string[]; dirRemoved: boolean };
-  record: AudioDeletionRecord;
-  audioExportsOnDisk: string[];
-}
+export type SegmentsView = SpeechSegmentsView;
+/** What "Export audio" asks for: raw, clean or both. */
+export type AudioExportKind = AudioExportRequestKind;
+/** What "Delete audio" deletes: raw (and cleaned) audio, or all of it. */
+export type AudioDeleteScope = AudioDeletionScope;
 
 /* ─────────────────────────── Formatting ─────────────────────────── */
 

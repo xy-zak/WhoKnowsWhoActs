@@ -21,6 +21,7 @@
  *  - State (input history, phase) carries across calls: the output does not
  *    depend on how the input is split into blocks.
  */
+import { AUDIO_SAMPLE_RATE } from "@wkwa/shared";
 
 const MAX_PHASES = 1024;
 const EMPTY = new Float32Array(0);
@@ -65,7 +66,11 @@ export interface ResamplerOptions {
 }
 
 /** Exact number of output samples for `inputLength` input samples (after flush()). */
-export function resampledLength(inputLength: number, inputRate: number, outputRate = 16000): number {
+export function resampledLength(
+  inputLength: number,
+  inputRate: number,
+  outputRate = AUDIO_SAMPLE_RATE,
+): number {
   const g = gcd(inputRate, outputRate);
   const up = outputRate / g;
   const down = inputRate / g;
@@ -99,7 +104,7 @@ export class Resampler {
   private finished = false;
 
   constructor(o: ResamplerOptions) {
-    const outputRate = o.outputRate ?? 16000;
+    const outputRate = o.outputRate ?? AUDIO_SAMPLE_RATE;
     for (const [k, v] of [
       ["inputRate", o.inputRate],
       ["outputRate", outputRate],

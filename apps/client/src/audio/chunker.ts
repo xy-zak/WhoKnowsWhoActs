@@ -1,5 +1,6 @@
+import { int16ToLeBytes } from "@wkwa/shared";
 import { roundDb, toDb } from "./levels";
-import { INT16_FULL_SCALE, int16ToLittleEndian, isClippedInt16, toInt16 } from "./pcm";
+import { INT16_FULL_SCALE, isClippedInt16, toInt16 } from "./pcm";
 
 /** A finished chunk before the recorder adds trackId and timing. */
 export interface ChunkDraft {
@@ -75,7 +76,8 @@ export class Chunker {
       rmsDb: roundDb(toDb(Math.sqrt(this.sumSq / n) / INT16_FULL_SCALE)),
       peakDb: roundDb(toDb(this.peak / INT16_FULL_SCALE)),
       clippedSamples: this.clipped,
-      pcm: int16ToLittleEndian(this.buf.subarray(0, n)),
+      // a copy: the buffer is reused for the next chunk
+      pcm: int16ToLeBytes(this.buf.subarray(0, n)).slice(),
     };
     this.seq++;
     this.start += n;

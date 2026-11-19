@@ -499,13 +499,30 @@ export interface ExportRow {
   path: string;
 }
 
-export function listExports(store: Store): ExportRow[] {
-  const rows = store.db.prepare("SELECT * FROM exports ORDER BY created_wall DESC").all() as Array<{
+/** An export register entry with what was asked for (`details`) and how many files it wrote. */
+export interface ExportListRow extends ExportRow {
+  details: Record<string, unknown>;
+  files: number;
+}
+
+/** The export register, newest first (of one session and/or one kind when given). */
+export function listExports(
+  store: Store,
+  filter: { sessionId?: string; kind?: RegisteredExportKind } = {},
+): ExportListRow[] {
+  const rows = store.db
+    .prepare(
+      `SELECT * FROM exports WHERE (@sessionId IS NULL OR session_id = @sessionId) AND (@kind IS NULL OR kind = @kind)
+       ORDER BY created_wall DESC, id`,
+    )
+    .all({ sessionId: filter.sessionId ?? null, kind: filter.kind ?? null }) as Array<{
     id: string;
     session_id: string;
     kind: RegisteredExportKind;
     created_wall: string;
     path: string;
+    details_json: string;
+    files_json: string;
   }>;
   return rows.map((r) => ({
     id: r.id,
@@ -513,6 +530,8 @@ export function listExports(store: Store): ExportRow[] {
     kind: r.kind,
     createdWall: r.created_wall,
     path: r.path,
+    details: JSON.parse(r.details_json) as Record<string, unknown>,
+    files: (JSON.parse(r.files_json) as unknown[]).length,
   }));
 }
 

@@ -875,6 +875,8 @@ export const EXPORT_FILES: ExportFileDef[] = [
  * File names hold the session id and the seat number only, never a participant code.
  */
 export type AudioExportKind = "raw" | "clean";
+/** What an "Export audio" request asks for: one kind, or both (one WAV of each per seat). */
+export type AudioExportRequestKind = AudioExportKind | "both";
 
 export interface AudioExportFileDef {
   /** File name pattern; `<sessionId>` and `<seat>` are replaced. */

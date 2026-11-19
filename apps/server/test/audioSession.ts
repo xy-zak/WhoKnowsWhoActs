@@ -4,12 +4,18 @@
  * 5 s chunk), the chunk index in `audio_chunks`, and the calibration in the event log.
  * The audio is the speech-like mix of ./attributionSynth.ts (no real voices).
  */
-import { randomUUID } from "node:crypto";
-import { generateParticipantCode, generateSessionId } from "@wkwa/shared";
+import {
+  type EventType,
+  generateParticipantCode,
+  generateSessionId,
+  type NewEvent,
+  type PayloadOf,
+} from "@wkwa/shared";
 import type { AudioFileStore } from "../src/audio/fileStore";
 import type { Store } from "../src/db/store";
 import { wall } from "../src/runtime";
 import { type SynthConfig, type SynthSession, synthesise } from "./attributionSynth";
+import { writeTestTrack } from "./audioFixtures";
 
 export interface SeededSession {
   sessionId: string;
@@ -43,12 +49,10 @@ export async function seedAudioSession(
   });
   const codes: Record<number, string> = {};
   for (const s of synth.seats) codes[s] = generateParticipantCode();
-  const ev = (type: string, payload: unknown, ts: number, seat: number | null = null) =>
+  const ev = <T extends EventType>(type: T, payload: PayloadOf<T>, ts: number, seat: number | null = null) =>
     store.appendEvent(
       sessionId,
-      { type, actorKind: "system", seat, participantCode: null, payload } as Parameters<
-        Store["appendEvent"]
-      >[1],
+      { type, actorKind: "system", seat, participantCode: null, payload } as NewEvent,
       0,
       ts,
     );
@@ -87,55 +91,23 @@ export async function seedAudioSession(
 
   const trackIds: Record<number, string[]> = {};
   for (const t of synth.tracks) {
-    const trackId = randomUUID();
-    trackIds[t.seat] = [...(trackIds[t.seat] ?? []), trackId];
-    const { fileName, key } = await files.createFile(sessionId);
     const first = t.chunks[0]!;
-    store.insertAudioTrack({
-      trackId,
+    const last = t.chunks[t.chunks.length - 1]!;
+    const { trackId } = await writeTestTrack(store, files, {
       sessionId,
       seat: t.seat,
       participantCode: codes[t.seat]!,
-      fileName,
-      fileKey: key,
-      sampleRate: 16_000,
-      settings: {
-        sampleRate: 48_000,
-        echoCancellation: false,
-        noiseSuppression: false,
-        autoGainControl: false,
-      },
       reason: "mic_check",
       startedServerTs: first.serverTs - 5000,
       startedClientTs: first.clientTs,
-      clockOffsetMs: 0,
+      levels: { rmsDb: -30, peakDb: -10 },
+      chunks: t.chunks.map((c) => {
+        const pcm = t.pcm.subarray(c.startSample, c.startSample + c.sampleCount);
+        return { ...c, pcm: Buffer.from(pcm.buffer, pcm.byteOffset, pcm.byteLength) };
+      }),
+      closedServerTs: last.serverTs + 10,
     });
-    for (const c of t.chunks) {
-      const pcm = t.pcm.subarray(c.startSample, c.startSample + c.sampleCount);
-      await files.appendRecord(
-        sessionId,
-        fileName,
-        key,
-        c.seq,
-        Buffer.from(pcm.buffer, pcm.byteOffset, pcm.byteLength),
-      );
-      store.insertAudioChunk({
-        trackId,
-        seq: c.seq,
-        startSample: c.startSample,
-        sampleCount: c.sampleCount,
-        clientTs: c.clientTs,
-        clockOffsetMs: 0,
-        serverTs: c.serverTs,
-        round: 0,
-        phase: "lobby",
-        rmsDb: -30,
-        peakDb: -10,
-        clipped: 0,
-      });
-    }
-    const last = t.chunks[t.chunks.length - 1]!;
-    store.closeAudioTrack(trackId, { closedServerTs: last.serverTs + 10, stopReason: "game_complete" });
+    trackIds[t.seat] = [...(trackIds[t.seat] ?? []), trackId];
   }
   return { sessionId, synth, codes, trackIds };
 }
