@@ -14,7 +14,7 @@ import { DB_FILES, dbFile, SessionStores } from "./db/stores";
 import { createLogger } from "./logger";
 import { Hub, isLoopback, tokenMatches } from "./net/hub";
 import type { RuntimeOptions } from "./runtime";
-import { outcomeLogFields, resolveTls, type TlsState, urlHost } from "./tls";
+import { baseUrl, isWildcardHost, outcomeLogFields, resolveTls, type TlsState } from "./tls";
 
 export interface AppContext {
   app: FastifyInstance;
@@ -95,9 +95,7 @@ export async function createApp(
     new Promise<string>((resolve) => {
       const make = () => {
         const port = (app.server.address() as AddressInfo).port;
-        const any = runtime.host === "0.0.0.0" || runtime.host === "::";
-        const host = any ? "127.0.0.1" : urlHost(runtime.host);
-        resolve(`${https ? "https" : "http"}://${host}:${port}`);
+        resolve(baseUrl(isWildcardHost(runtime.host) ? "127.0.0.1" : runtime.host, port, https !== null));
       };
       if (app.server.listening) make();
       else app.server.once("listening", make);

@@ -6,7 +6,15 @@ import { WrongPassphraseError } from "./db/database";
 import { DB_FILES, dbFile as dbFileOf } from "./db/stores";
 import { obtainPassphrase } from "./passphrase";
 import { harnessVersion, REPO_ROOT, runtimeFromEnv } from "./runtime";
-import { describeOutcome, playerUrls, resolveTls, startHttpRedirect } from "./tls";
+import {
+  baseUrl,
+  describeOutcome,
+  expiresSoon,
+  playerUrls,
+  RENEW_WITHIN_DAYS,
+  resolveTls,
+  startHttpRedirect,
+} from "./tls";
 
 async function main() {
   const runtime = runtimeFromEnv();
@@ -45,9 +53,8 @@ async function main() {
     }
   }
 
-  const proto = tls.info.enabled ? "https" : "http";
   console.log("\n────────────────────────────────────────────────────────");
-  console.log(` Facilitator dashboard: ${proto}://localhost:${port}/facilitator`);
+  console.log(` Facilitator dashboard: ${baseUrl("localhost", port, tls.info.enabled)}/facilitator`);
   console.log(" Players open one of:");
   const addrs = playerUrls(runtime.host, port, tls.info.enabled);
   for (const a of addrs) console.log(`   ${a.url}   (${a.iface})`);
@@ -60,10 +67,10 @@ async function main() {
       ` HTTPS: ${tls.info.mode === "provided" ? "your certificate (TLS_CERT/TLS_KEY)" : "self-signed certificate"} ${where}`,
     );
     if (tls.outcome) console.log(`   ${describeOutcome(tls.outcome)}`);
-    const left = Date.parse(tls.info.expires ?? "") - Date.now();
-    if (tls.info.mode === "provided" && !(left > 30 * 24 * 3600_000))
+    const expires = Date.parse(tls.info.expires ?? "");
+    if (tls.info.mode === "provided" && expiresSoon(expires, Date.now()))
       console.log(
-        `   ⚠  TLS_CERT ${left > 0 ? "expires within 30 days" : "has EXPIRED"}: browsers will refuse or warn. Renew it, or unset TLS_CERT/TLS_KEY to use the self-signed certificate.`,
+        `   ⚠  TLS_CERT ${expires > Date.now() ? `expires within ${RENEW_WITHIN_DAYS} days` : "has EXPIRED"}: browsers will refuse or warn. Renew it, or unset TLS_CERT/TLS_KEY to use the self-signed certificate.`,
       );
     console.log(`   SHA-256 fingerprint: ${tls.info.fingerprintSha256}`);
     console.log(`   valid until ${tls.info.expires?.slice(0, 10)}`);

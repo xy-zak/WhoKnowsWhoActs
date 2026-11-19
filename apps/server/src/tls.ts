@@ -3,6 +3,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSy
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
+import type { TlsInfo } from "@wkwa/shared";
 import { generate } from "selfsigned";
 import type { RuntimeOptions } from "./runtime";
 
@@ -20,24 +21,10 @@ import type { RuntimeOptions } from "./runtime";
  * The certificate is kept in data/tls/ and reused across restarts, so the
  * exceptions browsers have accepted stay valid. It is only made again when
  * an address or host name of this laptop is missing from it (the laptop moved
- * to another network), or when it expires within 30 days.
+ * to another network), or when it expires within 30 days (RENEW_WITHIN_DAYS).
  *
  * TLS_CERT + TLS_KEY (a certificate of your own) take precedence ("provided").
  */
-
-export type TlsMode = "auto" | "provided" | "off";
-
-/** What GET /api/server-info reports under `tls`. */
-export interface TlsInfo {
-  enabled: boolean;
-  mode: TlsMode;
-  /** SHA-256 fingerprint of the certificate, as browsers show it (`AB:CD:…`, 32 pairs). */
-  fingerprintSha256: string | null;
-  /** Names the certificate is valid for, e.g. `DNS:localhost`, `IP:192.168.1.10`. */
-  sans: string[];
-  /** Expiry of the certificate (ISO 8601). */
-  expires: string | null;
-}
 
 export interface TlsState {
   info: TlsInfo;
@@ -60,6 +47,11 @@ export const RENEW_WITHIN_DAYS = 30;
 /** notBefore is set this far in the past, so a participant PC whose clock is a little behind accepts it. */
 const BACKDATE_MS = 24 * 3600_000;
 const DAY_MS = 24 * 3600_000;
+
+/** Does a certificate that expires at `expiresMs` expire within RENEW_WITHIN_DAYS of `nowMs`? (An unknown expiry, NaN, does.) */
+export function expiresSoon(expiresMs: number, nowMs: number): boolean {
+  return !(expiresMs - nowMs >= RENEW_WITHIN_DAYS * DAY_MS);
+}
 
 export const TLS_OFF: TlsInfo = {
   enabled: false,
@@ -97,6 +89,20 @@ export function urlHost(host: string): string {
   return host.includes(":") && !host.startsWith("[") ? `[${host}]` : host;
 }
 
+/** Is this bind address every interface (0.0.0.0 / ::)? */
+export function isWildcardHost(host: string): boolean {
+  return host === "0.0.0.0" || host === "::";
+}
+
+export function schemeOf(tlsEnabled: boolean): "https" | "http" {
+  return tlsEnabled ? "https" : "http";
+}
+
+/** `https://host:port` (or http), without a trailing slash; IPv6 addresses in brackets. */
+export function baseUrl(host: string, port: number, tlsEnabled: boolean): string {
+  return `${schemeOf(tlsEnabled)}://${urlHost(host)}:${port}`;
+}
+
 /**
  * Where player PCs open the server: one URL per LAN interface when bound to
  * every interface (0.0.0.0 / ::), else the configured HOST. Used by the
@@ -108,10 +114,12 @@ export function playerUrls(
   tlsEnabled: boolean,
   interfaces: NodeJS.Dict<os.NetworkInterfaceInfo[]> = os.networkInterfaces(),
 ): Array<{ url: string; iface: string }> {
-  const proto = tlsEnabled ? "https" : "http";
-  if (bindHost === "0.0.0.0" || bindHost === "::")
-    return lanIPv4(interfaces).map((a) => ({ url: `${proto}://${a.address}:${port}/`, iface: a.iface }));
-  return [{ url: `${proto}://${urlHost(bindHost)}:${port}/`, iface: "configured host" }];
+  if (isWildcardHost(bindHost))
+    return lanIPv4(interfaces).map((a) => ({
+      url: `${baseUrl(a.address, port, tlsEnabled)}/`,
+      iface: a.iface,
+    }));
+  return [{ url: `${baseUrl(bindHost, port, tlsEnabled)}/`, iface: "configured host" }];
 }
 
 const DNS_NAME = /^[a-z0-9_]([a-z0-9_-]*[a-z0-9_])?(\.[a-z0-9_]([a-z0-9_-]*[a-z0-9_])?)*$/;
@@ -165,6 +173,22 @@ export function certificateFacts(certPem: string | Buffer): {
     expires: new Date(x509.validTo),
     fingerprintSha256: x509.fingerprint256,
   };
+}
+
+/**
+ * A certificate and its private key (PEM): the certificate's facts, and whether the key belongs to
+ * it (`unreadable`: the key cannot be parsed or checked). Throws if the certificate cannot be read.
+ */
+function loadKeyPair(
+  certPem: string | Buffer,
+  keyPem: string | Buffer,
+): { facts: ReturnType<typeof certificateFacts>; key: "matches" | "mismatch" | { unreadable: string } } {
+  const facts = certificateFacts(certPem);
+  try {
+    return { facts, key: facts.x509.checkPrivateKey(createPrivateKey(keyPem)) ? "matches" : "mismatch" };
+  } catch (e) {
+    return { facts, key: { unreadable: (e as Error).message } };
+  }
 }
 
 export interface SelfSignedMeta {
@@ -236,10 +260,10 @@ function readStored(certFile: string, keyFile: string) {
   try {
     const cert = readFileSync(certFile, "utf8");
     const key = readFileSync(keyFile, "utf8");
-    const facts = certificateFacts(cert);
-    if (!facts.x509.checkPrivateKey(createPrivateKey(key)))
-      return "the key does not belong to the certificate";
-    return { cert, key, facts };
+    const pair = loadKeyPair(cert, key);
+    if (typeof pair.key === "object") return `it cannot be read (${pair.key.unreadable})`;
+    if (pair.key === "mismatch") return "the key does not belong to the certificate";
+    return { cert, key, facts: pair.facts };
   } catch (e) {
     return `it cannot be read (${(e as Error).message})`;
   }
@@ -273,7 +297,7 @@ export async function ensureSelfSignedCert(
     const have = new Set(stored.facts.sans);
     const missing = wanted.filter((s) => !have.has(s));
     const { expires, validFrom } = stored.facts;
-    const expiring = expires.getTime() - now.getTime() < RENEW_WITHIN_DAYS * DAY_MS;
+    const expiring = expiresSoon(expires.getTime(), now.getTime());
     if (validFrom > now)
       outcome = { action: "regenerated", reason: "not-yet-valid", validFrom: validFrom.toISOString() };
     else if (expiring) outcome = { action: "regenerated", reason: "expiry", expires: expires.toISOString() };
@@ -329,14 +353,10 @@ export async function resolveTls(
       );
     const cert = readFileSync(runtime.tlsCert);
     const key = readFileSync(runtime.tlsKey);
-    const facts = certificateFacts(cert);
-    let matches = false;
-    try {
-      matches = facts.x509.checkPrivateKey(createPrivateKey(key));
-    } catch (e) {
-      throw new Error(`TLS_KEY cannot be read (it must be an unencrypted PEM key): ${(e as Error).message}`);
-    }
-    if (!matches) throw new Error("TLS_KEY does not belong to the certificate in TLS_CERT.");
+    const { facts, key: check } = loadKeyPair(cert, key);
+    if (typeof check === "object")
+      throw new Error(`TLS_KEY cannot be read (it must be an unencrypted PEM key): ${check.unreadable}`);
+    if (check === "mismatch") throw new Error("TLS_KEY does not belong to the certificate in TLS_CERT.");
     return {
       info: {
         enabled: true,

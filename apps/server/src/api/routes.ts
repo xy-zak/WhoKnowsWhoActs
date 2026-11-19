@@ -1,25 +1,17 @@
 import { existsSync, readFileSync } from "node:fs";
 import type { AddressInfo } from "node:net";
 import path from "node:path";
-import { reduceEvents, SessionConfigSchema } from "@wkwa/shared";
+import { reduceEvents, type ServerInfo, SessionConfigSchema } from "@wkwa/shared";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import type { AppContext } from "../app";
 import { redactEvent } from "../net/hub";
 import { harnessVersion } from "../runtime";
-import { playerUrls, type TlsInfo } from "../tls";
+import { playerUrls } from "../tls";
 import { registerAudioApi } from "./audioRoutes";
 import { registerGdprApi } from "./gdprRoutes";
 import { sessionOr404 } from "./sessionLookup";
 
 type Guard = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
-
-/** GET /api/server-info */
-export interface ServerInfo {
-  /** One URL per LAN interface (or the configured HOST), with the right scheme. */
-  playerUrls: Array<{ url: string; iface: string }>;
-  port: number;
-  tls: TlsInfo;
-}
 
 /** REST API for the facilitator dashboard (all routes facilitator-only). */
 export function registerApi(ctx: AppContext, guard: Guard) {

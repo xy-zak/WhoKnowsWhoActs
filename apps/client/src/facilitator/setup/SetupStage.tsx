@@ -4,6 +4,7 @@ import {
   isSimulated,
   normaliseTags,
   pairingName,
+  type ServerInfo,
   type SessionConfig,
   seatList,
 } from "@wkwa/shared";
@@ -51,19 +52,6 @@ import {
   saveDraft,
   setKeySheetConfirmed,
 } from "./draft";
-
-/** GET /api/server-info (the server's `ServerInfo`). */
-interface ServerInfo {
-  playerUrls: Array<{ url: string; iface: string }>;
-  port: number;
-  tls: {
-    enabled: boolean;
-    mode: "auto" | "provided" | "off";
-    fingerprintSha256: string | null;
-    sans: string[];
-    expires: string | null;
-  };
-}
 
 /** Step 07: what participants see when they open the HTTPS address, and the fingerprint to compare. */
 function TlsNote({ tls }: { tls: ServerInfo["tls"] }) {
