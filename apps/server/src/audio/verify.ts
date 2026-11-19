@@ -1,5 +1,5 @@
 import type { Store } from "../db/store";
-import { KEY_BYTES } from "./crypto";
+import { HEADER_BYTES, KEY_BYTES } from "./crypto";
 import type { AudioFileInfo, AudioFileStore } from "./fileStore";
 
 export interface AudioVerifyReport {
@@ -11,7 +11,10 @@ export interface AudioVerifyReport {
   problems: string[];
   /** Worth knowing, not a fault (e.g. an incomplete last record left by a crash mid-write). */
   warnings: string[];
-  /** Files on disk that no database row refers to (also listed in `problems`). */
+  /**
+   * Files on disk that no database row refers to (also listed in `problems`, or in `warnings` when
+   * the file is only a header: a crash between creating a track's file and storing its row).
+   */
   orphans: AudioFileInfo[];
 }
 
@@ -82,7 +85,9 @@ export async function verifyAudio(store: Store, files: AudioFileStore): Promise<
   const listed = files.listFiles();
   report.orphans = files.findOrphans(known, listed);
   for (const o of report.orphans)
-    problem(`orphan file ${o.relPath} (${o.bytes} bytes): no database row refers to it`);
+    if (o.bytes === HEADER_BYTES)
+      report.warnings.push(`orphan file ${o.relPath} holds no audio (header only, crash at a track start?)`);
+    else problem(`orphan file ${o.relPath} (${o.bytes} bytes): no database row refers to it`);
 
   // codes live only in participant_code columns, never in file or folder names
   const codeSet = new Set<string>();
