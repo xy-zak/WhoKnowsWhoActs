@@ -17,6 +17,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { useLatest } from "../../net/latest";
 import { useStore } from "../../net/store";
 import {
   Button,
@@ -175,16 +176,18 @@ export function SetupStage({ conn }: { conn: FacilitatorConnection }) {
     });
   }, []);
 
+  const latest = useLatest();
   useEffect(() => {
-    conn.api<ScenarioInfo[]>("/api/scenarios").then(setScenarios, () => {});
-    conn.api<ServerInfo>("/api/server-info").then(setInfo, () => {});
+    const ifLatest = latest();
+    conn.api<ScenarioInfo[]>("/api/scenarios").then(ifLatest(setScenarios), () => {});
+    conn.api<ServerInfo>("/api/server-info").then(ifLatest(setInfo), () => {});
     if (!loadDraft()) {
       conn.api<SessionConfig>("/api/config/session-defaults").then(
         (def) => setDraftState((cur) => cur ?? emptyDraft(def)),
         () => setDraftState((cur) => cur ?? emptyDraft()),
       );
     }
-  }, [conn]);
+  }, [conn, latest]);
   // first usable scenario as default
   useEffect(() => {
     if (draft && !draft.scenarioId && scenarios.length) {

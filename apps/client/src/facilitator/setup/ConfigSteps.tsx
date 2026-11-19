@@ -22,6 +22,7 @@ import {
 } from "@wkwa/shared";
 import { useEffect, useMemo, useState } from "react";
 import { MapScore, MapView } from "../../map/MapView";
+import { useLatest } from "../../net/latest";
 import {
   Button,
   Callout,
@@ -69,13 +70,15 @@ export function ScenarioStep({
 }) {
   const [preview, setPreview] = useState<Scenario | null>(null);
   const [view, setView] = useState("all");
+  const latest = useLatest();
   useEffect(() => {
     if (!d.scenarioId) return;
+    const ifLatest = latest();
     conn.api<Scenario>(`/api/scenarios/${d.scenarioId}`).then(
-      (s) => setPreview(s),
-      () => setPreview(null),
+      ifLatest(setPreview),
+      ifLatest(() => setPreview(null)),
     );
-  }, [conn, d.scenarioId]);
+  }, [conn, d.scenarioId, latest]);
   const scores = useMemo(() => {
     if (!preview) return {};
     if (view === "all") return preview.initialScores;

@@ -1,6 +1,7 @@
 import { reduceEvents, type Scenario, type StoredEvent, type StoredTelemetry, seatList } from "@wkwa/shared";
 import { useEffect, useMemo, useState } from "react";
 import { fmtDuration } from "../common/format";
+import { useLatest } from "../net/latest";
 import { Button, Panel, StatusTag } from "../ui";
 import { CompositeMap, PlayerMirrors } from "./Composite";
 import type { FacilitatorConnection } from "./connection";
@@ -73,14 +74,19 @@ export function Replay({
   const [cursor, setCursor] = useState(0);
   const [playing, setPlaying] = useState(false);
 
+  const latestList = useLatest();
+  const latestSession = useLatest();
+
   useEffect(() => {
+    const ifLatest = latestList();
     conn
       .api<Array<{ id: string; status: string; createdWall: string }>>("/api/sessions")
-      .then(setSessions, () => {});
-  }, [conn]);
+      .then(ifLatest(setSessions), () => {});
+  }, [conn, latestList]);
 
   useEffect(() => {
     if (!sessionId) return;
+    const ifLatest = latestSession();
     setData(null);
     setPlaying(false);
     Promise.all([
@@ -88,15 +94,15 @@ export function Replay({
       conn.api<StoredTelemetry[]>(`/api/sessions/${sessionId}/telemetry`),
       conn.api<{ scenario: Scenario; hashMatches: boolean }>(`/api/sessions/${sessionId}/scenario`),
     ]).then(
-      ([events, telemetry, sc]) => {
+      ifLatest(([events, telemetry, sc]) => {
         setData({ sessionId, events, telemetry, scenario: sc.scenario, hashMatches: sc.hashMatches });
         // start just before the first action: setup and round 1's start already applied
         const first = events.findIndex(isAction);
         setCursor(first < 0 ? events.length : first);
-      },
+      }),
       () => {},
     );
-  }, [conn, sessionId]);
+  }, [conn, sessionId, latestSession]);
 
   const events = data?.events ?? [];
   const end = data?.events.at(-1)?.serverTs ?? 0;

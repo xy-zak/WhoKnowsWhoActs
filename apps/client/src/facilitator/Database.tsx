@@ -8,6 +8,7 @@ import {
 } from "@wkwa/shared";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { fmtDuration, fmtMinutes, plural } from "../common/format";
+import { useLatest } from "../net/latest";
 import {
   Button,
   Callout,
@@ -142,12 +143,14 @@ export function Database({
   );
   const simulated = db === "simulated";
   const confirm = useConfirm();
+  const latest = useLatest();
   const refresh = useCallback(() => {
-    conn.api<SessionSummary[]>("/api/sessions").then(setSessions, () => {});
-    conn.api<InDb<ExportRow>[]>("/api/exports").then(setExports, () => {});
-    conn.api<Erasure[]>("/api/erasures").then(setErasures, () => {});
-    conn.api<InDb<Deletion>[]>("/api/session-deletions").then(setDeletions, () => {});
-  }, [conn]);
+    const ifLatest = latest();
+    conn.api<SessionSummary[]>("/api/sessions").then(ifLatest(setSessions), () => {});
+    conn.api<InDb<ExportRow>[]>("/api/exports").then(ifLatest(setExports), () => {});
+    conn.api<Erasure[]>("/api/erasures").then(ifLatest(setErasures), () => {});
+    conn.api<InDb<Deletion>[]>("/api/session-deletions").then(ifLatest(setDeletions), () => {});
+  }, [conn, latest]);
   useEffect(refresh, [refresh]);
 
   const doExport = async (s: SessionSummary, kind: "export" | "anonymise") => {
@@ -642,12 +645,14 @@ function CardsPopup({
   onClose: () => void;
 }) {
   const [seats, setSeats] = useState<number[] | null>(null);
+  const latest = useLatest();
   useEffect(() => {
+    const ifLatest = latest();
     conn.api<{ seats: number[] }>(`/api/sessions/${sessionId}/cards`).then(
-      (r) => setSeats(r.seats),
-      () => setSeats([]),
+      ifLatest((r) => setSeats(r.seats)),
+      ifLatest(() => setSeats([])),
     );
-  }, [conn, sessionId]);
+  }, [conn, sessionId, latest]);
   return (
     <Popup
       title="Takedown cards"
