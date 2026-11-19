@@ -12,15 +12,7 @@ import {
   type Validator,
   validateIntent,
 } from "../src";
-import { act, type EventLog, readySession, testScenario } from "./helpers";
-
-function startRound(log: EventLog, round: number) {
-  log.push(
-    "RoundStarted",
-    { round, spec: roundSpecFor(log.state.config, round), startedBy: "facilitator" },
-    { actor: "facilitator" },
-  );
-}
+import { act, readySession, startRound, testScenario } from "./helpers";
 
 describe("session setup", () => {
   it("binds seats, assigns labels and completes onboarding", () => {
@@ -58,7 +50,7 @@ describe("rounds and quotas (default: 5 propose + 5 decide, 3 rounds)", () => {
 
   it("enforces quotas and completes the round when all quotas are used", () => {
     const log = readySession();
-    startRound(log, 1);
+    startRound(log);
     const rule = ruleFor(log.state);
     for (let i = 0; i < 5; i++) {
       for (let seat = 1; seat <= 4; seat++) {
@@ -73,7 +65,7 @@ describe("rounds and quotas (default: 5 propose + 5 decide, 3 rounds)", () => {
 
   it("does not complete while one seat still has quota left", () => {
     const log = readySession();
-    startRound(log, 1);
+    startRound(log);
     for (let i = 0; i < 5; i++)
       for (let seat = 1; seat <= 3; seat++) {
         act(log, seat, "propose", "A1");
@@ -84,7 +76,7 @@ describe("rounds and quotas (default: 5 propose + 5 decide, 3 rounds)", () => {
 
   it("revoking an action restores quota", () => {
     const log = readySession({ defaultRound: { quota: { propose: 1, decide: 1 } } });
-    startRound(log, 1);
+    startRound(log);
     const ev = log.push(
       "ProposalMade",
       {
@@ -108,7 +100,7 @@ describe("rounds and quotas (default: 5 propose + 5 decide, 3 rounds)", () => {
 
   it("rejects while paused and for unknown sub-squares", () => {
     const log = readySession();
-    startRound(log, 1);
+    startRound(log);
     log.push("GamePaused", { reason: "facilitator", seat: null }, { actor: "facilitator" });
     expect(validateIntent(log.state, 1, { kind: "propose", regionId: "A1-Ka" })).toMatchObject({
       reason: "paused",
@@ -121,7 +113,7 @@ describe("rounds and quotas (default: 5 propose + 5 decide, 3 rounds)", () => {
 
   it("'manual' rule never auto-completes; unlimited quotas allowed", () => {
     const log = readySession({ defaultRound: { rule: "manual", quota: { propose: null, decide: null } } });
-    startRound(log, 1);
+    startRound(log);
     for (let i = 0; i < 20; i++) expect(act(log, 1, "propose", "A1").ok).toBe(true);
     expect(ruleFor(log.state).isComplete(log.state)).toBe(false);
   });
@@ -134,7 +126,7 @@ describe("rounds and quotas (default: 5 propose + 5 decide, 3 rounds)", () => {
 
   it("withdrawn seats are excluded from completion and cannot act", () => {
     const log = readySession({ defaultRound: { quota: { propose: 1, decide: 1 } } });
-    startRound(log, 1);
+    startRound(log);
     log.push("ParticipantWithdrawn", { seat: 4, by: "facilitator", phase: "round_active" }, { seat: 4 });
     for (let seat = 1; seat <= 3; seat++) {
       act(log, seat, "propose", "A1");
@@ -148,7 +140,7 @@ describe("rounds and quotas (default: 5 propose + 5 decide, 3 rounds)", () => {
 
   it("custom validators can be added (game-design hook)", () => {
     const log = readySession();
-    startRound(log, 1);
+    startRound(log);
     const decideOnlyProposed: Validator = (state, _seat, intent) =>
       intent.kind === "decide" &&
       !state.actions.some((a) => a.kind === "propose" && a.regionId === intent.regionId && !a.revoked)
@@ -162,7 +154,7 @@ describe("rounds and quotas (default: 5 propose + 5 decide, 3 rounds)", () => {
 
   it("time limit excludes paused time", () => {
     const log = readySession({ defaultRound: { timeLimitSec: 60 } });
-    startRound(log, 1);
+    startRound(log);
     const t0 = log.state.roundStartedTs!;
     expect(roundRemainingMs(log.state, t0 + 10_000)).toBe(50_000);
     log.push("GamePaused", { reason: "facilitator", seat: null }, { dt: 10_000 }); // paused at t0+10s
@@ -175,7 +167,7 @@ describe("rounds and quotas (default: 5 propose + 5 decide, 3 rounds)", () => {
 describe("replay determinism", () => {
   it("reduceEvents reproduces the live state and supports scrubbing", () => {
     const log = readySession();
-    startRound(log, 1);
+    startRound(log);
     act(log, 1, "propose", "A1");
     act(log, 2, "decide", "B1");
     const replayed = reduceEvents(log.events);
@@ -188,7 +180,7 @@ describe("replay determinism", () => {
 describe("player projection (information asymmetry)", () => {
   it("contains only the scores of the player's own knowledge type", () => {
     const log = readySession();
-    startRound(log, 1);
+    startRound(log);
     for (let seat = 1; seat <= 4; seat++) {
       const view = playerView(log.state, testScenario, seat, null, Date.now());
       const own = (["Ka", "Kb", "Kc", "Kd"] as const)[seat - 1]!;
@@ -205,7 +197,7 @@ describe("player projection (information asymmetry)", () => {
 
   it("hides actors and other labels according to visibility config", () => {
     const log = readySession({ visibility: { showActorToPlayers: false, showOtherLabelsToPlayers: false } });
-    startRound(log, 1);
+    startRound(log);
     act(log, 2, "propose", "A1");
     const v1 = playerView(log.state, testScenario, 1, null, Date.now());
     expect(v1.highlights[0]).toMatchObject({ regionId: "A1-Kb", seat: null, mine: false });
@@ -216,7 +208,7 @@ describe("player projection (information asymmetry)", () => {
 
   it("clears highlights between rounds when configured", () => {
     const log = readySession({ defaultRound: { quota: { propose: 1, decide: 0 } } });
-    startRound(log, 1);
+    startRound(log);
     for (let seat = 1; seat <= 4; seat++) act(log, seat, "propose", "A1");
     log.push("RoundCompleted", {
       round: 1,

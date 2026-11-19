@@ -1,4 +1,5 @@
 import {
+  AUDIO_CONSENT_ITEM,
   applyEvent,
   cellId,
   cellsOf,
@@ -6,9 +7,12 @@ import {
   type GameState,
   initialState,
   type KLabel,
+  type OnboardingStep,
+  onboardingStepsFor,
   type PayloadOf,
   quotaUsed,
   regionsOf,
+  roundSpecFor,
   type Scenario,
   type Scores,
   type SessionConfigInput,
@@ -89,10 +93,24 @@ export const TEST_MAP = {
   rules: { id: standardRules.id, version: standardRules.version },
 };
 
-/** A session with 4 bound, labelled, onboarded seats, ready for round 1. */
-export function readySession(configInput: SessionConfigInput = {}): EventLog {
-  const log = new EventLog();
-  const config = SessionConfigSchema.parse(configInput);
+export const code = (seat: number) => `WK-TEST-000${seat}-X`;
+
+export interface SessionSetup {
+  config?: SessionConfigInput;
+  sessionId?: string;
+  /** A random agent in every seat instead of real players. */
+  agents?: boolean;
+  /** Seats taken by fake players (no participant code, never connected). */
+  fakeSeats?: number[];
+  /** The OnboardingStarted steps (default: the ones the config asks for). */
+  steps?: OnboardingStep[];
+}
+
+/** A session in onboarding: every seat bound, connected and labelled, no onboarding step done yet. */
+export function newSession(setup: SessionSetup = {}): EventLog {
+  const { agents = false, fakeSeats = [] } = setup;
+  const log = new EventLog(setup.sessionId);
+  const config = SessionConfigSchema.parse(setup.config ?? {});
   log.push(
     "SessionCreated",
     {
@@ -105,16 +123,30 @@ export function readySession(configInput: SessionConfigInput = {}): EventLog {
     },
     { actor: "facilitator" },
   );
+  for (let seat = 1; seat <= config.seatCount; seat++) {
+    if (agents) {
+      log.push(
+        "AgentBound",
+        { seat, policy: "random", policyVersion: "2", params: { proposeBias: 0.5 }, seed: `S:${seat}` },
+        { seat },
+      );
+    } else if (fakeSeats.includes(seat)) {
+      log.push(
+        "SeatBound",
+        { seat, terminal: seat, bindingId: `b${seat}`, fake: true },
+        { seat, actor: "facilitator" },
+      );
+    } else {
+      log.push(
+        "SeatBound",
+        { seat, terminal: seat, bindingId: `b${seat}` },
+        { seat, code: code(seat), actor: "facilitator" },
+      );
+      log.push("PlayerConnected", { seat, reconnect: false }, { seat, code: code(seat) });
+    }
+  }
   const K = ["Ka", "Kb", "Kc", "Kd"] as const;
   const P = ["Pa", "Pb", "Pc", "Pd"] as const;
-  for (let seat = 1; seat <= config.seatCount; seat++) {
-    log.push(
-      "SeatBound",
-      { seat, terminal: seat, bindingId: `b${seat}` },
-      { seat, code: `WK-TEST-000${seat}-X`, actor: "facilitator" },
-    );
-    log.push("PlayerConnected", { seat, reconnect: false }, { seat, code: `WK-TEST-000${seat}-X` });
-  }
   log.push(
     "LabelsAssigned",
     {
@@ -130,22 +162,77 @@ export function readySession(configInput: SessionConfigInput = {}): EventLog {
     },
     { actor: "facilitator" },
   );
-  log.push("OnboardingStarted", { steps: ["consent", "demographics", "briefing"] }, { actor: "facilitator" });
-  for (let seat = 1; seat <= config.seatCount; seat++) {
-    const code = `WK-TEST-000${seat}-X`;
-    log.push(
-      "ConsentRecorded",
-      { formVersion: "1", textSha256: "x", answers: { participate: true }, consented: true, durationMs: 1 },
-      { seat, code, actor: "player" },
-    );
-    log.push(
-      "DemographicsSubmitted",
-      { formVersion: "1", answers: { age: "25_34" }, durationMs: 1 },
-      { seat, code, actor: "player" },
-    );
-    log.push("BriefingAcknowledged", { textSha256: "y", durationMs: 1 }, { seat, code, actor: "player" });
-  }
+  log.push(
+    "OnboardingStarted",
+    { steps: setup.steps ?? onboardingStepsFor(config) },
+    { actor: "facilitator" },
+  );
   return log;
+}
+
+/** A session with every seat bound, labelled and onboarded, ready for round 1. */
+export function readySession(config: SessionConfigInput = {}): EventLog {
+  const log = newSession({ config });
+  for (let seat = 1; seat <= log.state.config.seatCount; seat++) onboard(log, seat);
+  return log;
+}
+
+export const FULL_CONSENT = { participate: true, [AUDIO_CONSENT_ITEM]: true };
+
+export const MIC_OK = {
+  passed: true,
+  attempts: 1,
+  durationMs: 9000,
+  settings: { sampleRate: 48000, echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+  noiseFloorDb: -60,
+  speechDb: -22,
+  speechMs: 2500,
+};
+
+export function consent(
+  log: EventLog,
+  seat: number,
+  answers: Record<string, boolean> = FULL_CONSENT,
+  consented = true,
+) {
+  log.push(
+    "ConsentRecorded",
+    { formVersion: "1", textSha256: "x", answers, consented, durationMs: 1 },
+    { seat, code: code(seat), actor: "player" },
+  );
+}
+
+export function micCheck(log: EventLog, seat: number, passed = true) {
+  log.push("MicCheckCompleted", { ...MIC_OK, passed }, { seat, code: code(seat), actor: "player" });
+}
+
+/** The onboarding steps after consent: mic check (if used), demographics and briefing. */
+export function afterConsent(log: EventLog, seat: number) {
+  if (log.state.onboardingSteps.includes("mic_check")) micCheck(log, seat);
+  log.push(
+    "DemographicsSubmitted",
+    { formVersion: "1", answers: { age: "25_34" }, durationMs: 1 },
+    { seat, code: code(seat), actor: "player" },
+  );
+  log.push(
+    "BriefingAcknowledged",
+    { textSha256: "y", durationMs: 1 },
+    { seat, code: code(seat), actor: "player" },
+  );
+}
+
+/** Full consent, then the rest of onboarding. */
+export function onboard(log: EventLog, seat: number) {
+  consent(log, seat);
+  afterConsent(log, seat);
+}
+
+export function startRound(log: EventLog, round = 1) {
+  log.push(
+    "RoundStarted",
+    { round, spec: roundSpecFor(log.state.config, round), startedBy: "facilitator" },
+    { actor: "facilitator" },
+  );
 }
 
 /** The sub-square of `square` that `seat` acts on (standard rules: its power type's letter). */
@@ -172,7 +259,7 @@ export function act(log: EventLog, seat: number, kind: "propose" | "decide", squ
       msSinceRoundStart: 0,
       scoreChanges: scoreChangesForIntent(st, seat, { kind, regionId }),
     },
-    { seat, code: `WK-TEST-000${seat}-X`, actor: "player" },
+    { seat, code: code(seat), actor: "player" },
   );
   return v;
 }
