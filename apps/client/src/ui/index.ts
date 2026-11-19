@@ -29,6 +29,7 @@ export * from "./components";
 export { DisplaySettings, FONT_STACK } from "./DisplaySettings";
 export { ICONS, Icon } from "./Icon";
 export { ICON_TABLE, type IconName } from "./icons";
+export { useNow } from "./now";
 export {
   type ConfirmOptions,
   ConfirmProvider,

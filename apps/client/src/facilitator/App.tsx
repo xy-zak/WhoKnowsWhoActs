@@ -1,5 +1,5 @@
 import { fakeSeats, isSimulated } from "@wkwa/shared";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { fmtDuration } from "../common/format";
 import { useStore } from "../net/store";
 import {
@@ -18,6 +18,7 @@ import {
   ToastView,
   TooltipLayer,
   useDisplayPrefs,
+  useNow,
   useShortcuts,
   useSignalClass,
 } from "../ui";
@@ -48,15 +49,6 @@ const SHORTCUTS_HELP: Array<[string, string]> = [
   ["Enter", "Primary action in a popup"],
   ["Esc", "Close a popup (setup progress is kept)"],
 ];
-
-function useNow(ms = 1000) {
-  const [now, setNow] = useState(Date.now());
-  useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), ms);
-    return () => clearInterval(t);
-  }, [ms]);
-  return now;
-}
 
 export function App({ conn }: { conn: FacilitatorConnection }) {
   const fs = useStore(conn.store);
@@ -177,7 +169,8 @@ export function App({ conn }: { conn: FacilitatorConnection }) {
 
       {/* key → remount on tab/stage change, which plays the CRT screen-switch animation */}
       <main key={`${tab}-${stage}`} className={`screen-switch ${signal}`}>
-        {tab === "main" && (stage === "live" ? <LiveStage conn={conn} /> : <SetupStage conn={conn} />)}
+        {tab === "main" &&
+          (stage === "live" ? <LiveStage conn={conn} now={now} /> : <SetupStage conn={conn} />)}
         {tab === "replay" && (
           <Replay conn={conn} sessionId={replayId} onPick={(id) => setReplayId(id || null)} />
         )}

@@ -16,7 +16,7 @@ import {
   roundRemainingMs,
   seatList,
 } from "@wkwa/shared";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { fmtDuration } from "../../common/format";
 import { useStore } from "../../net/store";
 import {
@@ -40,15 +40,6 @@ import { paceText, policySummary } from "../simulation";
 import { Timeline } from "../Timeline";
 import { AudioNext } from "./AudioControls";
 import { AudioCheckView, CalibrationCard, RecordingControl, useAudioCheck } from "./AudioPanels";
-
-function useNow(ms = 1000) {
-  const [now, setNow] = useState(Date.now());
-  useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), ms);
-    return () => clearInterval(t);
-  }, [ms]);
-  return now;
-}
 
 /* ─────────────────────────── lifecycle (order of events) ─────────────────────────── */
 
@@ -83,13 +74,14 @@ function lifecycle(st: ReadonlyGameState): {
 function NextPanel({
   conn,
   st,
+  now,
   onWrapUp,
 }: {
   conn: FacilitatorConnection;
   st: ReadonlyGameState;
+  now: number;
   onWrapUp: () => void;
 }) {
-  const now = useNow();
   const confirm = useConfirm();
   const active = seatList(st).filter((s) => s.bound && !s.withdrawn);
 
@@ -593,9 +585,9 @@ function WrapUp({
 
 /* ─────────────────────────── stage ─────────────────────────── */
 
-export function LiveStage({ conn }: { conn: FacilitatorConnection }) {
+/** `now` comes from the App's clock, so one timer drives every live readout. */
+export function LiveStage({ conn, now }: { conn: FacilitatorConnection; now: number }) {
   const fs = useStore(conn.store);
-  const now = useNow();
   const [wrapUp, setWrapUp] = useState(false);
   const [labels, setLabels] = useState(false);
   const confirm = useConfirm();
@@ -678,11 +670,11 @@ export function LiveStage({ conn }: { conn: FacilitatorConnection }) {
           alignItems: "start",
         }}
       >
-        <NextPanel conn={conn} st={st} onWrapUp={() => setWrapUp(true)} />
+        <NextPanel conn={conn} st={st} now={now} onWrapUp={() => setWrapUp(true)} />
         <ToolsPanel conn={conn} st={st} onLabels={() => setLabels(true)} />
       </div>
       <CalibrationCard st={st} />
-      <SeatsPanel conn={conn} dash={dash} scenario={scenario} />
+      <SeatsPanel conn={conn} dash={dash} scenario={scenario} now={now} />
       {scenario && (
         <div
           style={{

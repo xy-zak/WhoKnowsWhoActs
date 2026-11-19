@@ -12,7 +12,18 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { fmtDuration, quotaText } from "../common/format";
 import { MapLegend, MapScore, MapView } from "../map/MapView";
-import { ActSwatch, AsciiProgress, Button, Icon, LabelTag, Panel, Popup, SeatDot, StatusTag } from "../ui";
+import {
+  ActSwatch,
+  AsciiProgress,
+  Button,
+  Icon,
+  LabelTag,
+  Panel,
+  Popup,
+  SeatDot,
+  StatusTag,
+  useNow,
+} from "../ui";
 import type { PlayerConnection } from "./connection";
 import { RecordingProblem, RecordingTag } from "./RecordingIndicator";
 
@@ -460,11 +471,7 @@ function StatusLine({
   scoreMax: number;
   decimals: number;
 }) {
-  const [, tick] = useState(0);
-  useEffect(() => {
-    const t = setInterval(() => tick((x) => x + 1), 1000);
-    return () => clearInterval(t);
-  }, []);
+  useNow(); // redraw the countdown each second
   const limit = view.roundSpec?.timeLimitSec;
   let left: number | null = null;
   if (limit && view.roundStartedTs) {

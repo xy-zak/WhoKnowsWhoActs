@@ -53,15 +53,6 @@ import {
 import type { FacilitatorConnection } from "./connection";
 import { policyLabel } from "./simulation";
 
-function useNow(ms = 1000) {
-  const [now, setNow] = useState(Date.now());
-  useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), ms);
-    return () => clearInterval(t);
-  }, [ms]);
-  return now;
-}
-
 /* ─────────────────────────── Who holds a seat ─────────────────────────── */
 
 /** Status tags of a seat's occupant: an agent, or a client (connection state) that may be a fake player. */
@@ -600,13 +591,14 @@ export function SeatsPanel({
   conn,
   dash,
   scenario,
+  now,
 }: {
   conn: FacilitatorConnection;
   dash: DashboardMsg;
   scenario: Scenario | null;
+  now: number;
 }) {
   const st = dash.state!;
-  const now = useNow();
   const confirm = useConfirm();
   const seats = seatList(st);
   const pLim = quotaLimit(st, "propose");
