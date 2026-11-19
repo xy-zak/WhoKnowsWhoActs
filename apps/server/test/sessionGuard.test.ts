@@ -1,5 +1,6 @@
+import { hasEnded, isFinalPhase } from "@wkwa/shared";
 import { describe, expect, it } from "vitest";
-import { type AttachedSessionSource, SessionGuard, sessionHasEnded } from "../src/session/sessionGuard";
+import { type AttachedSessionSource, SessionGuard } from "../src/session/sessionGuard";
 
 const S = "S-20261119-GARD";
 const OTHER = "S-20261119-OTHR";
@@ -257,8 +258,10 @@ describe("SessionGuard: may this operation change the session now?", () => {
     expect(new SessionGuard({ hub: null, jobs: { activeJob: () => undefined } }).running(S)).toBe(false);
   });
 
-  it("sessionHasEnded: game_complete, closed and aborted (the CLI reads it from the session row's status)", () => {
-    expect(ENDED_PHASES.every(sessionHasEnded)).toBe(true);
-    expect(RUNNING_PHASES.some(sessionHasEnded)).toBe(false);
+  it("hasEnded: game_complete, closed and aborted (the CLI reads it from the session row's status)", () => {
+    expect(ENDED_PHASES.every(hasEnded)).toBe(true);
+    expect(RUNNING_PHASES.some(hasEnded)).toBe(false);
+    // final: no more events; game_complete has ended but is not final yet
+    expect(ENDED_PHASES.filter(isFinalPhase)).toEqual(["closed", "aborted"]);
   });
 });

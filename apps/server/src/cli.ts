@@ -29,7 +29,7 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import readline from "node:readline/promises";
 import { parseArgs } from "node:util";
-import { EVENT_DEFS, type EventType, TELEMETRY_DEFS, type TelemetryType } from "@wkwa/shared";
+import { EVENT_DEFS, type EventType, hasEnded, TELEMETRY_DEFS, type TelemetryType } from "@wkwa/shared";
 import { AudioFileStore, audioDirOf } from "./audio/fileStore";
 import { verifyAudio } from "./audio/verify";
 import { ScenarioLibrary } from "./content";
@@ -40,7 +40,6 @@ import { dbFile as dbFileOf, exportsDirFor } from "./db/stores";
 import { exportSession } from "./gdpr/exporter";
 import { obtainPassphrase, promptHidden } from "./passphrase";
 import { runtimeFromEnv } from "./runtime";
-import { sessionHasEnded } from "./session/sessionGuard";
 
 const USAGE = `Usage: npm run cli -- <sessions|lookup|export|anonymise|erase|erasures|delete-session|deletions|delete-audio|audio-deletions|backup|rekey|verify> [options]
   lookup --code C          export --session S       anonymise --session S
@@ -292,7 +291,7 @@ async function main() {
         // A warning, not the server's refusal: the CLI sees only the database, not the hub's attached
         // session or its jobs and exports (SessionGuard refuses those in the server). The session
         // row's status is its phase, so "ended" is the same predicate the guard uses.
-        if (!sessionHasEnded(row.status) || stored.some((t) => t.status === "recording"))
+        if (!hasEnded(row.status) || stored.some((t) => t.status === "recording"))
           console.log(
             `⚠  The session is '${row.status}'${stored.some((t) => t.status === "recording") ? " and has tracks still marked recording" : ""}. ` +
               "If the server is running with this session attached, end the session (or stop the server) first.",

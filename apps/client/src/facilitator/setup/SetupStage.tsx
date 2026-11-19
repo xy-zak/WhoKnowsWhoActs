@@ -1,6 +1,7 @@
 import {
   fakeSeats,
   hasParticipants,
+  isFinalPhase,
   isSimulated,
   normaliseTags,
   pairingName,
@@ -717,7 +718,7 @@ export function SetupStage({ conn }: { conn: FacilitatorConnection }) {
           })}
         </div>
       </nav>
-      {!lobby && st && ["closed", "aborted"].includes(st.phase) && (
+      {!lobby && st && isFinalPhase(st.phase) && (
         <p className="small muted" style={{ margin: 0 }}>
           Previous session {st.sessionId} is {st.phase}. Its data is in DATABASE; configure the next one
           below.

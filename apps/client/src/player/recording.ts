@@ -1,10 +1,10 @@
 import {
   type AudioLevel,
   type AudioStartReason,
-  type AudioStopReason,
   audioSendResult,
   clampDb,
   micCapturing,
+  NOT_RECORDING_REASON_DEFS,
   type PlayerAcks,
   type PlayerPayload,
   type PlayerView,
@@ -16,8 +16,8 @@ import type {
   AudioStopInfo,
   EngineCaptureSettings,
   MicLevel,
+  MicRecorder,
   MicRecorderOptions,
-  RecorderState,
   RecorderStatus,
   SendResult,
 } from "../audio";
@@ -59,21 +59,21 @@ import {
  */
 
 /** The minimal recorder interface the controller uses (MicRecorder; a fake in tests). */
-export interface RecorderLike {
-  readonly status: RecorderStatus;
-  readonly pendingChunks: number;
-  readonly pendingBytes: number;
-  readonly captureSettings: EngineCaptureSettings;
-  prepare(): boolean;
-  resume(): Promise<boolean>;
-  start(reason?: AudioStartReason): Promise<RecorderState>;
-  stop(reason?: AudioStopReason): Promise<void>;
-  onReconnect(): void;
-  clearPending(): number;
-  addTap(fn: (samples: Float32Array) => void): () => void;
-  /** Resolves when everything recorded so far has been acknowledged. */
-  whenSent(): Promise<void>;
-}
+export type RecorderLike = Pick<
+  MicRecorder,
+  | "status"
+  | "pendingChunks"
+  | "pendingBytes"
+  | "captureSettings"
+  | "prepare"
+  | "resume"
+  | "start"
+  | "stop"
+  | "onReconnect"
+  | "clearPending"
+  | "addTap"
+  | "whenSent"
+>;
 
 /** The `audio:level` message (the shared AudioLevel schema; it has no defaults or transforms). */
 export type AudioLevelPayload = ReturnType<(typeof AudioLevel)["parse"]>;
@@ -135,7 +135,7 @@ export function recStateFor(
 ): RecState | null {
   if (!v?.audio.enabled) return null;
   const why = v.audio.notRecording;
-  if (why) return why === "mic_check_skipped" ? "skipped" : why === "paused" ? "paused" : "off";
+  if (why) return NOT_RECORDING_REASON_DEFS[why].state;
   const st = s.status.state;
   // idle: waiting for the mic check's Start click, or about to start
   if (st === "idle") return atMicCheck(v) && !s.gesture ? "off" : "requesting";

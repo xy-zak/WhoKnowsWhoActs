@@ -469,6 +469,16 @@ export function nextOnboardingStep(state: ReadonlyGameState, seat: ReadonlySeatS
   return null;
 }
 
+/** Is the session final in this phase: closed or aborted, so it takes no more events? */
+export function isFinalPhase(phase: string): boolean {
+  return phase === "closed" || phase === "aborted";
+}
+
+/** Has the game ended in this phase: complete, closed or aborted (nothing more is played)? */
+export function hasEnded(phase: string): boolean {
+  return phase === "game_complete" || isFinalPhase(phase);
+}
+
 /** Phases in which audio is recorded: from onboarding (the mic check) until the game is complete. */
 export const RECORDING_PHASES: ReadonlySet<Phase> = new Set(["onboarding", "round_active", "round_complete"]);
 

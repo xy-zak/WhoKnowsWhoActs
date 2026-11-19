@@ -195,6 +195,19 @@ export const AudioCaptureSettingsSchema = z
   .describe("Microphone processing settings as reported by the browser; never the device name or id");
 export type AudioCaptureSettings = z.infer<typeof AudioCaptureSettingsSchema>;
 
+/**
+ * The capture engine's whitelist of `getSettings()` (the browser's own copy): AudioCaptureSettings
+ * plus what only the engine uses. Unknown keys are stripped, so the device id, group id and label
+ * never leave `track.getSettings()`.
+ */
+export const EngineCaptureSettingsSchema = AudioCaptureSettingsSchema.extend({
+  sampleSize: z.number().optional(),
+  voiceIsolation: z.boolean().optional(),
+  /** capture latency reported by the browser (seconds) */
+  latency: z.number().optional(),
+});
+export type EngineCaptureSettings = z.infer<typeof EngineCaptureSettingsSchema>;
+
 /** The browser's AudioContext a track was captured with (timing details; nothing about the device). */
 export const AudioContextInfoSchema = z
   .object({

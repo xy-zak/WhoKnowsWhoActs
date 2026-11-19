@@ -17,6 +17,7 @@ import {
   calibrationWaitingSeats,
   currentCalibrationTurn,
   type GameState,
+  hasEnded,
   isMicCheckHeld,
   type MicCheckStatus,
   nextOnboardingStep,
@@ -227,8 +228,6 @@ function quotaFor(state: ReadonlyGameState, seat: number): Record<ActionKind, Qu
   };
 }
 
-const END_PHASES: ReadonlySet<Phase> = new Set(["game_complete", "closed", "aborted"]);
-
 export function playerView(
   state: ReadonlyGameState,
   scenario: Scenario,
@@ -278,7 +277,7 @@ export function playerView(
       nextStep,
       withdrawn: seat.withdrawn,
       quota: quotaFor(state, seat.seat),
-      participantCode: END_PHASES.has(state.phase) || seat.withdrawn ? seat.participantCode : null,
+      participantCode: hasEnded(state.phase) || seat.withdrawn ? seat.participantCode : null,
     },
     others: seatList(state)
       .filter((s) => s.seat !== seatNo && s.bound)
@@ -306,7 +305,7 @@ export function playerView(
     broadcasts: state.broadcasts.slice(-5),
     onboarding: nextStep ? withoutAudioTexts(onboarding) : null,
     onboardingSteps: [...state.onboardingSteps],
-    study: END_PHASES.has(state.phase) || seat.withdrawn ? (onboarding?.study ?? null) : null,
+    study: hasEnded(state.phase) || seat.withdrawn ? (onboarding?.study ?? null) : null,
     visibility: vis,
     audio: playerAudioView(state, seat, nextStep, onboarding),
   };

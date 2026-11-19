@@ -1,4 +1,4 @@
-import { fakeSeats, isSimulated } from "@wkwa/shared";
+import { fakeSeats, isFinalPhase, isSimulated } from "@wkwa/shared";
 import { useState } from "react";
 import { fmtDuration } from "../common/format";
 import { useStore } from "../net/store";
@@ -125,7 +125,7 @@ export function App({ conn }: { conn: FacilitatorConnection }) {
             SIMULATION
           </StatusTag>
         )}
-        {fakes > 0 && st && !["closed", "aborted"].includes(st.phase) && (
+        {fakes > 0 && st && !isFinalPhase(st.phase) && (
           <StatusTag
             icon="fake"
             title="This session has fake players: test clients the server created (marked fake in the log and exports)"

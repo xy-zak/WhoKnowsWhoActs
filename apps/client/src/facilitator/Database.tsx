@@ -1,6 +1,8 @@
 import {
   type AudioFilesRemoved,
   type ErasureRows,
+  hasEnded,
+  isFinalPhase,
   isSimulatedSessionId,
   normaliseParticipantCode,
   type PlayerMode,
@@ -358,7 +360,7 @@ export function Database({
                 </td>
                 <td>
                   <div className="row" style={{ gap: 4, justifyContent: "flex-end" }}>
-                    {s.id !== attachedId && !["closed", "aborted"].includes(s.status) && (
+                    {s.id !== attachedId && !isFinalPhase(s.status) && (
                       <Button
                         size="sm"
                         icon="resumeSession"
@@ -427,9 +429,7 @@ export function Database({
                       variant="danger"
                       icon="erase"
                       tip="Permanently delete the whole session from the database (asks for confirmation)."
-                      disabled={
-                        s.id === attachedId && !["closed", "aborted", "game_complete"].includes(s.status)
-                      }
+                      disabled={s.id === attachedId && !hasEnded(s.status)}
                       onClick={() => void removeSession(s)}
                     >
                       Delete
