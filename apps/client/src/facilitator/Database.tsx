@@ -14,6 +14,7 @@ import {
   Callout,
   Check,
   Chip,
+  ErrorText,
   Field,
   GridTable,
   Icon,
@@ -21,6 +22,7 @@ import {
   Popup,
   SeatDot,
   StatusTag,
+  TextSubmit,
   useConfirm,
 } from "../ui";
 import type { FacilitatorConnection } from "./connection";
@@ -763,35 +765,19 @@ function ErasurePanel({ conn, onDone }: { conn: FacilitatorConnection; onDone: (
           Enter the code from the participant's request, or from the key sheet. Typos are caught by the check
           character.
         </span>
-        <form
-          className="row nowrap"
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (code) void lookup();
-          }}
+        <TextSubmit
+          aria-label="Participant code"
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          placeholder="WK-XXXX-XXXX-X"
+          icon="search"
+          disabled={!code}
+          tip="Find every session and row that holds this participant code"
+          onSubmit={() => void lookup()}
         >
-          <input
-            type="text"
-            aria-label="Participant code"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            placeholder="WK-XXXX-XXXX-X"
-            style={{ flex: 1 }}
-          />
-          <Button
-            type="submit"
-            icon="search"
-            disabled={!code}
-            tip="Find every session and row that holds this participant code"
-          >
-            Look up
-          </Button>
-        </form>
-        {input && !code && (
-          <span className="small t-danger">
-            <Icon name="error" /> Not a valid participant code.
-          </span>
-        )}
+          Look up
+        </TextSubmit>
+        <ErrorText text={input && !code && "Not a valid participant code."} />
         {look && (
           <div className="col">
             <strong className="mono">{look.code}</strong>

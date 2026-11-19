@@ -20,13 +20,14 @@ import {
   type SimulationConfig,
   seatPolicyId,
 } from "@wkwa/shared";
-import { useEffect, useMemo, useState } from "react";
+import { type TextareaHTMLAttributes, useEffect, useMemo, useState } from "react";
 import { MapScore, MapView } from "../../map/MapView";
 import { useLatest } from "../../net/latest";
 import {
   Callout,
   Check,
   Chip,
+  ErrorText,
   Field,
   GridTable,
   Icon,
@@ -53,6 +54,29 @@ export interface ScenarioInfo {
 type Upd = (patch: Partial<Draft>) => void;
 const setCfg = (d: Draft, upd: Upd, patch: Partial<SessionConfig>) =>
   upd({ config: { ...d.config, ...patch } });
+
+/** A collapsed JSON textarea (empty counts as `{}`), flagged when its text does not parse. */
+function JsonField({
+  label,
+  value,
+  children,
+  ...area
+}: TextareaHTMLAttributes<HTMLTextAreaElement> & { label: string; value: string }) {
+  let ok = true;
+  try {
+    JSON.parse(value.trim() || "{}");
+  } catch {
+    ok = false;
+  }
+  return (
+    <details>
+      <summary className="small upper">{label}</summary>
+      <textarea aria-label={label} style={{ width: "100%", marginTop: 6 }} value={value} {...area} />
+      {!ok && <span className="small t-danger">Not valid JSON.</span>}
+      {children}
+    </details>
+  );
+}
 
 /* ─── 01 SCENARIO ─── */
 
@@ -119,11 +143,7 @@ export function ScenarioStep({
                   {s.board ? ` · ${s.board.cols} × ${s.board.rows} squares` : ""} · {s.regionCount}{" "}
                   sub-squares · types {s.viewIds.join(" ")}
                 </div>
-                {s.error && (
-                  <div className="small t-danger">
-                    <Icon name="error" /> {s.error}
-                  </div>
-                )}
+                <ErrorText text={s.error} />
               </td>
             </tr>
           ))}
@@ -231,12 +251,6 @@ export function RoundsStep({ d, upd }: { d: Draft; upd: Upd }) {
   const c = d.config;
   const r = c.defaultRound;
   const setRound = (patch: Partial<RoundSpec>) => setCfg(d, upd, { defaultRound: { ...r, ...patch } });
-  let overridesOk = true;
-  try {
-    JSON.parse(d.overridesText.trim() || "{}");
-  } catch {
-    overridesOk = false;
-  }
   return (
     <div className="col">
       <div className="grid-2">
@@ -300,19 +314,15 @@ export function RoundsStep({ d, upd }: { d: Draft; upd: Upd }) {
           </span>
         </Field>
       </div>
-      <details>
-        <summary className="small upper">Per-round overrides (JSON)</summary>
-        <textarea
-          rows={5}
-          style={{ width: "100%", marginTop: 6 }}
-          value={d.overridesText}
-          onChange={(e) => upd({ overridesText: e.target.value })}
-          placeholder={
-            '{ "3": { "rule": "quota", "quota": { "propose": 2, "decide": 2 }, "timeLimitSec": 300 } }'
-          }
-        />
-        {!overridesOk && <span className="small t-danger">Not valid JSON.</span>}
-      </details>
+      <JsonField
+        label="Per-round overrides (JSON)"
+        rows={5}
+        value={d.overridesText}
+        onChange={(e) => upd({ overridesText: e.target.value })}
+        placeholder={
+          '{ "3": { "rule": "quota", "quota": { "propose": 2, "decide": 2 }, "timeLimitSec": 300 } }'
+        }
+      />
       <Callout icon="rounds">
         Default rule: {c.roundCount} rounds; a round ends when every player has made {r.quota.propose ?? "∞"}{" "}
         proposals and {r.quota.decide ?? "∞"} decisions
@@ -386,12 +396,6 @@ function SimulationSettings({ d, upd }: { d: Draft; upd: Upd }) {
   const main = getPolicy(sim.policy);
   const pace = paceId(sim);
   const used = [...new Set(Array.from({ length: c.seatCount }, (_, i) => seatPolicyId(sim, i + 1)))];
-  let paramsOk = true;
-  try {
-    JSON.parse(d.simParamsText.trim() || "{}");
-  } catch {
-    paramsOk = false;
-  }
   const setSeat = (seat: number, id: string) => {
     const seatPolicies = { ...sim.seatPolicies };
     if (id) seatPolicies[String(seat)] = id;
@@ -504,17 +508,13 @@ function SimulationSettings({ d, upd }: { d: Draft; upd: Upd }) {
             placeholder="random"
           />
         </Field>
-        <details>
-          <summary className="small upper">Policy parameters (JSON)</summary>
-          <textarea
-            rows={4}
-            aria-label="Policy parameters (JSON)"
-            style={{ width: "100%", marginTop: 6 }}
-            value={d.simParamsText}
-            onChange={(e) => upd({ simParamsText: e.target.value })}
-            placeholder={'{ "random": { "proposeBias": 0.7 } }'}
-          />
-          {!paramsOk && <span className="small t-danger">Not valid JSON.</span>}
+        <JsonField
+          label="Policy parameters (JSON)"
+          rows={4}
+          value={d.simParamsText}
+          onChange={(e) => upd({ simParamsText: e.target.value })}
+          placeholder={'{ "random": { "proposeBias": 0.7 } }'}
+        >
           <GridTable>
             {used.flatMap((id) => {
               const p = getPolicy(id);
@@ -541,7 +541,7 @@ function SimulationSettings({ d, upd }: { d: Draft; upd: Upd }) {
                   ));
             })}
           </GridTable>
-        </details>
+        </JsonField>
       </div>
     </div>
   );

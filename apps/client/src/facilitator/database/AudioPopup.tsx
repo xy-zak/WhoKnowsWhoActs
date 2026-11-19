@@ -4,6 +4,7 @@ import {
   AsciiProgress,
   Button,
   Callout,
+  ErrorText,
   Field,
   GridTable,
   Icon,
@@ -55,16 +56,6 @@ const EXPORT_KINDS: Array<{ id: AudioExportKind; label: string; tip: string }> =
   },
   { id: "both", label: "Both", tip: "Raw and clean WAV of each seat" },
 ];
-
-/** An error message from the server, shown verbatim, with the error icon (red only for errors). */
-function ErrorLine({ text }: { text: string | null }) {
-  if (!text) return null;
-  return (
-    <span className="small t-danger" role="alert">
-      <Icon name="error" /> {text}
-    </span>
-  );
-}
 
 /** Why an action is unavailable right now (not an error: muted). */
 function BlockHint({ text }: { text: string | null }) {
@@ -282,7 +273,7 @@ export function AudioPopup({
     >
       <div className="col" style={{ gap: "var(--s3)" }}>
         {!view && !loadError && <span className="muted cursor">Loading</span>}
-        <ErrorLine text={loadError} />
+        <ErrorText text={loadError} />
         {view && (
           <>
             {view.running && (
@@ -379,7 +370,7 @@ export function AudioPopup({
                   </Button>
                 </div>
                 <BlockHint text={formBlock} />
-                <ErrorLine text={exportError} />
+                <ErrorText text={exportError} />
                 {exportResult && <ExportResultView r={exportResult} />}
               </div>
             </Panel>
@@ -543,7 +534,7 @@ function AttributionPanel({
           )}
         </div>
         {job.phase !== "active" && <BlockHint text={block} />}
-        {job.phase === "failed" && <ErrorLine text={job.error} />}
+        {job.phase === "failed" && <ErrorText text={job.error} />}
         {a ? <AttributionResult a={a} /> : <span className="faint">No attribution yet.</span>}
       </div>
     </Panel>
@@ -840,7 +831,7 @@ function RetentionPanel({
           </Button>
         </div>
         <BlockHint text={block} />
-        <ErrorLine text={error} />
+        <ErrorText text={error} />
         {result && <DeleteResultView r={result} />}
         {view.deletions.length > 0 && (
           <GridTable head={["#", "Executed", "Scope", "Seats", "Deleted", "Note"]}>

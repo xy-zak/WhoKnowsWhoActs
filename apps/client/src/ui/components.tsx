@@ -1,4 +1,4 @@
-import type { ButtonHTMLAttributes, CSSProperties, ReactNode, Ref } from "react";
+import type { ButtonHTMLAttributes, CSSProperties, InputHTMLAttributes, ReactNode, Ref } from "react";
 import { Icon } from "./Icon";
 import type { IconName } from "./icons";
 
@@ -347,6 +347,45 @@ export function Field({ label, hint, children }: { label: string; hint?: ReactNo
       {children}
       {hint && <span className="hint">{hint}</span>}
     </label>
+  );
+}
+
+/** A text input and its submit button in one row; Enter submits too, unless `disabled`. */
+export function TextSubmit({
+  icon,
+  tip,
+  disabled,
+  onSubmit,
+  children,
+  ...input
+}: Omit<InputHTMLAttributes<HTMLInputElement>, "onSubmit"> & {
+  icon: IconName;
+  tip: string;
+  onSubmit: () => void;
+}) {
+  return (
+    <form
+      className="row nowrap"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (!disabled) onSubmit();
+      }}
+    >
+      <input type="text" style={{ flex: 1 }} {...input} />
+      <Button type="submit" icon={icon} disabled={disabled} tip={tip}>
+        {children}
+      </Button>
+    </form>
+  );
+}
+
+/** An error message (e.g. from the server, shown verbatim) with the error icon; nothing when empty. */
+export function ErrorText({ text }: { text?: string | null | false }) {
+  if (!text) return null;
+  return (
+    <span className="small t-danger" role="alert">
+      <Icon name="error" /> {text}
+    </span>
   );
 }
 

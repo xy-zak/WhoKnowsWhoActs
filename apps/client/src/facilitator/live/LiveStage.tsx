@@ -28,6 +28,7 @@ import {
   StatusTag,
   type StepDef,
   Stepper,
+  TextSubmit,
   useConfirm,
   useShortcuts,
 } from "../../ui";
@@ -282,64 +283,42 @@ function ToolsPanel({
   return (
     <Panel title="Tools" icon="setup">
       <div className="col">
-        <form
-          className="row nowrap"
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (broadcast.trim())
-              void conn.cmd("broadcast", { text: broadcast.trim() }, "Message sent").then(
-                () => setBroadcast(""),
-                () => {},
-              );
-          }}
+        <TextSubmit
+          aria-label="Message to all players"
+          value={broadcast}
+          maxLength={300}
+          onChange={(e) => setBroadcast(e.target.value)}
+          placeholder="Message to all players…"
+          icon="broadcast"
+          disabled={!broadcast.trim()}
+          tip="Show this message on every player's screen (it is also logged)"
+          onSubmit={() =>
+            void conn.cmd("broadcast", { text: broadcast.trim() }, "Message sent").then(
+              () => setBroadcast(""),
+              () => {},
+            )
+          }
         >
-          <input
-            type="text"
-            aria-label="Message to all players"
-            value={broadcast}
-            maxLength={300}
-            onChange={(e) => setBroadcast(e.target.value)}
-            placeholder="Message to all players…"
-            style={{ flex: 1 }}
-          />
-          <Button
-            type="submit"
-            icon="broadcast"
-            disabled={!broadcast.trim()}
-            tip="Show this message on every player's screen (it is also logged)"
-          >
-            Broadcast
-          </Button>
-        </form>
-        <form
-          className="row nowrap"
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (note.trim())
-              void conn.cmd("note", { text: note.trim() }, "Note added").then(
-                () => setNote(""),
-                () => {},
-              );
-          }}
+          Broadcast
+        </TextSubmit>
+        <TextSubmit
+          aria-label="Facilitator note"
+          value={note}
+          maxLength={500}
+          onChange={(e) => setNote(e.target.value)}
+          placeholder="Note for the log — never type names"
+          icon="notes"
+          disabled={!note.trim()}
+          tip="Add a timestamped facilitator note to the event log; it is exported, so never type names"
+          onSubmit={() =>
+            void conn.cmd("note", { text: note.trim() }, "Note added").then(
+              () => setNote(""),
+              () => {},
+            )
+          }
         >
-          <input
-            type="text"
-            aria-label="Facilitator note"
-            value={note}
-            maxLength={500}
-            onChange={(e) => setNote(e.target.value)}
-            placeholder="Note for the log — never type names"
-            style={{ flex: 1 }}
-          />
-          <Button
-            type="submit"
-            icon="notes"
-            disabled={!note.trim()}
-            tip="Add a timestamped facilitator note to the event log; it is exported, so never type names"
-          >
-            Add note
-          </Button>
-        </form>
+          Add note
+        </TextSubmit>
         <RecordingControl conn={conn} st={st} />
         <div className="row">
           <Button
