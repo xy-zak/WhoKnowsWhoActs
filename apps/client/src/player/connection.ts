@@ -123,21 +123,14 @@ export class PlayerConnection {
       // refused with "Not seated"); within one 20 s budget. An attempt the queue gave up on while
       // waiting (`signal`) is never emitted, so a reconnect does not send the item twice.
       send: async (event, payload, signal) => {
-        const start = Date.now();
+        const deadline = Date.now() + AUDIO_SEND_TIMEOUT_MS;
         try {
           await this.whenSeated(AUDIO_SEND_TIMEOUT_MS, signal);
         } catch {
           return undefined;
         }
         if (signal?.aborted) return undefined;
-        return new Promise((resolve) => {
-          const left = Math.max(0, AUDIO_SEND_TIMEOUT_MS - (Date.now() - start));
-          const t = setTimeout(() => resolve(undefined), left);
-          emitPlayer(this.socket, event, payload, (ack) => {
-            clearTimeout(t);
-            resolve(ack);
-          });
-        });
+        return this.emitUntil(event, payload, deadline);
       },
       level: (p) => this.socket.volatile.emit("audio:level", p),
       now: () => this.clock.now(),
@@ -226,16 +219,18 @@ export class PlayerConnection {
   private whenSeated(timeoutMs: number, signal?: AbortSignal): Promise<void> {
     if (this.store.get().seated) return Promise.resolve();
     return new Promise((resolve, reject) => {
-      const stop = (msg: string) => {
+      const cleanUp = () => {
         clearTimeout(t);
         this.seatWaiters.delete(wake);
         signal?.removeEventListener("abort", onAbort);
+      };
+      const stop = (msg: string) => {
+        cleanUp();
         reject(new Error(msg));
       };
       const onAbort = () => stop("Cancelled");
       const wake = () => {
-        clearTimeout(t);
-        signal?.removeEventListener("abort", onAbort);
+        cleanUp();
         resolve();
       };
       const t = setTimeout(() => stop("Not connected to the server — check the connection"), timeoutMs);
@@ -277,18 +272,26 @@ export class PlayerConnection {
     payload: PlayerPayload<K>,
     timeoutMs = 8000,
   ): Promise<PlayerAcks[K]> {
-    const start = Date.now();
+    const deadline = Date.now() + timeoutMs;
     await this.whenSeated(timeoutMs);
-    return new Promise((resolve, reject) => {
-      const t = setTimeout(
-        () => reject(new Error("The server did not respond — check the connection")),
-        Math.max(0, timeoutMs - (Date.now() - start)),
-      );
+    const ack = await this.emitUntil(event, payload, deadline);
+    if (ack === undefined) throw new Error("The server did not respond — check the connection");
+    if (typeof ack === "object" && ack && "ok" in ack && ack.ok === false && "error" in ack)
+      throw new Error(ack.error);
+    return ack;
+  }
+
+  /** Emit and wait for the answer until `deadline` (epoch ms); undefined when none came by then. */
+  private emitUntil<K extends PlayerRequest>(
+    event: K,
+    payload: PlayerPayload<K>,
+    deadline: number,
+  ): Promise<PlayerAcks[K] | undefined> {
+    return new Promise((resolve) => {
+      const t = setTimeout(() => resolve(undefined), Math.max(0, deadline - Date.now()));
       emitPlayer(this.socket, event, payload, (ack) => {
         clearTimeout(t);
-        if (typeof ack === "object" && ack && "ok" in ack && ack.ok === false && "error" in ack)
-          reject(new Error(ack.error));
-        else resolve(ack);
+        resolve(ack);
       });
     });
   }
