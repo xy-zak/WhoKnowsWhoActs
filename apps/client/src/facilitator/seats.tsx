@@ -32,6 +32,7 @@ import {
   Callout,
   ConnTag,
   Field,
+  GridTable,
   Icon,
   LabelTag,
   LevelMeter,
@@ -114,88 +115,76 @@ export function BindEditor({ conn, dash }: { conn: FacilitatorConnection; dash: 
           </StatusTag>
         )}
       </div>
-      <table className="grid">
-        <thead>
-          <tr>
-            <th>Seat</th>
-            <th>Client</th>
-            <th>Participant code</th>
-            <th />
-          </tr>
-        </thead>
-        <tbody>
-          {seats.map((s) => (
-            <tr key={s.seat}>
-              <td>
+      <GridTable head={["Seat", "Client", "Participant code", ""]}>
+        {seats.map((s) => (
+          <tr key={s.seat}>
+            <td>
+              <span className="row nowrap">
+                <SeatDot seat={s.seat} /> <strong>SEAT {s.seat}</strong>
+              </span>
+            </td>
+            <td>
+              {s.bound ? (
                 <span className="row nowrap">
-                  <SeatDot seat={s.seat} /> <strong>SEAT {s.seat}</strong>
+                  <Icon name="client" /> C{s.terminal} <OccupantTags seat={s} />
                 </span>
-              </td>
-              <td>
-                {s.bound ? (
-                  <span className="row nowrap">
-                    <Icon name="client" /> C{s.terminal} <OccupantTags seat={s} />
-                  </span>
-                ) : (
-                  <span className="row nowrap">
-                    <select
-                      aria-label={`Bind a client to seat ${s.seat}`}
-                      value=""
-                      disabled={free.length === 0}
-                      onChange={(e) =>
-                        e.target.value &&
-                        conn.run(
-                          "seat:bind",
-                          { terminal: Number(e.target.value), seat: s.seat },
-                          `Seat ${s.seat} bound`,
-                        )
-                      }
-                    >
-                      <option value="">{free.length ? "bind client…" : "waiting for clients…"}</option>
-                      {free.map((t) => (
-                        <option key={t.terminal} value={t.terminal}>
-                          Client {t.terminal}
-                          {t.fake ? " (fake)" : ""}
-                        </option>
-                      ))}
-                    </select>
-                    <Button
-                      size="sm"
-                      icon="fake"
-                      disabled={busy}
-                      tip={`Let the server create a fake player for seat ${s.seat}: a test client that connects like a browser, skips consent and the questionnaire, gets no participant code and proposes/decides at random.`}
-                      onClick={() => addFake(s.seat)}
-                    >
-                      Fake player
-                    </Button>
-                  </span>
-                )}
-              </td>
-              <td className="mono">
-                {s.fake ? (
-                  <span className="faint">none (fake player)</span>
-                ) : (
-                  (s.participantCode ?? <span className="faint">—</span>)
-                )}
-              </td>
-              <td style={{ textAlign: "right" }}>
-                {s.bound && (
-                  <Button
-                    size="sm"
-                    icon="withdraw"
-                    tip="Free this seat so another client can be bound to it"
-                    onClick={() =>
-                      conn.run("seat:unbind", { seat: s.seat, reason: "facilitator" }, "Unbound")
+              ) : (
+                <span className="row nowrap">
+                  <select
+                    aria-label={`Bind a client to seat ${s.seat}`}
+                    value=""
+                    disabled={free.length === 0}
+                    onChange={(e) =>
+                      e.target.value &&
+                      conn.run(
+                        "seat:bind",
+                        { terminal: Number(e.target.value), seat: s.seat },
+                        `Seat ${s.seat} bound`,
+                      )
                     }
                   >
-                    Unbind
+                    <option value="">{free.length ? "bind client…" : "waiting for clients…"}</option>
+                    {free.map((t) => (
+                      <option key={t.terminal} value={t.terminal}>
+                        Client {t.terminal}
+                        {t.fake ? " (fake)" : ""}
+                      </option>
+                    ))}
+                  </select>
+                  <Button
+                    size="sm"
+                    icon="fake"
+                    disabled={busy}
+                    tip={`Let the server create a fake player for seat ${s.seat}: a test client that connects like a browser, skips consent and the questionnaire, gets no participant code and proposes/decides at random.`}
+                    onClick={() => addFake(s.seat)}
+                  >
+                    Fake player
                   </Button>
-                )}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+                </span>
+              )}
+            </td>
+            <td className="mono">
+              {s.fake ? (
+                <span className="faint">none (fake player)</span>
+              ) : (
+                (s.participantCode ?? <span className="faint">—</span>)
+              )}
+            </td>
+            <td style={{ textAlign: "right" }}>
+              {s.bound && (
+                <Button
+                  size="sm"
+                  icon="withdraw"
+                  tip="Free this seat so another client can be bound to it"
+                  onClick={() => conn.run("seat:unbind", { seat: s.seat, reason: "facilitator" }, "Unbound")}
+                >
+                  Unbind
+                </Button>
+              )}
+            </td>
+          </tr>
+        ))}
+      </GridTable>
       {free.length === 0 && bound < seats.length && (
         <Callout icon="client">
           Open the player URL on each PC. Each screen shows its <strong>client number</strong> in large type,
@@ -210,38 +199,28 @@ export function BindEditor({ conn, dash }: { conn: FacilitatorConnection; dash: 
 
 export function AgentsTable({ st }: { st: ReadonlyGameState }) {
   return (
-    <table className="grid">
-      <thead>
-        <tr>
-          <th>Seat</th>
-          <th>Agent policy</th>
-          <th>Seed</th>
-          <th>Client / code</th>
-        </tr>
-      </thead>
-      <tbody>
-        {seatList(st).map((s) => (
-          <tr key={s.seat}>
-            <td>
+    <GridTable head={["Seat", "Agent policy", "Seed", "Client / code"]}>
+      {seatList(st).map((s) => (
+        <tr key={s.seat}>
+          <td>
+            <span className="row nowrap">
+              <SeatDot seat={s.seat} /> <strong>SEAT {s.seat}</strong>
+            </span>
+          </td>
+          <td>
+            {s.agent ? (
               <span className="row nowrap">
-                <SeatDot seat={s.seat} /> <strong>SEAT {s.seat}</strong>
+                <Icon name="agent" /> {policyLabel(s.agent.policy)}
               </span>
-            </td>
-            <td>
-              {s.agent ? (
-                <span className="row nowrap">
-                  <Icon name="agent" /> {policyLabel(s.agent.policy)}
-                </span>
-              ) : (
-                <span className="faint">—</span>
-              )}
-            </td>
-            <td className="mono small">{s.agent?.seed ?? "—"}</td>
-            <td className="faint small">none (simulated)</td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
+            ) : (
+              <span className="faint">—</span>
+            )}
+          </td>
+          <td className="mono small">{s.agent?.seed ?? "—"}</td>
+          <td className="faint small">none (simulated)</td>
+        </tr>
+      ))}
+    </GridTable>
   );
 }
 
@@ -640,161 +619,157 @@ export function SeatsPanel({
 
   return (
     <Panel title="Seats" icon="seats">
-      <div style={{ overflowX: "auto" }}>
-        <table className="grid">
-          <thead>
-            <tr>
-              <th>Seat</th>
-              <th>{simulated ? "Agent" : "Client"}</th>
-              <th>Code</th>
-              <th>K</th>
-              <th>P</th>
-              <th>View</th>
-              <th>Onboarding</th>
-              {audio && <th>Mic</th>}
-              <th>Quota</th>
-              <th>Activity</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {seats.map((s) => {
-              const stats = dash.stats[s.seat];
-              const step = st.phase === "onboarding" ? nextOnboardingStep(st, s) : null;
-              const mic = stats?.mic;
-              const trend = nextBacklogTrend(trends.current.bySeat.get(s.seat), mic?.pendingChunks ?? 0);
-              trends.current.bySeat.set(s.seat, trend);
-              return (
-                <tr key={s.seat}>
-                  <td>
-                    <span className="row nowrap">
-                      <SeatDot seat={s.seat} /> <strong>{s.seat}</strong>
+      <GridTable
+        head={[
+          "Seat",
+          simulated ? "Agent" : "Client",
+          "Code",
+          "K",
+          "P",
+          "View",
+          "Onboarding",
+          ...(audio ? ["Mic"] : []),
+          "Quota",
+          "Activity",
+          "",
+        ]}
+        scroll
+      >
+        {seats.map((s) => {
+          const stats = dash.stats[s.seat];
+          const step = st.phase === "onboarding" ? nextOnboardingStep(st, s) : null;
+          const mic = stats?.mic;
+          const trend = nextBacklogTrend(trends.current.bySeat.get(s.seat), mic?.pendingChunks ?? 0);
+          trends.current.bySeat.set(s.seat, trend);
+          return (
+            <tr key={s.seat}>
+              <td>
+                <span className="row nowrap">
+                  <SeatDot seat={s.seat} /> <strong>{s.seat}</strong>
+                </span>
+              </td>
+              <td>
+                {s.bound ? (
+                  <span className="row nowrap">
+                    {s.agent ? (
+                      <>
+                        <Icon name="agent" /> {s.agent.policy}
+                      </>
+                    ) : (
+                      `C${s.terminal}`
+                    )}
+                    <OccupantTags seat={s} />
+                  </span>
+                ) : (
+                  <span className="faint">unbound</span>
+                )}
+              </td>
+              <td className="mono small">{s.participantCode ?? <span className="faint">—</span>}</td>
+              <td>
+                {s.k ? (
+                  <LabelTag label={s.k} tip={`Knowledge type of seat ${s.seat}`} />
+                ) : (
+                  <span className="faint">–</span>
+                )}
+              </td>
+              <td>
+                {s.p ? (
+                  <LabelTag
+                    label={s.p}
+                    filled
+                    tip={`Power type of seat ${s.seat}: acts on the K${s.p[1]} sub-squares`}
+                  />
+                ) : (
+                  <span className="faint">–</span>
+                )}
+              </td>
+              <td className="small">
+                {s.view ? (scenario?.views[s.view]?.name ?? s.view) : <span className="faint">–</span>}
+              </td>
+              <td className="small">
+                {st.phase === "lobby" || !s.bound || s.agent ? (
+                  <span className="faint">—</span>
+                ) : s.fake ? (
+                  <StatusTag icon="fake">skipped (fake)</StatusTag>
+                ) : s.consent === "declined" ? (
+                  <StatusTag tone="danger" icon="warning">
+                    declined
+                  </StatusTag>
+                ) : isOnboardingComplete(st, s) ? (
+                  <StatusTag tone="live" icon="ok">
+                    ready
+                  </StatusTag>
+                ) : (
+                  <StatusTag tone="warn">{step ?? "…"}</StatusTag>
+                )}
+              </td>
+              {audio && (
+                <td className="small">
+                  <MicColumn st={st} seat={s} mic={mic} trend={trend} serverNow={now - offset} />
+                </td>
+              )}
+              <td className="small">
+                {st.round > 0 && s.bound ? (
+                  <span className="col" style={{ gap: 0 }}>
+                    <span className="row nowrap" style={{ gap: 4 }} data-tip="Proposals used this round">
+                      <ActSwatch kind="propose" k={s.p ? `K${s.p[1]}` : null} />
+                      <AsciiProgress used={quotaUsed(st, s.seat, "propose")} limit={pLim} />
                     </span>
-                  </td>
-                  <td>
-                    {s.bound ? (
-                      <span className="row nowrap">
-                        {s.agent ? (
-                          <>
-                            <Icon name="agent" /> {s.agent.policy}
-                          </>
-                        ) : (
-                          `C${s.terminal}`
-                        )}
-                        <OccupantTags seat={s} />
-                      </span>
-                    ) : (
-                      <span className="faint">unbound</span>
-                    )}
-                  </td>
-                  <td className="mono small">{s.participantCode ?? <span className="faint">—</span>}</td>
-                  <td>
-                    {s.k ? (
-                      <LabelTag label={s.k} tip={`Knowledge type of seat ${s.seat}`} />
-                    ) : (
-                      <span className="faint">–</span>
-                    )}
-                  </td>
-                  <td>
-                    {s.p ? (
-                      <LabelTag
-                        label={s.p}
-                        filled
-                        tip={`Power type of seat ${s.seat}: acts on the K${s.p[1]} sub-squares`}
-                      />
-                    ) : (
-                      <span className="faint">–</span>
-                    )}
-                  </td>
-                  <td className="small">
-                    {s.view ? (scenario?.views[s.view]?.name ?? s.view) : <span className="faint">–</span>}
-                  </td>
-                  <td className="small">
-                    {st.phase === "lobby" || !s.bound || s.agent ? (
-                      <span className="faint">—</span>
-                    ) : s.fake ? (
-                      <StatusTag icon="fake">skipped (fake)</StatusTag>
-                    ) : s.consent === "declined" ? (
-                      <StatusTag tone="danger" icon="warning">
-                        declined
+                    <span className="row nowrap" style={{ gap: 4 }} data-tip="Decisions used this round">
+                      <ActSwatch kind="decide" k={s.p ? `K${s.p[1]}` : null} />
+                      <AsciiProgress used={quotaUsed(st, s.seat, "decide")} limit={dLim} />
+                    </span>
+                  </span>
+                ) : (
+                  <span className="faint">—</span>
+                )}
+              </td>
+              <td className="small">
+                {stats && s.bound && !s.withdrawn ? (
+                  <span className="row" style={{ gap: 4 }}>
+                    {stats.focused === false && (
+                      <StatusTag tone="warn" title="Game window lost focus">
+                        unfocused
                       </StatusTag>
-                    ) : isOnboardingComplete(st, s) ? (
-                      <StatusTag tone="live" icon="ok">
-                        ready
+                    )}
+                    {stats.visible === false && (
+                      <StatusTag tone="danger" icon="hidden">
+                        tab hidden
                       </StatusTag>
-                    ) : (
-                      <StatusTag tone="warn">{step ?? "…"}</StatusTag>
                     )}
-                  </td>
-                  {audio && (
-                    <td className="small">
-                      <MicColumn st={st} seat={s} mic={mic} trend={trend} serverNow={now - offset} />
-                    </td>
-                  )}
-                  <td className="small">
-                    {st.round > 0 && s.bound ? (
-                      <span className="col" style={{ gap: 0 }}>
-                        <span className="row nowrap" style={{ gap: 4 }} data-tip="Proposals used this round">
-                          <ActSwatch kind="propose" k={s.p ? `K${s.p[1]}` : null} />
-                          <AsciiProgress used={quotaUsed(st, s.seat, "propose")} limit={pLim} />
-                        </span>
-                        <span className="row nowrap" style={{ gap: 4 }} data-tip="Decisions used this round">
-                          <ActSwatch kind="decide" k={s.p ? `K${s.p[1]}` : null} />
-                          <AsciiProgress used={quotaUsed(st, s.seat, "decide")} limit={dLim} />
-                        </span>
-                      </span>
-                    ) : (
-                      <span className="faint">—</span>
+                    {stats.idle && (
+                      <StatusTag tone="warn" icon="idle">
+                        idle
+                      </StatusTag>
                     )}
-                  </td>
-                  <td className="small">
-                    {stats && s.bound && !s.withdrawn ? (
-                      <span className="row" style={{ gap: 4 }}>
-                        {stats.focused === false && (
-                          <StatusTag tone="warn" title="Game window lost focus">
-                            unfocused
-                          </StatusTag>
-                        )}
-                        {stats.visible === false && (
-                          <StatusTag tone="danger" icon="hidden">
-                            tab hidden
-                          </StatusTag>
-                        )}
-                        {stats.idle && (
-                          <StatusTag tone="warn" icon="idle">
-                            idle
-                          </StatusTag>
-                        )}
-                        {s.lastActionTs && (
-                          <span className="muted">last {fmtDuration(now - s.lastActionTs)}</span>
-                        )}
-                        {stats.rttMs !== null && <span className="faint">{stats.rttMs}ms</span>}
-                        {s.reconnects > 0 && <span className="faint">↻{s.reconnects}</span>}
-                        {s.rejections > 0 && <span className="faint">✗{s.rejections}</span>}
-                      </span>
-                    ) : (
-                      <span className="faint">—</span>
+                    {s.lastActionTs && (
+                      <span className="muted">last {fmtDuration(now - s.lastActionTs)}</span>
                     )}
-                  </td>
-                  <td style={{ textAlign: "right" }}>
-                    {st.phase !== "lobby" && s.bound && !s.withdrawn && !final && (
-                      <Button
-                        size="sm"
-                        variant="danger"
-                        icon="withdraw"
-                        onClick={() => void withdraw(s.seat)}
-                        tip="Stop this seat taking part; rounds complete without it from now on"
-                      >
-                        Withdraw
-                      </Button>
-                    )}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+                    {stats.rttMs !== null && <span className="faint">{stats.rttMs}ms</span>}
+                    {s.reconnects > 0 && <span className="faint">↻{s.reconnects}</span>}
+                    {s.rejections > 0 && <span className="faint">✗{s.rejections}</span>}
+                  </span>
+                ) : (
+                  <span className="faint">—</span>
+                )}
+              </td>
+              <td style={{ textAlign: "right" }}>
+                {st.phase !== "lobby" && s.bound && !s.withdrawn && !final && (
+                  <Button
+                    size="sm"
+                    variant="danger"
+                    icon="withdraw"
+                    onClick={() => void withdraw(s.seat)}
+                    tip="Stop this seat taking part; rounds complete without it from now on"
+                  >
+                    Withdraw
+                  </Button>
+                )}
+              </td>
+            </tr>
+          );
+        })}
+      </GridTable>
     </Panel>
   );
 }

@@ -7,6 +7,7 @@ import {
   DisplaySettings,
   FONT_LABEL,
   facilitatorPrefs,
+  GridTable,
   Icon,
   nextFont,
   nextScale,
@@ -277,18 +278,16 @@ export function App({ conn }: { conn: FacilitatorConnection }) {
           }
           onPrimary={() => setHelp(false)}
         >
-          <table className="grid">
-            <tbody>
-              {SHORTCUTS_HELP.map(([k, d]) => (
-                <tr key={k}>
-                  <td style={{ width: 80 }}>
-                    <kbd>{k}</kbd>
-                  </td>
-                  <td>{d}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <GridTable>
+            {SHORTCUTS_HELP.map(([k, d]) => (
+              <tr key={k}>
+                <td style={{ width: 80 }}>
+                  <kbd>{k}</kbd>
+                </td>
+                <td>{d}</td>
+              </tr>
+            ))}
+          </GridTable>
           <p className="small muted">
             Single-key shortcuts are ignored while you type in a field or while a popup is open.
           </p>

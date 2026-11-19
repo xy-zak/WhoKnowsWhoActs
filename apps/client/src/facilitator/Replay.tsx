@@ -2,7 +2,7 @@ import { reduceEvents, type Scenario, type StoredEvent, type StoredTelemetry, se
 import { useEffect, useMemo, useState } from "react";
 import { fmtDuration } from "../common/format";
 import { useLatest } from "../net/latest";
-import { Button, Panel, StatusTag } from "../ui";
+import { Button, GridTable, Panel, StatusTag } from "../ui";
 import { CompositeMap, PlayerMirrors } from "./Composite";
 import type { FacilitatorConnection } from "./connection";
 import { EventLog, summarise } from "./EventLog";
@@ -143,29 +143,22 @@ export function Replay({
           <span className="hint">
             Every recorded session can be scrubbed through with the same reducer that ran it live.
           </span>
-          <table className="grid">
-            <tbody>
-              {sessions.map((s) => (
-                <tr key={s.id} onClick={() => onPick(s.id)} style={{ cursor: "pointer" }}>
-                  <td className="mono">{s.id}</td>
-                  <td>
-                    <StatusTag>{s.status.replace("_", " ")}</StatusTag>
-                  </td>
-                  <td className="small">{s.createdWall.slice(0, 16).replace("T", " ")}</td>
-                  <td style={{ textAlign: "right" }}>
-                    <Button size="sm" icon="start" tip="Step through this session's events from the start">
-                      Replay
-                    </Button>
-                  </td>
-                </tr>
-              ))}
-              {sessions.length === 0 && (
-                <tr>
-                  <td className="faint">No sessions recorded yet.</td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+          <GridTable empty={sessions.length === 0 && "No sessions recorded yet."}>
+            {sessions.map((s) => (
+              <tr key={s.id} onClick={() => onPick(s.id)} style={{ cursor: "pointer" }}>
+                <td className="mono">{s.id}</td>
+                <td>
+                  <StatusTag>{s.status.replace("_", " ")}</StatusTag>
+                </td>
+                <td className="small">{s.createdWall.slice(0, 16).replace("T", " ")}</td>
+                <td style={{ textAlign: "right" }}>
+                  <Button size="sm" icon="start" tip="Step through this session's events from the start">
+                    Replay
+                  </Button>
+                </td>
+              </tr>
+            ))}
+          </GridTable>
         </div>
       </Panel>
     );

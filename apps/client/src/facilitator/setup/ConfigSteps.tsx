@@ -23,7 +23,18 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { MapScore, MapView } from "../../map/MapView";
 import { useLatest } from "../../net/latest";
-import { Callout, Check, Chip, Field, Icon, type IconName, LabelTag, SeatDot, useConfirm } from "../../ui";
+import {
+  Callout,
+  Check,
+  Chip,
+  Field,
+  GridTable,
+  Icon,
+  type IconName,
+  LabelTag,
+  SeatDot,
+  useConfirm,
+} from "../../ui";
 import type { FacilitatorConnection } from "../connection";
 import { PACES, paceId } from "../simulation";
 import type { Draft } from "./draft";
@@ -83,42 +94,40 @@ export function ScenarioStep({
           Choose the map: its size, knowledge types and starting scores. Scenarios live in{" "}
           <code>scenarios/&lt;id&gt;/</code>.
         </span>
-        <table className="grid">
-          <tbody>
-            {scenarios.map((s) => (
-              <tr
-                key={s.id}
-                className={d.scenarioId === s.id ? "selected" : ""}
-                onClick={() => !s.error && upd({ scenarioId: s.id })}
-                style={{ cursor: s.error ? "not-allowed" : "pointer" }}
-              >
-                <td style={{ width: 24 }}>
-                  <input
-                    type="radio"
-                    name="scenario"
-                    aria-label={s.title}
-                    checked={d.scenarioId === s.id}
-                    disabled={Boolean(s.error)}
-                    onChange={() => upd({ scenarioId: s.id })}
-                  />
-                </td>
-                <td>
-                  <strong>{s.title}</strong>
-                  <div className="small muted">
-                    {s.id} v{s.version}
-                    {s.board ? ` · ${s.board.cols} × ${s.board.rows} squares` : ""} · {s.regionCount}{" "}
-                    sub-squares · types {s.viewIds.join(" ")}
+        <GridTable>
+          {scenarios.map((s) => (
+            <tr
+              key={s.id}
+              className={d.scenarioId === s.id ? "selected" : ""}
+              onClick={() => !s.error && upd({ scenarioId: s.id })}
+              style={{ cursor: s.error ? "not-allowed" : "pointer" }}
+            >
+              <td style={{ width: 24 }}>
+                <input
+                  type="radio"
+                  name="scenario"
+                  aria-label={s.title}
+                  checked={d.scenarioId === s.id}
+                  disabled={Boolean(s.error)}
+                  onChange={() => upd({ scenarioId: s.id })}
+                />
+              </td>
+              <td>
+                <strong>{s.title}</strong>
+                <div className="small muted">
+                  {s.id} v{s.version}
+                  {s.board ? ` · ${s.board.cols} × ${s.board.rows} squares` : ""} · {s.regionCount}{" "}
+                  sub-squares · types {s.viewIds.join(" ")}
+                </div>
+                {s.error && (
+                  <div className="small t-danger">
+                    <Icon name="error" /> {s.error}
                   </div>
-                  {s.error && (
-                    <div className="small t-danger">
-                      <Icon name="error" /> {s.error}
-                    </div>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+                )}
+              </td>
+            </tr>
+          ))}
+        </GridTable>
         {preview?.description && <p className="small muted">{preview.description}</p>}
         <Field
           label="Game rules"
@@ -338,34 +347,32 @@ function PlayerModeChoice({ d, upd }: { d: Draft; upd: Upd }) {
         Real participants or simulated agents. This decides the database the session is stored in and which of
         the later steps apply.
       </span>
-      <table className="grid">
-        <tbody>
-          {PLAYER_MODES.map((m) => (
-            <tr
-              key={m.id}
-              className={mode === m.id ? "selected" : ""}
-              onClick={() => setCfg(d, upd, { players: m.id })}
-              style={{ cursor: "pointer" }}
-            >
-              <td style={{ width: 24 }}>
-                <input
-                  type="radio"
-                  name="players"
-                  aria-label={m.title}
-                  checked={mode === m.id}
-                  onChange={() => setCfg(d, upd, { players: m.id })}
-                />
-              </td>
-              <td>
-                <strong>
-                  <Icon name={m.icon} /> {m.title}
-                </strong>
-                <div className="small muted">{m.text}</div>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <GridTable>
+        {PLAYER_MODES.map((m) => (
+          <tr
+            key={m.id}
+            className={mode === m.id ? "selected" : ""}
+            onClick={() => setCfg(d, upd, { players: m.id })}
+            style={{ cursor: "pointer" }}
+          >
+            <td style={{ width: 24 }}>
+              <input
+                type="radio"
+                name="players"
+                aria-label={m.title}
+                checked={mode === m.id}
+                onChange={() => setCfg(d, upd, { players: m.id })}
+              />
+            </td>
+            <td>
+              <strong>
+                <Icon name={m.icon} /> {m.title}
+              </strong>
+              <div className="small muted">{m.text}</div>
+            </td>
+          </tr>
+        ))}
+      </GridTable>
     </div>
   );
 }
@@ -406,33 +413,31 @@ function SimulationSettings({ d, upd }: { d: Draft; upd: Upd }) {
             ))}
           </select>
         </Field>
-        <table className="grid">
-          <tbody>
-            {Array.from({ length: c.seatCount }, (_, i) => i + 1).map((seat) => (
-              <tr key={seat}>
-                <td style={{ width: 90 }}>
-                  <span className="row nowrap">
-                    <SeatDot seat={seat} /> <strong>SEAT {seat}</strong>
-                  </span>
-                </td>
-                <td>
-                  <select
-                    aria-label={`Policy of seat ${seat}`}
-                    value={sim.seatPolicies[String(seat)] ?? ""}
-                    onChange={(e) => setSeat(seat, e.target.value)}
-                  >
-                    <option value="">same as every seat ({sim.policy})</option>
-                    {policies.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.name} ({p.id})
-                      </option>
-                    ))}
-                  </select>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <GridTable>
+          {Array.from({ length: c.seatCount }, (_, i) => i + 1).map((seat) => (
+            <tr key={seat}>
+              <td style={{ width: 90 }}>
+                <span className="row nowrap">
+                  <SeatDot seat={seat} /> <strong>SEAT {seat}</strong>
+                </span>
+              </td>
+              <td>
+                <select
+                  aria-label={`Policy of seat ${seat}`}
+                  value={sim.seatPolicies[String(seat)] ?? ""}
+                  onChange={(e) => setSeat(seat, e.target.value)}
+                >
+                  <option value="">same as every seat ({sim.policy})</option>
+                  {policies.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name} ({p.id})
+                    </option>
+                  ))}
+                </select>
+              </td>
+            </tr>
+          ))}
+        </GridTable>
         <span className="hint">
           Policies live in <code>packages/shared/src/simulation/policies.ts</code>. The rules for simulated
           players are added there.
@@ -510,34 +515,32 @@ function SimulationSettings({ d, upd }: { d: Draft; upd: Upd }) {
             placeholder={'{ "random": { "proposeBias": 0.7 } }'}
           />
           {!paramsOk && <span className="small t-danger">Not valid JSON.</span>}
-          <table className="grid">
-            <tbody>
-              {used.flatMap((id) => {
-                const p = getPolicy(id);
-                const rows = p ? policyParamRows(p) : [];
-                return rows.length === 0
-                  ? [
-                      <tr key={id}>
-                        <td className="mono small">{id}</td>
-                        <td colSpan={2} className="faint small">
-                          no parameters
-                        </td>
-                      </tr>,
-                    ]
-                  : rows.map((r) => (
-                      <tr key={`${id}.${r.name}`}>
-                        <td className="mono small">
-                          {id}.{r.name}
-                        </td>
-                        <td className="mono small">
-                          {r.defaultValue === undefined ? "" : JSON.stringify(r.defaultValue)}
-                        </td>
-                        <td className="small">{r.description}</td>
-                      </tr>
-                    ));
-              })}
-            </tbody>
-          </table>
+          <GridTable>
+            {used.flatMap((id) => {
+              const p = getPolicy(id);
+              const rows = p ? policyParamRows(p) : [];
+              return rows.length === 0
+                ? [
+                    <tr key={id}>
+                      <td className="mono small">{id}</td>
+                      <td colSpan={2} className="faint small">
+                        no parameters
+                      </td>
+                    </tr>,
+                  ]
+                : rows.map((r) => (
+                    <tr key={`${id}.${r.name}`}>
+                      <td className="mono small">
+                        {id}.{r.name}
+                      </td>
+                      <td className="mono small">
+                        {r.defaultValue === undefined ? "" : JSON.stringify(r.defaultValue)}
+                      </td>
+                      <td className="small">{r.description}</td>
+                    </tr>
+                  ));
+            })}
+          </GridTable>
         </details>
       </div>
     </div>

@@ -5,6 +5,7 @@ import {
   Button,
   Callout,
   Field,
+  GridTable,
   Icon,
   Panel,
   Popup,
@@ -419,81 +420,68 @@ function SeatsPanel({
           No audio stored for this session (audio off, mic skipped, or no participant consented to audio).
         </span>
       ) : (
-        <div style={{ overflowX: "auto" }}>
-          <table className="grid">
-            <thead>
-              <tr>
-                <th>Seat</th>
-                <th>Tracks</th>
-                <th>Recorded</th>
-                <th>Gaps</th>
-                <th>Track breaks</th>
-                <th>Missing</th>
-                <th>Stored</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {view.seats.map((s) => {
-                const block = exportBlock(view, job, kind, s.seat);
-                return (
-                  <tr key={s.seat}>
-                    <td>
-                      <span className="row nowrap" style={{ gap: "var(--s1)" }}>
-                        <SeatDot seat={s.seat} />
-                        <strong>SEAT {s.seat}</strong>
-                      </span>
-                    </td>
-                    <td>{s.tracks}</td>
-                    <td className="mono" data-tip={`First to last sample: ${fmtDuration(s.spanMs)}`}>
-                      {fmtDuration(s.durationMs)}
-                    </td>
-                    <td data-tip="Chunks never received inside a track">{s.gaps}</td>
-                    <td data-tip="Breaks between tracks: a recording pause, reload or reconnect">
-                      {s.trackBreaks}
-                    </td>
-                    <td className="mono" data-tip="Time between the first and last sample without audio">
-                      {fmtDuration(s.missingMs)}
-                    </td>
-                    <td>
-                      <span className="row nowrap" style={{ gap: "var(--s1)" }}>
-                        {s.rawDeleted ? (
-                          <StatusTag
-                            icon="microphoneOff"
-                            tip="The raw audio of this seat was deleted; its metadata (times, lengths) is kept"
-                          >
-                            raw deleted
-                          </StatusTag>
-                        ) : (
-                          <StatusTag tip="The microphone audio as recorded (encrypted)">raw</StatusTag>
-                        )}
-                        {hasCleanTrack(view, s.seat) && (
-                          <StatusTag tip="Cleaned track from the latest speaker attribution (encrypted)">
-                            clean
-                          </StatusTag>
-                        )}
-                      </span>
-                    </td>
-                    <td>
-                      <Button
-                        size="sm"
-                        icon="export"
-                        disabled={block !== null || exporting !== null}
-                        tip={
-                          block ??
-                          `Export seat ${s.seat}'s ${kind === "both" ? "raw and clean" : kind} WAV to the exports folder on this computer (registered "Export audio")`
-                        }
-                        onClick={() => onExport(s.seat)}
+        <GridTable
+          head={["Seat", "Tracks", "Recorded", "Gaps", "Track breaks", "Missing", "Stored", ""]}
+          scroll
+        >
+          {view.seats.map((s) => {
+            const block = exportBlock(view, job, kind, s.seat);
+            return (
+              <tr key={s.seat}>
+                <td>
+                  <span className="row nowrap" style={{ gap: "var(--s1)" }}>
+                    <SeatDot seat={s.seat} />
+                    <strong>SEAT {s.seat}</strong>
+                  </span>
+                </td>
+                <td>{s.tracks}</td>
+                <td className="mono" data-tip={`First to last sample: ${fmtDuration(s.spanMs)}`}>
+                  {fmtDuration(s.durationMs)}
+                </td>
+                <td data-tip="Chunks never received inside a track">{s.gaps}</td>
+                <td data-tip="Breaks between tracks: a recording pause, reload or reconnect">
+                  {s.trackBreaks}
+                </td>
+                <td className="mono" data-tip="Time between the first and last sample without audio">
+                  {fmtDuration(s.missingMs)}
+                </td>
+                <td>
+                  <span className="row nowrap" style={{ gap: "var(--s1)" }}>
+                    {s.rawDeleted ? (
+                      <StatusTag
+                        icon="microphoneOff"
+                        tip="The raw audio of this seat was deleted; its metadata (times, lengths) is kept"
                       >
-                        {exporting === s.seat ? "Exporting…" : "WAV"}
-                      </Button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+                        raw deleted
+                      </StatusTag>
+                    ) : (
+                      <StatusTag tip="The microphone audio as recorded (encrypted)">raw</StatusTag>
+                    )}
+                    {hasCleanTrack(view, s.seat) && (
+                      <StatusTag tip="Cleaned track from the latest speaker attribution (encrypted)">
+                        clean
+                      </StatusTag>
+                    )}
+                  </span>
+                </td>
+                <td>
+                  <Button
+                    size="sm"
+                    icon="export"
+                    disabled={block !== null || exporting !== null}
+                    tip={
+                      block ??
+                      `Export seat ${s.seat}'s ${kind === "both" ? "raw and clean" : kind} WAV to the exports folder on this computer (registered "Export audio")`
+                    }
+                    onClick={() => onExport(s.seat)}
+                  >
+                    {exporting === s.seat ? "Exporting…" : "WAV"}
+                  </Button>
+                </td>
+              </tr>
+            );
+          })}
+        </GridTable>
       )}
     </Panel>
   );
@@ -786,49 +774,31 @@ function PreviousExports({ view }: { view: AudioSessionView }) {
       {view.audioExports.length === 0 ? (
         <span className="faint">No audio exports of this session yet.</span>
       ) : (
-        <div style={{ maxHeight: 200, overflow: "auto" }}>
-          <table className="grid">
-            <thead>
-              <tr>
-                <th>Export</th>
-                <th>Written</th>
-                <th>Kind</th>
-                <th>Seats</th>
-                <th>Files</th>
-                <th>Folder</th>
-              </tr>
-            </thead>
-            <tbody>
-              {view.audioExports.map((x) => (
-                <tr key={x.exportId}>
-                  <td className="mono small">{x.exportId}</td>
-                  <td className="small">{when(x.createdWall)}</td>
-                  <td>{x.audioKind ?? PLACEHOLDER}</td>
-                  <td>{x.seats.length ? x.seats.join(", ") : PLACEHOLDER}</td>
-                  <td>{x.files}</td>
-                  <td>
-                    <span className="row nowrap" style={{ gap: "var(--s1)" }}>
-                      {x.onDisk ? (
-                        <StatusTag
-                          tone="warn"
-                          icon="warning"
-                          tip="The WAV files are still in the exports folder"
-                        >
-                          on disk
-                        </StatusTag>
-                      ) : (
-                        <StatusTag tip="The folder is no longer in the exports folder (moved or deleted)">
-                          gone
-                        </StatusTag>
-                      )}
-                      <code className="small">{x.path}</code>
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <GridTable head={["Export", "Written", "Kind", "Seats", "Files", "Folder"]} scroll={200}>
+          {view.audioExports.map((x) => (
+            <tr key={x.exportId}>
+              <td className="mono small">{x.exportId}</td>
+              <td className="small">{when(x.createdWall)}</td>
+              <td>{x.audioKind ?? PLACEHOLDER}</td>
+              <td>{x.seats.length ? x.seats.join(", ") : PLACEHOLDER}</td>
+              <td>{x.files}</td>
+              <td>
+                <span className="row nowrap" style={{ gap: "var(--s1)" }}>
+                  {x.onDisk ? (
+                    <StatusTag tone="warn" icon="warning" tip="The WAV files are still in the exports folder">
+                      on disk
+                    </StatusTag>
+                  ) : (
+                    <StatusTag tip="The folder is no longer in the exports folder (moved or deleted)">
+                      gone
+                    </StatusTag>
+                  )}
+                  <code className="small">{x.path}</code>
+                </span>
+              </td>
+            </tr>
+          ))}
+        </GridTable>
       )}
     </Panel>
   );
@@ -873,32 +843,20 @@ function RetentionPanel({
         <ErrorLine text={error} />
         {result && <DeleteResultView r={result} />}
         {view.deletions.length > 0 && (
-          <table className="grid">
-            <thead>
-              <tr>
-                <th>#</th>
-                <th>Executed</th>
-                <th>Scope</th>
-                <th>Seats</th>
-                <th>Deleted</th>
-                <th>Note</th>
+          <GridTable head={["#", "Executed", "Scope", "Seats", "Deleted", "Note"]}>
+            {view.deletions.map((d) => (
+              <tr key={d.id}>
+                <td>{d.id}</td>
+                <td className="small">{when(d.executedWall)}</td>
+                <td>{d.scope}</td>
+                <td>{d.seats.join(", ") || PLACEHOLDER}</td>
+                <td className="small">
+                  {d.tracks} tracks · {d.derivatives} derived · {fmtBytes(d.bytes)}
+                </td>
+                <td className="small">{d.note}</td>
               </tr>
-            </thead>
-            <tbody>
-              {view.deletions.map((d) => (
-                <tr key={d.id}>
-                  <td>{d.id}</td>
-                  <td className="small">{when(d.executedWall)}</td>
-                  <td>{d.scope}</td>
-                  <td>{d.seats.join(", ") || PLACEHOLDER}</td>
-                  <td className="small">
-                    {d.tracks} tracks · {d.derivatives} derived · {fmtBytes(d.bytes)}
-                  </td>
-                  <td className="small">{d.note}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+            ))}
+          </GridTable>
         )}
       </div>
     </Panel>

@@ -10,7 +10,7 @@ import {
 } from "@wkwa/shared";
 import { Fragment, memo, useMemo, useState } from "react";
 import { fmtDuration, fmtSigned, plural } from "../common/format";
-import { Button, formatDb, Panel, SeatDot } from "../ui";
+import { Button, formatDb, GridTable, Panel, SeatDot } from "../ui";
 import { shortTrack } from "./audioLive";
 
 function ms(ts: number) {
@@ -166,69 +166,54 @@ export const EventLog = memo(function EventLog({
             ))}
           </select>
         </div>
-        <div style={{ maxHeight, overflow: "auto" }}>
-          <table className="grid">
-            <thead>
-              <tr>
-                <th>#</th>
-                <th>time</th>
-                <th>R</th>
-                <th>type</th>
-                <th>seat</th>
-                <th>details</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((e) => (
-                <Fragment key={e.seq}>
-                  <tr
-                    onClick={() => setOpen(open === e.seq ? null : e.seq)}
-                    className={e.seq === highlightSeq ? "selected" : ""}
-                    style={{ cursor: "pointer" }}
-                  >
-                    <td className="faint">{e.seq}</td>
-                    <td className="mono small">{ms(e.serverTs)}</td>
-                    <td>{e.round || ""}</td>
-                    <td>{e.type}</td>
-                    <td>
-                      {e.seat && (
-                        <span className="row nowrap" style={{ gap: 4 }}>
-                          <SeatDot seat={e.seat} /> {e.seat}
-                        </span>
-                      )}
-                    </td>
-                    <td className="small">{summarise(e, regionName)}</td>
-                    <td>
-                      {revocable(e) && (
-                        <Button
-                          size="sm"
-                          icon="revoke"
-                          onClick={(x) => {
-                            x.stopPropagation();
-                            onRevoke!(e.seq);
-                          }}
-                          tip="Undo this action for everyone: its mark and score changes are undone and the quota is returned; the event stays in the log"
-                        >
-                          Revoke
-                        </Button>
-                      )}
-                    </td>
-                  </tr>
-                  {open === e.seq && (
-                    <tr>
-                      <td colSpan={7}>
-                        <pre className="mono small" style={{ margin: 0, whiteSpace: "pre-wrap" }}>
-                          {JSON.stringify({ ...e, payload: e.payload }, null, 2)}
-                        </pre>
-                      </td>
-                    </tr>
+        <GridTable head={["#", "time", "R", "type", "seat", "details", ""]} scroll={maxHeight}>
+          {rows.map((e) => (
+            <Fragment key={e.seq}>
+              <tr
+                onClick={() => setOpen(open === e.seq ? null : e.seq)}
+                className={e.seq === highlightSeq ? "selected" : ""}
+                style={{ cursor: "pointer" }}
+              >
+                <td className="faint">{e.seq}</td>
+                <td className="mono small">{ms(e.serverTs)}</td>
+                <td>{e.round || ""}</td>
+                <td>{e.type}</td>
+                <td>
+                  {e.seat && (
+                    <span className="row nowrap" style={{ gap: 4 }}>
+                      <SeatDot seat={e.seat} /> {e.seat}
+                    </span>
                   )}
-                </Fragment>
-              ))}
-            </tbody>
-          </table>
-        </div>
+                </td>
+                <td className="small">{summarise(e, regionName)}</td>
+                <td>
+                  {revocable(e) && (
+                    <Button
+                      size="sm"
+                      icon="revoke"
+                      onClick={(x) => {
+                        x.stopPropagation();
+                        onRevoke!(e.seq);
+                      }}
+                      tip="Undo this action for everyone: its mark and score changes are undone and the quota is returned; the event stays in the log"
+                    >
+                      Revoke
+                    </Button>
+                  )}
+                </td>
+              </tr>
+              {open === e.seq && (
+                <tr>
+                  <td colSpan={7}>
+                    <pre className="mono small" style={{ margin: 0, whiteSpace: "pre-wrap" }}>
+                      {JSON.stringify({ ...e, payload: e.payload }, null, 2)}
+                    </pre>
+                  </td>
+                </tr>
+              )}
+            </Fragment>
+          ))}
+        </GridTable>
       </div>
     </Panel>
   );
@@ -246,34 +231,30 @@ export function TelemetryFeed({
     <Panel title="Live telemetry" icon="telemetry">
       <div className="col">
         <span className="hint">Last {rows.length} items · state acks and clock syncs hidden</span>
-        <div style={{ maxHeight: 340, overflow: "auto" }}>
-          <table className="grid">
-            <tbody>
-              {rows.map((t) => {
-                const p = t.payload as Record<string, unknown>;
-                const detail = Object.entries(p)
-                  .map(([k, v]) =>
-                    k === "regionId"
-                      ? regionName(String(v))
-                      : `${k}=${typeof v === "object" ? JSON.stringify(v) : v}`,
-                  )
-                  .join(" ");
-                return (
-                  <tr key={t.id}>
-                    <td className="mono small">{ms(t.clientTs)}</td>
-                    <td>
-                      <span className="row nowrap" style={{ gap: 4 }}>
-                        <SeatDot seat={t.seat} /> {t.seat}
-                      </span>
-                    </td>
-                    <td>{t.type}</td>
-                    <td className="small">{detail}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+        <GridTable scroll={340}>
+          {rows.map((t) => {
+            const p = t.payload as Record<string, unknown>;
+            const detail = Object.entries(p)
+              .map(([k, v]) =>
+                k === "regionId"
+                  ? regionName(String(v))
+                  : `${k}=${typeof v === "object" ? JSON.stringify(v) : v}`,
+              )
+              .join(" ");
+            return (
+              <tr key={t.id}>
+                <td className="mono small">{ms(t.clientTs)}</td>
+                <td>
+                  <span className="row nowrap" style={{ gap: 4 }}>
+                    <SeatDot seat={t.seat} /> {t.seat}
+                  </span>
+                </td>
+                <td>{t.type}</td>
+                <td className="small">{detail}</td>
+              </tr>
+            );
+          })}
+        </GridTable>
       </div>
     </Panel>
   );

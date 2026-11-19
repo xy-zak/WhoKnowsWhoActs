@@ -23,6 +23,7 @@ import {
   Button,
   Callout,
   Check,
+  GridTable,
   Icon,
   type IconName,
   StatusTag,
@@ -145,17 +146,15 @@ type ChecklistRow = [label: string, ok: boolean, value: string | null];
 /** The final check before starting: ✓ or ⚠ per row, with a short value. */
 function Checklist({ rows }: { rows: ChecklistRow[] }) {
   return (
-    <table className="grid">
-      <tbody>
-        {rows.map(([k, ok, v]) => (
-          <tr key={k}>
-            <td style={{ width: 30 }}>{ok ? <Icon name="ok" /> : <Icon name="warning" />}</td>
-            <td className={ok ? "" : "t-warn"}>{k}</td>
-            <td className="mono small">{v}</td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
+    <GridTable>
+      {rows.map(([k, ok, v]) => (
+        <tr key={k}>
+          <td style={{ width: 30 }}>{ok ? <Icon name="ok" /> : <Icon name="warning" />}</td>
+          <td className={ok ? "" : "t-warn"}>{k}</td>
+          <td className="mono small">{v}</td>
+        </tr>
+      ))}
+    </GridTable>
   );
 }
 

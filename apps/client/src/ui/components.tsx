@@ -239,6 +239,51 @@ export function ActSwatch({ kind, k }: { kind: "propose" | "decide"; k?: string 
   );
 }
 
+/* ─────────────────────────── GridTable ─────────────────────────── */
+
+/**
+ * A `table.grid`: a header row of `head`, the rows as children, then `empty` (unless false) as
+ * one faint row across all columns. `scroll` wraps it in a scroll box; a number is its max height.
+ */
+export function GridTable({
+  head,
+  empty,
+  scroll,
+  children,
+}: {
+  head?: string[];
+  empty?: ReactNode;
+  scroll?: true | number;
+  children: ReactNode;
+}) {
+  const table = (
+    <table className="grid">
+      {head && (
+        <thead>
+          <tr>
+            {head.map((h, i) => (
+              // biome-ignore lint/suspicious/noArrayIndexKey: fixed columns, some without a title
+              <th key={i}>{h}</th>
+            ))}
+          </tr>
+        </thead>
+      )}
+      <tbody>
+        {children}
+        {empty && (
+          <tr>
+            <td colSpan={head?.length} className="faint">
+              {empty}
+            </td>
+          </tr>
+        )}
+      </tbody>
+    </table>
+  );
+  if (!scroll) return table;
+  return <div style={{ maxHeight: scroll === true ? undefined : scroll, overflow: "auto" }}>{table}</div>;
+}
+
 /* ─────────────────────────── Stepper (wayfinding) ─────────────────────────── */
 
 export interface StepDef {
