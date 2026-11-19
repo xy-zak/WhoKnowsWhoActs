@@ -10,11 +10,12 @@ import { statSync } from "node:fs";
 import { stat } from "node:fs/promises";
 import {
   AUDIO_SAMPLE_RATE,
-  AUDIO_STOP_REASONS,
   type AudioDerivativeKind,
   type AudioDerivativeSummary,
   type AudioStopReason,
   type AudioTrackSummary,
+  audioTrackEnding,
+  isAudioStopReason,
   type SeatAudioSummary,
   type SpeechSegmentRow,
 } from "@wkwa/shared";
@@ -45,28 +46,15 @@ export function isAudioDerivativeKind(kind: string): boolean {
   return (DERIVATIVE_KINDS as Record<string, { sound: boolean } | undefined>)[kind]?.sound ?? true;
 }
 
-/**
- * Stop reasons after which a track did not end cleanly: the browser or its microphone went away, or
- * the track was still open when the session was loaded again (`interrupted`, e.g. after a restart).
- */
-const INTERRUPTED_STOP_REASONS: ReadonlySet<string> = new Set([
-  "disconnect",
-  "interrupted",
-  "permission_lost",
-  "error",
-]);
-const KNOWN_STOP_REASONS: ReadonlySet<string> = new Set(AUDIO_STOP_REASONS);
-
-/** DB status + stop reason → the REST status. Unknown stop reasons count as interrupted too. */
+/** DB status + stop reason → the REST status (`audioTrackEnding`: unknown stop reasons count as interrupted). */
 export function trackStatusOf(t: Pick<AudioTrackRow, "status" | "stopReason">): AudioTrackSummary["status"] {
   if (t.status === "deleted") return "deleted";
   if (t.status === "recording") return "open";
-  if (t.stopReason !== null && !KNOWN_STOP_REASONS.has(t.stopReason)) return "interrupted";
-  return t.stopReason !== null && INTERRUPTED_STOP_REASONS.has(t.stopReason) ? "interrupted" : "closed";
+  return audioTrackEnding(t.stopReason) === "interrupted" ? "interrupted" : "closed";
 }
 
 function stopReasonOf(reason: string | null): AudioStopReason | null {
-  return reason !== null && KNOWN_STOP_REASONS.has(reason) ? (reason as AudioStopReason) : null;
+  return reason !== null && isAudioStopReason(reason) ? reason : null;
 }
 
 /**

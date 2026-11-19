@@ -1,8 +1,15 @@
-import { cellName, formatScoreChanges, parseCellId, type StoredEvent } from "@wkwa/shared";
+import {
+  AUDIO_START_REASON_DEFS,
+  AUDIO_STOP_REASON_DEFS,
+  cellName,
+  formatScoreChanges,
+  parseCellId,
+  type StoredEvent,
+} from "@wkwa/shared";
 import { useCallback, useId, useMemo, useRef, useState } from "react";
 import { kColour, seatColour } from "../map/MapView";
 import { ActSwatch, LabelTag, Panel } from "../ui";
-import { audioSpans, START_REASON_TEXT, STOP_REASON_TEXT } from "./audioLive";
+import { audioSpans } from "./audioLive";
 
 /**
  * Swimlane timeline: one lane per seat, proposals and decisions over time,
@@ -240,7 +247,7 @@ export function Timeline({
                 {audio.tracks.map((t) => {
                   const lane = seats.indexOf(t.seat);
                   if (lane < 0) return null;
-                  const tip = `Seat ${t.seat} recording · ${((t.s - start) / 60_000).toFixed(1)}–${(((t.e ?? now) - start) / 60_000).toFixed(1)} min · started: ${START_REASON_TEXT[t.reason]}${t.stopReason === null ? " · still recording" : ` · stopped: ${STOP_REASON_TEXT[t.stopReason]}`}`;
+                  const tip = `Seat ${t.seat} recording · ${((t.s - start) / 60_000).toFixed(1)}–${(((t.e ?? now) - start) / 60_000).toFixed(1)} min · started: ${AUDIO_START_REASON_DEFS[t.reason].label}${t.stopReason === null ? " · still recording" : ` · stopped: ${AUDIO_STOP_REASON_DEFS[t.stopReason].label}`}`;
                   return (
                     <rect
                       key={t.trackId}

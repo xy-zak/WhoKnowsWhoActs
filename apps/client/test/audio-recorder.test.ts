@@ -219,7 +219,7 @@ describe("MicRecorder", () => {
     const { rec, sent, states } = recorder();
     expect(await rec.start("mic_check")).toBe("recording");
     env.render(11);
-    await rec.stop("done");
+    await rec.stop("game_complete");
     await rec.whenSent();
     // onState also fires when only the track changes; the states themselves:
     expect(states.filter((x, i) => x !== states[i - 1])).toEqual(["idle", "requesting", "recording", "idle"]);
@@ -259,7 +259,7 @@ describe("MicRecorder", () => {
     expect(chunks[1]!.clientTs - chunks[0]!.clientTs).toBeCloseTo(5000, 3);
     expect(chunks[2]!.clientTs - chunks[1]!.clientTs).toBeCloseTo(5000, 3);
     const stop = sent.at(-1)!.m as AudioStopInfo;
-    expect(stop).toMatchObject({ trackId: "track-1", reason: "done", chunks: 3, samples: 176000 });
+    expect(stop).toMatchObject({ trackId: "track-1", reason: "game_complete", chunks: 3, samples: 176000 });
     expect(stop.clientTs - chunks[0]!.clientTs).toBeCloseTo(11000, 3);
     const pcm = int16FromLeBytes(chunks[0]!.pcm);
     expect(Math.max(...pcm.subarray(0, 1000))).toBeGreaterThan(9000);
@@ -268,7 +268,7 @@ describe("MicRecorder", () => {
   it("survives many start/stop cycles without leaking nodes or streams", async () => {
     const { rec, sent } = recorder();
     for (let i = 0; i < 40; i++) {
-      await rec.start(`cycle-${i}`);
+      await rec.start(i === 0 ? "mic_check" : "resume");
       env.render(0.3);
       await rec.stop();
     }
@@ -343,6 +343,16 @@ describe("MicRecorder", () => {
     expect(sent.at(-1)).toMatchObject({ kind: "stop", m: { reason: "track_ended", samples: 16000 } });
   });
 
+  it("fails with an error stop when the browser closes the audio context", async () => {
+    const { rec, sent } = recorder();
+    await rec.start();
+    env.render(1);
+    env.ctx.setState("closed");
+    expect(rec.state).toBe("error");
+    await rec.whenSent();
+    expect(sent.at(-1)).toMatchObject({ kind: "stop", m: { reason: "error", samples: 16000 } });
+  });
+
   it("splits the track at a context suspension and continues in a new track after the resume", async () => {
     const { rec, sent } = recorder();
     await rec.start();
@@ -359,7 +369,7 @@ describe("MicRecorder", () => {
     await rec.stop();
     await rec.whenSent();
     const starts = sent.filter((s) => s.kind === "start").map((s) => s.m as AudioStartInfo);
-    expect(starts.map((s) => s.reason)).toEqual(["start", "context_resumed"]);
+    expect(starts.map((s) => s.reason)).toEqual(["reload", "context_resumed"]);
     const second = chunksOf(sent, starts[1]!.trackId);
     expect(second[0]!.startSample).toBe(0);
     expect(rec.lateFrames).toBe(0);
@@ -377,8 +387,11 @@ describe("MicRecorder", () => {
     env.node.port.onmessage?.({ data: { type: "pcm", frame, samples: new Float32Array(1920) } });
     await rec.stop();
     await rec.whenSent();
-    expect(sent.filter((s) => s.kind === "stop").map((s) => s.m.reason)).toEqual(["clock_jump", "stop"]);
-    expect(sent.filter((s) => s.kind === "start").map((s) => s.m.reason)).toEqual(["start", "clock_jump"]);
+    expect(sent.filter((s) => s.kind === "stop").map((s) => s.m.reason)).toEqual([
+      "clock_jump",
+      "client_stop",
+    ]);
+    expect(sent.filter((s) => s.kind === "start").map((s) => s.m.reason)).toEqual(["reload", "clock_jump"]);
   });
 
   it("reports no signal for digital silence and for a muted track", async () => {
@@ -440,9 +453,9 @@ describe("MicRecorder", () => {
     const { rec } = recorder();
     await rec.start();
     env.render(1);
-    const first = rec.stop("a");
-    const restarted = rec.start("again");
-    const second = rec.stop("b");
+    const first = rec.stop("paused");
+    const restarted = rec.start("resume");
+    const second = rec.stop("closed");
     await Promise.all([first, second]);
     expect(await restarted).toBe("idle");
     expect(rec.state).toBe("idle");
@@ -499,7 +512,7 @@ describe("MicRecorder", () => {
     await rec.whenSent();
     expect(sent.filter((s) => s.kind === "stop").map((s) => [s.m.reason, s.m.samples])).toEqual([
       ["discontinuity", resampledLength(48000 + 512 + 128, 48000)],
-      ["stop", 8000],
+      ["client_stop", 8000],
     ]);
   });
 });

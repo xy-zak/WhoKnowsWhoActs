@@ -1,11 +1,10 @@
 import {
-  AUDIO_START_REASONS,
-  AUDIO_STOP_REASONS,
   type AudioLevel,
   type AudioStartReason,
   type AudioStopReason,
   audioSendResult,
   clampDb,
+  micCapturing,
   type PlayerAcks,
   type PlayerPayload,
   type PlayerView,
@@ -56,8 +55,8 @@ export interface RecorderLike {
   readonly captureSettings: EngineCaptureSettings;
   prepare(): boolean;
   resume(): Promise<boolean>;
-  start(reason?: string): Promise<RecorderState>;
-  stop(reason?: string): Promise<void>;
+  start(reason?: AudioStartReason): Promise<RecorderState>;
+  stop(reason?: AudioStopReason): Promise<void>;
   onReconnect(): void;
   clearPending(): number;
   addTap(fn: (samples: Float32Array) => void): () => void;
@@ -149,18 +148,6 @@ export function stopReasonFor(v: PlayerView | null): AudioStopReason {
 /** The start reason of a track (falls back to `reload` / `mic_check` when there is no specific one). */
 export function startReasonFor(v: PlayerView | null, next: AudioStartReason | null): AudioStartReason {
   return next ?? (atMicCheck(v) ? "mic_check" : "reload");
-}
-
-const START_REASONS: ReadonlySet<string> = new Set(AUDIO_START_REASONS);
-const STOP_REASONS: ReadonlySet<string> = new Set(AUDIO_STOP_REASONS);
-
-/** A reason the server accepts: the engine's own reasons are mapped onto the documented ones. */
-export function wireStopReason(reason: string): AudioStopReason {
-  if (STOP_REASONS.has(reason)) return reason as AudioStopReason;
-  return reason === "dispose" || reason === "stop" ? "client_stop" : "error";
-}
-export function wireStartReason(reason: string): AudioStartReason {
-  return START_REASONS.has(reason) ? (reason as AudioStartReason) : "reload";
 }
 
 /**
@@ -470,7 +457,7 @@ export class RecordingController {
       }
       this.report(status.state, status.error?.name);
       if (prev !== status.state) this.reportDrained();
-    } else if (status.state === "recording" || status.state === "no_signal" || status.state === "paused") {
+    } else if (micCapturing(status.state)) {
       this.report("granted");
     }
     this.publish(status);
@@ -526,8 +513,7 @@ export class RecordingController {
   private publish(status?: RecorderStatus) {
     const rec = this.rec;
     const st = status ?? rec?.status ?? IDLE_STATUS;
-    const capturing = st.state === "recording" || st.state === "no_signal" || st.state === "paused";
-    if (!capturing && this.levelStore.get() !== null) this.levelStore.set(null);
+    if (!micCapturing(st.state) && this.levelStore.get() !== null) this.levelStore.set(null);
     this.store.set((s) => ({
       ...s,
       status: st,
@@ -540,12 +526,7 @@ export class RecordingController {
 
   private async sendStart(info: AudioStartInfo, signal?: AbortSignal): Promise<SendResult> {
     this.store.set((s) => ({ ...s, contextSampleRate: info.context.sampleRate }));
-    const ack = await this.deps.send(
-      "audio:start",
-      { ...info, reason: wireStartReason(info.reason) },
-      signal,
-    );
-    return audioSendResult(ack);
+    return audioSendResult(await this.deps.send("audio:start", info, signal));
   }
 
   private async sendChunk(chunk: AudioChunk, signal?: AbortSignal): Promise<SendResult> {
@@ -559,7 +540,6 @@ export class RecordingController {
       "audio:stop",
       {
         ...info,
-        reason: wireStopReason(info.reason),
         droppedChunks: Math.min(dropped, info.chunks),
       },
       signal,

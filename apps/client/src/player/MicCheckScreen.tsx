@@ -66,7 +66,6 @@ export function MicCheckScreen({ conn, view }: { conn: PlayerConnection; view: P
   const support = useRef(micSupportProblem()).current;
 
   const st = snap.status.state;
-  const capturing = st === "recording" || st === "no_signal";
   const failed = st === "denied" || st === "error";
   // the participant clicked Start in this page (a reload asks again)
   const started = attempt > 0 && snap.gesture;
@@ -267,7 +266,7 @@ export function MicCheckScreen({ conn, view }: { conn: PlayerConnection; view: P
         <div className="col" style={{ gap: "var(--s3)" }}>
           <div className="row" style={{ gap: "var(--s3)" }}>
             <span className="small upper muted">Your microphone</span>
-            <MicLevelMeter conn={conn} capturing={capturing} />
+            <MicLevelMeter conn={conn} state={st} />
           </div>
           {passedShown ? (
             <Callout tone="live" icon="ok">

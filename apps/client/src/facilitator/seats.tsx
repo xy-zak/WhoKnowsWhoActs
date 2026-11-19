@@ -10,6 +10,7 @@ import {
   K_LABELS,
   type KLabel,
   type LabelPairing,
+  micHasLevel,
   nextOnboardingStep,
   P_LABELS,
   type PairingMode,
@@ -593,7 +594,7 @@ export function MicColumn({
   if (!meter && !check) return <RecTag compact state={cell.state} tip={cell.tip} />;
   const pending = mic?.pendingChunks ?? 0;
   const pendingWarn = backlogTone(pending, trend?.growing ?? false) === "warn";
-  const live = cell.state === "recording" || cell.state === "no_signal";
+  const live = micHasLevel(cell.state);
   const age = live ? chunkAge(mic, serverNow) : { ageMs: null, stale: false };
   return (
     <span className="col" style={{ gap: 2 }}>

@@ -1,4 +1,6 @@
 import {
+  AUDIO_STOP_REASON_DEFS,
+  AUDIO_STOP_REASONS,
   type AudioStartReason,
   type AudioStopReason,
   type AudioTrackSummary,
@@ -8,6 +10,7 @@ import {
   isParticipant,
   type MicCheckStatus,
   micCheckApplies,
+  micHasLevel,
   RECORDING_PHASES,
   type ReadonlyGameState,
   type ReadonlySeatState,
@@ -96,7 +99,7 @@ export function micCell(
           ? "Not recording: no reading from this browser (disconnected, or the mic check has not opened the microphone yet)"
           : "Not recording yet: the mic checks wait until every seat has finished consent",
     );
-  const level = mic.state === "recording" || mic.state === "no_signal";
+  const level = micHasLevel(mic.state);
   return {
     state: mic.state,
     ...(mic.state === "paused"
@@ -285,15 +288,13 @@ export interface AudioCheck {
   lines: AudioCheckLine[];
 }
 
-/** Stop reasons that mean audio may be missing, and how the wrap-up check names them. */
-const BROKEN_STOPS: Partial<Record<AudioStopReason, string>> = {
-  disconnect: "disconnected",
-  interrupted: "not closed cleanly",
-  error: "capture error",
-  permission_lost: "microphone permission lost",
-  track_ended: "microphone unplugged or blocked",
-  context_interrupted: "audio engine interrupted",
-};
+/** Stop reasons that mean audio may be missing, and how the wrap-up check names them (the catalogue's `wrapUpIssue`). */
+const BROKEN_STOPS: Partial<Record<AudioStopReason, string>> = Object.fromEntries(
+  AUDIO_STOP_REASONS.flatMap((r) => {
+    const why = AUDIO_STOP_REASON_DEFS[r].wrapUpIssue;
+    return why === null ? [] : [[r, why]];
+  }),
+);
 
 /**
  * Before closing: is every real seat's audio on the server? Uses the live upload backlog and the
@@ -466,35 +467,3 @@ export function audioSpans(events: readonly StoredEvent[]): AudioSpans {
 export function shortTrack(trackId: string): string {
   return trackId.slice(0, 8);
 }
-
-export const START_REASON_TEXT: Record<AudioStartReason, string> = {
-  mic_check: "mic check",
-  resume: "recording resumed",
-  reconnect: "reconnect",
-  reload: "page reload",
-  permission_regained: "microphone back",
-  context_resumed: "audio engine resumed",
-  clock_jump: "clock jump",
-  discontinuity: "audio discontinuity",
-  cleared: "unsent audio cleared",
-};
-
-export const STOP_REASON_TEXT: Record<AudioStopReason, string> = {
-  paused: "recording paused",
-  game_complete: "game complete",
-  closed: "session closed",
-  aborted: "session aborted",
-  withdrawn: "withdrawn",
-  disconnect: "disconnected",
-  permission_lost: "microphone permission lost",
-  error: "capture error",
-  client_stop: "stopped by the browser",
-  skipped: "mic check skipped",
-  interrupted: "interrupted",
-  context_suspended: "audio engine suspended",
-  context_interrupted: "audio engine interrupted",
-  clock_jump: "clock jump",
-  discontinuity: "audio discontinuity",
-  track_ended: "microphone track ended",
-  cleared: "unsent audio cleared",
-};

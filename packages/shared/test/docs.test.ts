@@ -4,10 +4,13 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { ALL_BLOCKS } from "../../../scripts/docBlocks";
 import {
+  AUDIO_START_REASONS,
+  AUDIO_STOP_REASONS,
   applyGeneratedBlocks,
   EVENT_DEFS,
   EVENT_TYPES,
   EXPORT_FILES,
+  INTERRUPTED_STOP_REASONS,
   MESSAGES,
   renderCodebook,
   TELEMETRY_DEFS,
@@ -108,5 +111,20 @@ describe("codebook", () => {
     expect(md).toContain("`q_age_bracket`");
     for (const f of EXPORT_FILES) expect(md).toContain(`\`${f.file}\``);
     for (const t of EVENT_TYPES) expect(md).toContain(`### \`${t}\``);
+  });
+});
+
+describe("audio_tracks.csv codebook", () => {
+  const column = (name: string) => {
+    const file = EXPORT_FILES.find((f) => f.file === "audio_tracks.csv");
+    const col = file?.columns.find((c) => c.name === name);
+    if (!col) throw new Error(`audio_tracks.csv has no ${name} column`);
+    return col.description;
+  };
+
+  it("names every start and stop reason, and the stop reasons that make a track interrupted", () => {
+    for (const r of AUDIO_START_REASONS) expect(column("start_reason")).toContain(`'${r}' = `);
+    for (const r of AUDIO_STOP_REASONS) expect(column("stop_reason")).toContain(`'${r}' = `);
+    for (const r of INTERRUPTED_STOP_REASONS) expect(column("status")).toContain(r);
   });
 });

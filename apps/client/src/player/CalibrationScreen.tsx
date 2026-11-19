@@ -64,7 +64,6 @@ export function CalibrationScreen({ conn, view }: { conn: PlayerConnection; view
   const c = view.audio.calibration;
   const snap = useRecording(conn);
   const left = useSecondsLeft(conn, c.myTurn ? c.turnEndsAt : null);
-  const capturing = snap.status.state === "recording" || snap.status.state === "no_signal";
   // index of the latest turn seen, for the gap between two turns (the view has no turn then)
   const lastTurn = useRef(-1);
   if (c.status !== "running") lastTurn.current = -1;
@@ -99,7 +98,7 @@ export function CalibrationScreen({ conn, view }: { conn: PlayerConnection; view
             </>
           )}
         </p>
-        <MicLevelMeter conn={conn} capturing={capturing} />
+        <MicLevelMeter conn={conn} state={snap.status.state} />
       </Centered>
     );
   }

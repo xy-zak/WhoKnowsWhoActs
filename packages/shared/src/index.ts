@@ -1,4 +1,5 @@
 export * from "./audio";
+export * from "./audioReasons";
 export * from "./board";
 export * from "./config";
 export * from "./docgen";

@@ -6,7 +6,14 @@
  * (`AudioChunk` and `SendResult` are derived from there); the engine itself has
  * no socket or UI dependency (all I/O is injected into MicRecorder).
  */
-import type { AUDIO_SAMPLE_RATE, AudioChunkInput, audioSendResult, MicLevelState } from "@wkwa/shared";
+import type {
+  AUDIO_SAMPLE_RATE,
+  AudioChunkInput,
+  AudioStartReason,
+  AudioStopReason,
+  audioSendResult,
+  MicLevelState,
+} from "@wkwa/shared";
 
 /** Default cap of unacknowledged audio kept in memory (30 min ≈ 57.6 MB). */
 export const DEFAULT_MAX_PENDING_SECONDS = 1800;
@@ -78,8 +85,8 @@ export interface AudioContextInfo {
 export interface AudioStartInfo {
   /** random UUID of this capture run */
   trackId: string;
-  /** why the track started: the reason given to start(), or "context_resumed" / "clock_jump" / "discontinuity" */
-  reason: string;
+  /** why the track started: the reason given to start(), or "context_resumed" / "clock_jump" / "discontinuity" / "cleared" */
+  reason: AudioStartReason;
   /** rate of the PCM in the chunks: always 16 000 */
   sampleRate: typeof AUDIO_SAMPLE_RATE;
   /** samples in a full chunk (chunkSeconds × 16 000); the last chunk of a track may be shorter */
@@ -103,8 +110,8 @@ export type AudioChunk = Omit<AudioChunkInput, "pcm"> & { pcm: Uint8Array };
 /** Sent once when a track ends, after its last chunk. */
 export interface AudioStopInfo {
   trackId: string;
-  /** the reason given to stop(), or "track_ended" / "context_suspended" / "context_interrupted" / "clock_jump" / "discontinuity" / "error" */
-  reason: string;
+  /** the reason given to stop(), or "track_ended" / "context_suspended" / "context_interrupted" / "clock_jump" / "discontinuity" / "cleared" / "error" */
+  reason: AudioStopReason;
   /** chunks the track produced (seq 0 … chunks − 1) */
   chunks: number;
   /** 16 kHz samples the track produced */

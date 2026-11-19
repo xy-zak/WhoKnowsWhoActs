@@ -1,12 +1,6 @@
 import { z } from "zod";
-import {
-  AUDIO_SAMPLE_RATE,
-  AudioSettingsSchema,
-  AudioStartReasonSchema,
-  AudioStopReasonSchema,
-  Dbfs,
-  TrackIdSchema as TrackId,
-} from "./audio";
+import { AUDIO_SAMPLE_RATE, AudioSettingsSchema, Dbfs, TrackIdSchema as TrackId } from "./audio";
+import { AudioStartReasonSchema, AudioStopReasonSchema } from "./audioReasons";
 import { BoardSchema } from "./board";
 import { FakePaceSchema, RoundSpecSchema, SessionConfigSchema } from "./config";
 import {

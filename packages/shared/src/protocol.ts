@@ -5,16 +5,18 @@ import {
   AUDIO_SAMPLE_RATE,
   AudioCaptureSettingsSchema,
   AudioContextInfoSchema,
-  AudioStartReasonSchema,
-  AudioStopReasonSchema,
   Dbfs,
-  type MicLevelState,
-  MicLevelStateSchema,
   PcmSchema,
   pcmByteLength,
   TrackIdSchema,
   toAudioSettings,
 } from "./audio";
+import {
+  AudioStartReasonSchema,
+  AudioStopReasonSchema,
+  type MicLevelState,
+  MicLevelStateSchema,
+} from "./audioReasons";
 import { FakePaceSchema, SessionConfigSchema } from "./config";
 import { EVENT_DEFS } from "./events";
 import { ActionKindSchema, KLabelSchema, SeatSchema } from "./labels";
