@@ -1,7 +1,13 @@
 import { mkdtempSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { generateParticipantCode, type NewEvent, type TelemetryItem } from "@wkwa/shared";
+import {
+  generateParticipantCode,
+  type NewEvent,
+  parseSessionConfig,
+  reduceEvents,
+  type TelemetryItem,
+} from "@wkwa/shared";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { AudioFileStore } from "../src/audio/fileStore";
 import { sha256 } from "../src/content";
@@ -75,6 +81,16 @@ async function seedSession(store: Store, files: AudioFileStore, codes: Record<nu
     harness_version: "0",
     git_commit: "test",
   });
+  // the replay needs it to have seats
+  store.appendEvent(
+    sessionId,
+    {
+      type: "SessionCreated",
+      actorKind: "system",
+      payload: { config: parseSessionConfig({}), scenario: {}, regionIds: [], viewIds: [] },
+    } as unknown as NewEvent,
+    0,
+  );
   const seats = Object.keys(codes).map(Number);
   const trackIds: Record<number, string> = {};
   for (const seat of seats) {
@@ -258,6 +274,27 @@ describe("personal-data map", () => {
     expect(map.erase(code).erased).toBe(false);
   });
 
+  it("an erasure does not withdraw the participant who holds the seat now", async () => {
+    const [a, b] = [generateParticipantCode(), generateParticipantCode()];
+    const { sessionId } = await seedSession(store, files, { 2: a });
+    // seat 2 rebound (replaced) to b in the lobby
+    store.appendEvent(
+      sessionId,
+      {
+        type: "SeatBound",
+        actorKind: "facilitator",
+        seat: 2,
+        participantCode: b,
+        payload: { seat: 2, terminal: 2, bindingId: "b-2-again" },
+      } as NewEvent,
+      0,
+    );
+    expect(map.erase(a).erased).toBe(true);
+    expect(store.listEvents(sessionId).some((e) => e.type === "ParticipantWithdrawn")).toBe(false);
+    const seat = reduceEvents(store.listEvents(sessionId)).seats[2]!;
+    expect(seat).toMatchObject({ participantCode: b, withdrawn: false });
+  });
+
   it("after deleting a session no table holds its id, and the other session is untouched", async () => {
     const a = await seedSession(store, files, { 1: generateParticipantCode(), 2: generateParticipantCode() });
     const b = await seedSession(store, files, { 1: generateParticipantCode() });
@@ -268,7 +305,7 @@ describe("personal-data map", () => {
     const r = map.deleteSession(a.sessionId, { exportsDir: path.join(dir, "exports"), note: "invariant" });
 
     expect(r.rows).toEqual({
-      events: 3,
+      events: 4,
       telemetry: 2,
       exports: 1,
       audioTracks: 2,

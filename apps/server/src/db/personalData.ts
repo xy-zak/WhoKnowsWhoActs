@@ -353,7 +353,8 @@ export class PersonalDataMap {
    *     every audio derivative that carries the code or was computed from one of their tracks
    *     (e.g. session-wide speech segments: re-run the attribution); the other seats' kept
    *     segments forget the erased seat as overlap partner, job summaries are cleared,
-   *  2. append ParticipantWithdrawn{by: "erasure"} (without the code) to each affected session,
+   *  2. append ParticipantWithdrawn{by: "erasure"} (without the code) to each affected session
+   *     whose seat the participant still holds (not after it was rebound to someone else),
    *  3. add an entry to the erasure register (SHA-256 of the code only),
    *  4. checkpoint + VACUUM so the deleted pages are physically gone (secure_delete is ON),
    *  5. unlink the encrypted audio files (already unreadable: their keys are gone).
@@ -380,6 +381,9 @@ export class PersonalDataMap {
     const unlink = this.removeInTransaction(() => {
       for (const occ of found.occurrences) {
         const { sessionId, seat } = occ;
+        // read before the delete: a seat rebound to someone else since must not be withdrawn
+        const holdsSeat =
+          seat !== null && reduceEvents(store.listEvents(sessionId)).seats[seat]?.participantCode === code;
         this.eraseDerivedAudio(sessionId, code, seat, rows, files);
         for (const t of PERSONAL_DATA) {
           const where = ofParticipant(t);
@@ -394,7 +398,7 @@ export class PersonalDataMap {
           const n = db.prepare(`DELETE FROM ${t.table} WHERE ${where}`).run(sessionId, code).changes;
           if (t.counts.erasure) rows[t.counts.erasure] += n;
         }
-        if (seat !== null) {
+        if (holdsSeat) {
           store.resetSeqCache();
           const state = reduceEvents(store.listEvents(sessionId));
           store.appendEvent(

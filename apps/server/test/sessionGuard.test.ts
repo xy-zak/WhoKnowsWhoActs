@@ -183,14 +183,16 @@ describe("SessionGuard: may this operation change the session now?", () => {
     });
 
     it("eraseParticipant reloads the attached session afterwards only when the code was in it", () => {
-      for (const [codes, expected] of [
-        [[CODE], ["erase", "reload"]],
-        [["WK-ZZZZ-ZZZZ-Z"], ["erase"]],
+      for (const [codes, sessions, expected] of [
+        [[CODE], [S], ["erase", "reload"]],
+        // seat rebound to someone else: the code is still in the session's stored data
+        [["WK-ZZZZ-ZZZZ-Z"], [S], ["erase", "reload"]],
+        [["WK-ZZZZ-ZZZZ-Z"], [OTHER], ["erase"]],
       ] as const) {
         const { guard, calls } = setup({ sessionId: S, phase: "closed", codes: [...codes] }, "none");
         const v = guard.eraseParticipant(
           CODE,
-          () => [S],
+          () => sessions,
           () => calls.push("erase"),
         );
         expect(v.ok).toBe(true);
