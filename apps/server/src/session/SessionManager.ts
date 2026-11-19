@@ -1,6 +1,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import {
   type ActionKind,
+  type ActorKind,
   AUDIO_CONSENT_ITEM,
   type AudioAck,
   activeSeats,
@@ -13,6 +14,7 @@ import {
   checkSimulationConfig,
   DEFAULT_VALIDATORS,
   DISSOCIATED_PAIRINGS,
+  type EventType,
   type FakePlayerPace,
   type GameState,
   generateParticipantCode,
@@ -393,8 +395,17 @@ export class SessionManager {
     return stored;
   }
 
-  private codeOf(seat: number): string | null {
-    return this.state.seats[seat]?.participantCode ?? null;
+  /** An event of a seat: the seat's participant code is recorded with it (and the browser's clientTs/clientSeq). */
+  private seatEvent<K extends EventType>(
+    seat: number,
+    type: K,
+    actorKind: ActorKind,
+    payload: PayloadOf<K>,
+    clientTs?: number,
+    clientSeq?: number,
+  ): StoredEvent {
+    const participantCode = this.state.seats[seat]?.participantCode ?? null;
+    return this.append({ type, actorKind, seat, participantCode, clientTs, clientSeq, payload } as NewEvent);
   }
 
   private requirePhase(...phases: GameState["phase"][]) {
@@ -501,13 +512,7 @@ export class SessionManager {
       const fakeRefused = opts.fake ? this.fakePlayerRefusal(seat) : null;
       if (fakeRefused) throw new CommandError(fakeRefused);
       if (s.bound) {
-        this.append({
-          type: "SeatUnbound",
-          actorKind: "facilitator",
-          seat,
-          participantCode: s.participantCode,
-          payload: { seat, reason: "replaced" },
-        });
+        this.seatEvent(seat, "SeatUnbound", "facilitator", { seat, reason: "replaced" });
       }
       const fake = opts.fake === true;
       let code: string | null = null;
@@ -539,13 +544,7 @@ export class SessionManager {
       this.requirePhase("lobby");
       const s = this.requireSeat(seat);
       if (!s.bound) throw new CommandError(`Seat ${seat} is not bound`);
-      this.append({
-        type: "SeatUnbound",
-        actorKind: "facilitator",
-        seat,
-        participantCode: s.participantCode,
-        payload: { seat, reason },
-      });
+      this.seatEvent(seat, "SeatUnbound", "facilitator", { seat, reason });
     });
   }
 
@@ -763,19 +762,13 @@ export class SessionManager {
       if (a.revoked) throw new CommandError("Already revoked");
       if (a.round !== this.state.round)
         throw new CommandError("Only actions of the current round can be revoked");
-      this.append({
-        type: "ActionRevoked",
-        actorKind: "facilitator",
-        seat: a.seat,
-        participantCode: this.codeOf(a.seat),
-        payload: {
-          targetSeq: seq,
-          targetType: a.kind === "propose" ? "ProposalMade" : "DecisionMade",
-          targetSeat: a.seat,
-          regionId: a.regionId,
-          reason,
-          scoreChanges: scoreChangesForRevoke(this.state, seq),
-        },
+      this.seatEvent(a.seat, "ActionRevoked", "facilitator", {
+        targetSeq: seq,
+        targetType: a.kind === "propose" ? "ProposalMade" : "DecisionMade",
+        targetSeat: a.seat,
+        regionId: a.regionId,
+        reason,
+        scoreChanges: scoreChangesForRevoke(this.state, seq),
       });
     });
   }
@@ -805,12 +798,10 @@ export class SessionManager {
       const s = this.requireSeat(seat);
       if (!s.bound) throw new CommandError(`Seat ${seat} is not bound`);
       if (s.withdrawn) throw new CommandError(`Seat ${seat} already withdrawn`);
-      this.append({
-        type: "ParticipantWithdrawn",
-        actorKind: "facilitator",
+      this.seatEvent(seat, "ParticipantWithdrawn", "facilitator", {
         seat,
-        participantCode: s.participantCode,
-        payload: { seat, by: "facilitator", phase: this.state.phase },
+        by: "facilitator",
+        phase: this.state.phase,
       });
       this.afterAction();
     });
@@ -856,13 +847,7 @@ export class SessionManager {
     this.run(() => {
       const s = this.state.seats[seat];
       if (!s?.bound || s.withdrawn || s.connected || this.isFinal) return;
-      this.append({
-        type: "PlayerConnected",
-        actorKind: "system",
-        seat,
-        participantCode: s.participantCode,
-        payload: { seat, reconnect: s.everConnected },
-      });
+      this.seatEvent(seat, "PlayerConnected", "system", { seat, reconnect: s.everConnected });
     });
   }
 
@@ -872,13 +857,7 @@ export class SessionManager {
     this.run(() => {
       const s = this.state.seats[seat];
       if (!s?.bound || !s.connected || this.isFinal) return;
-      this.append({
-        type: "PlayerDisconnected",
-        actorKind: "system",
-        seat,
-        participantCode: s.participantCode,
-        payload: { seat, reason },
-      });
+      this.seatEvent(seat, "PlayerDisconnected", "system", { seat, reason });
       const st = this.state;
       if (st.phase === "round_active" && !st.paused && st.config.pauseOnDisconnect && !s.withdrawn) {
         this.append({ type: "GamePaused", actorKind: "system", payload: { reason: "disconnect", seat } });
@@ -922,20 +901,19 @@ export class SessionManager {
       const answers: Record<string, boolean> = {};
       for (const item of c.items) answers[item.id] = msg.answers[item.id] === true;
       const consented = c.items.every((i) => !i.required || answers[i.id]);
-      this.append({
-        type: "ConsentRecorded",
-        actorKind: "player",
+      this.seatEvent(
         seat,
-        participantCode: s.participantCode,
-        clientTs: msg.clientTs,
-        payload: {
+        "ConsentRecorded",
+        "player",
+        {
           formVersion: c.version,
           textSha256: c.sha256,
           answers,
           consented,
           durationMs: msg.durationMs,
         },
-      });
+        msg.clientTs,
+      );
     });
   }
 
@@ -944,7 +922,7 @@ export class SessionManager {
     msg: { formVersion: string; answers: Record<string, string>; durationMs: number; clientTs: number },
   ) {
     this.run(() => {
-      const s = this.requireStep(seat, "demographics");
+      this.requireStep(seat, "demographics");
       const form = this.onboarding.demographics;
       if (msg.formVersion !== form.version)
         throw new CommandError("The questionnaire has changed — please reload");
@@ -957,31 +935,29 @@ export class SessionManager {
       }
       if (Object.keys(msg.answers).length !== form.questions.length)
         throw new CommandError("Unexpected answers");
-      this.append({
-        type: "DemographicsSubmitted",
-        actorKind: "player",
+      this.seatEvent(
         seat,
-        participantCode: s.participantCode,
-        clientTs: msg.clientTs,
-        payload: { formVersion: form.version, answers, durationMs: msg.durationMs },
-      });
+        "DemographicsSubmitted",
+        "player",
+        { formVersion: form.version, answers, durationMs: msg.durationMs },
+        msg.clientTs,
+      );
     });
   }
 
   acknowledgeBriefing(seat: number, msg: { textSha256: string; durationMs: number; clientTs: number }) {
     this.run(() => {
-      const s = this.requireStep(seat, "briefing");
+      this.requireStep(seat, "briefing");
       if (msg.textSha256 !== this.onboarding.briefing.sha256) {
         throw new CommandError("The briefing has changed — please reload the page");
       }
-      this.append({
-        type: "BriefingAcknowledged",
-        actorKind: "player",
+      this.seatEvent(
         seat,
-        participantCode: s.participantCode,
-        clientTs: msg.clientTs,
-        payload: { textSha256: msg.textSha256, durationMs: msg.durationMs },
-      });
+        "BriefingAcknowledged",
+        "player",
+        { textSha256: msg.textSha256, durationMs: msg.durationMs },
+        msg.clientTs,
+      );
     });
   }
 
@@ -999,16 +975,14 @@ export class SessionManager {
   submitMicCheck(seat: number, msg: MicCheckResult) {
     this.run(() => {
       this.requireAudio();
-      const s = this.requireStep(seat, "mic_check");
+      this.requireStep(seat, "mic_check");
       if (isMicCheckHeld(this.state))
         throw new CommandError("Please wait: the others have not finished the briefing yet");
-      this.append({
-        type: "MicCheckCompleted",
-        actorKind: "player",
+      this.seatEvent(
         seat,
-        participantCode: s.participantCode,
-        clientTs: msg.clientTs,
-        payload: {
+        "MicCheckCompleted",
+        "player",
+        {
           passed: msg.passed,
           attempts: msg.attempts,
           durationMs: msg.durationMs,
@@ -1017,7 +991,8 @@ export class SessionManager {
           speechDb: msg.speechDb,
           speechMs: msg.speechMs,
         },
-      });
+        msg.clientTs,
+      );
     });
   }
 
@@ -1032,13 +1007,7 @@ export class SessionManager {
         throw new CommandError(`The mic check does not apply to seat ${seat} (no audio consent)`);
       if (s.micCheck !== "pending")
         throw new CommandError(`The mic check of seat ${seat} is already ${s.micCheck}`);
-      this.append({
-        type: "MicCheckSkipped",
-        actorKind: "facilitator",
-        seat,
-        participantCode: s.participantCode,
-        payload: { seat, reason },
-      });
+      this.seatEvent(seat, "MicCheckSkipped", "facilitator", { seat, reason });
     });
   }
 
@@ -1115,14 +1084,7 @@ export class SessionManager {
         if (this.state.audio.calibration.ready.includes(seat)) return; // a resend: already ready
         throw new CommandError("The calibration is not waiting for you now");
       }
-      this.append({
-        type: "CalibrationReady",
-        actorKind: "player",
-        seat,
-        participantCode: s.participantCode,
-        clientTs: msg.clientTs,
-        payload: {},
-      });
+      this.seatEvent(seat, "CalibrationReady", "player", {}, msg.clientTs);
     });
   }
 
@@ -1285,18 +1247,16 @@ export class SessionManager {
     msg: { clientSeq: number; kind: ActionKind; regionId: string; clientTs: number },
   ): IntentAck {
     const st = this.state;
-    const code = this.codeOf(seat);
     const v = validateIntent(st, seat, { kind: msg.kind, regionId: msg.regionId }, this.validators);
     if (!v.ok) {
-      this.append({
-        type: "IntentRejected",
-        actorKind: "player",
+      this.seatEvent(
         seat,
-        participantCode: code,
-        clientTs: msg.clientTs,
-        clientSeq: msg.clientSeq,
-        payload: { kind: msg.kind, regionId: msg.regionId, reason: v.reason, detail: v.detail },
-      });
+        "IntentRejected",
+        "player",
+        { kind: msg.kind, regionId: msg.regionId, reason: v.reason, detail: v.detail },
+        msg.clientTs,
+        msg.clientSeq,
+      );
       return { ok: false, reason: v.reason, detail: v.detail };
     }
     const onRegion = st.actions.filter(
@@ -1314,27 +1274,8 @@ export class SessionManager {
       // the game rules run once, here; the event records their effect (see game/rules.ts)
       scoreChanges: scoreChangesForIntent(st, seat, { kind: msg.kind, regionId: msg.regionId }),
     };
-    const ev = this.append(
-      msg.kind === "propose"
-        ? {
-            type: "ProposalMade",
-            actorKind: "player",
-            seat,
-            participantCode: code,
-            clientTs: msg.clientTs,
-            clientSeq: msg.clientSeq,
-            payload,
-          }
-        : {
-            type: "DecisionMade",
-            actorKind: "player",
-            seat,
-            participantCode: code,
-            clientTs: msg.clientTs,
-            clientSeq: msg.clientSeq,
-            payload,
-          },
-    );
+    const type = msg.kind === "propose" ? "ProposalMade" : "DecisionMade";
+    const ev = this.seatEvent(seat, type, "player", payload, msg.clientTs, msg.clientSeq);
     this.afterAction();
     return { ok: true, seq: ev.seq };
   }

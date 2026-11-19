@@ -429,7 +429,7 @@ Used by the dashboard's data pages and by scripts. **Localhost-only** unless `AD
 | Validity | 397 days (from one day in the past, so a PC whose clock is slightly behind still accepts it) |
 | Extensions | `basicConstraints CA:false` (it cannot sign other certificates), `keyUsage digitalSignature`, `extKeyUsage serverAuth` |
 | Names (SANs) | DNS `localhost`, the laptop's host name and `<host name>.local`; IP `127.0.0.1`, `::1` and **every non-internal IPv4 address** of the laptop |
-| Files | `data/tls/self-signed-cert.pem`, `data/tls/self-signed-key.pem` (mode `0600`), and `data/tls/meta.json` (`sans`, `created`, `expires`, `fingerprintSha256`) |
+| Files | `data/tls/self-signed-cert.pem` and `data/tls/self-signed-key.pem` (mode `0600`); names, expiry and fingerprint are read from the certificate itself |
 | Fingerprint | SHA-256 of the certificate, as `AB:CD:…` (32 pairs). Printed at start-up, shown in setup step 07 and returned by `GET /api/server-info`. Browsers show the same value in their certificate viewer (some with spaces instead of colons). |
 
 ```mermaid

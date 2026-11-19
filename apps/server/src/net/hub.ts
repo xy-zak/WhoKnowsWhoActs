@@ -284,22 +284,23 @@ export class Hub {
 
   /** Tell the facilitator pages that no session is attached. */
   private showNoSession() {
-    this.facilitator.emit("scenario", null);
-    this.facilitator.emit("events", { events: [], reset: true });
-    this.facilitator.emit("telemetry:live", { items: [], reset: true });
+    this.sendSnapshot(this.facilitator);
     this.pushDashboard();
+  }
+
+  /** The attached session's scenario, event log and live telemetry (all empty when none), replacing what a page shows. */
+  private sendSnapshot(to: FacilitatorNamespace | FacilitatorSocket) {
+    const m = this.session;
+    to.emit("scenario", m?.scenario ?? null);
+    to.emit("events", { events: m ? this.store.listEvents(m.sessionId).map(redactEvent) : [], reset: true });
+    to.emit("telemetry:live", { items: m ? [...m.monitor.liveTelemetry] : [], reset: true });
   }
 
   private afterAttach(m: SessionManager) {
     // Connected browsers re-send hello with their stored seat token, so seats are re-claimed
     // by token only (terminal numbers are not stable across server restarts).
     this.player.emit("rehello");
-    this.facilitator.emit("scenario", m.scenario);
-    this.facilitator.emit("events", {
-      events: this.store.listEvents(m.sessionId).map(redactEvent),
-      reset: true,
-    });
-    this.facilitator.emit("telemetry:live", { items: [], reset: true });
+    this.sendSnapshot(this.facilitator);
     this.pushAll();
     if (m.simulated) {
       this.runner = new SimulationRunner(m, this.deps.log);
@@ -539,15 +540,20 @@ export class Hub {
 
     /**
      * A seated player's request: refused when the socket holds no seat or the payload is invalid
-     * (validated with the message's schema from PLAYER_SCHEMAS); `fn` may be async. `refuse` builds
-     * the refusal ack (`retry`: the player may send it again).
+     * (validated with the message's schema from PLAYER_SCHEMAS); `fn` may be async, and a command
+     * returning nothing acks `{ ok: true }`. Every refusal says whether the player may send it again
+     * (`retry`): not seated (e.g. right after a reconnect, before hello) is transient; a bad payload is permanent.
      */
-    const seatHandler = <K extends PlayerRequest>(
+    const seatCmd = <K extends PlayerRequest>(
       name: K,
-      fn: (m: SessionManager, seat: number, msg: PlayerMessage<K>) => PlayerAcks[K] | Promise<PlayerAcks[K]>,
-      refuse: (error: string, retry: boolean) => PlayerAcks[K],
+      fn: (
+        m: SessionManager,
+        seat: number,
+        msg: PlayerMessage<K>,
+      ) => PlayerAcks[K] | undefined | Promise<PlayerAcks[K]>,
     ) => {
       const schema = playerSchema(name);
+      const refuse = (error: string, retry: boolean) => ({ ok: false, error, retry }) as PlayerAcks[K];
       const handler = async (raw: unknown, ack?: (a: PlayerAcks[K]) => void) => {
         const m = this.session;
         const seat = data.seat;
@@ -556,7 +562,7 @@ export class Hub {
         if (!msg.success)
           return ack?.(refuse(`Invalid message: ${msg.error.issues[0]?.message ?? ""}`, false));
         try {
-          ack?.(await fn(m, seat, msg.data));
+          ack?.((await fn(m, seat, msg.data)) ?? ({ ok: true } as PlayerAcks[K]));
         } catch (e) {
           if (e instanceof CommandError) return ack?.(refuse(e.message, false));
           this.deps.log.error({ err: e, msg: name }, "player command failed");
@@ -568,40 +574,20 @@ export class Hub {
       sock.on(name, handler as never);
     };
 
-    /** A request whose refusals are `Refusal`s; a command returning nothing acks `{ ok: true }`. */
-    const seatCmd = <K extends PlayerRequest>(
-      name: K,
-      fn: (m: SessionManager, seat: number, msg: PlayerMessage<K>) => PlayerAcks[K] | undefined,
-    ) =>
-      seatHandler(
-        name,
-        (m, seat, msg) => fn(m, seat, msg) ?? ({ ok: true } as PlayerAcks[K]),
-        (error, retry) => ({ ok: false, error, retry }) as PlayerAcks[K],
-      );
-
-    /**
-     * Audio uploads: every refusal says whether to retry (AudioAck). Not seated (e.g. right after a
-     * reconnect, before hello) is transient; a bad payload is permanent.
-     */
-    const audioCmd = <K extends "audio:start" | "audio:chunk" | "audio:stop">(
-      name: K,
-      fn: (m: SessionManager, seat: number, msg: PlayerMessage<K>) => PlayerAcks[K] | Promise<PlayerAcks[K]>,
-    ) => seatHandler(name, fn, (error, retry) => ({ ok: false, error, retry }));
-
     seatCmd("consent:submit", (m, seat, msg) => {
       m.submitConsent(seat, msg);
     });
     seatCmd("mic:check", (m, seat, msg) => {
       m.submitMicCheck(seat, msg);
     });
-    audioCmd("audio:start", (m, seat, msg) => m.submitAudioStart(seat, msg));
-    audioCmd("audio:chunk", async (m, seat, msg) => {
+    seatCmd("audio:start", (m, seat, msg) => m.submitAudioStart(seat, msg));
+    seatCmd("audio:chunk", async (m, seat, msg) => {
       const a = await m.submitAudioChunk(seat, msg);
       // a stored chunk changes the LIVE mic column (throttled); start and stop push through their events
       if (a.ok && !a.duplicate && this.session === m) this.schedulePush();
       return a;
     });
-    audioCmd("audio:stop", (m, seat, msg) => m.submitAudioStop(seat, msg));
+    seatCmd("audio:stop", (m, seat, msg) => m.submitAudioStop(seat, msg));
     seatCmd("demographics:submit", (m, seat, msg) => {
       m.submitDemographics(seat, msg);
     });
@@ -652,13 +638,7 @@ export class Hub {
   /* ═════════════════════════ facilitator ═════════════════════════ */
 
   private onFacilitator(sock: FacilitatorSocket) {
-    const m = this.session;
-    sock.emit("scenario", m?.scenario ?? null);
-    sock.emit("events", {
-      events: m ? this.store.listEvents(m.sessionId).map(redactEvent) : [],
-      reset: true,
-    });
-    sock.emit("telemetry:live", { items: m ? [...m.monitor.liveTelemetry] : [], reset: true });
+    this.sendSnapshot(sock);
     sock.emit("dashboard", this.dashboard());
 
     /**
@@ -689,7 +669,7 @@ export class Hub {
           fail(e);
         }
       };
-      // Socket.IO's listener type cannot follow a generic name (see seatHandler in onPlayer)
+      // Socket.IO's listener type cannot follow a generic name (see seatCmd in onPlayer)
       sock.on(name, handler as never);
     };
     /** The attached session (cmd() refuses a command that needs one before it runs). */

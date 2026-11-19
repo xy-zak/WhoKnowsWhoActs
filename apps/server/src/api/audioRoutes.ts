@@ -1,15 +1,13 @@
 import { SeatSchema } from "@wkwa/shared";
-import type { FastifyReply, FastifyRequest } from "fastify";
+import type { FastifyReply } from "fastify";
 import { z } from "zod";
 import type { AppContext } from "../app";
 import { AudioJobRunner, runInWorker } from "../audio/jobs";
-import { AudioRequestError, AudioService } from "../audio/service";
+import { AudioService } from "../audio/service";
 import { exportsDirFor } from "../db/stores";
 import { isLoopback } from "../net/hub";
 import { SessionGuard } from "../session/sessionGuard";
-import { sessionOr404 } from "./sessionLookup";
-
-type Guard = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
+import { type Guard, HttpError, requireSession } from "./http";
 
 const Note = z
   .string()
@@ -102,31 +100,13 @@ export function registerAudioApi(ctx: AppContext, guard: Guard, service: AudioSe
   const { app, stores } = ctx;
   const route = { preHandler: guard };
 
-  /** Run `fn`, mapping refusals to their status codes. */
-  const handle = async <T>(reply: FastifyReply, fn: () => T | Promise<T>) => {
-    try {
-      return await fn();
-    } catch (e) {
-      if (e instanceof AudioRequestError) return reply.code(e.statusCode).send({ error: e.message });
-      throw e;
-    }
-  };
-  /** The session in the participant database, or 404 / 400 (simulated sessions have no audio). */
-  const participantSession = (id: string, reply: FastifyReply) => {
-    const found = sessionOr404(stores, id, reply);
-    if (!found) return null;
-    if (found.players === "simulated") {
-      reply.code(400).send({ error: "Simulated sessions have no audio." });
-      return null;
-    }
-    return found;
-  };
+  /** The session in the participant database (simulated sessions have no audio). */
+  const participantSession = (id: string) =>
+    requireSession(stores, id, { participants: "Simulated sessions have no audio." });
 
   /** Tracks (no keys, no file names), cleaned tracks, jobs, deletion register, audio exports, per-seat totals. */
-  app.get<{ Params: { id: string } }>("/api/sessions/:id/audio", route, async (req, reply) => {
-    const found = sessionOr404(stores, req.params.id, reply);
-    if (!found) return;
-    if (found.players === "simulated")
+  app.get<{ Params: { id: string } }>("/api/sessions/:id/audio", route, async (req) => {
+    if (requireSession(stores, req.params.id).players === "simulated")
       return {
         sessionId: req.params.id,
         tracks: [],
@@ -138,63 +118,57 @@ export function registerAudioApi(ctx: AppContext, guard: Guard, service: AudioSe
         audioExports: [],
         running: false,
       };
-    return handle(reply, () => service.summary(req.params.id));
+    return service.summary(req.params.id);
   });
 
   /** Queue a speaker attribution (post-session). 202 + the job; poll GET /api/audio/jobs/:jobId. */
   app.post<{ Params: { id: string } }>("/api/sessions/:id/audio/attribution", route, async (req, reply) => {
-    if (!participantSession(req.params.id, reply)) return;
+    participantSession(req.params.id);
     const body = AttributionRequestSchema.safeParse(req.body ?? {});
     if (!body.success) return badRequest(reply, body.error);
-    return handle(reply, () => {
-      const job = service.startAttribution(
-        req.params.id,
-        body.data.options ? { options: body.data.options } : {},
-      );
-      return reply.code(202).send(job);
-    });
+    const job = service.startAttribution(
+      req.params.id,
+      body.data.options ? { options: body.data.options } : {},
+    );
+    return reply.code(202).send(job);
   });
 
   /** Job status: progress while running, the attribution summary once done, the error if failed. */
-  app.get<{ Params: { jobId: string } }>("/api/audio/jobs/:jobId", route, async (req, reply) =>
-    handle(reply, () => service.job(req.params.jobId)),
+  app.get<{ Params: { jobId: string } }>("/api/audio/jobs/:jobId", route, async (req) =>
+    service.job(req.params.jobId),
   );
 
   /** Who spoke when (JSON, timing only). Empty until an attribution has been run. */
-  app.get<{ Params: { id: string } }>("/api/sessions/:id/audio/segments", route, async (req, reply) => {
-    if (!participantSession(req.params.id, reply)) return;
-    return handle(reply, () => service.speechSegments(req.params.id));
+  app.get<{ Params: { id: string } }>("/api/sessions/:id/audio/segments", route, async (req) => {
+    participantSession(req.params.id);
+    return service.speechSegments(req.params.id);
   });
 
   /** Export audio: the only way audio content leaves the encrypted store. Writes WAVs + manifest, registered. */
   app.post<{ Params: { id: string } }>("/api/sessions/:id/audio/export", route, async (req, reply) => {
-    if (!participantSession(req.params.id, reply)) return;
+    participantSession(req.params.id);
     const body = AudioExportRequestSchema.safeParse(req.body ?? {});
     if (!body.success) return badRequest(reply, body.error);
     if (body.data.sessionId !== undefined && body.data.sessionId !== req.params.id)
-      return reply.code(400).send({ error: "sessionId in the body does not match the URL" });
+      throw new HttpError(400, "sessionId in the body does not match the URL");
     const requestedBy = isLoopback(req.socket.remoteAddress)
       ? "facilitator (this computer)"
       : "facilitator (ADMIN_TOKEN)";
-    return handle(reply, () =>
-      service.exportAudio(req.params.id, {
-        kind: body.data.kind,
-        ...(body.data.seats ? { seats: body.data.seats } : {}),
-        ...(body.data.note !== undefined ? { note: body.data.note } : {}),
-        requestedBy,
-      }),
-    );
+    return service.exportAudio(req.params.id, {
+      kind: body.data.kind,
+      ...(body.data.seats ? { seats: body.data.seats } : {}),
+      ...(body.data.note !== undefined ? { note: body.data.note } : {}),
+      requestedBy,
+    });
   });
 
   /** Delete raw audio (scope raw) or every audio row and file (scope all). The body must repeat the session id. */
   app.post<{ Params: { id: string } }>("/api/sessions/:id/audio/delete", route, async (req, reply) => {
-    if (!participantSession(req.params.id, reply)) return;
+    participantSession(req.params.id);
     const body = AudioDeleteRequestSchema.safeParse(req.body ?? {});
     if (!body.success) return badRequest(reply, body.error);
-    return handle(reply, () => {
-      const r = service.deleteAudio(req.params.id, body.data);
-      ctx.log.info({ scope: r.scope, counts: r.counts }, "session audio deleted");
-      return r;
-    });
+    const r = service.deleteAudio(req.params.id, body.data);
+    ctx.log.info({ scope: r.scope, counts: r.counts }, "session audio deleted");
+    return r;
   });
 }

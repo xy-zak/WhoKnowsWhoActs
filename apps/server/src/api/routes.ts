@@ -2,21 +2,19 @@ import { existsSync, readFileSync } from "node:fs";
 import type { AddressInfo } from "node:net";
 import path from "node:path";
 import { reduceEvents, type ServerInfo, SessionConfigSchema } from "@wkwa/shared";
-import type { FastifyReply, FastifyRequest } from "fastify";
 import type { AppContext } from "../app";
 import { redactEvent } from "../net/hub";
 import { harnessVersion } from "../runtime";
 import { playerUrls } from "../tls";
 import { createAudioService, registerAudioApi } from "./audioRoutes";
 import { registerGdprApi } from "./gdprRoutes";
-import { sessionOr404 } from "./sessionLookup";
-
-type Guard = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
+import { type Guard, replyHttpErrors, requireSession, rethrowAs } from "./http";
 
 /** REST API for the facilitator dashboard (all routes facilitator-only). */
 export function registerApi(ctx: AppContext, guard: Guard) {
   const { app, stores, scenarios, hub } = ctx;
   const opts = { preHandler: guard };
+  replyHttpErrors(app);
 
   app.get("/api/health", async () => ({
     ok: true,
@@ -27,13 +25,9 @@ export function registerApi(ctx: AppContext, guard: Guard) {
   app.get("/api/scenarios", opts, async () => scenarios.list());
 
   /** Full scenario (board, all views, starting scores) for the setup preview. */
-  app.get<{ Params: { id: string } }>("/api/scenarios/:id", opts, async (req, reply) => {
-    try {
-      return scenarios.load(req.params.id);
-    } catch (e) {
-      return reply.code(404).send({ error: (e as Error).message });
-    }
-  });
+  app.get<{ Params: { id: string } }>("/api/scenarios/:id", opts, async (req) =>
+    rethrowAs(404, () => scenarios.load(req.params.id)),
+  );
 
   /** Where players should point their browsers (setup step "Connect & bind"), and the HTTPS set-up. */
   app.get("/api/server-info", opts, async (): Promise<ServerInfo> => {
@@ -58,9 +52,8 @@ export function registerApi(ctx: AppContext, guard: Guard) {
   /** Sessions of both databases, newest first; `players` says which database each one is in. */
   app.get("/api/sessions", opts, async () => stores.listSessions());
 
-  app.get<{ Params: { id: string } }>("/api/sessions/:id", opts, async (req, reply) => {
-    const found = sessionOr404(stores, req.params.id, reply);
-    if (!found) return;
+  app.get<{ Params: { id: string } }>("/api/sessions/:id", opts, async (req) => {
+    const found = requireSession(stores, req.params.id);
     const events = found.store.listEvents(found.row.id);
     return {
       session: found.row,
@@ -72,18 +65,16 @@ export function registerApi(ctx: AppContext, guard: Guard) {
   });
 
   /** Event log of a session (demographic answers redacted), for replay and inspection. */
-  app.get<{ Params: { id: string } }>("/api/sessions/:id/events", opts, async (req, reply) => {
-    const found = sessionOr404(stores, req.params.id, reply);
-    if (!found) return;
+  app.get<{ Params: { id: string } }>("/api/sessions/:id/events", opts, async (req) => {
+    const found = requireSession(stores, req.params.id);
     return found.store.listEvents(req.params.id).map(redactEvent);
   });
 
   app.get<{ Params: { id: string }; Querystring: { afterId?: string; limit?: string } }>(
     "/api/sessions/:id/telemetry",
     opts,
-    async (req, reply) => {
-      const found = sessionOr404(stores, req.params.id, reply);
-      if (!found) return;
+    async (req) => {
+      const found = requireSession(stores, req.params.id);
       return found.store.listTelemetry(req.params.id, {
         afterId: Number(req.query.afterId ?? 0),
         limit: Math.min(Number(req.query.limit ?? 100_000), 1_000_000),
@@ -91,9 +82,8 @@ export function registerApi(ctx: AppContext, guard: Guard) {
     },
   );
 
-  app.get<{ Params: { id: string } }>("/api/sessions/:id/scenario", opts, async (req, reply) => {
-    const found = sessionOr404(stores, req.params.id, reply);
-    if (!found) return;
+  app.get<{ Params: { id: string } }>("/api/sessions/:id/scenario", opts, async (req) => {
+    const found = requireSession(stores, req.params.id);
     const row = found.row;
     const scenario = scenarios.load(row.scenario_id);
     return { scenario, hashMatches: scenario.hash === row.scenario_hash };
