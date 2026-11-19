@@ -8,6 +8,8 @@ import {
   MAX_TAG_LENGTH,
   MAX_TAGS,
   normaliseTags,
+  type OnboardingStep as OnboardingStepId,
+  onboardingStepsFor,
   type PlayerMode,
   parseCellId,
   policyParamRows,
@@ -828,6 +830,27 @@ export function TagsStep({ d, upd }: { d: Draft; upd: Upd }) {
 
 /* ─── 06 REVIEW ─── */
 
+/** The facilitator's names of the onboarding steps (the players' own are STEP_LABEL, e.g. "About you"). */
+const FACILITATOR_STEP_LABEL: Record<OnboardingStepId, string> = {
+  consent: "consent",
+  mic_check: "mic check",
+  demographics: "demographics",
+  briefing: "briefing",
+};
+
+/**
+ * `consent → mic check → demographics → briefing`: the onboarding steps of a config ("" for none),
+ * with `labels` replacing some of the names.
+ */
+export function onboardingStepsText(
+  c: Parameters<typeof onboardingStepsFor>[0],
+  labels: Partial<Record<OnboardingStepId, string>> = {},
+): string {
+  return onboardingStepsFor(c)
+    .map((s) => labels[s] ?? FACILITATOR_STEP_LABEL[s])
+    .join(" → ");
+}
+
 export function ReviewStep({
   d,
   scenarios,
@@ -915,20 +938,7 @@ export function ReviewStep({
           [2, "Disconnect", c.pauseOnDisconnect ? "auto-pause" : "keep playing"],
           [2, "Player screens", "display settings: each player's own choice (not recorded)"],
         ] as Array<[number, string, string]>)),
-    [
-      3,
-      "Onboarding",
-      simulated
-        ? "none (simulated players)"
-        : [
-            c.onboarding.consent && "consent",
-            c.onboarding.consent && c.audio.enabled && "mic check",
-            c.onboarding.demographics && "demographics",
-            c.onboarding.briefing && "briefing",
-          ]
-            .filter(Boolean)
-            .join(" → ") || "none",
-    ],
+    [3, "Onboarding", simulated ? "none (simulated players)" : onboardingStepsText(c) || "none"],
     [
       3,
       "Audio",

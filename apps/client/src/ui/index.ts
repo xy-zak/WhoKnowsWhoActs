@@ -29,7 +29,16 @@ export * from "./components";
 export { DisplaySettings, FONT_STACK } from "./DisplaySettings";
 export { ICONS, Icon } from "./Icon";
 export { ICON_TABLE, type IconName } from "./icons";
-export { ConfirmProvider, isPopupOpen, Popup, type PopupProps, useConfirm } from "./Popup";
+export {
+  type ConfirmOptions,
+  ConfirmProvider,
+  isPopupOpen,
+  Popup,
+  type PopupProps,
+  type ReasonField,
+  useConfirm,
+  usePromptReason,
+} from "./Popup";
 export {
   applyAppearance,
   type DisplayPrefs,

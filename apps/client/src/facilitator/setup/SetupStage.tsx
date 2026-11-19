@@ -34,6 +34,7 @@ import { paceText, policySummary } from "../simulation";
 import { inLobby } from "../stage";
 import {
   OnboardingStep,
+  onboardingStepsText,
   PlayersStep,
   ReviewStep,
   RoundsStep,
@@ -383,16 +384,7 @@ export function SetupStage({ conn }: { conn: FacilitatorConnection }) {
       case 2:
         return `${cfg.seatCount} seats · view ${cfg.viewAssignment === "byKnowledgeType" ? "follows K" : "manual"}`;
       case 3:
-        return (
-          [
-            cfg.onboarding.consent && "consent",
-            cfg.onboarding.consent && cfg.audio.enabled && "mic check (audio)",
-            cfg.onboarding.demographics && "demographics",
-            cfg.onboarding.briefing && "briefing",
-          ]
-            .filter(Boolean)
-            .join(" → ") || "no onboarding"
-        );
+        return onboardingStepsText(cfg, { mic_check: "mic check (audio)" }) || "no onboarding";
       case 4: {
         const tags = lobby ? cfg.tags : normaliseTags(draft?.tagsText ?? "");
         return tags.length ? `tags: ${tags.join(", ")}` : "no tags";
@@ -559,14 +551,8 @@ export function SetupStage({ conn }: { conn: FacilitatorConnection }) {
             <Callout icon="onboarding">
               Seat the participants first. <strong>Start onboarding</strong> locks the seats and sends every
               player to{" "}
-              {[
-                st!.config.onboarding.consent && "consent",
-                st!.config.onboarding.consent && st!.config.audio.enabled && "the mic check",
-                st!.config.onboarding.demographics && "demographics",
-                st!.config.onboarding.briefing && "the briefing",
-              ]
-                .filter(Boolean)
-                .join(" → ") || "the waiting screen"}
+              {onboardingStepsText(st!.config, { mic_check: "the mic check", briefing: "the briefing" }) ||
+                "the waiting screen"}
               . The tab then switches to <span className="t-live strong">LIVE</span>.
               {fakes.length > 0 && " Fake players skip onboarding and are ready at once."}
             </Callout>
