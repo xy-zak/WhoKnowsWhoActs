@@ -28,6 +28,7 @@ Related documents: [ARCHITECTURE.md](ARCHITECTURE.md), [DATA-MANAGEMENT.md](DATA
 ## 1. Overview
 
 - **One server, five browsers.** The facilitator laptop runs a single Node.js process. It serves the web pages, the WebSocket endpoints and the REST API on one port (default `3000`). Four player PCs and the facilitator open it in a browser. Nothing is installed on the player PCs.
+- **A welcome page first.** The same process also serves a small **welcome page** over plain HTTP on a second port (`LANDING_PORT`, default `8080`). Participants open it first. Once a session is open it shows **Join live session**, which leads to the game page on port `3000` ([§ 4](#4-ports-interfaces-and-configuration)).
 - **Hub and spoke.** Players never talk to each other directly. Every message goes to the server, which validates it, records it and sends each recipient **its own projection** of the state.
 - **Low data rate.** The game is turn-based. A full player state is a few tens of kilobytes and is re-sent on every change. That is simpler and more robust than sending deltas, and amounts to well under 1 Mbit/s in total.
 - **Offline by design.** All assets are bundled with the app (no CDNs, no web fonts, no analytics), so the LAN does not need an internet connection, and it is recommended not to have one.
@@ -39,8 +40,8 @@ Related documents: [ARCHITECTURE.md](ARCHITECTURE.md), [DATA-MANAGEMENT.md](DATA
 flowchart TB
   INET(("Internet"))
   R["Dedicated router or switch<br/>own SSID or cables, DHCP<br/>no client isolation"]
-  L["Facilitator laptop<br/>server on 0.0.0.0:3000 (HTTPS)<br/>dashboard via https://localhost:3000/facilitator"]
-  P1["Player PC 1<br/>browser: https://LAPTOP-IP:3000"]
+  L["Facilitator laptop<br/>server on 0.0.0.0:3000 (HTTPS)<br/>welcome page on 0.0.0.0:8080 (HTTP)<br/>dashboard via https://localhost:3000/facilitator"]
+  P1["Player PC 1<br/>browser: http://LAPTOP-IP:8080 (welcome)<br/>then https://LAPTOP-IP:3000 (game)"]
   P2["Player PC 2<br/>browser"]
   P3["Player PC 3<br/>browser"]
   P4["Player PC 4<br/>browser"]
@@ -92,7 +93,7 @@ There is **no player-to-player channel**. Even the "mark for all players" effect
 
 ## 4. Ports, interfaces and configuration
 
-The server binds to `HOST:PORT` (default `0.0.0.0:3000`, i.e. all interfaces) and speaks **HTTPS and secure WebSockets (WSS)** on that one port. On start it prints the URLs of all non-internal IPv4 interfaces, e.g. `https://192.168.1.10:3000/   (eth0)`, and the SHA-256 fingerprint of its certificate (see [§ 11](#11-security-on-the-lan)).
+The server binds to `HOST:PORT` (default `0.0.0.0:3000`, i.e. all interfaces) and speaks **HTTPS and secure WebSockets (WSS)** on that one port. It also serves the plain-HTTP **welcome page** on `HOST:LANDING_PORT` (default `8080`; see [below](#the-welcome-page)). On start it prints the welcome page URLs first, e.g. `http://192.168.1.10:8080/   (eth0)`, then the game page URLs of all non-internal IPv4 interfaces, e.g. `https://192.168.1.10:3000/   (eth0)`, and the SHA-256 fingerprint of its certificate (see [§ 11](#11-security-on-the-lan)).
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
@@ -105,24 +106,57 @@ The server binds to `HOST:PORT` (default `0.0.0.0:3000`, i.e. all interfaces) an
 | `WKWA_TLS` | `auto` | `auto`: HTTPS with a **self-signed certificate** the server makes and keeps in `data/tls/` ([§ 11](#11-security-on-the-lan)). **Required for sessions with audio**: browsers only allow the microphone on a secure page. `off`: plain HTTP. `npm run dev`, the Playwright server and the unit tests use `off`; they run on `localhost`/`127.0.0.1`, which browsers treat as secure anyway. |
 | `TLS_CERT`, `TLS_KEY` | — | Your own certificate and unencrypted key (PEM files), instead of the self-signed one. Set both or neither (one alone stops the server). When both are set they are used whatever `WKWA_TLS` says (mode `provided`). |
 | `WKWA_SPEECH_MODEL` | on | Speaker attribution detects speech with the Silero VAD model ([AUDIO.md § 10](AUDIO.md#10-speaker-attribution)). `off`: speech is taken as energy above each mic's noise floor instead, and the quality report says so. Only for bots and demos, whose synthetic audio has no real voice in it; the e2e test server (`scripts/e2e-server.mjs`) sets it. |
-| `HTTP_REDIRECT_PORT` | — | Optional second, plain-HTTP port that answers every request with `301` to `https://<same host>:PORT<same path>`, so that a typed `http://` address still arrives. E.g. `8080`, or `80` so players can type just `http://LAPTOP-IP` (port 80 needs administrator rights on Linux). Ignored when TLS is off. |
+| `LANDING_PORT` | `8080` | Plain-HTTP port of the **welcome page** participants open first ([below](#the-welcome-page)). `off`: no welcome page; players then open the game page directly. `80` lets them type just `http://LAPTOP-IP` (port 80 needs administrator rights on Linux). A value that is not a port or `off` stops the server at start (the data CLI still works). `npm run dev` and the e2e test server set `off`. It replaces the old `HTTP_REDIRECT_PORT`, which is gone. |
 
 | URL | Who |
 | --- | --- |
-| `https://LAPTOP-IP:3000/` | Player PCs (each browser accepts the certificate warning once) |
+| `http://LAPTOP-IP:8080/` | Player PCs, first: the welcome page, with **Join live session** once a session is open |
+| `https://LAPTOP-IP:3000/` | Player PCs: the game page (each browser accepts the certificate warning once) |
 | `https://localhost:3000/facilitator` | Facilitator, on the laptop itself (accept the warning once there too) |
 | `https://localhost:3000/api/…` | Dashboard / scripts (see [§ 10](#10-rest-api)) |
 
 With `WKWA_TLS=off` the same URLs start with `http://`.
 
+### The welcome page
+
+The welcome page (`apps/server/src/landing.ts`, page `apps/client/landing.html`) is the address participants open first. It is plain HTTP on purpose: it is the one page that opens **without a certificate warning**, so it can explain that warning before the game page shows it.
+
+- It shows the title and a short welcome text. While a session with real participants is open (phase `lobby`, `onboarding`, `round_active` or `round_complete`), it also shows **Join live session**. A simulated session never shows the button.
+- When the server uses its self-signed certificate, a note above the button says that the next page shows a browser warning, what to click, and why the warning is there. It also shows the certificate fingerprint.
+- The page asks `GET /api/landing` every 2 s, so the button appears by itself once the facilitator creates the session. Keep the page open on each player PC.
+- **Join live session** goes to the game page on the same host name or address the browser used (from its `Host` header), on `PORT` and with the game server's scheme (`https://` unless `WKWA_TLS=off`). Then the usual flow follows: the certificate warning once, **Client N**, and the facilitator binds a seat ([§ 5](#5-connecting-and-binding-a-seat)).
+
+The welcome page listener answers only three things. Any other path gets `302` to `/`.
+
+| Path | Answer |
+| --- | --- |
+| `/` | The welcome page (`landing.html` from the built client; a short text if the client is not built yet) |
+| `/assets/*` | Its scripts and styles |
+| `GET /api/landing` | `LandingStatus { live, joinUrl, certificate: "self-signed" \| "own" \| "none", fingerprintSha256 }` |
+
+The status carries no session id, no names and nothing a participant typed. The game server also serves the page at `https://LAPTOP-IP:3000/landing` and the same status at `/api/landing` (there with `joinUrl` `"/"`). In development (`npm run dev`) the page is `http://localhost:5173/landing`.
+
 ## 5. Connecting and binding a seat
+
+A participant first opens the welcome page, then joins the game page from there. With `LANDING_PORT=off` they open the game page directly, and the diagram starts at the certificate warning.
 
 ```mermaid
 sequenceDiagram
   autonumber
   participant B as Player browser
-  participant S as Server
+  participant W as Welcome page (HTTP, port 8080)
+  participant S as Server (HTTPS, port 3000)
   participant F as Facilitator dashboard
+  B->>W: GET / (http://LAPTOP-IP:8080)
+  W-->>B: welcome page
+  loop every 2 s
+    B->>W: GET /api/landing
+    W-->>B: live, joinUrl, certificate, fingerprint
+  end
+  Note over B,W: live turns true once the facilitator creates the session
+  B->>B: participant clicks Join live session
+  B->>S: open joinUrl (https://LAPTOP-IP:3000/)
+  B->>B: certificate warning, accepted once per browser
   B->>B: read terminalKey from localStorage (create a random one if missing)
   B->>S: connect to the player namespace
   B->>S: hello (terminalKey, seatToken null)
@@ -143,7 +177,7 @@ sequenceDiagram
 
 The facilitator matches the **Client N** shown on each physical screen to a seat on the dashboard. Binding generates the participant code; it is shown to the facilitator immediately (for the key sheet) and to the player only on the end screen.
 
-**Fake players.** In setup step 07 the facilitator can let the server create *fake players* for empty seats (`fake:add`). The server starts a socket.io client inside its own process, which connects to its own `/player` namespace over the loopback interface (or the configured `HOST`) and goes through exactly the steps in the diagram above. Before that client connects, the server registers its random terminal key, so the hub marks its client as fake (the dashboard's client list shows `fake: true`) and its `SeatBound` carries `fake: true` and no participant code. Fake players skip onboarding and send no telemetry. After a server restart the server starts them again; they re-claim their seats with their seat tokens, like a reloaded browser.
+**Fake players.** In setup step 08 (**Connect**) the facilitator can let the server create a *fake player* for an empty seat, one seat at a time (`fake:add` with that seat; it always plays at the normal pace). The server starts a socket.io client inside its own process, which connects to its own `/player` namespace over the loopback interface (or the configured `HOST`) and goes through exactly the steps in the diagram above. Before that client connects, the server registers its random terminal key, so the hub marks its client as fake (the dashboard's client list shows `fake: true`) and its `SeatBound` carries `fake: true` and no participant code. Fake players skip onboarding and send no telemetry. After a server restart the server starts them again; they re-claim their seats with their seat tokens, like a reloaded browser.
 
 ```mermaid
 sequenceDiagram
@@ -151,14 +185,14 @@ sequenceDiagram
   participant F as Facilitator dashboard
   participant H as Hub (server)
   participant FP as Fake player (client inside the server process)
-  F->>H: fake:add (seats null = every empty seat, pace fast)
+  F->>H: fake:add (seats [3], pace normal)
   H->>H: register a random terminal key as fake
   H->>FP: start socket.io client with that key
   FP->>H: connect to /player over loopback, hello (terminalKey)
   H-->>FP: terminal (7), client marked fake
   H->>H: SeatBound (seat 3, terminal 7, fake true, no code), PlayerConnected
   H-->>FP: bound, state (PlayerView)
-  H-->>F: ack (seats [1, 2, 3]), dashboard
+  H-->>F: ack (seats [3]), dashboard
   Note over FP,H: during rounds: intent messages like a browser, at random
 ```
 
@@ -340,7 +374,7 @@ Every client→server payload is validated with the zod schema listed here. Inva
 | `onboarding:start` | `{}` | `Ack` | OnboardingStarted | Lock seats and send players to consent / demographics / briefing. |
 | `simulation:start` | `{}` | `Ack` | OnboardingStarted (no steps), RoundStarted | Simulated sessions only: start the game with the agents (no onboarding) and begin round 1; the agents then play by their policies. |
 | `calibration:start` | `{}` | `Ack` | CalibrationStarted, then CalibrationTurn per seat, CalibrationCompleted and CalibrationChecked | Sessions that record audio: start the calibration once every seat is through its onboarding and every recorded seat has said it is ready (the server also starts it by itself then). The server times the turns (each seat reads a sentence aloud while the others stay quiet) and runs a quick quality check. |
-| `calibration:redo` | `{}` | `Ack` | CalibrationSkipped (cancelled, if one was running), CalibrationRequested; then as calibration:start | Run the calibration again (e.g. after a seat moved closer to its microphone): ends a running one, then asks every recorded seat again to say it is ready; the turns start once all are. |
+| `calibration:redo` | `{}` | `Ack` | CalibrationRequested (it ends a running run); then as calibration:start | Run the calibration again (e.g. after a seat moved closer to its microphone): ends a running one, then asks every recorded seat again to say it is ready; the turns start once all are. |
 | `calibration:skip` | `{ reason?: string (≤ 200 chars) }` | `Ack` | CalibrationSkipped | Skip (or cancel) the calibration, after confirmation; round 1 may then start without it. |
 | `mic:skip` | `{ seat: integer 1–4, reason?: string (≤ 200 chars) }` | `Ack` | MicCheckSkipped | Skip a seat's mic check (e.g. no working microphone): the player continues onboarding and the seat is not recorded. |
 | `recording:pause` | `{ reason?: string (≤ 200 chars) }` | `Ack` | RecordingPaused (+ AudioTrackStopped per recording seat) | Pause audio recording for every seat, after confirmation (players cannot mute themselves). The game goes on. |
@@ -375,14 +409,15 @@ Server→client payload types are TypeScript interfaces in `packages/shared/src/
 
 ## 10. REST API
 
-Used by the dashboard's data pages and by scripts. **Localhost-only** unless `ADMIN_TOKEN` is set; then send `Authorization: Bearer <token>`. Routes with `:id` find the session in whichever database holds it. Participant look-up and erasure only search the participant database.
+Used by the dashboard's data pages and by scripts. **Localhost-only** (except `/api/health` and `/api/landing`) unless `ADMIN_TOKEN` is set; then send `Authorization: Bearer <token>`. Routes with `:id` find the session in whichever database holds it. Participant look-up and erasure only search the participant database.
 
 | Method | Path | Purpose |
 | --- | --- | --- |
 | `GET` | `/api/health` | Liveness check (no data) |
 | `GET` | `/api/scenarios` | Available scenarios |
 | `GET` | `/api/scenarios/:id` | Full scenario (board, all views and starting scores) for the setup preview |
-| `GET` | `/api/server-info` | Player URLs on this machine's LAN interfaces (setup step "Connect & bind"), and `tls: { enabled, mode: "auto" \| "provided" \| "off", fingerprintSha256, sans, expires }` (see [§ 11](#11-security-on-the-lan)) |
+| `GET` | `/api/landing` | The welcome page's status: `{ live, joinUrl: "/", certificate, fingerprintSha256 }` ([§ 4](#the-welcome-page)). Open to every client, like `/api/health`: it says only whether a session with real participants is open. |
+| `GET` | `/api/server-info` | Player URLs on this machine's LAN interfaces, `landingUrls` (the welcome page URLs; empty with `LANDING_PORT=off`) for setup step 08 **Connect**, and `tls: { enabled, mode: "auto" \| "provided" \| "off", fingerprintSha256, sans, expires }` (see [§ 11](#11-security-on-the-lan)) |
 | `GET` | `/api/config/session-defaults` | Default session configuration for the setup form (`config/session.default.json`, validated) |
 | `GET` | `/api/sessions` | All sessions of both databases with status, newest first; `players` is `"real"` (participant database) or `"simulated"` (simulation database); `fakeSeats` lists seats played by fake players |
 | `GET` | `/api/sessions/:id` | One session (metadata + reduced state + `players`) |
@@ -417,8 +452,10 @@ Used by the dashboard's data pages and by scripts. **Localhost-only** unless `AD
 | A player forges messages (e.g. acting for another seat) | The seat comes from the server-side socket binding, never from the payload. Every payload is schema-validated, and rules are enforced on the server. |
 | A browser pretends to be a fake player to skip consent | Not possible: a client is fake only if the server registered its terminal key before starting it. Nothing a client sends can set the flag. |
 | Eavesdropping on the LAN | HTTPS is on by default (`WKWA_TLS=auto`), so game actions, consent and demographic answers (all pseudonymised) and any microphone audio are **encrypted** on the LAN. Only with `WKWA_TLS=off` do they cross it in plaintext; use that for development and tests on `localhost` only. |
-| A device on the LAN poses as the server (man in the middle) | The certificate is self-signed, so a browser cannot tell by itself that it is talking to the real laptop: it warns, and the participant accepts the warning. A rogue device would show a warning too, for a certificate with a **different fingerprint**. Controls: a dedicated network that only you control, the address taken from the facilitator, and the fingerprint compared in setup step 07 ([SESSION-RUNBOOK.md § 10](SESSION-RUNBOOK.md#10-https-and-the-certificate-warning)). |
+| A device on the LAN poses as the server (man in the middle) | The certificate is self-signed, so a browser cannot tell by itself that it is talking to the real laptop: it warns, and the participant accepts the warning. A rogue device would show a warning too, for a certificate with a **different fingerprint**. Controls: a dedicated network that only you control, the address taken from the facilitator, and the fingerprint compared in setup step 08 ([SESSION-RUNBOOK.md § 10](SESSION-RUNBOOK.md#10-https-and-the-certificate-warning)). |
 | Someone copies the certificate's private key | `data/tls/self-signed-key.pem` is readable only by the laptop user (mode `0600` on Linux and macOS), lives in the git-ignored `data/` folder, and is never sent anywhere. On Windows, and on FAT/exFAT drives, file modes do not apply: the key has the folder's permissions, so keep `data/` in your own user profile on a laptop no one else logs in to. Delete `data/tls/` to make a new key at the next start (participants then accept a new warning). |
+| Someone learns from the welcome page that a session is running | The welcome page is plain HTTP, so anyone on the LAN can open it. Its status says only whether a session with real participants is open, the join link and the certificate's kind and fingerprint (both public anyway). No session id, no names, nothing a participant typed. It opens no socket. |
+| A device on the LAN alters the plain-HTTP welcome page (e.g. a link to a rogue server) | Plain HTTP is not protected against tampering. The game page itself is HTTPS, so a rogue server still shows a warning for a certificate with a different fingerprint. Compare the fingerprint with setup step 08, not only with the one on the welcome page (that copy came over plain HTTP). And use a dedicated network that only you control. |
 | Rogue devices on the network | Use WPA2/3 with a password only you know, or wired connections; switch off the router's WAN. |
 
 **HTTPS with a self-signed certificate (default).** Browsers only give a page the microphone (`getUserMedia`) in a *secure context*: a page loaded over HTTPS, or from `localhost`. Player PCs open the server by its LAN address, so the server must speak HTTPS. A closed LAN has no internet and no public domain name, so no publicly trusted certificate is possible, and the participants' own laptops cannot have a local certificate authority (such as [mkcert](https://github.com/FiloSottile/mkcert)'s) installed beforehand. The server therefore makes its own certificate at start-up (`apps/server/src/tls.ts`, with the [`selfsigned`](https://www.npmjs.com/package/selfsigned) library; no `openssl` needed, so it works on every OS):
@@ -430,7 +467,7 @@ Used by the dashboard's data pages and by scripts. **Localhost-only** unless `AD
 | Extensions | `basicConstraints CA:false` (it cannot sign other certificates), `keyUsage digitalSignature`, `extKeyUsage serverAuth` |
 | Names (SANs) | DNS `localhost`, the laptop's host name and `<host name>.local`; IP `127.0.0.1`, `::1` and **every non-internal IPv4 address** of the laptop |
 | Files | `data/tls/self-signed-cert.pem` and `data/tls/self-signed-key.pem` (mode `0600`); names, expiry and fingerprint are read from the certificate itself |
-| Fingerprint | SHA-256 of the certificate, as `AB:CD:…` (32 pairs). Printed at start-up, shown in setup step 07 and returned by `GET /api/server-info`. Browsers show the same value in their certificate viewer (some with spaces instead of colons). |
+| Fingerprint | SHA-256 of the certificate, as `AB:CD:…` (32 pairs). Printed at start-up, shown in setup step 08 and returned by `GET /api/server-info`. Browsers show the same value in their certificate viewer (some with spaces instead of colons). |
 
 ```mermaid
 flowchart TD
@@ -453,25 +490,27 @@ Each participant accepts the warning **once per browser**, talked through it by 
 
 **Your own certificate.** If you have a certificate the player PCs trust (for example from a university CA, or mkcert where you control the PCs), start with `TLS_CERT=… TLS_KEY=… npm start`. It takes precedence over `WKWA_TLS`, its fingerprint is shown in the same places, and the browsers show no warning.
 
+**The welcome page is plain HTTP on purpose.** It must open before the browser has accepted the certificate, so it can explain the warning. It is not a secure context, so it cannot and does not open the microphone; it sends nothing but its own status. The microphone, consent and every game message are only on the HTTPS game page.
+
 **Plain HTTP** (`WKWA_TLS=off`) is meant for development and tests on the laptop itself. Browsers on other PCs then have no microphone, and traffic crosses the LAN unencrypted. Record the TLS set-up in your data management plan.
 
-**Firewall.** The laptop must accept incoming TCP connections on `PORT` (and on `HTTP_REDIRECT_PORT`, if you set it):
+**Firewall.** The laptop must accept incoming TCP connections on `PORT` and on `LANDING_PORT` (unless it is `off`):
 
 | OS | Command / action |
 | --- | --- |
-| Linux (ufw) | `sudo ufw allow 3000/tcp` |
-| Linux (firewalld) | `sudo firewall-cmd --add-port=3000/tcp` |
-| Windows | Allow Node.js on *private* networks when prompted, or add an inbound rule for TCP 3000 |
+| Linux (ufw) | `sudo ufw allow 3000,8080/tcp` |
+| Linux (firewalld) | `sudo firewall-cmd --add-port=3000/tcp --add-port=8080/tcp` |
+| Windows | Allow Node.js on *private* networks when prompted, or add an inbound rule for TCP 3000 and 8080 |
 | macOS | System Settings → Network → Firewall → allow incoming connections for `node` |
 
 ## 12. Session-day network checklist
 
 - [ ] Router powered on, WAN unplugged, SSID/password known only to the research team
 - [ ] Laptop connected (cable) and has its expected IP (`ip addr` / `ipconfig`)
-- [ ] Firewall allows TCP `3000`
-- [ ] `npm start` → passphrase entered → server prints the `https://` player URL and the certificate fingerprint (and *reusing* the certificate, if the laptop's address has not changed)
+- [ ] Firewall allows TCP `3000` and `8080`
+- [ ] `npm start` → passphrase entered → server prints the `http://…:8080` welcome page URL, the `https://` player URL and the certificate fingerprint (and *reusing* the certificate, if the laptop's address has not changed)
 - [ ] Facilitator dashboard opens at `https://localhost:3000/facilitator` (certificate warning accepted once)
-- [ ] Each player PC opens the player URL, accepts the certificate warning ([SESSION-RUNBOOK.md § 10](SESSION-RUNBOOK.md#10-https-and-the-certificate-warning)) and shows **Client N**, and all 4 clients appear on the dashboard
+- [ ] Each player PC opens the welcome page (`http://LAPTOP-IP:8080`); once the session is created it clicks **Join live session**, accepts the certificate warning ([SESSION-RUNBOOK.md § 10](SESSION-RUNBOOK.md#10-https-and-the-certificate-warning)) and shows **Client N**, and all 4 clients appear on the dashboard
 - [ ] Sessions with audio: the player URL is `https://`, and every player PC has accepted the warning (otherwise it has no microphone)
 - [ ] Optional: run `npm run bots -- --count 4` *before* participants arrive, for a full rehearsal on the real network
 - [ ] Player browsers in full-screen, notifications and screen savers off, power-saving sleep disabled
@@ -489,15 +528,19 @@ Each participant accepts the warning **once per browser**, talked through it by 
 | LIVE shows a Mic column of `[NO SIGNAL]`, a growing upload backlog `↑ n`, or *mics 3/4* | A muted or unplugged microphone, or a weak or interrupted connection (chunks wait in the browser and are resent) | Ask the participant to check the mic and the connection; the backlog drains after a reconnect. A track that ended with `disconnect` shows in the wrap-up audio check. |
 | Large `rttMs` / clock offset jumps on the dashboard | Congested Wi-Fi, PC under load | Move closer to the router or use cables; close other apps |
 | Facilitator page says "forbidden" | Opened from another machine without `ADMIN_TOKEN` | Open it on the laptop via `https://localhost:3000/facilitator`, or set `ADMIN_TOKEN` |
-| "Your connection is not private" (Chrome, Edge), "Warning: Potential Security Risk Ahead" (Firefox), "This Connection Is Not Private" (Safari) | Expected: the server's certificate is self-signed | Accept it once per browser: [SESSION-RUNBOOK.md § 10](SESSION-RUNBOOK.md#10-https-and-the-certificate-warning). Compare the fingerprint with setup step 07 if in doubt. |
+| "Your connection is not private" (Chrome, Edge), "Warning: Potential Security Risk Ahead" (Firefox), "This Connection Is Not Private" (Safari) | Expected: the server's certificate is self-signed | Accept it once per browser: [SESSION-RUNBOOK.md § 10](SESSION-RUNBOOK.md#10-https-and-the-certificate-warning). Compare the fingerprint with setup step 08 if in doubt. |
 | The warning is back on a PC that had accepted it | The server made a new certificate (new LAN address or host name, near expiry, or `data/tls/` deleted; the start-up banner says which), or another browser, profile or private window is used | Accept it again. Keep the laptop's IP address fixed (DHCP reservation) so the certificate stays the same. |
 | `NET::ERR_CERT_COMMON_NAME_INVALID` (Chrome, Edge) or `SSL_ERROR_BAD_CERT_DOMAIN` (Firefox) | The address in the URL is not in the certificate: the laptop got a new address while the server was running, or the page was opened by another name | Restart the server (it makes a certificate that covers the current addresses) and open one of the URLs it prints |
 | `NET::ERR_CERT_DATE_INVALID` | The PC's clock is more than a day off, or the certificate expired while the server kept running | Set the PC's clock right; restart the server |
-| "didn't send any data" (`ERR_EMPTY_RESPONSE`), "the connection was reset" or "the server unexpectedly dropped the connection" | The URL starts with `http://`, but the server speaks HTTPS on that port | Type `https://`. Or start the server with `HTTP_REDIRECT_PORT` (e.g. `80`) so plain-HTTP addresses are redirected. |
+| "didn't send any data" (`ERR_EMPTY_RESPONSE`), "the connection was reset" or "the server unexpectedly dropped the connection" | The URL starts with `http://`, but the server speaks HTTPS on that port | Type `https://`. Or open the welcome page (`http://LAPTOP-IP:8080`) and click **Join live session**. |
 | No "Proceed"/"Accept the risk" link on the warning page | The browser is managed (company or school policy forbids certificate exceptions) | Use another browser on that PC, or another device |
 | Safari: the page loads but stays on "Reconnecting…", or reacts slowly | Safari may refuse secure WebSockets to a self-signed server; Socket.IO then falls back to HTTP long-polling | Usually it still works, just more slowly. Otherwise use Chrome, Edge or Firefox on that Mac. |
 | Server stops at start with "Set both TLS_CERT and TLS_KEY" or "TLS_KEY does not belong…" | Only one of the two is set, or they are not a pair | Set both to a matching pair, or unset both to use the self-signed certificate |
-| Server stops at start with "WKWA_TLS must be…" or "HTTP_REDIRECT_PORT must be…" | A typo in the environment | Use `auto` or `off`, and a port number (the data CLI, `npm run cli`, still works meanwhile) |
+| Server stops at start with "WKWA_TLS must be…" or "LANDING_PORT must be…" | A typo in the environment | Use `auto` or `off` for `WKWA_TLS`, and a port number or `off` for `LANDING_PORT` (the data CLI, `npm run cli`, still works meanwhile) |
+| Start-up banner: "LANDING_PORT 8080: welcome page not started (…)" | Another program uses the port, or the port needs administrator rights (below 1024 on Linux) | Set `LANDING_PORT` to a free port, or `off` and give players the game page URL. The game server runs either way. |
+| Welcome page: no **Join live session** button | No session with real participants is open yet (simulated sessions never show it), or the session has ended | Create the session (setup step 07); the button appears within 2 s |
+| Welcome page: "cannot reach the game server" | The server stopped, or the PC lost the network | Check the laptop and the connection; the page tries again every 2 s |
+| Welcome page: "The welcome page is not built yet" | The client was not built | Run `npm run build`, then restart the server |
 | A new certificate at every start, although the laptop stays on the same network | A virtual adapter (VPN, Docker, WSL, Hyper-V) gets a new address each time | Switch that adapter off before starting the server for sessions. The start-up banner names the address that was missing. |
 
 ## 14. Microphone audio on the network
@@ -506,8 +549,8 @@ Audio uses the existing `/player` socket and the HTTPS port, so it needs no extr
 
 | Topic | Detail |
 | --- | --- |
-| Secure context | Browsers expose the microphone only on HTTPS pages (or `localhost`), so a session with audio needs the default `WKWA_TLS=auto` ([§ 11](#11-security-on-the-lan)). Setup step 04 warns when the server runs plain HTTP. |
-| Messages | Players send `mic:check`, `audio:start`, `audio:chunk`, `audio:stop` and `audio:level`. The facilitator sends `calibration:start`, `calibration:redo`, `calibration:skip`, `mic:skip`, `recording:pause` and `recording:resume`. |
+| Secure context | Browsers expose the microphone only on HTTPS pages (or `localhost`), so a session with audio needs the default `WKWA_TLS=auto` ([§ 11](#11-security-on-the-lan)). Setup step 05 warns when the server runs plain HTTP. The welcome page is plain HTTP and never uses the microphone. |
+| Messages | Players send `mic:check`, `calibration:ready`, `audio:start`, `audio:chunk`, `audio:stop` and `audio:level`. The facilitator sends `calibration:start`, `calibration:redo`, `calibration:skip`, `mic:skip`, `recording:pause` and `recording:resume`. |
 | Chunk size | A chunk is 5 s of 16 kHz mono 16-bit PCM, about 160 KB, sent as a binary attachment (not base64). The server accepts 1 to 96 000 samples (up to 6 s); the Socket.IO limit is 1 MB per message. |
 | Data rate | About 32 kB/s per seat, so about 130 kB/s for four players: far below a LAN's capacity, but more than the rest of the game together. Use cables where you can. |
 | Acknowledgements | `audio:start`, `audio:chunk` and `audio:stop` carry an acknowledgement `{ ok: true }` (also for a repeat) or `{ ok: false, error, retry }`. `retry: false` is permanent and the browser drops the item; `retry: true` is transient and it sends again with back-off. `audio:level` has none. |
@@ -515,4 +558,4 @@ Audio uses the existing `/player` socket and the HTTPS port, so it needs no extr
 | Late chunks | The server closes a seat's track when its socket drops. The track accepts chunks for 35 minutes after the close, then refuses them. Audio captured during a recording pause or after the game was complete is never stored. |
 | Volatile levels | `audio:level` is about 4 per second and may be dropped when the network is busy. It is never stored and only feeds the LIVE mic column. |
 | Reconnect | After a drop the browser reconnects with its seat token ([§ 7](#7-disconnects-and-reconnects)), resends what is pending, and starts a new track with reason `reconnect`. A game auto-pause does not stop recording; only the facilitator's *Pause recording* does. |
-| Certificates | The certificate is for the laptop's addresses only. Participants accept the browser warning and **compare the fingerprint** with setup step 07 instead of installing any certificate: nobody should install a root certificate on their own laptop for this study ([§ 11](#11-security-on-the-lan)). |
+| Certificates | The certificate is for the laptop's addresses only. Participants accept the browser warning and **compare the fingerprint** with setup step 08 instead of installing any certificate: nobody should install a root certificate on their own laptop for this study ([§ 11](#11-security-on-the-lan)). |

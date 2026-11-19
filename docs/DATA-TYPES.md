@@ -2941,7 +2941,7 @@ Stored verbatim in `SessionCreated.config` and in `sessions.config_json`. Defaul
 | `onboarding.demographics` | `boolean` | `true` | Show the demographics questionnaire |
 | `onboarding.briefing` | `boolean` | `true` | Show the briefing / instructions screen |
 | `audio` | `object` | — | Microphone recording (research data: see DATA-MANAGEMENT.md) |
-| `audio.enabled` | `boolean` | `false` | Record each participant's microphone, from their mic check (an onboarding step after consent) until the game is complete. Needs the consent step with the audio consent item, and HTTPS; never used for simulated sessions or fake players |
+| `audio.enabled` | `boolean` | `false` | Record each participant's microphone, from their mic check (the last onboarding step, once every seat has finished the briefing) until the game is complete. Needs the consent step with the audio consent item, and HTTPS; never used for simulated sessions or fake players |
 | `audio.requireCalibration` | `boolean` | `true` | With audio on: round 1 can start only once the calibration (each seat reads a sentence aloud in turn while the others stay quiet) is done or skipped |
 | `visibility` | `object` | — | What players can see about each other |
 | `visibility.showActorToPlayers` | `boolean` | `true` | Players see which seat made each proposal/decision |
@@ -2954,7 +2954,7 @@ Stored verbatim in `SessionCreated.config` and in `sessions.config_json`. Defaul
 
 ## Label pairings
 
-Every seat holds one knowledge type (K) and one power type (P). The facilitator chooses which seat gets which K (setup step 08); **P is never chosen freely**. It follows from one of two kinds of **pairing**:
+Every seat holds one knowledge type (K) and one power type (P). The facilitator does not choose K per seat: each seat keeps the K it holds, by default in seat order (seat 1 Ka, seat 2 Kb, seat 3 Kc, seat 4 Kd). **P is never chosen freely** either. It follows from one of two kinds of **pairing**, which the facilitator picks in setup step 09 (**Labels**); the choice is saved at once as a `LabelsAssigned` event (method `manual`, or `random` when a dissociated pairing is drawn at random):
 
 - **Aligned**: each seat holds the same letter for K and P (Ka–Pa, Kb–Pb, Kc–Pc, Kd–Pd).
 - **Fully dissociated**: no seat holds the same letter for K and P, **and** no two seats mirror each other. A "player pair" such as Ka–Pd plus Kd–Pa is excluded. Following the links K → P → (same letter as K) visits all four letters in one loop. There are exactly **3! = 6** such pairings, numbered **D1–D6** in the order below.

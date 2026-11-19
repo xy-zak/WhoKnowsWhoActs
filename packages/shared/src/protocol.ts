@@ -530,8 +530,7 @@ export const MESSAGES: {
         description:
           "Run the calibration again (e.g. after a seat moved closer to its microphone): ends a running one, then asks every recorded seat again to say it is ready; the turns start once all are.",
         ack: "Ack",
-        logged:
-          "CalibrationSkipped (cancelled, if one was running), CalibrationRequested; then as calibration:start",
+        logged: "CalibrationRequested (it ends a running run); then as calibration:start",
       },
       "calibration:skip": {
         description:

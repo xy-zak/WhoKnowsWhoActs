@@ -106,8 +106,8 @@ const TABLE: Array<[Case, NotRecordingReason | null, string | null, string | nul
   [
     { phase: "onboarding", otherInConsent: true },
     "mic_check_held",
-    "Waiting for every seat to finish the consent form",
-    "Waiting for every seat to finish the consent form",
+    "Waiting for every seat to finish the briefing",
+    "Waiting for every seat to finish the briefing",
   ],
   [{ paused: true }, "paused", null, "Recording is paused"],
   // server-only checks

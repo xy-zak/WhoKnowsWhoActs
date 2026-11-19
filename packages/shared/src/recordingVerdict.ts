@@ -117,7 +117,7 @@ export const NOT_RECORDING_REASON_DEFS = {
   mic_check_held: {
     ...notNow(
       "Not recording yet: the mic checks wait until every seat has finished consent",
-      "Waiting for every seat to finish the consent form",
+      "Waiting for every seat to finish the briefing",
     ),
     notYet: true,
   },

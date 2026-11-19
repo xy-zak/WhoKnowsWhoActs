@@ -2,6 +2,20 @@
 
 History of [DATA-TYPES.md](../DATA-TYPES.md). Newest first. How entries are written: [README.md](README.md).
 
+## Unreleased
+
+### Not yet committed · documents `03fa07e`
+
+- **Type:** Feature
+- **Change:** **Label pairings** says that each seat keeps its K (seat order by default) and that the facilitator only picks the pairing in step 09, saved at once; the generated `audio.enabled` row says recording starts at the mic check after the briefing.
+- **Reason:** The labels step no longer assigns K per seat, and the recording window moved.
+
+### 2026-11-19 · `03fa07e` · Session startup: who-plays step, create step, consent sections, calibration after the room is ready, welcome page
+
+- **Type:** Feature
+- **Change:** The generated event catalogue adds `CalibrationReady` and `CalibrationRequested`, and updates the trigger texts of `CalibrationStarted`, `MicCheckCompleted`, `SeatBound`, `LabelsAssigned` and `OnboardingStarted` to the new onboarding order and setup step numbers; the consent item schema gains the `section` field.
+- **Reason:** The schemas changed with the startup redesign; the catalogue is generated from them so it stays exact.
+
 ### 2026-11-19 · `bee2f52` · Docs: recording controller states, mic-check attempt, session guard
 
 - **Type:** Risk mitigation

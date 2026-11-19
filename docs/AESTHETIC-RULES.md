@@ -241,7 +241,7 @@ The sizes below are the **Small** (default) text size. **Large** steps every tok
 | `simulation` | `Flask` | Simulated session, simulation database |
 | `fake` | `TestTube` | A fake player: a test client the server created, not a participant |
 | `labels` | `Label` | K/P labels |
-| `randomise` | `DiceFive` | Shuffle K labels across seats / random pairing |
+| `randomise` | `DiceFive` | Random draw (a pairing drawn with a logged seed) |
 | `connected` | `Wifi` | Connected |
 | `disconnected` | `WifiOff` | Disconnected |
 | `idle` | `Hourglass` | Idle / waiting |
@@ -342,15 +342,16 @@ Use a panel, not a popup, for anything that should stay visible while working. *
 - **Facilitator tabs, in order of use:** `[1] SETUP | LIVE`, `[2] REPLAY`, `[3] DATABASE`.
   - The first tab is **one tab with two faces**. It reads **SETUP** until "Start onboarding", then flips to **LIVE**.
   - A green **`● LIVE S-…`** indicator in the top bar shows that a session is running; clicking it always leads back to it.
-- **Setup:** ten steps as a **vertical accordion** of collapsible panels (`01 SCENARIO`, `02 ROUNDS`, … `10 START`). Exactly one step, the current one, is expanded, with Back and Next/Create/Start in its footer. *Next* collapses it into a one-line summary and expands the next step below.
-  - The headers are the stepper: glyph, number, title and the step's summary, so the whole setup can be read at a glance.
-  - Finished steps can be reopened by clicking their header. Steps 01–06 lock (■) once the session is created.
-  - A blue **wayfinder bar** is pinned to the top of the page while you scroll. It shows `▶ STEP nn/10 · TITLE`, the keys, and a strip of all ten steps (`✓ 01 Scenario`, `▶ 03 Players`, `· 04 Onboarding`, …); click a finished step to reopen it. Steps scrolled into view stop below the bar.
-  - The two commit points, **06 REVIEW & CREATE** and **10 START ONBOARDING**, have their own colour (`--review`, § 2.2).
+- **Setup:** eleven steps as a **vertical accordion** of collapsible panels (`01 SCENARIO`, `02 ROUNDS`, `03 WHO PLAYS`, … `11 START`). Exactly one step, the current one, is expanded, with Back and Next/Create/Start in its footer. *Next* collapses it into a one-line summary and expands the next step below.
+  - The headers are the stepper: glyph, number, title and the step's own one-line summary, so the whole setup can be read at a glance. There is no separate review table: the create step relies on these summaries.
+  - Finished steps can be reopened by clicking their header. Steps 01–07 lock (■) once the session is created.
+  - A blue **wayfinder bar** is pinned to the top of the page while you scroll. It shows `▶ STEP nn/11 · TITLE`, the hint `01–07 configure · 08–11 prepare the room`, the keys, and a strip of all eleven steps (`✓ 01 Scenario`, `▶ 03 Who plays`, `· 04 Seats`, …); click a finished step to reopen it. Steps scrolled into view stop below the bar.
+  - The two commit points, **07 CREATE SESSION** and **11 START ONBOARDING**, have their own colour (`--review`, § 2.2).
   - `Enter` in a step moves to the next one; `N` jumps to the current step. The draft survives reloads.
 - **Live:** a lifecycle stepper `ONBOARDING → ROUND 1 → … → ROUND N → WRAP-UP`, plus a **NEXT** panel with the single next action and its key (`N`).
-- **Players:** a stepper `CONSENT → ABOUT YOU → BRIEFING → READY` during onboarding, and a status line (round, quotas, timer) during the game.
-- **Stepper glyphs:** `✓` done · `▶` current · `·` upcoming · `■` locked · `–` skipped (a step a simulated session does not need: 04 onboarding and 09 key sheet; shown muted, not green, with a dotted border in the wayfinder).
+- **Players:** a stepper `CONSENT → ABOUT YOU → BRIEFING → READY` during onboarding (`… → BRIEFING → MIC CHECK & CALIBRATION → READY` in audio sessions), and a status line (round, quotas, timer) during the game.
+  - The **consent** screen uses the same accordion pattern (and the same `acc-step` styles) as the setup, under the study and contact details: one numbered sub-section per `## ` section of the information letter, exactly one open, each with the one statement that confirms it in its footer. Glyphs `▶` open · `✓` confirmed · `·` not reached; an optional section has an `[OPTIONAL]` tag and a **Continue without** button. Ticking the statement collapses the section and opens the next; finished sections can be reopened by their header. The primary button (**I agree — continue**) is enabled only when every section was gone through and every required box is ticked.
+- **Stepper glyphs:** `✓` done · `▶` current · `·` upcoming · `■` locked · `–` skipped (a step a simulated session does not need: 05 onboarding and 10 key sheet; shown muted, not green, with a dotted border in the wayfinder).
 - **Simulated sessions** are marked, never coloured: a neutral **`[SIMULATION]`** tag with the *simulation* icon (flask) in the top bar, the setup wayfinder and the LIVE session panel, and the *agent* icon (chip) wherever a seat is played by an agent. No accent colour is reserved for them (§ 2.2), so green still only means "running / OK".
 - **Fake players** (test clients in a real session) are marked the same way: a neutral **`[FAKE]`** tag with the *fake* icon (test tube) on their seat, in the mirrors and the bind step, **`[FAKE PLAYERS ×N]`** in the top bar, and `fake ×N` on the session in DATABASE.
 - **Sub-tabs** inside a page (DATABASE: *Participants* | *Simulations*) use the same `tab` style as the top bar, in a `subtabs` row under it.
@@ -388,9 +389,9 @@ When a session records audio, each participant's microphone is recorded from the
 
 | Where | What |
 | --- | --- |
-| Player onboarding (background questions, briefing, ready, calibration) | `RecordingBanner`: a slim, non-dismissable line on top, e.g. `[REC] Your microphone is being recorded` or `[PAUSED] Recording paused by the facilitator` |
+| Player onboarding after the mic check (calibration, ready) | `RecordingBanner`: a slim, non-dismissable line on top, e.g. `[REC] Your microphone is being recorded` or `[PAUSED] Recording paused by the facilitator` |
 | Player game | A `RecTag` in the status line, always visible, and a `RecordingBanner` **only when the microphone needs the participant** (permission denied, error, a browser that waits for a click, or no signal), with fix steps and a **Try again** or **Resume recording** button. There is no permanent banner in the game: a green tag is enough while all is well, and the map keeps its room. |
-| Player mic check | The mic check screen shows its own state: a `RecTag` once the mic is open, a `LevelMeter`, the phrase and the progress. The calibration screen shows a `LevelMeter` during the player's own turn |
+| Player mic check | The mic check screen shows its own state: a `RecTag` once the mic is open, a `LevelMeter`, the phrase and the progress. Part 2 (*I'm ready for the calibration*) and the calibration screen show a `LevelMeter`, the latter during the player's own turn |
 | Facilitator LIVE seats | `RecTag compact` and `LevelMeter compact quietDb={null}` per seat in the Mic column; `upload` icon for an upload backlog; `voice` for calibration turns |
 | Facilitator status bar, calibration card and wrap-up | `mics 3/4` with a warning microphone when fewer seats record, `RECORDING PAUSED` in the warn tone, the calibration card's verdicts as neutral or warn tags (never red), and the wrap-up audio check as callouts |
 | Facilitator DATABASE | The audio column and the per-seat audio popup: the same tags and icons (e.g. `[MIC SKIPPED]` for a seat with no audio), never a red tone for audio that was simply not recorded |
