@@ -1,5 +1,6 @@
-import { memo, useCallback, useEffect, useId, useMemo, useReducer, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useId, useMemo, useReducer, useState } from "react";
 import { fmtBytes, fmtDuration, fmtShare, fmtSigned, PLACEHOLDER } from "../../common/format";
+import { useLatest } from "../../net/latest";
 import {
   AsciiProgress,
   Button,
@@ -96,30 +97,30 @@ export function AudioPopup({
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const kindName = useId();
   const base = `/api/sessions/${encodeURIComponent(sessionId)}/audio`;
-  /** Number of the latest load: an older, slower answer never overwrites a newer view. */
-  const loadSeq = useRef(0);
+  const latest = useLatest();
 
   const load = useCallback(
-    async (followJob = false) => {
-      const seq = ++loadSeq.current;
-      try {
-        const v = await conn.api<AudioSessionView>(base);
-        if (seq !== loadSeq.current) return;
-        setView(v);
-        setLoadError(null);
-        if (followJob) {
-          const j = initialJobState(v);
-          if (j.phase === "active" && v.jobs[0]) dispatch({ type: "job", job: v.jobs[0] });
-        }
-        if (v.seats.length > 0 || v.deletions.length > 0) {
-          const s = await conn.api<SegmentsView>(`${base}/segments`).catch(() => null);
-          if (seq === loadSeq.current) setSegments(s);
-        } else setSegments(null);
-      } catch (e) {
-        if (seq === loadSeq.current) setLoadError(errText(e));
-      }
+    (followJob = false) => {
+      const ifLatest = latest();
+      return conn.api<AudioSessionView>(base).then(
+        ifLatest((v) => {
+          setView(v);
+          setLoadError(null);
+          if (followJob) {
+            const j = initialJobState(v);
+            if (j.phase === "active" && v.jobs[0]) dispatch({ type: "job", job: v.jobs[0] });
+          }
+          if (v.seats.length > 0 || v.deletions.length > 0) {
+            conn.api<SegmentsView>(`${base}/segments`).then(
+              ifLatest(setSegments),
+              ifLatest(() => setSegments(null)),
+            );
+          } else setSegments(null);
+        }),
+        ifLatest((e) => setLoadError(errText(e))),
+      );
     },
-    [conn, base],
+    [conn, base, latest],
   );
   useEffect(() => {
     void load(true);
@@ -235,7 +236,7 @@ export function AudioPopup({
       setExportResult(null);
       conn.toast(
         `Audio deleted (${DELETE_SCOPES[r.scope].label.toLowerCase()}): ${r.counts.files} files`,
-        r.audioExportsOnDisk.length || r.audioFiles.failed.length ? "warn" : "ok",
+        deleteWarns(r) ? "warn" : "ok",
       );
       void load();
       onChanged();
@@ -848,8 +849,11 @@ function RetentionPanel({
   );
 }
 
+const deleteWarns = (r: AudioDeleteResult) =>
+  r.audioExportsOnDisk.length > 0 || r.audioFiles.failed.length > 0 || Boolean(r.audioFiles.compactionError);
+
 function DeleteResultView({ r }: { r: AudioDeleteResult }) {
-  const warn = r.audioExportsOnDisk.length > 0 || r.audioFiles.failed.length > 0;
+  const warn = deleteWarns(r);
   return (
     <Callout tone={warn ? "warn" : "live"} icon={warn ? "warning" : "ok"}>
       <strong>
@@ -866,6 +870,16 @@ function DeleteResultView({ r }: { r: AudioDeleteResult }) {
           <span className="t-danger">
             <Icon name="error" /> Could not remove (unreadable, keys gone; delete by hand):{" "}
             {r.audioFiles.failed.join(", ")}
+          </span>
+        </>
+      )}
+      {r.audioFiles.compactionError && (
+        <>
+          <br />
+          <span className="t-danger">
+            <Icon name="error" /> The database could not be compacted: the data is deleted, but its old pages
+            may stay in the file until the next erasure or deletion compacts it (
+            {r.audioFiles.compactionError}).
           </span>
         </>
       )}
