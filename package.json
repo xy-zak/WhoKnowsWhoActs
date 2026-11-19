@@ -26,7 +26,8 @@
     "test:e2e": "playwright test",
     "docs:generate": "tsx scripts/generate-docs.ts",
     "docs:check": "tsx scripts/generate-docs.ts --check",
-    "screenshots": "tsx scripts/screenshots.ts"
+    "screenshots": "tsx scripts/screenshots.ts",
+    "test:coverage": "vitest run --coverage"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.6.8",
@@ -34,6 +35,7 @@
     "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^26.6.6",
     "@types/pdfkit": "^0.17.7",
+    "@vitest/coverage-v8": "^5.1.0",
     "mermaid": "^12.3.0",
     "socket.io-client": "^4.8.4",
     "tsx": "^4.23.15",
