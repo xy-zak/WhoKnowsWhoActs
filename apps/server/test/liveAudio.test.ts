@@ -9,34 +9,30 @@ import {
   type AudioAck,
   type PlayerView,
   playerView,
-  type SessionConfigInput,
   type StoredEvent,
 } from "@wkwa/shared";
 import pino from "pino";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { AudioFileStore } from "../src/audio/fileStore";
 import type { AudioStartMsg } from "../src/audio/live";
 import { trackStatusOf } from "../src/audio/records";
 import { verifyAudio } from "../src/audio/verify";
-import { loadOnboardingContent, ScenarioLibrary, sha256 } from "../src/content";
-import { openDatabase } from "../src/db/database";
-import { Store } from "../src/db/store";
-import { REPO_ROOT } from "../src/runtime";
+import { loadOnboardingContent, sha256 } from "../src/content";
 import { CALIBRATION_CHECK_WAIT_MS, CommandError, SessionManager } from "../src/session/SessionManager";
 import { Bot, FacilitatorClient } from "../src/tools/botClient";
 import { readTrackPcm } from "./audioFixtures";
-import { cleanup, PASSPHRASE, setupSession, startTestServer, type TestServer } from "./harness";
-
-const CONFIG_DIR = path.join(REPO_ROOT, "config");
-const SCENARIOS = new ScenarioLibrary(path.join(REPO_ROOT, "scenarios"));
-const SETTINGS = {
-  sampleRate: 48_000,
-  echoCancellation: false,
-  noiseSuppression: false,
-  autoGainControl: false,
-  channelCount: 1,
-};
-const ROUND = { rule: "quota" as const, quota: { propose: 1, decide: 1 }, timeLimitSec: null };
+import {
+  CONFIG_DIR,
+  consent,
+  type Direct,
+  direct,
+  finishOnboarding,
+  MIC_OK,
+  onboard,
+  ROUND,
+  SCENARIOS,
+  SETTINGS,
+} from "./direct";
+import { cleanup, setupSession, startTestServer, type TestServer } from "./harness";
 
 /* ─────────────────────────── helpers ─────────────────────────── */
 
@@ -95,94 +91,6 @@ function filesUnder(dir: string): string[] {
     else out.push(p);
   }
   return out;
-}
-
-interface Direct {
-  m: SessionManager;
-  store: Store;
-  files: AudioFileStore;
-  dir: string;
-  events: StoredEvent[];
-  close(): void;
-}
-
-/** A SessionManager on its own encrypted database, driven directly (no sockets). */
-function direct(
-  config: SessionConfigInput = { audio: { enabled: true } },
-  opts: { clock?: () => number; sim?: boolean } = {},
-): Direct {
-  const dir = mkdtempSync(path.join(os.tmpdir(), "wkwa-live-"));
-  const db = openDatabase(path.join(dir, "wkwa.db"), PASSPHRASE);
-  const files = new AudioFileStore(path.join(dir, "audio"));
-  const store = new Store(db, opts.sim ? null : files);
-  const events: StoredEvent[] = [];
-  const audio = config.players !== "simulated" && config.audio?.enabled === true;
-  const m = SessionManager.create(
-    {
-      store,
-      scenario: SCENARIOS.load("demo"),
-      onboarding: loadOnboardingContent(CONFIG_DIR, { audio }),
-      serverSecret: "test-secret",
-      log: pino({ level: "silent" }),
-      onEvents: (e) => events.push(...e),
-      clock: opts.clock,
-    },
-    { seatCount: 2, roundCount: 1, defaultRound: ROUND, ...config } as never,
-    "live audio test",
-  );
-  return {
-    m,
-    store,
-    files,
-    dir,
-    events,
-    close() {
-      m.dispose();
-      db.close();
-      cleanup(dir);
-    },
-  };
-}
-
-/** Bind seats (seat n on terminal n; `fake` seats as fake players), assign labels, start onboarding. */
-function onboard(m: SessionManager, fake: number[] = []) {
-  for (const s of Object.keys(m.state.seats).map(Number))
-    m.bindSeat(s, s, fake.includes(s) ? { fake: true } : {});
-  m.randomiseLabels();
-  m.startOnboarding();
-}
-
-function consent(m: SessionManager, seat: number, audio = true, all = true) {
-  const c = m.onboarding.consent;
-  m.submitConsent(seat, {
-    formVersion: c.version,
-    textSha256: c.sha256,
-    answers: Object.fromEntries(c.items.map((i) => [i.id, i.id === AUDIO_CONSENT_ITEM ? audio : all])),
-    durationMs: 1000,
-    clientTs: Date.now(),
-  });
-}
-
-const MIC_OK = {
-  passed: true,
-  attempts: 1,
-  durationMs: 1000,
-  settings: SETTINGS,
-  noiseFloorDb: -60,
-  speechDb: -20,
-  speechMs: 1500,
-  clientTs: 0,
-};
-
-function finishOnboarding(m: SessionManager, seat: number) {
-  const o = m.onboarding;
-  m.submitDemographics(seat, {
-    formVersion: o.demographics.version,
-    answers: Object.fromEntries(o.demographics.questions.map((q) => [q.id, q.options[0]!.value])),
-    durationMs: 1,
-    clientTs: 0,
-  });
-  m.acknowledgeBriefing(seat, { textSha256: o.briefing.sha256, durationMs: 1, clientTs: 0 });
 }
 
 const types = (events: readonly StoredEvent[]) => events.map((e) => e.type);
@@ -260,15 +168,15 @@ describe("onboarding with audio: consent hold and mic check", () => {
     expect(d.m.state.seats[1]!.audioConsent).toBe(true);
     // seat 2 is still reading the consent form: seat 1 may not open its mic
     expect(() => d.m.submitMicCheck(1, MIC_OK)).toThrow(/consent/);
-    const held = await d.m.audio.start(1, startMsg());
+    const held = await d.m.submitAudioStart(1, startMsg());
     expect(refused(held)).toBe(true);
     // a decline holds as well, until the facilitator withdraws that seat
     consent(d.m, 2, false);
     expect(d.m.state.seats[2]!.consent).toBe("declined");
-    expect(refused(await d.m.audio.start(1, startMsg()))).toBe(true);
+    expect(refused(await d.m.submitAudioStart(1, startMsg()))).toBe(true);
     d.m.withdraw(2);
     const t = randomUUID();
-    expect(await d.m.audio.start(1, startMsg(t))).toEqual({ ok: true });
+    expect(await d.m.submitAudioStart(1, startMsg(t))).toEqual({ ok: true });
     d.m.submitMicCheck(1, MIC_OK);
     expect(d.m.state.seats[1]!.micCheck).toBe("passed");
     expect(types(d.events)).toContain("AudioTrackStarted");
@@ -283,13 +191,13 @@ describe("onboarding with audio: consent hold and mic check", () => {
     consent(d.m, 1);
     consent(d.m, 2);
     const t = randomUUID();
-    expect((await d.m.audio.start(2, startMsg(t))).ok).toBe(true);
+    expect((await d.m.submitAudioStart(2, startMsg(t))).ok).toBe(true);
     d.m.skipMicCheck(2, "no working microphone");
     expect(d.m.state.seats[2]!.micCheck).toBe("skipped");
     // its open track is closed and further audio refused
     expect(d.store.getAudioTrack(t)).toMatchObject({ status: "closed", stopReason: "skipped" });
-    expect(refused(await d.m.audio.start(2, startMsg()))).toBe(true);
-    expect(refused(await d.m.audio.chunk(2, chunkMsg(t, 0, 1600, Date.now())))).toBe(true);
+    expect(refused(await d.m.submitAudioStart(2, startMsg()))).toBe(true);
+    expect(refused(await d.m.submitAudioChunk(2, chunkMsg(t, 0, 1600, Date.now())))).toBe(true);
     expect(() => d.m.skipMicCheck(2, "again")).toThrow(/already/);
     finishOnboarding(d.m, 2);
     expect(d.m.state.seats[2]!.briefing).toBe(true);
@@ -300,15 +208,15 @@ describe("onboarding with audio: consent hold and mic check", () => {
     onboard(d.m, [2]);
     expect(d.m.state.seats[2]!.consent).toBe("skipped");
     expect(d.m.state.seats[2]!.audioConsent).toBe(false);
-    expect(refused(await d.m.audio.start(2, startMsg()))).toBe(true);
+    expect(refused(await d.m.submitAudioStart(2, startMsg()))).toBe(true);
     consent(d.m, 1, false, true); // required audio item unticked: declined
-    expect(refused(await d.m.audio.start(1, startMsg()))).toBe(true);
+    expect(refused(await d.m.submitAudioStart(1, startMsg()))).toBe(true);
     d.close();
     d = direct({ audio: { enabled: false } });
     onboard(d.m);
     expect(d.m.state.onboardingSteps).not.toContain("mic_check");
     consent(d.m, 1);
-    const a = await d.m.audio.start(1, startMsg());
+    const a = await d.m.submitAudioStart(1, startMsg());
     expect(a).toMatchObject({ ok: false, retry: false });
     expect(() => d.m.submitMicCheck(1, MIC_OK)).toThrow(CommandError);
     expect(d.store.listAudioTracks(d.m.sessionId)).toEqual([]);
@@ -319,7 +227,7 @@ describe("onboarding with audio: consent hold and mic check", () => {
     expect(d.m.state.audio.enabled).toBe(false);
     d.m.randomiseLabels();
     d.m.startSimulation();
-    expect(refused(await d.m.audio.start(1, startMsg()))).toBe(true);
+    expect(refused(await d.m.submitAudioStart(1, startMsg()))).toBe(true);
     expect(d.store.listAudioTracks(d.m.sessionId)).toEqual([]);
   });
 
@@ -342,7 +250,7 @@ describe("chunk ingest", () => {
     consent(d.m, 1);
     consent(d.m, 2);
     const t = randomUUID();
-    expect(await d.m.audio.start(1, startMsg(t, now))).toEqual({ ok: true });
+    expect(await d.m.submitAudioStart(1, startMsg(t, now))).toEqual({ ok: true });
     return t;
   }
 
@@ -352,25 +260,28 @@ describe("chunk ingest", () => {
     const at = (seq: number) => now + (seq * N * 1000) / AUDIO_SAMPLE_RATE;
     now += 1000;
     for (const seq of [0, 2, 1]) {
-      const a = await d.m.audio.chunk(1, chunkMsg(t, seq, N, at(seq)));
+      const a = await d.m.submitAudioChunk(1, chunkMsg(t, seq, N, at(seq)));
       expect(a).toEqual({ ok: true, data: { trackId: t, seq }, duplicate: false });
     }
     // a resend (lost ack) and two copies at once are stored once
-    expect(await d.m.audio.chunk(1, chunkMsg(t, 1, N, at(1)))).toMatchObject({ ok: true, duplicate: true });
+    expect(await d.m.submitAudioChunk(1, chunkMsg(t, 1, N, at(1)))).toMatchObject({
+      ok: true,
+      duplicate: true,
+    });
     const [x, y] = await Promise.all([
-      d.m.audio.chunk(1, chunkMsg(t, 3, N, at(3))),
-      d.m.audio.chunk(1, chunkMsg(t, 3, N, at(3))),
+      d.m.submitAudioChunk(1, chunkMsg(t, 3, N, at(3))),
+      d.m.submitAudioChunk(1, chunkMsg(t, 3, N, at(3))),
     ]);
     expect(x.ok && y.ok).toBe(true);
     expect(d.store.getAudioTrack(t)).toMatchObject({ chunks: 4, samples: 4 * N });
     // permanent refusals
-    expect(refused(await d.m.audio.chunk(2, chunkMsg(t, 4, N, at(4))))).toBe(true); // another seat's track
-    expect(refused(await d.m.audio.chunk(1, chunkMsg(randomUUID(), 0, N, now)))).toBe(true); // unknown
-    expect(refused(await d.m.audio.chunk(1, { ...chunkMsg(t, 1_000_000, N, now), seq: 5 }))).toBe(true);
-    expect(refused(await d.m.audio.chunk(1, { ...chunkMsg(t, 5, N, now), startSample: 10_000_000 }))).toBe(
-      true,
-    );
-    expect(refused(await d.m.audio.chunk(1, chunkMsg(t, 5, N, now + 60_000)))).toBe(true); // future
+    expect(refused(await d.m.submitAudioChunk(2, chunkMsg(t, 4, N, at(4))))).toBe(true); // another seat's track
+    expect(refused(await d.m.submitAudioChunk(1, chunkMsg(randomUUID(), 0, N, now)))).toBe(true); // unknown
+    expect(refused(await d.m.submitAudioChunk(1, { ...chunkMsg(t, 1_000_000, N, now), seq: 5 }))).toBe(true);
+    expect(
+      refused(await d.m.submitAudioChunk(1, { ...chunkMsg(t, 5, N, now), startSample: 10_000_000 })),
+    ).toBe(true);
+    expect(refused(await d.m.submitAudioChunk(1, chunkMsg(t, 5, N, now + 60_000)))).toBe(true); // future
     // the stored audio decrypts to what was sent, in seq order
     const back = await readTrackPcm(
       d.files,
@@ -380,10 +291,10 @@ describe("chunk ingest", () => {
     );
     expect(back.seqs).toEqual([0, 1, 2, 3]);
     expect(back.pcm.subarray(0, N * 2).equals(chunkMsg(t, 0, N, 0).pcm)).toBe(true);
-    expect(d.m.audio.seatStats(1)).toMatchObject({ tracks: 1, recordedMs: 400 });
+    expect(d.m.monitor.dashboardStats()[1]!.mic).toMatchObject({ tracks: 1, recordedMs: 400 });
     // a second start of the same track (lost ack) is fine; another seat may not reuse the id
-    expect(await d.m.audio.start(1, startMsg(t, now))).toMatchObject({ ok: true, duplicate: true });
-    expect(refused(await d.m.audio.start(2, startMsg(t, now)))).toBe(true);
+    expect(await d.m.submitAudioStart(1, startMsg(t, now))).toMatchObject({ ok: true, duplicate: true });
+    expect(refused(await d.m.submitAudioStart(2, startMsg(t, now)))).toBe(true);
   });
 
   it("pause: closes the tracks, keeps in-flight audio up to the pause and nothing after it", async () => {
@@ -399,23 +310,23 @@ describe("chunk ingest", () => {
     ]);
     now += 2000;
     // captured before the pause: stored; the chunk running into the pause is cut at the pause
-    expect((await d.m.audio.chunk(1, chunkMsg(t, 0, N, t0))).ok).toBe(true);
-    expect((await d.m.audio.chunk(1, chunkMsg(t, 1, N, t0 + 1000))).ok).toBe(true);
-    expect((await d.m.audio.chunk(1, chunkMsg(t, 2, N, t0 + 2000))).ok).toBe(true);
+    expect((await d.m.submitAudioChunk(1, chunkMsg(t, 0, N, t0))).ok).toBe(true);
+    expect((await d.m.submitAudioChunk(1, chunkMsg(t, 1, N, t0 + 1000))).ok).toBe(true);
+    expect((await d.m.submitAudioChunk(1, chunkMsg(t, 2, N, t0 + 2000))).ok).toBe(true);
     const rows = d.store.listAudioChunks(t);
     expect(rows.map((r) => r.sampleCount)).toEqual([N, N, N / 2]);
     // captured after the pause: refused for good
-    expect(refused(await d.m.audio.chunk(1, chunkMsg(t, 3, N, t0 + 3000)))).toBe(true);
+    expect(refused(await d.m.submitAudioChunk(1, chunkMsg(t, 3, N, t0 + 3000)))).toBe(true);
     // no new track while paused
-    expect(refused(await d.m.audio.start(1, startMsg(randomUUID(), now)))).toBe(true);
+    expect(refused(await d.m.submitAudioStart(1, startMsg(randomUUID(), now)))).toBe(true);
     expect(view(d.m, 1).audio).toMatchObject({ record: false, paused: true });
     d.m.resumeRecording();
     expect(types(d.events)).toContain("RecordingResumed");
     // the old track does not take audio captured during the pause, even after resuming
-    expect(refused(await d.m.audio.chunk(1, chunkMsg(t, 3, N, t0 + 3000)))).toBe(true);
+    expect(refused(await d.m.submitAudioChunk(1, chunkMsg(t, 3, N, t0 + 3000)))).toBe(true);
     const t2 = randomUUID();
-    expect(await d.m.audio.start(1, { ...startMsg(t2, now), reason: "resume" })).toEqual({ ok: true });
-    expect((await d.m.audio.chunk(1, chunkMsg(t2, 0, N, now))).ok).toBe(true);
+    expect(await d.m.submitAudioStart(1, { ...startMsg(t2, now), reason: "resume" })).toEqual({ ok: true });
+    expect((await d.m.submitAudioChunk(1, chunkMsg(t2, 0, N, now))).ok).toBe(true);
     expect(() => d.m.resumeRecording()).toThrow(/not paused/);
   });
 
@@ -427,39 +338,45 @@ describe("chunk ingest", () => {
     expect(d.store.getAudioTrack(t)).toMatchObject({ status: "closed", stopReason: "disconnect" });
     expect(trackStatusOf(d.store.getAudioTrack(t)!)).toBe("interrupted");
     now += 60_000;
-    expect((await d.m.audio.chunk(1, chunkMsg(t, 0, N, now - 59_000))).ok).toBe(true);
+    expect((await d.m.submitAudioChunk(1, chunkMsg(t, 0, N, now - 59_000))).ok).toBe(true);
     // the grace period runs from the last late chunk
     now += AUDIO_LATE_CHUNK_GRACE_MS - 1000;
-    expect((await d.m.audio.chunk(1, chunkMsg(t, 1, N, now - 1000))).ok).toBe(true);
+    expect((await d.m.submitAudioChunk(1, chunkMsg(t, 1, N, now - 1000))).ok).toBe(true);
     now += AUDIO_LATE_CHUNK_GRACE_MS + 1;
-    expect(refused(await d.m.audio.chunk(1, chunkMsg(t, 2, N, now - 1000)))).toBe(true);
+    expect(refused(await d.m.submitAudioChunk(1, chunkMsg(t, 2, N, now - 1000)))).toBe(true);
     // the browser's own stop after reconnecting is fine and adds its dropped chunks
-    expect(d.m.audio.stop(1, { trackId: t, reason: "disconnect", droppedChunks: 2 })).toEqual({ ok: true });
+    expect(d.m.submitAudioStop(1, { trackId: t, reason: "disconnect", droppedChunks: 2 })).toEqual({
+      ok: true,
+    });
     expect(d.store.getAudioTrack(t)!.droppedChunks).toBe(2);
   });
 
   it("a track stopped by the browser still takes a resend for the grace period; a new start ends a forgotten one", async () => {
     const t = await recording();
-    expect(d.m.audio.stop(1, { trackId: t, reason: "client_stop", droppedChunks: 0 })).toEqual({ ok: true });
+    expect(d.m.submitAudioStop(1, { trackId: t, reason: "client_stop", droppedChunks: 0 })).toEqual({
+      ok: true,
+    });
     expect(d.events.at(-1)).toMatchObject({ type: "AudioTrackStopped", actorKind: "player" });
-    expect((await d.m.audio.chunk(1, chunkMsg(t, 0, 1600, now))).ok).toBe(true);
+    expect((await d.m.submitAudioChunk(1, chunkMsg(t, 0, 1600, now))).ok).toBe(true);
     now += AUDIO_LATE_CHUNK_GRACE_MS + 1;
-    expect(refused(await d.m.audio.chunk(1, chunkMsg(t, 1, 1600, now - 1000)))).toBe(true);
+    expect(refused(await d.m.submitAudioChunk(1, chunkMsg(t, 1, 1600, now - 1000)))).toBe(true);
     const a = randomUUID();
     const b = randomUUID();
-    await d.m.audio.start(1, startMsg(a, now));
-    await d.m.audio.start(1, startMsg(b, now));
+    await d.m.submitAudioStart(1, startMsg(a, now));
+    await d.m.submitAudioStart(1, startMsg(b, now));
     expect(d.store.getAudioTrack(a)).toMatchObject({ status: "closed", stopReason: "interrupted" });
     expect(d.store.getAudioTrack(b)!.status).toBe("recording");
-    expect(refused(d.m.audio.stop(2, { trackId: b, reason: "client_stop", droppedChunks: 0 }))).toBe(true);
+    expect(refused(d.m.submitAudioStop(2, { trackId: b, reason: "client_stop", droppedChunks: 0 }))).toBe(
+      true,
+    );
   });
 
   it("withdrawal closes the seat's track at once and refuses all further audio", async () => {
     const t = await recording();
     d.m.withdraw(1);
     expect(d.store.getAudioTrack(t)).toMatchObject({ status: "closed", stopReason: "withdrawn" });
-    expect(refused(await d.m.audio.chunk(1, chunkMsg(t, 0, 1600, now - 100)))).toBe(true);
-    expect(refused(await d.m.audio.start(1, startMsg()))).toBe(true);
+    expect(refused(await d.m.submitAudioChunk(1, chunkMsg(t, 0, 1600, now - 100)))).toBe(true);
+    expect(refused(await d.m.submitAudioStart(1, startMsg()))).toBe(true);
   });
 
   it("game complete cuts the recording; close and abort leave nothing open", async () => {
@@ -478,18 +395,18 @@ describe("chunk ingest", () => {
     d.m.endGame();
     expect(d.store.getAudioTrack(t)).toMatchObject({ status: "closed", stopReason: "game_complete" });
     // a late chunk running past the end is cut there; one captured after it is refused
-    expect((await d.m.audio.chunk(1, chunkMsg(t, 0, 64_000, t0))).ok).toBe(true);
+    expect((await d.m.submitAudioChunk(1, chunkMsg(t, 0, 64_000, t0))).ok).toBe(true);
     expect(d.store.listAudioChunks(t)[0]!.sampleCount).toBe(48_000);
-    expect(refused(await d.m.audio.chunk(1, chunkMsg(t, 1, 1600, t0 + 4000)))).toBe(true);
+    expect(refused(await d.m.submitAudioChunk(1, chunkMsg(t, 1, 1600, t0 + 4000)))).toBe(true);
     d.m.close();
-    expect(refused(await d.m.audio.chunk(1, chunkMsg(t, 2, 1600, t0)))).toBe(true);
+    expect(refused(await d.m.submitAudioChunk(1, chunkMsg(t, 2, 1600, t0)))).toBe(true);
     expect(d.store.listAudioTracks(d.m.sessionId, { status: "recording" })).toEqual([]);
   });
 
   it("abort logs every open track's stop before SessionAborted", async () => {
     const t1 = await recording();
     const t2 = randomUUID();
-    expect(await d.m.audio.start(2, startMsg(t2, now))).toEqual({ ok: true });
+    expect(await d.m.submitAudioStart(2, startMsg(t2, now))).toEqual({ ok: true });
     d.m.abort("test");
     for (const t of [t1, t2])
       expect(d.store.getAudioTrack(t)).toMatchObject({ status: "closed", stopReason: "aborted" });
@@ -544,10 +461,10 @@ describe("chunk ingest", () => {
     );
     try {
       expect(reloaded.state.audio.pauses).toEqual([{ fromTs: t0 + 2500, toTs: null }]);
-      expect((await reloaded.audio.chunk(1, chunkMsg(t, 0, N, t0))).ok).toBe(true);
-      expect((await reloaded.audio.chunk(1, chunkMsg(t, 2, N, t0 + 2000))).ok).toBe(true);
+      expect((await reloaded.submitAudioChunk(1, chunkMsg(t, 0, N, t0))).ok).toBe(true);
+      expect((await reloaded.submitAudioChunk(1, chunkMsg(t, 2, N, t0 + 2000))).ok).toBe(true);
       expect(d.store.listAudioChunks(t).map((r) => r.sampleCount)).toEqual([N, N / 2]);
-      expect(refused(await reloaded.audio.chunk(1, chunkMsg(t, 3, N, t0 + 3000)))).toBe(true);
+      expect(refused(await reloaded.submitAudioChunk(1, chunkMsg(t, 3, N, t0 + 3000)))).toBe(true);
     } finally {
       reloaded.dispose();
     }
@@ -574,8 +491,8 @@ describe("chunk ingest", () => {
         type: "AudioTrackStopped",
         payload: { reason: "interrupted" },
       });
-      expect((await reloaded.audio.chunk(1, chunkMsg(t, 0, 1600, now))).ok).toBe(true);
-      expect(reloaded.audio.seatStats(1).tracks).toBe(1);
+      expect((await reloaded.submitAudioChunk(1, chunkMsg(t, 0, 1600, now))).ok).toBe(true);
+      expect(reloaded.monitor.dashboardStats()[1]!.mic?.tracks).toBe(1);
     } finally {
       reloaded.dispose();
     }
@@ -601,7 +518,7 @@ describe("calibration state machine", () => {
     for (const s of [1, 2]) {
       const t = randomUUID();
       tracks.push(t);
-      expect((await d.m.audio.start(s, startMsg(t, Date.now() - 2000))).ok).toBe(true);
+      expect((await d.m.submitAudioStart(s, startMsg(t, Date.now() - 2000))).ok).toBe(true);
       d.m.submitMicCheck(s, MIC_OK);
       finishOnboarding(d.m, s);
     }
@@ -637,7 +554,10 @@ describe("calibration state machine", () => {
         const ts = T0 + seq * 500;
         const turn = turns.find((x) => ts >= x.startTs - 1 && ts < x.endTs);
         const db = turn ? (turn.seat === seat ? -18 : -40) : null;
-        const a = await d.m.audio.chunk(seat, chunkMsg(tracks[i]!, seq, N, ts, pcm(N, db, seq + seat * 100)));
+        const a = await d.m.submitAudioChunk(
+          seat,
+          chunkMsg(tracks[i]!, seq, N, ts, pcm(N, db, seq + seat * 100)),
+        );
         expect(a.ok).toBe(true);
       }
     }

@@ -1,7 +1,5 @@
 import { timingSafeEqual } from "node:crypto";
 import {
-  AUDIO_SILENCE_DB,
-  type AudioLevel,
   audioEnabled,
   type DashboardMsg,
   FACILITATOR_SCHEMAS,
@@ -13,7 +11,6 @@ import {
   type FacilitatorResults,
   type FacilitatorServerToClient,
   type FakePlayerPace,
-  LIVE_TELEMETRY_TYPES,
   PLAYER_SCHEMAS,
   type PlayerAcks,
   type PlayerClientToServer,
@@ -21,23 +18,18 @@ import {
   type PlayerRequest,
   type PlayerServerToClient,
   parseSessionConfig,
-  parseTelemetryItem,
   playerView,
   REDACTED_EVENT_TYPES,
   type Scenario,
-  type SeatLiveStats,
-  type SeatMicStats,
   type ServerSide,
   type SessionConfig,
   type StoredEvent,
-  type StoredTelemetry,
   seatList,
-  type TelemetryItem,
   type TerminalInfo,
 } from "@wkwa/shared";
 import type { Logger } from "pino";
 import type { Namespace, Server, Socket } from "socket.io";
-import type { ZodType, z } from "zod";
+import type { ZodType } from "zod";
 import { loadOnboardingContent, type ScenarioLibrary } from "../content";
 import { getMeta } from "../db/database";
 import type { Store } from "../db/store";
@@ -106,9 +98,6 @@ function facilitatorSchema<K extends FacilitatorCommand>(name: K): ZodType<Facil
   return FACILITATOR_SCHEMAS[name] as unknown as ZodType<FacilitatorMessage<K>>;
 }
 
-/** Latest `audio:level` of a seat (volatile: never stored). */
-type MicLevelReading = z.output<typeof AudioLevel>;
-
 export interface HubDeps {
   io: Server;
   /** Participant and simulation databases; each session lives in exactly one. */
@@ -134,21 +123,6 @@ export function tokenMatches(given: unknown, expected: string | null): boolean {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
-function emptyStats(seat: number): SeatLiveStats {
-  return {
-    seat,
-    focused: null,
-    visible: null,
-    idle: false,
-    rttMs: null,
-    offsetMs: null,
-    hoverRegionId: null,
-    screen: null,
-    telemetryCount: 0,
-    lastTelemetryTs: null,
-  };
-}
-
 /** Facilitator-visible copy of an event: demographic answers are never shown live. */
 export function redactEvent(ev: StoredEvent): StoredEvent {
   if (!REDACTED_EVENT_TYPES.has(ev.type)) return ev;
@@ -159,6 +133,10 @@ export function redactEvent(ev: StoredEvent): StoredEvent {
  * The hub in hub-and-spoke: every message between players passes through
  * here. It owns the socket namespaces, the terminal registry and the active
  * SessionManager, and fans state out to each recipient as a projection.
+ * It routes what a seat sends to the session's submit* methods; the session
+ * owns its rules and its live figures (the seat monitor). The hub keeps the
+ * sockets, the dashboard refresh, the fake players' network clients and the
+ * simulation runner.
  */
 export class Hub {
   session: SessionManager | null = null;
@@ -169,9 +147,6 @@ export class Hub {
   private terminals = new Map<string, TerminalEntry>();
   private nextTerminal = 1;
   private seatSockets = new Map<number, PlayerSocket>();
-  private stats = new Map<number, SeatLiveStats>();
-  private micLevels = new Map<number, MicLevelReading>();
-  private liveTelemetry: StoredTelemetry[] = [];
   private statsTimer: NodeJS.Timeout | null = null;
   readonly player: PlayerNamespace;
   readonly facilitator: FacilitatorNamespace;
@@ -292,13 +267,9 @@ export class Hub {
       sock.data.seat = null;
     }
     this.seatSockets.clear();
-    this.stats.clear();
-    this.micLevels.clear();
-    this.liveTelemetry = [];
   }
 
   private afterAttach(m: SessionManager) {
-    for (const s of Object.values(m.state.seats)) this.stats.set(s.seat, emptyStats(s.seat));
     // Connected browsers re-send hello with their stored seat token, so seats are re-claimed
     // by token only (terminal numbers are not stable across server restarts).
     this.player.emit("rehello");
@@ -327,25 +298,7 @@ export class Hub {
   async addFakePlayers(seatsIn: number[] | null, pace: FakePlayerPace): Promise<{ seats: number[] }> {
     const m = this.session;
     if (!m) throw new CommandError("No active session");
-    if (m.simulated) {
-      throw new CommandError(
-        "Fake players are for sessions with real players; a simulated session already has an agent in every seat",
-      );
-    }
-    if (m.state.phase !== "lobby") {
-      throw new CommandError(
-        "Fake players can only be added in the lobby (setup step 07), before onboarding",
-      );
-    }
-    const free = seatList(m.state)
-      .filter((s) => !s.bound)
-      .map((s) => s.seat);
-    const seats = seatsIn ?? free;
-    if (seats.length === 0) throw new CommandError("Every seat is already bound");
-    for (const seat of seats) {
-      if (!m.state.seats[seat]) throw new CommandError(`Seat ${seat} does not exist in this session`);
-      if (!free.includes(seat)) throw new CommandError(`Seat ${seat} is already bound; unbind it first`);
-    }
+    const seats = m.fakePlayerSeats(seatsIn);
     // connect them all at once, then bind in seat order
     const bots = await Promise.all(seats.map((seat) => this.fakes.spawn({ pace, seat })));
     const terminals = await Promise.allSettled(bots.map((b) => b.waitForTerminal(5000)));
@@ -355,7 +308,7 @@ export class Hub {
       const bot = bots[i]!;
       const t = terminals[i]!;
       // the session may have changed while the fake players were connecting
-      const stale = this.session !== m || m.state.phase !== "lobby" || m.state.seats[seat]?.bound;
+      const stale = this.session !== m || m.fakePlayerRefusal(seat) !== null;
       if (t.status === "rejected" || stale) {
         failed ||= t.status === "rejected";
         this.dropFake(bot.terminalKey);
@@ -429,14 +382,7 @@ export class Hub {
         const sock = entry ? [...entry.sockets].at(-1) : undefined;
         if (sock) queueMicrotask(() => this.claimSeat(sock, ev.payload.seat));
       }
-      // the mic meter of a seat that is no longer recorded goes blank
-      if (ev.type === "SeatUnbound" || ev.type === "ParticipantWithdrawn" || ev.type === "MicCheckSkipped")
-        this.micLevels.delete(ev.payload.seat);
-      // nobody is recorded once the session has ended
-      if (ev.type === "SessionClosed" || ev.type === "SessionAborted") this.micLevels.clear();
       if (ev.type === "SeatUnbound") {
-        // the next client in this seat starts with empty live figures
-        this.stats.set(ev.payload.seat, emptyStats(ev.payload.seat));
         const sock = this.seatSockets.get(ev.payload.seat);
         const key = sock ? sock.data.terminalKey : undefined;
         if (sock && key && this.fakes.isFake(key)) {
@@ -493,30 +439,12 @@ export class Hub {
       }))
       .filter((t) => t.connected || t.seat !== null)
       .sort((a, b) => a.terminal - b.terminal);
-    const stats: Record<number, SeatLiveStats> = {};
-    for (const [seat, st] of this.stats)
-      stats[seat] = m?.state.audio.enabled ? { ...st, mic: this.micStats(m, seat) } : st;
     return {
       state: m?.state ?? null,
       serverTs: nowTs(),
       terminals,
-      stats,
+      stats: m?.monitor.dashboardStats() ?? {},
       live: Boolean(m && !m.isFinal),
-    };
-  }
-
-  /** LIVE mic figures of a seat: the browser's latest meter reading plus what the server stored. */
-  private micStats(m: SessionManager, seat: number): SeatMicStats {
-    const level = this.micLevels.get(seat);
-    const stored = m.audio.seatStats(seat);
-    return {
-      state: level?.state ?? "idle",
-      rmsDb: level?.rmsDb ?? AUDIO_SILENCE_DB,
-      peakDb: level?.peakDb ?? AUDIO_SILENCE_DB,
-      lastChunkServerTs: stored.lastChunkServerTs,
-      pendingChunks: level?.pendingChunks ?? 0,
-      tracks: stored.tracks,
-      recordedMs: Math.round(stored.recordedMs),
     };
   }
 
@@ -642,14 +570,14 @@ export class Hub {
     seatCmd("mic:check", (m, seat, msg) => {
       m.submitMicCheck(seat, msg);
     });
-    audioCmd("audio:start", (m, seat, msg) => m.audio.start(seat, msg));
+    audioCmd("audio:start", (m, seat, msg) => m.submitAudioStart(seat, msg));
     audioCmd("audio:chunk", async (m, seat, msg) => {
-      const a = await m.audio.chunk(seat, msg);
+      const a = await m.submitAudioChunk(seat, msg);
       // a stored chunk changes the LIVE mic column (throttled); start and stop push through their events
       if (a.ok && !a.duplicate && this.session === m) this.schedulePush();
       return a;
     });
-    audioCmd("audio:stop", (m, seat, msg) => m.audio.stop(seat, msg));
+    audioCmd("audio:stop", (m, seat, msg) => m.submitAudioStop(seat, msg));
     seatCmd("demographics:submit", (m, seat, msg) => {
       m.submitDemographics(seat, msg);
     });
@@ -657,14 +585,19 @@ export class Hub {
       m.acknowledgeBriefing(seat, msg);
     });
     seatCmd("intent", (m, seat, msg) => m.intent(seat, msg));
-    seatCmd("telemetry", (m, seat, msg) => ({ stored: this.ingestTelemetry(m, seat, msg) }));
+    seatCmd("telemetry", (m, seat, msg) => {
+      const { stored, live } = m.submitTelemetry(seat, msg);
+      if (live.length) this.facilitator.emit("telemetry:live", { items: live, reset: false });
+      if (stored > 0) this.schedulePush();
+      return { stored };
+    });
 
     sock.on("presence", (raw) => {
+      const m = this.session;
       const seat = data.seat;
       const msg = PLAYER_SCHEMAS.presence.safeParse(raw);
-      if (!msg.success || !seat) return;
-      const st = this.stats.get(seat);
-      if (st) st.hoverRegionId = msg.data.regionId;
+      if (!m || !msg.success || !seat) return;
+      m.submitPresence(seat, msg.data.regionId);
       this.facilitator.volatile.emit("presence:live", { seat, regionId: msg.data.regionId });
     });
 
@@ -672,11 +605,9 @@ export class Hub {
     sock.on("audio:level", (raw) => {
       const m = this.session;
       const seat = data.seat;
-      if (!m || !seat || m.audio.refusal(seat) !== null) return;
       const msg = PLAYER_SCHEMAS["audio:level"].safeParse(raw);
-      if (!msg.success) return;
-      this.micLevels.set(seat, msg.data);
-      this.schedulePush();
+      if (!m || !seat || !msg.success) return;
+      if (m.submitMicLevel(seat, msg.data)) this.schedulePush();
     });
 
     sock.on("disconnect", (reason) => {
@@ -685,60 +616,10 @@ export class Hub {
       const seat = data.seat;
       if (seat && this.seatSockets.get(seat) === sock) {
         this.seatSockets.delete(seat);
-        this.micLevels.delete(seat);
-        const st = this.stats.get(seat);
-        if (st) st.hoverRegionId = null;
         this.session?.playerDisconnected(seat, reason);
       }
       this.pushDashboard();
     });
-  }
-
-  private ingestTelemetry(
-    m: SessionManager,
-    seat: number,
-    msg: { clockOffsetMs: number; items: unknown[] },
-  ): number {
-    const seatState = m.state.seats[seat];
-    const code = seatState?.participantCode;
-    if (!code || m.isFinal) return 0;
-    // No interaction telemetry is stored before the participant has consented.
-    if (seatState.consent !== "given" && seatState.consent !== "skipped") return 0;
-    const items: TelemetryItem[] = [];
-    for (const raw of msg.items) {
-      const it = parseTelemetryItem(raw);
-      if (it) items.push(it);
-    }
-    if (items.length === 0) return 0;
-    const stored = this.store.insertTelemetry(
-      m.sessionId,
-      seat,
-      code,
-      m.state.round,
-      msg.clockOffsetMs,
-      items,
-    );
-    const st = this.stats.get(seat) ?? emptyStats(seat);
-    this.stats.set(seat, st);
-    st.telemetryCount += stored.length;
-    st.lastTelemetryTs = nowTs();
-    for (const it of items) {
-      if (it.type === "focus_change") st.focused = it.payload.focused;
-      else if (it.type === "visibility_change") st.visible = it.payload.visible;
-      else if (it.type === "idle") st.idle = it.payload.state === "start";
-      else if (it.type === "clock_sync") {
-        st.rttMs = it.payload.rttMs;
-        st.offsetMs = it.payload.offsetMs;
-      } else if (it.type === "screen_view") st.screen = it.payload.screen;
-    }
-    const live = stored.filter((t) => LIVE_TELEMETRY_TYPES.has(t.type));
-    if (live.length) {
-      this.liveTelemetry.push(...live);
-      if (this.liveTelemetry.length > 500) this.liveTelemetry.splice(0, this.liveTelemetry.length - 500);
-      this.facilitator.emit("telemetry:live", { items: live, reset: false });
-    }
-    this.schedulePush();
-    return stored.length;
   }
 
   /* ═════════════════════════ facilitator ═════════════════════════ */
@@ -750,7 +631,7 @@ export class Hub {
       events: m ? this.store.listEvents(m.sessionId).map(redactEvent) : [],
       reset: true,
     });
-    sock.emit("telemetry:live", { items: this.liveTelemetry, reset: true });
+    sock.emit("telemetry:live", { items: m ? [...m.monitor.liveTelemetry] : [], reset: true });
     sock.emit("dashboard", this.dashboard());
 
     /**
