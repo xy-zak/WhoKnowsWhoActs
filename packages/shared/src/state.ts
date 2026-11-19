@@ -20,13 +20,18 @@ export const PHASES = [
 export type Phase = (typeof PHASES)[number];
 
 export type ConsentStatus = "pending" | "given" | "declined" | "skipped";
-/** Every onboarding step, in the order a player does them. `mic_check` is used only when the session records audio. */
-export const ONBOARDING_STEPS = ["consent", "mic_check", "demographics", "briefing"] as const;
+/**
+ * Every onboarding step, in the order a player of a new session does them. `mic_check` is used only
+ * when the session records audio: it comes last, as part 1 of "Mic check & calibration", and opens
+ * once every seat has finished the steps before it. (A session keeps the order it logged in
+ * OnboardingStarted: sessions from before had the mic check right after consent.)
+ */
+export const ONBOARDING_STEPS = ["consent", "demographics", "briefing", "mic_check"] as const;
 export type OnboardingStep = (typeof ONBOARDING_STEPS)[number];
 /** Name of each onboarding step, as the player's stepper and the facilitator's summaries show it. */
 export const STEP_LABEL: Record<OnboardingStep, string> = {
   consent: "Consent",
-  mic_check: "Mic check",
+  mic_check: "Mic check & calibration",
   demographics: "About you",
   briefing: "Briefing",
 };
@@ -140,6 +145,16 @@ export interface CalibrationState {
   startedTs: number | null;
   completedTs: number | null;
   quality: CalibrationQuality | null;
+  /**
+   * Seats that said they are ready for the next run (CalibrationReady), in the order they did; the
+   * server starts the turns once every recorded seat is. Emptied when a run starts or is requested again.
+   */
+  ready: number[];
+  /**
+   * A run was asked for again (CalibrationRequested, or the server's cancel of a running one): in a
+   * round break, the players are then asked to say they are ready (before round 1 they always are).
+   */
+  requested: boolean;
   /**
    * The server's cancel of the latest run (CalibrationSkipped with `cancelled`: status back to
    * pending), with its reason and time; null once a calibration starts again, or if none was cancelled.
@@ -265,6 +280,8 @@ export function emptyCalibration(): CalibrationState {
     startedTs: null,
     completedTs: null,
     quality: null,
+    ready: [],
+    requested: false,
     lastCancel: null,
   };
 }
@@ -327,8 +344,8 @@ export function initialState(): GameState {
 
 /**
  * The onboarding steps a session with this config uses, in ONBOARDING_STEPS order (logged in
- * OnboardingStarted). The mic check comes right after consent when the session records audio
- * (never for simulated players): recording starts at each participant's own mic check.
+ * OnboardingStarted). The mic check comes last when the session records audio (never for
+ * simulated players): recording starts at each participant's own mic check.
  */
 export function onboardingStepsFor(
   config: Pick<SessionConfig, "onboarding" | "audio" | "players">,
@@ -382,20 +399,36 @@ export function micCheckApplies(state: ReadonlyGameState, seat: ReadonlySeatStat
   return state.audio.enabled && isParticipant(seat) && seat.audioConsent;
 }
 
+/** The session's onboarding steps before its mic check, in its order (none without a mic check step). */
+function stepsBeforeMicCheck(state: ReadonlyGameState): readonly OnboardingStep[] {
+  const i = state.onboardingSteps.indexOf("mic_check");
+  return i < 0 ? [] : state.onboardingSteps.slice(0, i);
+}
+
 /**
  * Seats that hold the mic checks: active real participants (bound, not withdrawn, not a fake player
- * or agent) whose consent is not `given` yet, i.e. still reading the form or declined. Empty unless
- * the session has the mic check step.
+ * or agent) that have not finished every step before the mic check yet: still in consent (or
+ * declined), in the questionnaire or in the briefing. Empty unless the session has the mic check step.
  *
  * Every microphone in the room also hears the others, so NO seat may open its mic (start its mic
  * check, and so its recording) while anyone is still in consent: their voice would be recorded
- * before they agreed, or although they then decline. To go on without a decliner, the facilitator
- * withdraws that seat.
+ * before they agreed, or although they then decline. The mic checks and the calibration form one
+ * part of the onboarding that the room does together, once every seat is ready (has finished the
+ * briefing). To go on without a decliner, the facilitator withdraws that seat. (Sessions from before
+ * this order had only consent before the mic check, so only consent holds them.)
  */
 export function micCheckHoldSeats(state: ReadonlyGameState): number[] {
-  if (!state.audio.enabled || !state.onboardingSteps.includes("mic_check")) return [];
+  if (!state.audio.enabled) return [];
+  const before = stepsBeforeMicCheck(state);
+  if (before.length === 0) return [];
   return seatList(state)
-    .filter((s) => s.bound && !s.withdrawn && isParticipant(s) && s.consent !== "given")
+    .filter(
+      (s) =>
+        s.bound &&
+        !s.withdrawn &&
+        isParticipant(s) &&
+        (s.consent !== "given" || before.some((step) => !stepDone(state, s, step))),
+    )
     .map((s) => s.seat);
 }
 
@@ -424,14 +457,14 @@ export function isOnboardingComplete(state: ReadonlyGameState, seat: ReadonlySea
 }
 
 /**
- * The next onboarding step a seat still has to do (null = done), in the order
- * consent → mic_check → demographics → briefing, skipping steps the session does not use
- * (and the mic check for a participant who did not permit audio recording).
+ * The next onboarding step a seat still has to do (null = done), in the session's own order
+ * (OnboardingStarted; for a new session consent → demographics → briefing → mic_check), skipping
+ * the mic check for a participant who did not permit audio recording.
  */
 export function nextOnboardingStep(state: ReadonlyGameState, seat: ReadonlySeatState): OnboardingStep | null {
   if (!isParticipant(seat)) return null;
-  for (const step of ONBOARDING_STEPS) {
-    if (state.onboardingSteps.includes(step) && !stepDone(state, seat, step)) return step;
+  for (const step of state.onboardingSteps) {
+    if (!stepDone(state, seat, step)) return step;
   }
   return null;
 }
@@ -449,11 +482,17 @@ export function canStartFirstRound(state: ReadonlyGameState): boolean {
   return status === "done" || status === "skipped";
 }
 
-/** Real seats the calibration waits for: active participants not past their mic check yet (consent included). */
+/**
+ * Real seats the calibration waits for: active participants not through their onboarding yet (in a
+ * round break: not past their mic check). The calibration only runs once every seat in the room is ready.
+ */
 export function calibrationWaitingSeats(state: ReadonlyGameState): ReadonlySeatState[] {
   return activeSeats(state).filter(
     (s) =>
-      isParticipant(s) && (s.consent !== "given" || (micCheckApplies(state, s) && s.micCheck === "pending")),
+      isParticipant(s) &&
+      (state.phase === "onboarding"
+        ? !isOnboardingComplete(state, s)
+        : s.consent !== "given" || (micCheckApplies(state, s) && s.micCheck === "pending")),
   );
 }
 

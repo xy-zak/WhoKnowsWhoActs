@@ -53,8 +53,9 @@ async function submitMicCheck(conn: PlayerConnection, o: MicCheckOutcome): Promi
 }
 
 /**
- * Onboarding step `mic_check` (sessions that record audio). Held while another seat is still in
- * consent (no microphone opens before everyone agreed). Then: what is recorded and for how long,
+ * Onboarding step `mic_check` (sessions that record audio): part 1 of "Mic check & calibration",
+ * the last onboarding step. Held while another seat has not finished the briefing (no microphone
+ * opens before everyone has agreed and is ready). Then: what is recorded and for how long,
  * a Start button (the user gesture the browser needs), the live level, the phrase to read aloud
  * and the speech heard so far. Passing sends `mic:check` and moves on; there is no skip for the
  * player (the facilitator can skip a seat). Recording starts here and runs until the game ends.
@@ -100,7 +101,7 @@ export function MicCheckScreen({ conn, view }: { conn: PlayerConnection; view: P
       <Page
         view={view}
         step="mic_check"
-        title="Mic check"
+        title="Mic check & calibration · part 1 of 2: mic check"
         icon="microphone"
         footer={
           <>
@@ -111,9 +112,10 @@ export function MicCheckScreen({ conn, view }: { conn: PlayerConnection; view: P
           </>
         }
       >
-        <h2 style={{ margin: 0 }}>Waiting for the other players to finish the consent form</h2>
+        <h2 style={{ margin: 0 }}>Waiting for the other players to finish the briefing</h2>
         <p className="muted cursor">
-          Your microphone stays off until everyone in the room has agreed. This takes a moment
+          The microphones stay off until everyone in the room is ready. Then you check your microphone (part
+          1) and the room does a short calibration together (part 2)
         </p>
       </Page>
     );
@@ -184,7 +186,7 @@ export function MicCheckScreen({ conn, view }: { conn: PlayerConnection; view: P
     <Page
       view={view}
       step="mic_check"
-      title="Mic check"
+      title="Mic check & calibration · part 1 of 2: mic check"
       icon="microphone"
       footer={
         <>
@@ -221,7 +223,7 @@ export function MicCheckScreen({ conn, view }: { conn: PlayerConnection; view: P
           </div>
           {c.passed ? (
             <Callout tone="live" icon="ok">
-              <strong>Mic check passed.</strong> We can hear you clearly. Recording continues while you go on
+              <strong>Mic check passed.</strong> We can hear you clearly. Next: part 2, the calibration
             </Callout>
           ) : (
             <>

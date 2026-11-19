@@ -39,7 +39,13 @@ export function registerApi(ctx: AppContext, guard: Guard) {
   app.get("/api/server-info", opts, async (): Promise<ServerInfo> => {
     const addr = app.server.address() as AddressInfo | null;
     const port = addr?.port ?? ctx.runtime.port;
-    return { playerUrls: playerUrls(ctx.runtime.host, port, ctx.tls.info.enabled), port, tls: ctx.tls.info };
+    const landing = ctx.runtime.landingPort;
+    return {
+      playerUrls: playerUrls(ctx.runtime.host, port, ctx.tls.info.enabled),
+      landingUrls: landing === null ? [] : playerUrls(ctx.runtime.host, landing, false),
+      port,
+      tls: ctx.tls.info,
+    };
   });
 
   /** Default session configuration for the setup form (config/session.default.json, validated). */

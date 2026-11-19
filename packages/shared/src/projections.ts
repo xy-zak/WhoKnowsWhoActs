@@ -2,12 +2,19 @@ import { parseCellId, type Scores } from "./board";
 import type { OnboardingContent, RoundSpec, StudyConfig } from "./config";
 import { actorOf, mapScoreOf, rulesFor } from "./game/scoring";
 import { type ActionKind, K_LABELS, type KLabel, type PLabel } from "./labels";
-import { type NotRecordingReason, recordingVerdict } from "./recordingVerdict";
+import {
+  calibrationNotReadySeats,
+  calibrationWaitsIn,
+  canSayCalibrationReady,
+  type NotRecordingReason,
+  recordingVerdict,
+} from "./recordingVerdict";
 import { quotaLimit, quotaUsed } from "./rules/roundRules";
 import type { MapGeometry, Scenario } from "./scenario";
 import {
   type CalibrationStatus,
   type ConsentStatus,
+  calibrationWaitingSeats,
   currentCalibrationTurn,
   type GameState,
   isMicCheckHeld,
@@ -126,9 +133,10 @@ export interface PlayerAudioView {
   paused: boolean;
   micCheck: MicCheckStatus;
   /**
-   * The mic check is this seat's next step but is held: another seat is still reading the consent
-   * form (or declined and was not withdrawn yet). Show "waiting for the others to finish consent"
-   * and do NOT open the microphone; `mic:check` and `audio:start` are refused meanwhile.
+   * The mic check is this seat's next step but is held: another seat has not finished the steps
+   * before it yet (consent, the questionnaire, the briefing; or declined and was not withdrawn yet).
+   * Show "waiting for the others" and do NOT open the microphone; `mic:check` and `audio:start` are
+   * refused meanwhile.
    */
   micCheckHeld: boolean;
   /** Sentence to read aloud in the mic check (only while the mic check is this seat's next step). */
@@ -146,6 +154,15 @@ export interface PlayerAudioView {
     turnEndsAt: number | null;
     /** Seats in turn order. */
     order: number[];
+    /** This seat has said it is ready for the next run (CalibrationReady). */
+    ready: boolean;
+    /** This seat may say so now: show the "I'm ready for the calibration" button (`calibration:ready`). */
+    canSayReady: boolean;
+    /**
+     * While it waits (pending): the seats it waits for, in seat order. Seats still in their onboarding
+     * (or mic check) and recorded seats that have not said they are ready. The turns start once none is left.
+     */
+    waitingFor: number[];
   };
 }
 
@@ -188,6 +205,17 @@ function playerAudioView(
         : null,
       turnEndsAt: turn && a.calibration.turnMs !== null ? turn.startTs + a.calibration.turnMs : null,
       order: [...a.calibration.order],
+      ready: a.calibration.ready.includes(seat.seat),
+      canSayReady: canSayCalibrationReady(state, seat),
+      waitingFor:
+        a.enabled && a.calibration.status === "pending" && calibrationWaitsIn(state)
+          ? [
+              ...new Set([
+                ...calibrationWaitingSeats(state).map((s) => s.seat),
+                ...calibrationNotReadySeats(state),
+              ]),
+            ].sort((x, y) => x - y)
+          : [],
     },
   };
 }

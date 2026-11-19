@@ -67,6 +67,8 @@ export const BriefingAck = z.object({
   durationMs: DurationMs,
   clientTs: ClientTs,
 });
+/** The player is ready for the calibration's turns (part 2 of "Mic check & calibration"). */
+export const CalibrationReadyMsg = z.object({ clientTs: ClientTs });
 export const IntentMsg = z.object({
   clientSeq: z
     .number()
@@ -298,6 +300,7 @@ export const PLAYER_SCHEMAS = {
   "demographics:submit": DemographicsSubmit,
   "mic:check": MicCheckSubmit,
   "briefing:ack": BriefingAck,
+  "calibration:ready": CalibrationReadyMsg,
   intent: IntentMsg,
   telemetry: TelemetryBatch,
   presence: Presence,
@@ -384,7 +387,7 @@ export const MESSAGES: {
       },
       "mic:check": {
         description:
-          "Result of the player's own mic check (sessions that record audio; the onboarding step after consent). Refused while PlayerView.audio.micCheckHeld (another seat is still in consent). Only processing flags and the sample rate are sent, never the device name or id.",
+          "Result of the player's own mic check (sessions that record audio; the last onboarding step, part 1 of 'Mic check & calibration'). Refused while PlayerView.audio.micCheckHeld (a seat has not finished the briefing yet). Only processing flags and the sample rate are sent, never the device name or id.",
         ack: "Ack",
         logged: "MicCheckCompleted",
       },
@@ -392,6 +395,12 @@ export const MESSAGES: {
         description: "Player confirms having read the briefing.",
         ack: "Ack",
         logged: "BriefingAcknowledged",
+      },
+      "calibration:ready": {
+        description:
+          "The player is ready for the calibration (part 2 of 'Mic check & calibration'; only while PlayerView.audio.calibration.canSayReady). Once every recorded seat is ready, the server starts the turns.",
+        ack: "Ack",
+        logged: "CalibrationReady, then CalibrationStarted when it was the last seat",
       },
       intent: {
         description: "Request to propose or decide a region. Validated by the rules engine.",
@@ -524,15 +533,17 @@ export const MESSAGES: {
       },
       "calibration:start": {
         description:
-          "Sessions that record audio: start the calibration once every seat is ready. The server then times the turns (each seat reads a sentence aloud while the others stay quiet) and runs a quick quality check.",
+          "Sessions that record audio: start the calibration once every seat is through its onboarding and every recorded seat has said it is ready (the server also starts it by itself then). The server times the turns (each seat reads a sentence aloud while the others stay quiet) and runs a quick quality check.",
         ack: "Ack",
         logged:
           "CalibrationStarted, then CalibrationTurn per seat, CalibrationCompleted and CalibrationChecked",
       },
       "calibration:redo": {
-        description: "Run the calibration again (e.g. after a seat moved closer to its microphone).",
+        description:
+          "Run the calibration again (e.g. after a seat moved closer to its microphone): ends a running one, then asks every recorded seat again to say it is ready; the turns start once all are.",
         ack: "Ack",
-        logged: "CalibrationStarted, then as calibration:start",
+        logged:
+          "CalibrationSkipped (cancelled, if one was running), CalibrationRequested; then as calibration:start",
       },
       "calibration:skip": {
         description:
@@ -719,6 +730,34 @@ export interface TlsInfo {
 export interface ServerInfo {
   /** One URL per LAN interface (or the configured HOST), with the right scheme. */
   playerUrls: Array<{ url: string; iface: string }>;
+  /**
+   * The plain-HTTP welcome page (LANDING_PORT), one URL per LAN interface: what participants open
+   * first. Empty when the landing page is off.
+   */
+  landingUrls: Array<{ url: string; iface: string }>;
   port: number;
   tls: TlsInfo;
 }
+
+/**
+ * GET /api/landing: what the welcome page shows. Served over plain HTTP before anyone accepted the
+ * certificate, so it says only whether a session takes players now: no session id, no names.
+ */
+export interface LandingStatus {
+  /** A session with real participants is open (lobby to the last round): show "Join live session". */
+  live: boolean;
+  /** Where the button goes: the game page (HTTPS) on the address the browser used. */
+  joinUrl: string;
+  /** "self-signed": the next page shows the browser's certificate warning once. */
+  certificate: "self-signed" | "own" | "none";
+  /** SHA-256 fingerprint of the certificate, to compare with the browser's (null without HTTPS). */
+  fingerprintSha256: string | null;
+}
+
+/** Phases in which a session with real participants takes players at the game page. */
+export const JOINABLE_PHASES: ReadonlySet<string> = new Set([
+  "lobby",
+  "onboarding",
+  "round_active",
+  "round_complete",
+]);

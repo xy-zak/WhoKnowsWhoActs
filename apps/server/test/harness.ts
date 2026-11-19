@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import type { AddressInfo } from "node:net";
 import os from "node:os";
 import path from "node:path";
+import { isOnboardingComplete } from "@wkwa/shared";
 import { type AppContext, createApp } from "../src/app";
 import { REPO_ROOT, type RuntimeOptions } from "../src/runtime";
 import { baseUrl } from "../src/tls";
@@ -35,7 +36,7 @@ export async function startTestServer(
     tlsMode: "off",
     tlsCert: null,
     tlsKey: null,
-    httpRedirectPort: null,
+    landingPort: null,
     logToStdout: false,
     logLevel: "info",
     ...overrides,
@@ -79,8 +80,10 @@ export async function setupSession(
   await Promise.all(bots.map((b) => b.waitFor((v) => v.phase === "lobby")));
   await fac.cmd("labels:randomise");
   await fac.cmd("onboarding:start");
-  await fac.waitForDashboard((d) =>
-    Object.values(d.state?.seats ?? {}).every((s) => s.consent === "given" && s.demographics && s.briefing),
-  );
+  // through the onboarding: consent, questionnaire, briefing and (audio sessions) the mic check
+  await fac.waitForDashboard((d) => {
+    const st = d.state;
+    return st !== null && Object.values(st.seats).every((s) => isOnboardingComplete(st, s));
+  });
   return { fac, bots, sessionId };
 }

@@ -1,5 +1,5 @@
-import type { PlayerView } from "@wkwa/shared";
-import { type ReactNode, useRef, useState } from "react";
+import { consentSections, type PlayerView } from "@wkwa/shared";
+import { type ReactNode, useMemo, useRef, useState } from "react";
 import { Markdown } from "../common/Markdown";
 import { ActSwatch, Button, Callout, Check, type IconName, LabelTag, Panel, StatusTag } from "../ui";
 import { Centered, OnboardingStepper } from "./chrome";
@@ -39,6 +39,23 @@ export function useOpenedAt() {
   return useRef(performance.now()).current;
 }
 
+type ConsentItemView = NonNullable<PlayerView["onboarding"]>["consent"]["items"][number];
+
+/**
+ * The consent text as accordion sub-sections, one per `## ` section, each with the one statement
+ * that confirms it (consentSections). Null when the text cannot be split so (it is checked when
+ * the session is created, so only for an old form): the screen then shows it in one piece.
+ */
+function useConsentSections(markdown: string, items: readonly ConsentItemView[]) {
+  return useMemo(() => {
+    try {
+      return consentSections(markdown, items);
+    } catch {
+      return null;
+    }
+  }, [markdown, items]);
+}
+
 export function ConsentScreen({ conn, view }: { conn: PlayerConnection; view: PlayerView }) {
   const c = view.onboarding!.consent;
   const study = view.onboarding!.study;
@@ -46,7 +63,34 @@ export function ConsentScreen({ conn, view }: { conn: PlayerConnection; view: Pl
   const [answers, setAnswers] = useState<Record<string, boolean>>({});
   const [busy, setBusy] = useState(false);
   const [confirmDecline, setConfirmDecline] = useState(false);
+  const split = useConsentSections(c.markdown, c.items);
+  const sections = split?.sections ?? [];
+  /** The sub-section open now (one at a time), and how far the participant has come. */
+  const [open, setOpen] = useState(0);
+  const [passed, setPassed] = useState<ReadonlySet<number>>(new Set());
   const allRequired = c.items.every((i) => !i.required || answers[i.id]);
+  const allPassed = !split || sections.every((_, i) => passed.has(i));
+  const canAgree = allRequired && allPassed;
+  const sectionRefs = useRef<Array<HTMLElement | null>>([]);
+
+  const pass = (i: number) => {
+    setPassed((p) => new Set(p).add(i));
+    const next = i + 1 < sections.length ? i + 1 : -1;
+    setOpen(next);
+    if (next >= 0)
+      requestAnimationFrame(() => sectionRefs.current[next]?.scrollIntoView({ block: "nearest" }));
+  };
+  const tick = (i: number, item: ConsentItemView, v: boolean) => {
+    setAnswers((a) => ({ ...a, [item.id]: v }));
+    // ticking confirms the sub-section: it closes and the next one opens
+    if (v) pass(i);
+    else
+      setPassed((p) => {
+        const n = new Set(p);
+        if (item.required) n.delete(i);
+        return n;
+      });
+  };
 
   const submit = async (decline: boolean) => {
     setBusy(true);
@@ -65,6 +109,18 @@ export function ConsentScreen({ conn, view }: { conn: PlayerConnection; view: Pl
       setBusy(false);
     }
   };
+
+  const statement = (item: ConsentItemView, onChange: (v: boolean) => void) => (
+    <Check
+      label={
+        <>
+          {item.text} {item.required && <span className="t-danger">*</span>}
+        </>
+      }
+      checked={answers[item.id] === true}
+      onChange={onChange}
+    />
+  );
 
   return (
     <Page
@@ -105,12 +161,12 @@ export function ConsentScreen({ conn, view }: { conn: PlayerConnection; view: Pl
             variant="primary"
             size="lg"
             icon="ok"
-            disabled={!allRequired || busy}
+            disabled={!canAgree || busy}
             onClick={() => submit(false)}
             tip={
-              allRequired
+              canAgree
                 ? "Give consent and go on to a few short questions"
-                : "Tick every required box first"
+                : "Go through every section and tick every required box first"
             }
           >
             I agree — continue
@@ -118,7 +174,7 @@ export function ConsentScreen({ conn, view }: { conn: PlayerConnection; view: Pl
         </>
       }
     >
-      <Markdown text={c.markdown} />
+      {split ? split.intro && <Markdown text={split.intro} /> : <Markdown text={c.markdown} />}
       <Callout icon="info">
         <strong>{study.title}</strong>
         <br />
@@ -130,21 +186,69 @@ export function ConsentScreen({ conn, view }: { conn: PlayerConnection; view: Pl
         <br />
         <span className="muted">{study.retention}</span>
       </Callout>
-      <div className="col" style={{ gap: "var(--s2)" }}>
-        {c.items.map((item) => (
-          <Check
-            key={item.id}
-            label={
-              <>
-                {item.text} {item.required && <span className="t-danger">*</span>}
-              </>
-            }
-            checked={answers[item.id] === true}
-            onChange={(v) => setAnswers((a) => ({ ...a, [item.id]: v }))}
-          />
-        ))}
-      </div>
-      <span className="hint">* required to take part · consent form version {c.version}</span>
+      {split ? (
+        <div className="accordion">
+          {sections.map((sec, i) => {
+            const isOpen = i === open;
+            const done = passed.has(i);
+            const reachable = i === 0 || passed.has(i - 1) || done;
+            const ticked = answers[sec.item.id] === true;
+            return (
+              <section
+                key={sec.title}
+                ref={(el) => {
+                  sectionRefs.current[i] = el;
+                }}
+                className={`acc-step ${isOpen ? "current" : done ? "done" : "upcoming"}`}
+              >
+                <button
+                  type="button"
+                  className="acc-head"
+                  aria-expanded={isOpen}
+                  disabled={isOpen || !reachable}
+                  onClick={() => setOpen(i)}
+                >
+                  <span className="glyph">{isOpen ? "▶" : done ? "✓" : "·"}</span>
+                  <span className="num">{String(i + 1).padStart(2, "0")}</span>
+                  <span className="title">{sec.title}</span>
+                  <span className="summary">
+                    {isOpen ? "" : done ? (ticked ? "confirmed" : "not given (optional)") : ""}
+                  </span>
+                  {!sec.item.required && <StatusTag>optional</StatusTag>}
+                </button>
+                {isOpen && (
+                  <div className="acc-body">
+                    <Markdown text={sec.markdown} />
+                    <div className="acc-foot">
+                      {statement(sec.item, (v) => tick(i, sec.item, v))}
+                      <span className="spacer" />
+                      {!sec.item.required && !ticked && (
+                        <Button
+                          icon="next"
+                          onClick={() => pass(i)}
+                          tip="Go on without this optional permission"
+                        >
+                          Continue without
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </section>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="col" style={{ gap: "var(--s2)" }}>
+          {c.items.map((item) => (
+            <div key={item.id}>{statement(item, (v) => setAnswers((a) => ({ ...a, [item.id]: v })))}</div>
+          ))}
+        </div>
+      )}
+      <span className="hint">
+        {split && "Tick the box of each section to confirm it; you can reopen a section. "}* required to take
+        part · consent form version {c.version}
+      </span>
     </Page>
   );
 }
@@ -269,7 +373,11 @@ export function BriefingScreen({ conn, view }: { conn: PlayerConnection; view: P
             icon="ok"
             disabled={busy}
             onClick={submit}
-            tip="Tell the facilitator you are ready; the game starts when every player is"
+            tip={
+              view.audio.enabled
+                ? "Tell the facilitator you are ready; next, once everyone is, the mic check and calibration"
+                : "Tell the facilitator you are ready; the game starts when every player is"
+            }
           >
             I'm ready
           </Button>

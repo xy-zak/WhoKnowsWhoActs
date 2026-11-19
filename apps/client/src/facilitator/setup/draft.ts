@@ -70,7 +70,7 @@ export function finalConfig(d: Draft): { config: SessionConfig } | { error: stri
     try {
       params = JSON.parse(d.simParamsText.trim() || "{}");
     } catch {
-      return { error: "Policy parameters are not valid JSON (step 03 · Players)" };
+      return { error: "Policy parameters are not valid JSON (step 03 · Who plays)" };
     }
   }
   try {
@@ -92,7 +92,7 @@ export function finalConfig(d: Draft): { config: SessionConfig } | { error: stri
     });
     if (config.players === "simulated") {
       const problem = checkSimulationConfig(config.simulation, config.seatCount);
-      if (problem) return { error: `${problem} (step 03 · Players)` };
+      if (problem) return { error: `${problem} (step 03 · Who plays)` };
     }
     return { config };
   } catch (e) {

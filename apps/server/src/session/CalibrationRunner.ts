@@ -3,26 +3,30 @@
  * in turn reads a sentence aloud while the others stay quiet, so the attribution can measure how
  * loud each voice is on every microphone (see audio/attribution, AUDIO.md § 9).
  *
+ * It never starts by surprise: once every seat is through its onboarding (the mic check last), each
+ * recorded seat says it is ready (CalibrationReady), and the run starts when the last one does.
  * The server times the turns, so they survive a slow browser and are logged:
  *
- *   CalibrationStarted → CalibrationTurn × seats (turnMs each, gapMs between) → CalibrationCompleted
- *     → (once the turns' audio has arrived, at most CALIBRATION_CHECK_WAIT_MS) → CalibrationChecked
+ *   CalibrationReady × seats → CalibrationStarted → CalibrationTurn × seats (turnMs each, gapMs
+ *     between) → CalibrationCompleted → (once the turns' audio has arrived, at most
+ *     CALIBRATION_CHECK_WAIT_MS) → CalibrationChecked
  *
- * A redo, a skip, a recording pause or a restart ends a running calibration; a timer of an earlier
- * run then does nothing (each run has a number, counted by the reducer: `state.audio.calibrationRuns`).
+ * A redo (CalibrationRequested: everyone says they are ready again), a skip, a recording pause or a
+ * restart ends a running calibration; a timer of an earlier run then does nothing (each run has a
+ * number, counted by the reducer: `state.audio.calibrationRuns`).
  * The audio of the turns is collected by LiveAudio (`beginCalibration`), which also stores it as usual.
  *
  * Owned by the SessionManager, like LiveAudio: every event goes through its `append`, inside a
  * command (`run`), and the manager checks the phase and that the session records audio first.
  */
 import {
-  activeSeats,
+  calibrationNotReadySeats,
+  calibrationSeats,
   calibrationWaitingSeats,
   type NewEvent,
   type OnboardingContent,
   type ReadonlyGameState,
   type StoredEvent,
-  shouldRecord,
 } from "@wkwa/shared";
 import type { Logger } from "pino";
 import { calibrationCheckedPayload } from "../audio/calibration";
@@ -72,22 +76,25 @@ export class CalibrationRunner {
   }
 
   /**
-   * Start the calibration (or run it again with `redo`; a redo cancels a running one). Possible
-   * once every real seat is past its mic check and recording is not paused. Inside a command.
+   * Start the waiting calibration: by the server as soon as the room is ready (`system`), or by the
+   * facilitator. Possible once every real seat is through its onboarding (past its mic check), every
+   * recorded seat has said it is ready, and recording is not paused. Inside a command.
    */
-  start(redo: boolean) {
+  start(by: "system" | "facilitator") {
     const st = this.state;
     const c = st.audio.calibration;
-    if (!redo && c.status === "running") throw new CalibrationError("The calibration is already running");
-    if (!redo && c.status !== "pending")
+    if (c.status === "running") throw new CalibrationError("The calibration is already running");
+    if (c.status !== "pending")
       throw new CalibrationError(`The calibration was already ${c.status}: use 'redo' to run it again`);
     if (st.audio.recordingPaused) throw new CalibrationError("Recording is paused: resume recording first");
     const waiting = calibrationWaitingSeats(st).map((s) => s.seat);
-    if (waiting.length) throw new CalibrationError(`Waiting for the mic check of seat ${waiting.join(", ")}`);
-    const order = activeSeats(st)
-      .filter((s) => shouldRecord(st, s))
-      .map((s) => s.seat);
+    if (waiting.length)
+      throw new CalibrationError(`Waiting for the onboarding (mic check) of seat ${waiting.join(", ")}`);
+    const order = calibrationSeats(st);
     if (order.length === 0) throw new CalibrationError("No seat is recorded: skip the calibration instead");
+    const notReady = calibrationNotReadySeats(st);
+    if (notReady.length)
+      throw new CalibrationError(`Waiting for seat ${notReady.join(", ")} to say they are ready`);
     const content = this.deps.content();
     if (!content) throw new CalibrationError("No calibration texts (config/audio.json)");
     this.clearTimer();
@@ -99,11 +106,22 @@ export class CalibrationRunner {
     const { turnMs, gapMs } = content;
     this.deps.append({
       type: "CalibrationStarted",
-      actorKind: "facilitator",
+      actorKind: by,
       payload: { order, sentenceIds, turnMs, gapMs },
     });
     this.deps.audio.beginCalibration(run, order, this.deps.clock());
     this.turn(run, 0);
+  }
+
+  /**
+   * Facilitator: run the calibration again. Ends a running one; every recorded seat then says again
+   * that it is ready, and the turns start once all have (CalibrationRequested). Inside a command.
+   */
+  redo() {
+    if (this.state.audio.calibration.status === "pending")
+      throw new CalibrationError("The calibration has not run yet: it starts once everyone is ready");
+    this.stop();
+    this.deps.append({ type: "CalibrationRequested", actorKind: "facilitator", payload: {} });
   }
 
   /** Skip the calibration, or cancel a running one (round 1 may then start without it). Inside a command. */

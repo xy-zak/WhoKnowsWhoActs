@@ -146,6 +146,15 @@ export function applyEvent(state: GameState, ev: StoredEvent): GameState {
     case "AudioTrackStopped":
       // audit trail only: tracks live in the audio store, not in the game state
       break;
+    case "CalibrationRequested":
+      // a redo (ends a running run): the next run waits for every recorded seat to say it is ready again
+      state.audio.calibration = { ...emptyCalibration(), requested: true };
+      break;
+    case "CalibrationReady": {
+      const c = state.audio.calibration;
+      if (c.status === "pending" && ev.seat !== null && !c.ready.includes(ev.seat)) c.ready.push(ev.seat);
+      break;
+    }
     case "CalibrationStarted": {
       const p = ev.payload;
       state.audio.calibrationRuns++;
@@ -198,6 +207,7 @@ export function applyEvent(state: GameState, ev: StoredEvent): GameState {
         if (state.audio.calibration.status === "running")
           state.audio.calibration = {
             ...emptyCalibration(),
+            requested: true,
             lastCancel: { reason: ev.payload.reason, ts: ev.serverTs },
           };
         break;

@@ -113,3 +113,17 @@ export function finishOnboarding(m: SessionManager, seat: number) {
   });
   m.acknowledgeBriefing(seat, { textSha256: o.briefing.sha256, durationMs: 1, clientTs: 0 });
 }
+
+/**
+ * Take a seat through consent and the steps before its mic check (questionnaire, briefing), so its
+ * next step is the mic check (sessions that record audio; it stays held until every seat is there).
+ */
+export function toMicCheck(m: SessionManager, seat: number, audio = true, consentFirst = true) {
+  if (consentFirst) consent(m, seat, audio);
+  finishOnboarding(m, seat);
+}
+
+/** Every recorded seat says it is ready for the calibration; the last one starts it. */
+export function sayAllReady(m: SessionManager, seats: number[]) {
+  for (const s of seats) m.sayCalibrationReady(s, { clientTs: 0 });
+}

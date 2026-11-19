@@ -138,7 +138,7 @@ export const EVENT_DEFS = {
     summary:
       "A client (player browser) was assigned to a seat and a participant code was generated. For a fake player (a test client the server created) no code is generated.",
     trigger:
-      "Facilitator binds a connected client to a seat in the lobby (setup step 07), or adds a fake player to a seat there.",
+      "Facilitator binds a connected client to a seat in the lobby (setup step 08), or adds a fake player to a seat there.",
     actors: ["facilitator"],
     changesState: true,
     visibleTo: "Facilitator; the bound player sees their seat",
@@ -214,7 +214,7 @@ export const EVENT_DEFS = {
   LabelsAssigned: defineRecord({
     summary: "Knowledge-type, power-type and map view were (re)assigned to seats, with the K–P pairing used.",
     trigger:
-      "Facilitator saves labels (K per seat + pairing) or shuffles K across seats, in setup step 08 or between rounds. P always follows from the pairing. Not allowed during an active round.",
+      "Facilitator chooses the K–P pairing (each seat keeps its K; seat n holds the n-th K by default), in setup step 09 or between rounds; the bots and tests may also shuffle K across seats. P always follows from the pairing. Not allowed during an active round.",
     actors: ["facilitator"],
     changesState: true,
     visibleTo: "Facilitator; each player sees own labels (configurable)",
@@ -247,7 +247,7 @@ export const EVENT_DEFS = {
   }),
 
   OnboardingStarted: defineRecord({
-    summary: "Seats are locked; players move to the consent / mic check / demographics / briefing screens.",
+    summary: "Seats are locked; players move to the consent / demographics / briefing / mic check screens.",
     trigger: "Facilitator clicks 'Start onboarding' once all seats are bound and labelled.",
     actors: ["facilitator"],
     changesState: true,
@@ -292,7 +292,7 @@ export const EVENT_DEFS = {
     summary:
       "A player finished their own mic check (sessions that record audio): how loud the room and their voice were, and whether it passed.",
     trigger:
-      "The player's browser ends the mic check (the onboarding step after consent). Passed: it heard enough speech above the background noise, and the step is done. Not passed: the step stays open (the player tries again, or the facilitator skips the check). Recording starts with the mic check.",
+      "The player's browser ends the mic check (the last onboarding step, part 1 of 'Mic check & calibration'; it opens once every seat has finished the briefing). Passed: it heard enough speech above the background noise, and the step is done. Not passed: the step stays open (the player tries again, or the facilitator skips the check). Recording starts with the mic check.",
     actors: ["player"],
     changesState: true,
     visibleTo: "Facilitator (mic check status and levels)",
@@ -469,12 +469,40 @@ export const EVENT_DEFS = {
     },
   }),
 
+  CalibrationRequested: defineRecord({
+    summary:
+      "The facilitator asked for the calibration to be run again: every recorded seat is asked again to say it is ready, and the turns start once all are.",
+    trigger:
+      "Facilitator clicks 'Redo calibration' (in the onboarding or between rounds); a running calibration ends with it (its turns so far are not used).",
+    actors: ["facilitator"],
+    changesState: true,
+    visibleTo: "Everyone (players see the 'ready for the calibration' button again)",
+    dataClass: "non-personal",
+    frequency: "0–1 per redo (audio sessions only)",
+    payload: z.object({}),
+    example: {},
+  }),
+
+  CalibrationReady: defineRecord({
+    summary:
+      "A player said they are ready for the calibration (part 2 of 'Mic check & calibration', after their mic check), so the turns never start by surprise.",
+    trigger:
+      "Player clicks 'I'm ready for the calibration'. Once every recorded seat is ready, the server starts the calibration (CalibrationStarted).",
+    actors: ["player"],
+    changesState: true,
+    visibleTo: "Facilitator (who is ready); players see who they wait for",
+    dataClass: "pseudonymous",
+    frequency: "1 per recorded seat per calibration run (audio sessions only)",
+    payload: z.object({}),
+    example: {},
+  }),
+
   CalibrationStarted: defineRecord({
     summary:
       "The calibration started: each seat in turn reads a sentence aloud while the others stay quiet, which measures how much each voice leaks into the other microphones.",
     trigger:
-      "Facilitator clicks 'Start calibration' (or 'Redo calibration') in the NEXT panel once every seat is ready (sessions that record audio).",
-    actors: ["facilitator"],
+      "The server, as soon as every recorded seat has said it is ready (CalibrationReady) and every seat is past its mic check; or the facilitator's 'Start calibration' then (sessions that record audio).",
+    actors: ["system", "facilitator"],
     changesState: true,
     visibleTo: "Everyone (players see whose turn it is)",
     dataClass: "non-personal",

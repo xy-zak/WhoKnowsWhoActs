@@ -25,13 +25,16 @@ export interface RuntimeOptions {
   /** TLS_CERT / TLS_KEY: your own certificate and key (PEM); both or neither. */
   tlsCert: string | null;
   tlsKey: string | null;
-  /** HTTP_REDIRECT_PORT: an extra plain-HTTP port that redirects to HTTPS (null = none). */
-  httpRedirectPort: number | null;
+  /**
+   * LANDING_PORT: the plain-HTTP welcome page participants open first (default 8080; `off` = none).
+   * It links to the game page once a session is open (see landing.ts).
+   */
+  landingPort: number | null;
   /** Log to stdout as well as to data/logs/server.log. */
   logToStdout: boolean;
   logLevel: string;
   /**
-   * Server-only settings (WKWA_TLS, HTTP_REDIRECT_PORT) that could not be read.
+   * Server-only settings (WKWA_TLS, LANDING_PORT) that could not be read.
    * The server refuses to start with any; the data CLI, which never serves, ignores them.
    */
   configErrors?: string[];
@@ -60,7 +63,7 @@ export function runtimeFromEnv(env: NodeJS.ProcessEnv = process.env): RuntimeOpt
     tlsMode: read(() => tlsSetting(env.WKWA_TLS), "auto"),
     tlsCert: env.TLS_CERT ? r(env.TLS_CERT) : null,
     tlsKey: env.TLS_KEY ? r(env.TLS_KEY) : null,
-    httpRedirectPort: read(() => optionalPort("HTTP_REDIRECT_PORT", env.HTTP_REDIRECT_PORT), null),
+    landingPort: read(() => landingPort(env.LANDING_PORT), DEFAULT_LANDING_PORT),
     logToStdout: env.WKWA_LOG_STDOUT !== "0",
     logLevel: env.LOG_LEVEL ?? "info",
     configErrors,
@@ -76,11 +79,21 @@ function tlsSetting(value: string | undefined): TlsSetting {
   throw new Error(`WKWA_TLS must be "auto" or "off", not "${value}".`);
 }
 
+/** The welcome page's port when LANDING_PORT is not set. */
+export const DEFAULT_LANDING_PORT = 8080;
+
+function landingPort(value: string | undefined): number | null {
+  const v = value?.trim().toLowerCase();
+  if (v === undefined || v === "") return DEFAULT_LANDING_PORT;
+  if (v === "off") return null;
+  return optionalPort("LANDING_PORT", v);
+}
+
 function optionalPort(name: string, value: string | undefined): number | null {
   if (value === undefined || value.trim() === "") return null;
   const n = Number(value);
   if (!Number.isInteger(n) || n < 1 || n > 65_535)
-    throw new Error(`${name} must be a TCP port (1–65535), not "${value}".`);
+    throw new Error(`${name} must be a TCP port (1–65535) or "off", not "${value}".`);
   return n;
 }
 

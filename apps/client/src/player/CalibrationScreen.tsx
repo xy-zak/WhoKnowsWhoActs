@@ -1,7 +1,7 @@
 import type { PlayerView } from "@wkwa/shared";
 import { useEffect, useRef, useState } from "react";
-import { Icon, SeatDot, type StepDef, Stepper } from "../ui";
-import { Centered, ReadyScreen } from "./chrome";
+import { Button, Callout, Icon, SeatDot, StatusTag, type StepDef, Stepper } from "../ui";
+import { Centered, OnboardingStepper, ReadyScreen } from "./chrome";
 import type { PlayerConnection } from "./connection";
 import { MicLevelMeter, useRecording } from "./RecordingIndicator";
 
@@ -17,16 +17,16 @@ function useSecondsLeft(conn: PlayerConnection, endsAt: number | null): number |
   return Math.max(0, Math.ceil((endsAt - conn.clock.now()) / 1000));
 }
 
-/** Is the facilitator's calibration running for this seat's screen? */
+/**
+ * Does the calibration cover this seat's screen? While it runs, and in a round break while a redo
+ * waits for the players to say they are ready (before round 1 the READY screen shows that part).
+ */
 export function isCalibrating(v: PlayerView | null): boolean {
-  return (
-    !!v &&
-    v.audio.enabled &&
-    v.audio.calibration.status === "running" &&
-    !v.me.withdrawn &&
-    v.me.consent !== "declined" &&
-    (v.phase === "onboarding" || v.phase === "round_complete")
-  );
+  if (!v || !v.audio.enabled || v.me.withdrawn || v.me.consent === "declined") return false;
+  const c = v.audio.calibration;
+  if (v.phase === "round_complete")
+    return c.status === "running" || (c.status === "pending" && c.waitingFor.length > 0);
+  return v.phase === "onboarding" && c.status === "running";
 }
 
 /**
@@ -43,15 +43,78 @@ function TurnStepper({ view, last }: { view: PlayerView; last: number }) {
   return <Stepper steps={steps} current={idx} completed={(i) => (idx >= 0 ? i < idx : i <= last)} />;
 }
 
-/** READY in a session that records audio, until the facilitator runs (or skips) the calibration. */
-export function CalibrationPendingScreen({ view }: { view: PlayerView }) {
+/**
+ * Part 2 of "Mic check & calibration" (sessions that record audio), after this seat's mic check:
+ * what the calibration is, and the "I'm ready for the calibration" button, so it never starts by
+ * surprise. Once every recorded seat has clicked it, the server starts the turns. A seat that is
+ * not recorded (no audio permission, mic check skipped) only waits.
+ */
+export function CalibrationPendingScreen({ conn, view }: { conn: PlayerConnection; view: PlayerView }) {
+  const c = view.audio.calibration;
+  const snap = useRecording(conn);
+  const [busy, setBusy] = useState(false);
+  const others = c.waitingFor.filter((s) => s !== view.me.seat);
+  if (!c.canSayReady && !c.ready) {
+    return (
+      <ReadyScreen view={view} waitingFor="the calibration" width={720}>
+        <p>
+          <Icon name="voice" /> Next, the other players do a short <strong>sound calibration</strong>: each in
+          turn reads one sentence aloud. Please stay quiet while they do.
+        </p>
+      </ReadyScreen>
+    );
+  }
+  const sayReady = async () => {
+    setBusy(true);
+    try {
+      await conn.request("calibration:ready", { clientTs: conn.clock.now() });
+    } catch (e) {
+      conn.showToast((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
   return (
-    <ReadyScreen view={view} waitingFor="the facilitator" width={720}>
-      <p>
-        <Icon name="voice" /> Next, the facilitator runs a short <strong>sound calibration</strong>: each
-        player in turn reads one sentence aloud, while everyone else stays quiet.
+    <Centered title="Mic check & calibration" icon="voice" width={760}>
+      {view.phase === "onboarding" && <OnboardingStepper v={view} current="mic_check" />}
+      <StatusTag tone="live" icon="ok">
+        part 1 · mic check done
+      </StatusTag>
+      <h1 style={{ margin: 0 }}>Part 2: the calibration</h1>
+      <p style={{ margin: 0 }}>
+        Each player in turn reads <strong>one sentence aloud</strong> from their screen (about 6 seconds),
+        while everyone else stays quiet. This measures how loud each voice is on each microphone.
       </p>
-    </ReadyScreen>
+      <div className="row" style={{ gap: "var(--s3)" }}>
+        <span className="small upper muted">Your microphone</span>
+        <MicLevelMeter conn={conn} state={snap.status.state} />
+      </div>
+      {c.ready ? (
+        <Callout tone="live" icon="ok">
+          <strong>You are ready.</strong>{" "}
+          {others.length
+            ? `Waiting for seat ${others.join(", ")}. The calibration starts as soon as everyone is ready.`
+            : "The calibration is starting."}
+        </Callout>
+      ) : (
+        <>
+          <p className="muted" style={{ margin: 0 }}>
+            When you are seated with your headset on and ready to read, click the button. The calibration
+            starts once every player has.
+          </p>
+          <Button
+            variant="primary"
+            size="lg"
+            icon="voice"
+            disabled={busy}
+            onClick={() => void sayReady()}
+            tip="Tell the others you are ready; the calibration starts once everyone is"
+          >
+            I'm ready for the calibration
+          </Button>
+        </>
+      )}
+    </Centered>
   );
 }
 
@@ -69,6 +132,8 @@ export function CalibrationScreen({ conn, view }: { conn: PlayerConnection; view
   if (c.status !== "running") lastTurn.current = -1;
   else if (c.turnSeat !== null) lastTurn.current = c.order.indexOf(c.turnSeat);
   const last = lastTurn.current;
+
+  if (c.status === "pending") return <CalibrationPendingScreen conn={conn} view={view} />;
 
   if (c.myTurn) {
     return (

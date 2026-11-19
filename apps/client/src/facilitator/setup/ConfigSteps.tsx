@@ -23,21 +23,9 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { MapScore, MapView } from "../../map/MapView";
 import { useLatest } from "../../net/latest";
-import {
-  Button,
-  Callout,
-  Check,
-  Chip,
-  Field,
-  Icon,
-  type IconName,
-  LabelTag,
-  SeatDot,
-  StatusTag,
-  useConfirm,
-} from "../../ui";
+import { Callout, Check, Chip, Field, Icon, type IconName, LabelTag, SeatDot, useConfirm } from "../../ui";
 import type { FacilitatorConnection } from "../connection";
-import { PACES, paceId, paceText, policySummary } from "../simulation";
+import { PACES, paceId } from "../simulation";
 import type { Draft } from "./draft";
 
 export interface ScenarioInfo {
@@ -325,7 +313,7 @@ export function RoundsStep({ d, upd }: { d: Draft; upd: Upd }) {
   );
 }
 
-/* ─── 03 PLAYERS & VISIBILITY ─── */
+/* ─── 03 WHO PLAYS ─── */
 
 const PLAYER_MODES: Array<{ id: PlayerMode; icon: IconName; title: string; text: string }> = [
   {
@@ -346,7 +334,10 @@ function PlayerModeChoice({ d, upd }: { d: Draft; upd: Upd }) {
   const mode = d.config.players;
   return (
     <div className="col">
-      <h3>Who plays</h3>
+      <span className="hint">
+        Real participants or simulated agents. This decides the database the session is stored in and which of
+        the later steps apply.
+      </span>
       <table className="grid">
         <tbody>
           {PLAYER_MODES.map((m) => (
@@ -553,6 +544,18 @@ function SimulationSettings({ d, upd }: { d: Draft; upd: Upd }) {
   );
 }
 
+/** Real participants or simulated agents, with the agents' settings when simulated. */
+export function WhoPlaysStep({ d, upd }: { d: Draft; upd: Upd }) {
+  return (
+    <div className="col" style={{ gap: "var(--s3)" }}>
+      <PlayerModeChoice d={d} upd={upd} />
+      {d.config.players === "simulated" && <SimulationSettings d={d} upd={upd} />}
+    </div>
+  );
+}
+
+/* ─── 04 SEATS & VISIBILITY ─── */
+
 export function PlayersStep({ d, upd }: { d: Draft; upd: Upd }) {
   const c = d.config;
   const simulated = c.players === "simulated";
@@ -560,8 +563,6 @@ export function PlayersStep({ d, upd }: { d: Draft; upd: Upd }) {
     setCfg(d, upd, { visibility: { ...c.visibility, ...patch } });
   return (
     <div className="col" style={{ gap: "var(--s3)" }}>
-      <PlayerModeChoice d={d} upd={upd} />
-      {simulated && <SimulationSettings d={d} upd={upd} />}
       <div className="grid-2" style={{ alignItems: "start" }}>
         <div className="col">
           <h3>Seats &amp; labels</h3>
@@ -588,8 +589,8 @@ export function PlayersStep({ d, upd }: { d: Draft; upd: Upd }) {
             </select>
           </Field>
           <span className="hint">
-            K and P labels are assigned in step 08: each K once, P follows from the pairing (aligned or fully
-            dissociated D1–D6).
+            K and P labels are assigned in step 09: seat 1 holds Ka, seat 2 Kb and so on, and P follows from
+            the pairing (aligned or fully dissociated D1–D6).
           </span>
           <h3 style={{ marginTop: 8 }}>What players see</h3>
           <Check
@@ -657,7 +658,7 @@ export function PlayersStep({ d, upd }: { d: Draft; upd: Upd }) {
   );
 }
 
-/* ─── 04 ONBOARDING ─── */
+/* ─── 05 ONBOARDING ─── */
 
 export function OnboardingStep({
   d,
@@ -776,7 +777,7 @@ export function OnboardingStep({
   );
 }
 
-/* ─── 05 TAGS & NOTES ─── */
+/* ─── 06 TAGS & NOTES ─── */
 
 export function TagsStep({ d, upd }: { d: Draft; upd: Upd }) {
   const tags = normaliseTags(d.tagsText);
@@ -831,7 +832,7 @@ export function TagsStep({ d, upd }: { d: Draft; upd: Upd }) {
   );
 }
 
-/* ─── 06 REVIEW ─── */
+/* ─── 07 CREATE ─── */
 
 /** The facilitator's names of the onboarding steps (the players' own are STEP_LABEL, e.g. "About you"). */
 const FACILITATOR_STEP_LABEL: Record<OnboardingStepId, string> = {
@@ -854,146 +855,19 @@ export function onboardingStepsText(
     .join(" → ");
 }
 
-export function ReviewStep({
-  d,
-  scenarios,
-  config,
-  error,
-  goTo,
-}: {
-  d: Draft;
-  scenarios: ScenarioInfo[];
-  config: SessionConfig | null;
-  error: string | null;
-  goTo: (i: number) => void;
-}) {
-  const sc = scenarios.find((s) => s.id === d.scenarioId);
-  const c = config ?? d.config;
-  const r = c.defaultRound;
-  const simulated = c.players === "simulated";
-  const yes = (b: boolean) => (b ? "yes" : "no");
-  const rows: Array<[number, string, string]> = [
-    [
-      0,
-      "Scenario",
-      sc
-        ? `${sc.title} (${sc.id} v${sc.version})${sc.board ? ` · ${sc.board.cols} × ${sc.board.rows} squares, ${sc.regionCount} sub-squares` : ""}`
-        : "— not chosen —",
-    ],
-    [
-      0,
-      "Game rules",
-      (() => {
-        const g = getGameRules(c.rules);
-        return g
-          ? `${g.name} (${g.id} v${g.version}) · scores ${g.scoreRange.min}–${g.scoreRange.max}`
-          : `unknown '${c.rules}'`;
-      })(),
-    ],
-    [
-      1,
-      "Rounds",
-      `${c.roundCount} × ${r.rule === "quota" ? "ends when quotas are used" : "ends by facilitator"}`,
-    ],
-    [
-      1,
-      "Quotas per player",
-      `propose ${r.quota.propose ?? "∞"} · decide ${r.quota.decide ?? "∞"}${r.timeLimitSec ? ` · limit ${r.timeLimitSec}s` : ""}`,
-    ],
-    [
-      1,
-      "Next round",
-      c.roundAdvance === "auto" ? `auto after ${c.autoAdvanceDelaySec}s` : "facilitator starts it",
-    ],
-    [
-      1,
-      "Overrides",
-      Object.keys(c.roundOverrides).length ? `rounds ${Object.keys(c.roundOverrides).join(", ")}` : "none",
-    ],
-    [
-      2,
-      "Players",
-      simulated
-        ? `simulated · ${policySummary(c.simulation, c.seatCount)} · pause ${paceText(c.simulation)} · seed ${c.simulation.seed ?? "random (logged)"}`
-        : "real participants",
-    ],
-    [
-      2,
-      "Database",
-      simulated
-        ? "simulation database (data/wkwa-sim.db), session id SIM-…"
-        : "participant database (data/wkwa.db)",
-    ],
-    [2, "Seats", `${c.seatCount} · view ${c.viewAssignment === "byKnowledgeType" ? "follows K" : "manual"}`],
-    [
-      2,
-      "Players see",
-      `actors ${yes(c.visibility.showActorToPlayers)} · own labels ${yes(c.visibility.showOwnLabels)} · others' labels ${yes(c.visibility.showOtherLabelsToPlayers)} · others' progress ${yes(c.visibility.showOthersProgress)}`,
-    ],
-    [
-      2,
-      "Map marks",
-      `${c.clearHighlightsEachRound ? "hatches/fills cleared each round" : "hatches/fills kept across rounds"} · scores always carry over · players see only their own knowledge type's scores`,
-    ],
-    ...(simulated
-      ? []
-      : ([
-          [2, "Disconnect", c.pauseOnDisconnect ? "auto-pause" : "keep playing"],
-          [2, "Player screens", "display settings: each player's own choice (not recorded)"],
-        ] as Array<[number, string, string]>)),
-    [3, "Onboarding", simulated ? "none (simulated players)" : onboardingStepsText(c) || "none"],
-    [
-      3,
-      "Audio",
-      simulated
-        ? "off (simulated players have no microphone)"
-        : c.audio.enabled
-          ? `on · each microphone recorded from the mic check until game complete (fake players never) · calibration ${c.audio.requireCalibration ? "required before round 1" : "optional"}`
-          : "off",
-    ],
-    [4, "Tags", c.tags.length ? c.tags.join(", ") : "none"],
-    [4, "Notes", d.notes || "—"],
-  ];
-  return (
-    <div className="col">
-      <table className="grid">
-        <tbody>
-          {rows.map(([step, k, v]) => (
-            <tr key={k}>
-              <td className="muted upper small" style={{ width: 160 }}>
-                {k}
-              </td>
-              <td>{v}</td>
-              <td style={{ width: 60, textAlign: "right" }}>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => goTo(step)}
-                  tip={`Change ${k.toLowerCase()} (step ${String(step + 1).padStart(2, "0")})`}
-                >
-                  Edit
-                </Button>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      {!simulated && !c.onboarding.consent && (
-        <StatusTag tone="danger" icon="warning">
-          consent disabled
-        </StatusTag>
-      )}
-      {simulated && <StatusTag icon="simulation">simulated players · simulation database</StatusTag>}
-      {error ? (
-        <Callout tone="danger" icon="error">
-          {error}
-        </Callout>
-      ) : (
-        <Callout icon="info">
-          Creating the session writes these settings into its first event (<code>SessionCreated</code>). They
-          cannot be changed afterwards — steps 01–06 are then locked.
-        </Callout>
-      )}
-    </div>
+/**
+ * The last configuration step: no summary of its own (each step above shows one when collapsed),
+ * only the confirmation that creating the session locks the steps before it.
+ */
+export function CreateStep({ lastStep, error }: { lastStep: string; error: string | null }) {
+  return error ? (
+    <Callout tone="danger" icon="error">
+      {error}
+    </Callout>
+  ) : (
+    <Callout icon="info">
+      Creating the session writes these settings into its first event (<code>SessionCreated</code>). They
+      cannot be changed afterwards: steps 01–{lastStep} are then locked.
+    </Callout>
   );
 }

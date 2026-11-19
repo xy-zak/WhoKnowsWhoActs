@@ -5,7 +5,7 @@
  */
 import { AUDIO_SILENCE_DB, type SeatLiveStats } from "@wkwa/shared";
 import { afterEach, describe, expect, it } from "vitest";
-import { consent, type Direct, direct, onboard } from "./direct";
+import { consent, type Direct, direct, onboard, toMicCheck } from "./direct";
 
 const focus = (focused: boolean) => ({ type: "focus_change", clientTs: Date.now(), payload: { focused } });
 const batch = (...items: unknown[]) => ({ clockOffsetMs: 0, items });
@@ -94,11 +94,14 @@ describe("seat monitor", () => {
   it("keeps mic readings only of a seat that may be recorded", () => {
     d = direct({ audio: { enabled: true } });
     onboard(d.m);
-    consent(d.m, 1);
+    toMicCheck(d.m, 1);
     // seat 2 is still in consent: nobody's microphone records yet
     expect(d.m.submitMicLevel(1, LEVEL)).toBe(false);
     expect(meter(1)).toBe("idle");
+    // nor while it is in the briefing
     consent(d.m, 2);
+    expect(d.m.submitMicLevel(1, LEVEL)).toBe(false);
+    toMicCheck(d.m, 2, true, false);
     expect(d.m.submitMicLevel(1, LEVEL)).toBe(true);
     expect(stats(1).mic).toMatchObject({ state: "recording", rmsDb: -30, pendingChunks: 1 });
     expect(meter(2)).toBe("idle");
@@ -107,7 +110,7 @@ describe("seat monitor", () => {
   it("withdrawal and a skipped mic check blank that seat's meter; the end of the session every meter", () => {
     d = direct({ audio: { enabled: true }, seatCount: 3 });
     onboard(d.m);
-    for (const seat of [1, 2, 3]) consent(d.m, seat);
+    for (const seat of [1, 2, 3]) toMicCheck(d.m, seat);
     for (const seat of [1, 2, 3]) expect(d.m.submitMicLevel(seat, LEVEL)).toBe(true);
     d.m.withdraw(1);
     expect([meter(1), meter(2), meter(3)]).toEqual(["idle", "recording", "recording"]);
@@ -120,8 +123,8 @@ describe("seat monitor", () => {
   it("a disconnect blanks the seat's meter and hover", () => {
     d = direct({ audio: { enabled: true } });
     onboard(d.m);
-    consent(d.m, 1);
-    consent(d.m, 2);
+    toMicCheck(d.m, 1);
+    toMicCheck(d.m, 2);
     d.m.playerConnected(1);
     d.m.submitMicLevel(1, LEVEL);
     d.m.submitPresence(1, "A1-Ka");

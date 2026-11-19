@@ -608,6 +608,9 @@ export class Hub {
     seatCmd("briefing:ack", (m, seat, msg) => {
       m.acknowledgeBriefing(seat, msg);
     });
+    seatCmd("calibration:ready", (m, seat, msg) => {
+      m.sayCalibrationReady(seat, msg);
+    });
     seatCmd("intent", (m, seat, msg) => m.intent(seat, msg));
     seatCmd("telemetry", (m, seat, msg) => {
       const { stored, live } = m.submitTelemetry(seat, msg);
@@ -730,8 +733,8 @@ export class Hub {
     act("session:close", () => s().close());
     act("session:abort", (msg) => s().abort(msg.reason));
     act("mic:skip", (msg) => s().skipMicCheck(msg.seat, msg.reason));
-    act("calibration:start", () => s().startCalibration(false));
-    act("calibration:redo", () => s().startCalibration(true));
+    act("calibration:start", () => s().startCalibration());
+    act("calibration:redo", () => s().redoCalibration());
     act("calibration:skip", (msg) => s().skipCalibration(msg.reason));
     act("recording:pause", (msg) => s().pauseRecording(msg.reason));
     act("recording:resume", () => s().resumeRecording());

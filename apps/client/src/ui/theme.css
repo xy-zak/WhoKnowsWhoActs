@@ -1052,7 +1052,7 @@ table.grid tr.selected {
   border-top: 1px dashed var(--frame);
   padding-top: var(--s3);
 }
-/* the two commit points (06 review & create, 10 start onboarding) have their own colour (--review), whatever their state */
+/* the two commit points (07 create session, 11 start onboarding) have their own colour (--review), whatever their state */
 .acc-step.accent {
   border-color: var(--review);
 }

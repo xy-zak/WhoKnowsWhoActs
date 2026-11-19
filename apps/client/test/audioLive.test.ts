@@ -239,7 +239,12 @@ describe("calibration advice", () => {
 
   it("sums the calibration up in one tag: not run, who reads now, checking, the verdict", () => {
     const log = audioSession({ checked: [1, 2] });
-    expect(calibrationSummary(log.state)).toMatchObject({ tone: "warn", text: "not run yet" });
+    // before round 1 it waits for the room: who is still in the onboarding (here: everyone)
+    expect(calibrationSummary(log.state)).toMatchObject({
+      tone: "warn",
+      label: "waiting for ready",
+      text: expect.stringMatching(/^waiting · seat [\d, ]+ still in the onboarding$/),
+    });
     log.push(
       "CalibrationStarted",
       { order: [2, 1], sentenceIds: ["s1", "s2"], turnMs: 6000, gapMs: 1000 },

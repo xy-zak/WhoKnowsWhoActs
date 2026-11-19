@@ -4,6 +4,7 @@ import { io, type Socket } from "socket.io-client";
 import {
   aboutYou,
   act,
+  addFake,
   bind,
   briefing,
   chooseScenario,
@@ -14,15 +15,18 @@ import {
   fillRounds,
   micCheck,
   next,
-  shuffleLabels,
+  nextThrough,
+  readyForCalibration,
+  saveLabels,
   wrapUp,
 } from "./screenshots/flows";
 
 /**
  * Audio end to end through the real UI: the facilitator switches "Record audio" on in setup
- * step 04; two real player browsers (Chromium's fake microphone plays a synthetic voice, see
+ * step 05; two real player browsers (Chromium's fake microphone plays a synthetic voice, see
  * playwright.config.ts) and two fake players take the seats; consent with the audio item, the
- * consent hold, each player's own mic check, the facilitator-led calibration, round 1 with the
+ * questionnaire and briefing, the hold until both are through, each player's own mic check, both
+ * saying they are ready, the calibration (which then starts by itself), round 1 with the
  * recording indicator, a facilitator pause and resume, game complete; then the server holds
  * audio tracks for the two real seats and none for the fake ones.
  */
@@ -56,7 +60,7 @@ function facilitatorSocket() {
 
 const recTag = (page: Page, state: string) => page.locator(`.rec-tag.rec-${state}`).first();
 
-test("audio: setup → consent hold → mic check → calibration → recorded round with pause → tracks for real seats only", async ({
+test("audio: setup → onboarding → hold → mic check → ready → calibration → recorded round with pause → tracks for real seats only", async ({
   page: fac,
   browser,
 }) => {
@@ -68,10 +72,9 @@ test("audio: setup → consent hold → mic check → calibration → recorded r
     await next(fac).click();
     await fillRounds(fac, { rounds: 1, propose: 1, decide: 1 });
     await next(fac).click();
-    await current(fac, "players");
-    await next(fac).click();
+    await nextThrough(fac, ["who", "players"]);
 
-    // 04: Record audio (needs consent); the e2e server runs plain HTTP, so the HTTPS warning shows
+    // 05: Record audio (needs consent); the e2e server runs plain HTTP, so the HTTPS warning shows
     await enableAudio(fac);
     const step4 = fac.locator(".acc-step.current");
     await expect(step4.getByText(/players' browsers will block the microphone/)).toBeVisible();
@@ -79,15 +82,15 @@ test("audio: setup → consent hold → mic check → calibration → recorded r
     await next(fac).click();
     await current(fac, "tags");
     await next(fac).click();
-    await current(fac, "review");
-    const review = fac.locator(".acc-step.current");
-    await expect(review).toContainText("consent → mic check → demographics → briefing");
-    await expect(review).toContainText(
-      /on · each microphone recorded .* calibration required before round 1/,
+    await current(fac, "create");
+    // the collapsed onboarding step sums it up: the mic check (and calibration) comes last
+    await expect(fac.locator('.acc-step[data-step="onboarding"]')).toContainText(
+      "consent → demographics → briefing → mic check & calibration (audio)",
     );
+    await expect(fac.locator(".acc-step.current")).toContainText("steps 01–07 are then locked");
     await next(fac).click();
 
-    // 07: two real browsers on seats 1–2, fake players on 3–4
+    // 08: two real browsers on seats 1–2, fake players on 3–4
     await current(fac, "connect");
     const p1 = await newPlayer(browser);
     const p2 = await newPlayer(browser);
@@ -95,11 +98,10 @@ test("audio: setup → consent hold → mic check → calibration → recorded r
     await expect(p1.page.getByText("Seat 1")).toBeVisible();
     await bind(fac, 2, p2.terminal);
     await expect(p2.page.getByText("Seat 2")).toBeVisible();
-    await fac.getByRole("combobox", { name: "Fake player pace" }).selectOption("fast");
-    await fac.getByRole("button", { name: /Fill empty seats with fake players/ }).click();
+    for (const seat of [3, 4]) await addFake(fac, seat);
     await expect(fac.locator(".acc-step.current").getByText("4/4 seats bound")).toBeVisible();
     await next(fac).click();
-    await shuffleLabels(fac);
+    await saveLabels(fac);
     await next(fac).click();
     await confirmKeySheet(fac);
     await next(fac).click();
@@ -108,28 +110,30 @@ test("audio: setup → consent hold → mic check → calibration → recorded r
     await next(fac).click();
     await expect(fac.locator(".live-indicator")).toBeVisible();
 
-    // consent hold: seat 1 is done, seat 2 still reads the form → no microphone opens yet
+    // hold: seat 1 is through the briefing, seat 2 still reads the consent form → no microphone opens yet
     await consent(p1.page);
-    await expect(p1.page.getByText("Waiting for the other players to finish the consent form")).toBeVisible();
+    await aboutYou(p1.page);
+    await briefing(p1.page);
+    await expect(p1.page.getByText("Waiting for the other players to finish the briefing")).toBeVisible();
     await expect(p1.page.getByRole("button", { name: /Start mic check/ })).toHaveCount(0);
     await expect(fac.getByText(/Mic checks are held until seat 2/)).toBeVisible();
     await consent(p2.page);
+    await aboutYou(p2.page);
+    await briefing(p2.page);
 
-    // each player's own mic check (the real detector, fed by the synthetic voice)
+    // part 1: each player's own mic check (the real detector, fed by the synthetic voice)
     await Promise.all([micCheck(p1.page), micCheck(p2.page)]);
-    // onboarding chrome: the recording line
+    // part 2 has the recording line
     await expect(recTag(p1.page, "recording")).toBeVisible();
-    await Promise.all(
-      [p1, p2].map(async (p) => {
-        await aboutYou(p.page);
-        await briefing(p.page);
-        await expect(p.page.getByText(/sound calibration/)).toBeVisible();
-      }),
-    );
 
-    // calibration from the NEXT panel: seat 1 reads while seat 2 stays quiet, then the other way round
+    // part 2: the calibration starts only once both have said they are ready
     await expect(fac.getByRole("button", { name: /Start round 1/ })).toHaveCount(0);
-    await fac.getByRole("button", { name: "Start calibration" }).click();
+    await readyForCalibration(p1.page);
+    await expect(p1.page.getByText("Waiting for seat 2")).toBeVisible();
+    await expect(fac.getByText(/seat 2 not ready yet/)).toBeVisible();
+    await expect(p1.page.getByText("Your turn: read this sentence aloud")).toHaveCount(0);
+    await readyForCalibration(p2.page);
+    // seat 1 reads while seat 2 stays quiet, then the other way round
     await expect(p1.page.getByText("Your turn: read this sentence aloud")).toBeVisible({ timeout: 20_000 });
     await expect(p2.page.getByText(/Stay quiet: .*seat 1 is reading/)).toBeVisible();
     await expect(p2.page.getByText("Your turn: read this sentence aloud")).toBeVisible({ timeout: 20_000 });
