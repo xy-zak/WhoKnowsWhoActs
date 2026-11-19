@@ -204,10 +204,21 @@ sequenceDiagram
 ```
 
 - Socket.IO reconnects automatically with back-off. The player sees a "Reconnecting…" overlay.
-- **Actions are never lost and never made twice.** The browser keeps every action (`intent`) until the server has answered it (`apps/client/src/player/intents.ts`). It sends an action only while its socket is *seated* (the server has answered `hello` with the seat, or sent `bound`), and sends every unanswered one again, unchanged (same `clientSeq` and click time), each time the socket is seated again. The server stores an action once and answers a resend with its first answer (`duplicate: true`); it keeps the answers of each seat's last 50 actions and rebuilds them from the event log after a restart, so a resend gets the exact answer then too. An action still unanswered after 45 s is given up: the player is told to check the map, and it is never sent again.
+- **Actions are never lost and never made twice.** The browser keeps every action (`intent`) until the server has answered it (the `resend` policy below). It sends an action only while its socket is *seated* (the server has answered `hello` with the seat, or sent `bound`), and sends every unanswered one again, unchanged (same `clientSeq` and click time), each time the socket is seated again. The server stores an action once and answers a resend with its first answer (`duplicate: true`); it keeps the answers of each seat's last 50 actions and rebuilds them from the event log after a restart, so a resend gets the exact answer then too. An action still unanswered after 45 s is given up: the player is told to check the map, and it is never sent again.
 - **Why the browser waits for `hello`'s answer.** On a reconnect, Socket.IO sends what was emitted while offline *before* the `connect` handler runs, so before `hello`: the server's new socket holds no seat yet and refuses it. Requests from a socket without a seat are refused as transient (`{ ok: false, error: "Not seated", retry: true }`), and the browser's onboarding requests (consent, mic check, demographics, briefing) also wait until the socket is seated before they are sent.
 - **Audio uploads wait for the seat too.** The recorder's send queue (`apps/client/src/audio/queue.ts`) delivers one item at a time; each attempt waits until the socket is seated before it is emitted (within its 20 s budget). After a reconnect the queue gives up on the attempt in flight and sends it again; an attempt it gave up on while still waiting for the seat is cancelled (an `AbortSignal`), so the item is not sent twice.
-- Telemetry produced while offline is buffered in the browser and sent after reconnecting. Its `clientTs` keeps the original timing.
+- **One seat gate for every answered message.** The player connection (`apps/client/src/player/connection.ts`) holds the socket's seat in one place, the *seat gate* (`apps/client/src/net/delivery.ts`). `hello`'s answer, `bound`, a disconnect, `detached` and `unbound` reach it, the recorder and telemetry through one handler. Each kind of message picks a delivery policy:
+
+  | Policy | Behaviour | Used by |
+  | --- | --- | --- |
+  | `once` | sent at once, no seat needed | `clock:ping` |
+  | `whileSeated` | sent only while the socket is seated | `telemetry` |
+  | `attempt` | waits for the seat, then sent once; can be cancelled | audio uploads (the send queue does the back-off) |
+  | `retry` | like `attempt`, and sent again once seated after a `retry: true` refusal, within the same deadline | onboarding requests (consent, mic check, demographics, briefing) |
+  | `resend` | like `retry`, and also sent again unchanged every time the socket is seated again | `intent` |
+
+  A `retry: true` refusal that arrives while the socket is still seated (a server fault) is sent again after 1 s. An onboarding request that got no answer is **not** resent after a reconnect, because consent and the other onboarding steps must not be recorded twice; only actions, which the server deduplicates by `clientSeq`, are. A message still waiting for its seat fails at once when the seat is released (`unbound`).
+- Telemetry produced while offline is buffered in the browser and sent once the socket is seated again (the server refuses telemetry from a socket without a seat). Its `clientTs` keeps the original timing.
 - A reload, or even closing and reopening the tab, keeps the seat, because the token is in `localStorage` (`wkwa.seat`). Clearing the browser's site data, or using a different browser profile, loses it.
 
 ### After a server restart

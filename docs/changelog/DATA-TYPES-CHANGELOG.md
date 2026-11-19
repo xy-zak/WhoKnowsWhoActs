@@ -4,19 +4,37 @@ History of [DATA-TYPES.md](../DATA-TYPES.md). Newest first. How entries are writ
 
 ## Unreleased
 
-### Not yet committed · documents `880ecba` (Headset gate engine: Silero VAD + cross-channel level gate; storage fixes)
+### Not yet committed · documents `07fcc02` and `dc1a59f`
+
+- **Type:** Risk mitigation
+- **Change:** The hand-written `audio_tracks.status` row adds `track_ended` to the stop reasons shown as `interrupted` and names the audio reason catalogue as their source, pointing to the generated column text.
+- **Reason:** The row was a hand copy of a list the code had changed; the generated text below it cannot drift.
+
+### 2026-11-19 · `dc1a59f` · Audio: a track that ends because the mic went away counts as interrupted
+
+- **Type:** Bug fix
+- **Change:** The generated `status` column of `audio_tracks.csv` lists `track_ended` among the stop reasons that make a track `interrupted`.
+- **Reason:** The browser reports a lost microphone as `track_ended`, so those tracks were exported as `closed` although the column defines `interrupted` as "the browser or microphone went away".
+
+### 2026-11-19 · `07fcc02` · Audio reason catalogue: one source for start/stop reasons and mic states
+
+- **Type:** Bug fix
+- **Change:** In the generated `audio_tracks.csv` table, `start_reason` and `stop_reason` now list all 9 start and 17 stop reasons with their meaning (before: 5 and 9), and `status` names the stop reasons that count as interrupted.
+- **Reason:** The codebook texts were typed by hand and had fallen behind the schemas; they are now generated from the audio reason catalogue, so researchers see every value that can occur.
+
+### 2026-11-19 · `490686a` · Docs: headset gate engine, speech model, storage fixes
 
 - **Type:** Feature
 - **Change:** The *Audio storage* table describes the new content of the `quality_report` (speech detector, per-seat coverage, clipping, noise floor, speech level, drift, talk time) and `leakage_matrix` results, names the engine version `wkwa-gate-attribution/2.0.0` and says that *Export audio* reuses a stored alignment only from that version. It also states that an erasure strips the erased seat from kept speech segments and clears `audio_jobs.result_json`.
 - **Reason:** The new attribution engine stores results of a different shape (an older alignment can no longer be read), and the erasure now changes stored rows of other seats.
 
-### Not yet committed · documents `simplify/audio-cleanup` (#16)
+### 2026-11-19 · `5c76bd2` · Simplify the audio feature: shared helpers and types, fewer duplicates, cheaper hot paths (#16)
 
-- **Type:** Correction
+- **Type:** Bug fix
 - **Change:** The `audio_tracks.status` row now lists the stop reason `interrupted` among those the REST API shows as `interrupted`.
 - **Reason:** The cleanup in #16 merged the two `trackStatusOf` copies; the one REST and CSV now use also counts the stop reason `interrupted` as interrupted, as the shared schema already said.
 
-### Not yet committed · documents `0f6971a`…`abcacbe` (microphone audio)
+### 2026-11-19 · `2428109` · Docs: audio design document (AUDIO.md), docs sweep against the built behaviour and change logs (U14) (#14)
 
 - **Type:** Feature
 - **Change:** The overview table and the ER diagram add the five audio tables and `exports.details_json`. A new *Audio storage* section gives the `.wka` file layout and a column table for every audio table, and the acknowledgement shape. The *Other tables* rows for `exports` and `erasures` cover audio, and the statements on participant codes and on what is never logged now include the audio tables and microphone names.

@@ -2,15 +2,13 @@
 
 History of [AUDIO-TRANSCRIPTION.md](../AUDIO-TRANSCRIPTION.md). Newest first. How entries are written: [README.md](README.md).
 
-## Unreleased
-
-### Not yet committed · documents `880ecba` (Headset gate engine: Silero VAD + cross-channel level gate; storage fixes)
+### 2026-11-19 · `490686a` · Docs: headset gate engine, speech model, storage fixes
 
 - **Type:** Risk mitigation
 - **Change:** The table of what exists, the non-goals, requirement R11, the echo-matching and word-timing text and the pipeline diagram no longer mention lag refinement or loudness-only attribution; they describe one clock fit per track and speech detection plus a level gate.
 - **Reason:** The engine this research builds on changed; the document must not rely on an alignment from the audio that the code no longer does (docs drifting from the code).
 
-### Not yet committed · links to `docs/AUDIO.md`
+### 2026-11-19 · `2428109` · Docs: audio design document (AUDIO.md), docs sweep against the built behaviour and change logs (U14) (#14)
 
 - **Type:** Risk mitigation
 - **Change:** The title gets the change-log link and the related-documents line links to the new audio design document. No research content changed.

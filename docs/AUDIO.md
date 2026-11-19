@@ -131,7 +131,7 @@ flowchart TD
 | Levels | `audio:level` about 4 times a second, volatile, never stored. After a stop and once the queue has emptied, one last `audio:level` with `pendingChunks` 0 is sent, which the facilitator's wrap-up check relies on. |
 | Errors | `classifyMicError` maps browser errors (denied, not found, in use, insecure page, unsupported, over-constrained, ended) to a title and fix steps for the browser and operating system. |
 
-**Recording controller.** The browser starts and stops recording from what the server says (`PlayerView.audio.record`), never on its own:
+**Recording controller.** The browser starts and stops recording from what the server says (`PlayerView.audio.record`, with the reason in `notRecording`), never on its own:
 
 | Event | Browser action | Track reason |
 | --- | --- | --- |
@@ -140,12 +140,12 @@ flowchart TD
 | Facilitator resumes | Starts a new track | start `resume` |
 | The socket drops and comes back | Resends the queue, stops the old track, starts a new one | stop `disconnect`, start `reconnect` |
 | The page is reloaded | Starts again (shows **Resume recording** if the browser needs a click) | start `reload` |
-| The mic is lost (unplugged, permission revoked) | Waits for **Try again** or a device change | stop `permission_lost` or `track_ended`, then start `permission_regained` |
+| The mic is lost (unplugged, permission revoked) | Waits for **Try again** or a device change | stop `track_ended`, then start `permission_regained` |
 | Game complete, seat withdrawn, mic check skipped | Stops, drains the queue | stop `game_complete`, `withdrawn` or `skipped` |
 | The session is detached (the facilitator resumes another, an erasure reloads it); the seat is kept | Stops, keeps what is pending; resends it and starts again once the seat is re-claimed | stop `disconnect`, start `reconnect` |
 | The seat is unbound | Stops and clears what is pending | stop `client_stop` |
 
-The full lists of start and stop reasons, with their meaning, are in [NETWORKING.md § 9](NETWORKING.md#9-message-catalogue) (`audio:start`, `audio:stop`) and [DATA-TYPES.md](DATA-TYPES.md#audiotrackstarted) (`AudioTrackStarted`, `AudioTrackStopped`).
+Every start and stop reason, and every mic state, is defined once in the audio reason catalogue (`packages/shared/src/audioReasons.ts`), with its label and meaning; the schemas, the codebook and the facilitator's labels take their text from it. The generated lists are in [NETWORKING.md § 9](NETWORKING.md#9-message-catalogue) (`audio:start`, `audio:stop`) and [DATA-TYPES.md](DATA-TYPES.md#audiotrackstarted) (`AudioTrackStarted`, `AudioTrackStopped`).
 
 ## 5. Networking: upload, acknowledgements and retries
 
@@ -315,7 +315,9 @@ Field-level tables: [DATA-TYPES.md](DATA-TYPES.md#audio-storage).
 
 ## 8. Recording lifecycle
 
-A seat is recorded only while `shouldRecord` is true: the session records audio, the seat is held by a **real participant** who gave the audio consent, has not withdrawn, has reached the mic check and not had it skipped, **no other real seat is still in consent** (the hold), recording is not paused, and the phase is onboarding, round active or round complete. Breaks and game pauses are recorded too.
+A seat is recorded only while its **recording verdict** (`recordingVerdict`, `packages/shared/src/recordingVerdict.ts`) says so: the session records audio, the seat is held by a **real participant** who gave the audio consent, has not withdrawn, has reached the mic check and not had it skipped, **no other real seat is still in consent** (the hold), recording is not paused, and the phase is onboarding, round active or round complete. Breaks and game pauses are recorded too.
+
+When a seat is not recorded, the verdict names the **first** reason that applies, in a fixed order: first the reasons that concern the seat itself (audio off, no client, fake player or agent, withdrawn, consent declined, no audio consent, consent not finished, mic check skipped, no mic check step), then the moment (still in the lobby, game complete, session closed or aborted, the consent hold, the facilitator's pause). `paused` therefore means that the pause is the only thing stopping the seat. The player's view carries the reason (`PlayerView.audio.notRecording`); the browser takes the track's stop reason from it, and the facilitator's mic column and wrap-up check read the same verdict, so all three always agree.
 
 ```mermaid
 stateDiagram-v2
@@ -353,12 +355,12 @@ stateDiagram-v2
 | --- | --- | --- | --- |
 | Normal course | `mic_check`, `resume` | `paused`, `game_complete`, `closed`, `aborted` | Browser, or server for `closed` and `aborted` |
 | Reconnection and reload | `reconnect`, `reload` | `disconnect` (the server closes the track when the socket drops), `interrupted` (the server found it still open after a restart, or the seat started another track) | Server |
-| Microphone problems | `permission_regained` | `permission_lost`, `track_ended`, `error` | Browser |
+| Microphone problems | `permission_regained` | `track_ended` (the device was unplugged or the permission revoked), `error`; `permission_lost` is accepted but not sent by the current browser code | Browser |
 | Browser audio engine | `context_resumed`, `clock_jump`, `discontinuity` | `context_suspended`, `context_interrupted`, `clock_jump`, `discontinuity` | Browser |
 | People | – | `withdrawn` (participant withdrawn), `skipped` (mic check skipped) | Server |
 | Clean-up | `cleared` | `cleared`, `client_stop` | Browser |
 
-A track shows as `interrupted` in the facilitator's views and the REST summary when it ended with `disconnect`, `permission_lost` or `error`, so the wrap-up check can tell the facilitator that audio may be missing.
+A track shows as `interrupted` in the facilitator's views, the REST summary and the CSV when it ended with `disconnect`, `interrupted`, `permission_lost`, `error` or `track_ended`, so the wrap-up check can tell the facilitator that audio may be missing. The wrap-up check also flags `context_interrupted` (the system interrupted the browser's audio engine), without counting it as interrupted.
 
 **Pause.** `recording:pause` is only for everyone at once; players have no mute. On a pause the server closes every open track at once (`paused`). Chunks that were in flight are kept up to the pause and nothing after it. `recording:resume` makes every recorded seat start a new track.
 
@@ -570,7 +572,7 @@ classDiagram
   SpeechSegment ..> QualityReport : graded in
 ```
 
-The stored `audio_tracks.status` is only `recording`, `closed` or `deleted`. The REST and CSV view derives `open`, `closed`, `interrupted` and `deleted` from it and from the stop reason. A track reads as `interrupted` when it stopped with `disconnect`, `interrupted` (the server found it still open after a restart), `permission_lost`, `error` or an unknown reason; its stop reason is kept in the data.
+The stored `audio_tracks.status` is only `recording`, `closed` or `deleted`. The REST and CSV view derives `open`, `closed`, `interrupted` and `deleted` from it and from the stop reason. A track reads as `interrupted` when it stopped with `disconnect`, `interrupted` (the server found it still open after a restart), `permission_lost`, `error`, `track_ended` (the microphone went away) or an unknown reason; its stop reason is kept in the data. The status is worked out each time it is read, so tracks recorded before `track_ended` counted as interrupted read as `interrupted` too.
 
 ## 13. Known limits
 
@@ -589,7 +591,8 @@ The stored `audio_tracks.status` is only `recording`, `closed` or `deleted`. The
 
 | Area | Where |
 | --- | --- |
-| Shared contracts (config, events, messages, state, projections, REST types, `shouldRecord`) | `packages/shared/src/audio.ts`, `state.ts`, `events.ts`, `protocol.ts`, `projections.ts`, `config.ts` |
+| Shared contracts (config, events, messages, state, projections, REST types) | `packages/shared/src/audio.ts`, `state.ts`, `events.ts`, `protocol.ts`, `projections.ts`, `config.ts` |
+| Recording verdict and reason catalogue | `packages/shared/src/recordingVerdict.ts`, `audioReasons.ts` |
 | Browser capture engine | `apps/client/src/audio/` (`MicRecorder`, worklet, resampler, chunker, queue, speech detector, timing, errors) |
 | Browser recording flow and screens | `apps/client/src/player/recording.ts`, `MicCheckScreen.tsx`, `CalibrationScreen.tsx`, `RecordingIndicator.tsx` |
 | Live ingest, consent hold, calibration, pause | `apps/server/src/audio/live.ts`, `calibration.ts`, `session/CalibrationRunner.ts` (timed turns, quick check), `session/SessionManager.ts` |
@@ -597,9 +600,9 @@ The stored `audio_tracks.status` is only `recording`, `closed` or `deleted`. The
 | Attribution | `apps/server/src/audio/attribution/` (overview in the header of `index.ts`; `features.ts`, `vad.ts`, `clock.ts`, `analyse.ts`, `smooth.ts`, `render.ts`, `annotate.ts`), `service.ts`, `jobs.ts`, `jobWorker.ts`, `wav.ts` |
 | Speech model | `apps/server/models/silero_vad.onnx` (Silero VAD 6.2.3, MIT), checked against its SHA-256 in `vad.ts`; runtime `onnxruntime-node` |
 | REST routes | `apps/server/src/api/audioRoutes.ts` (`GET /api/sessions/:id/audio`, `POST …/audio/attribution`, `GET /api/audio/jobs/:jobId`, `GET …/audio/segments`, `POST …/audio/export`, `POST …/audio/delete`) |
-| Erasure and deletion | `apps/server/src/gdpr/erase.ts`, `deleteSession.ts`, `deleteAudio.ts`, `cli.ts` |
+| Erasure and deletion | `apps/server/src/db/personalData.ts` (the personal-data map), `audio/service.ts` (the running and busy checks), `cli.ts` |
 | Facilitator screens | `apps/client/src/facilitator/live/AudioPanels.tsx`, `AudioControls.tsx`, `seats.tsx`, `database/AudioPopup.tsx`, `setup/ConfigSteps.tsx` (step 04) |
 | UI primitives | `apps/client/src/ui/audio.tsx`, `audioMeta.ts` ([AESTHETIC-RULES.md § 8.1](AESTHETIC-RULES.md#81-audio-indicators)) |
 | Test bots | `npm run bots -- --count 4 --auto --audio` ([ARCHITECTURE.md § 13](ARCHITECTURE.md#13-testing-strategy-and-bots)) |
 
-Tests: unit tests for the resampler, queue, recorder (against a fake Web Audio environment), file store (round trip, tampering, truncation, path tricks), attribution (synthetic headset and laptop-like mixes with known truth, with and without a calibration), live ingest (every gate, every lifecycle close), processing jobs, routes, exports and erasure; a Playwright flow with a fake microphone that plays a synthetic voice (`e2e/app-audio.spec.ts`), through consent hold, mic check, calibration, a round, pause and resume, and game complete.
+Tests: a table test of the recording verdict, checked against every combination of the fields it reads; a test of the reason catalogue against the schemas and the codebook; unit tests for the resampler, queue, recorder (against a fake Web Audio environment), file store (round trip, tampering, truncation, path tricks), attribution (synthetic headset and laptop-like mixes with known truth, with and without a calibration), live ingest (every gate, every lifecycle close), processing jobs, routes, exports and erasure; a Playwright flow with a fake microphone that plays a synthetic voice (`e2e/app-audio.spec.ts`), through consent hold, mic check, calibration, a round, pause and resume, and game complete.

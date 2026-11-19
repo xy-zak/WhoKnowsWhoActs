@@ -371,6 +371,8 @@ sequenceDiagram
 7. **Key sheet:** strike through the line.
 8. **Confirm** to the participant, and keep a note of the request date and completion date (no reasons needed).
 
+**Why no table is missed.** Which database tables and columns hold participant codes, session ids and references to audio files is written down in one place, the personal-data map (`apps/server/src/db/personalData.ts`). The look-up, the erasure, session deletion and audio deletion all work from that list, and each runs as one database transaction with its register entry, followed by the vacuum and, only after the transaction succeeded, the removal of the audio files. A test checks that every table in the database is classified, that every table with a code, session id or audio-file column is on the list, and that after an erasure no column of any table still contains the code. A table added later without being put on the list makes that test fail.
+
 **Deleting an entire session.** Use this for practice runs, aborted sessions, or a whole group withdrawing. Use *DATABASE → Delete* (type the session id to confirm) or `npm run cli -- delete-session --session S-…`.
 
 - It removes all of the session's events, telemetry (consent and demographics included), audio (rows, keys, then files) and export-register rows, and the session itself.

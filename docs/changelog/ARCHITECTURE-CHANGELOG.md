@@ -4,25 +4,31 @@ History of [ARCHITECTURE.md](../ARCHITECTURE.md). Newest first. How entries are 
 
 ## Unreleased
 
-### Not yet committed · documents `880ecba` (Headset gate engine: Silero VAD + cross-channel level gate; storage fixes) and `c438572` (e2e server: speech by energy for the bots' synthetic audio)
+### Not yet committed · documents `07fcc02`, `088ab40`, `86effaf`, `f5bce64` and `18f6ee0`
+
+- **Type:** Risk mitigation
+- **Change:** The glossary adds *recording verdict*, *audio reason catalogue*, *personal-data map* and *delivery policy*. The code layout adds `audioReasons.ts`, `recordingVerdict.ts`, `db/personalData.ts`, `net/delivery.ts` and `player/connection.ts` and drops `player/intents.ts` and the erasure files under `gdpr/`; the § 13 testing table and the § 15 state and projection rows follow.
+- **Reason:** Four refactors each moved a rule that was copied in several places into one module (which audio reasons exist, whether a seat records, which tables hold personal data, how the browser sends again); the document must say where those rules now live.
+
+### 2026-11-19 · `490686a` · Docs: headset gate engine, speech model, storage fixes
 
 - **Type:** Feature
 - **Change:** The component table, the code layout and § 15 (diagram and table) add the Silero VAD model file with its SHA-256 check, `onnxruntime-node` loaded only in the attribution worker, and the busy check that blocks deletion during a job or export. The bot `--audio` flag explains when to use `WKWA_SPEECH_MODEL=off`, and the testing table lists the new audio tests.
 - **Reason:** The commit adds a runtime dependency and a model file to the server and a new rule between audio jobs and deletion.
 
-### Not yet committed · read-only game state; `detached` on session switch
+### 2026-11-19 · `f309df0` · Seats survive session switches; read-only GameState; audio waits for the seat
 
 - **Type:** Risk mitigation
 - **Change:** § 5 adds the invariant that only the reducer changes state (`ReadonlyGameState` everywhere else; `afterReplay` for the reset after a load). § 11 says that switching sessions keeps the players' seats.
 - **Reason:** The "reducer is the only place state changes" rule was a convention: `SessionManager.load` reset `connected` outside it, and nothing stopped other code from writing. The compiler now enforces it.
 
-### Not yet committed · typed socket protocol, intent resend, CalibrationRunner
+### 2026-11-19 · `0f343ea` · Typed socket protocol, intent resend after reconnect, CalibrationRunner
 
 - **Type:** Risk mitigation
 - **Change:** The code layout adds `packages/shared/src/socket.ts` (typed event maps), the schema tables in `protocol.ts`, `session/CalibrationRunner.ts` and `player/intents.ts`. The component table says what `SessionManager` delegates. The idempotency bullet covers the browser's resend and restarts. The extension guide gets *Add a socket message*. The testing table adds the protocol and intent-queue tests and the restart deduplication test.
 - **Reason:** The socket protocol was typed by message name strings only, so a payload drift was not caught by the compiler, and the calibration's timers made SessionManager the largest file. The document must say where those parts now live and how to extend the protocol.
 
-### Not yet committed · documents `0f6971a`…`abcacbe` (microphone audio)
+### 2026-11-19 · `2428109` · Docs: audio design document (AUDIO.md), docs sweep against the built behaviour and change logs (U14) (#14)
 
 - **Type:** Feature
 - **Change:** The overview diagram, component table, harness table and code layout get the `audio` module, the encrypted audio folder and the browser capture engine. The lifecycle table and seat diagram add the mic check step and the consent hold. § 13 adds an Audio row to the testing table and the bots `--audio` flag. A new § 15 *Microphone audio* shows where audio fits (state, events, projection, timers, processing, who never records, recovery) with a diagram.

@@ -4,13 +4,19 @@ History of [DATA-MANAGEMENT.md](../DATA-MANAGEMENT.md). Newest first. How entrie
 
 ## Unreleased
 
-### Not yet committed · documents `880ecba` (Headset gate engine: Silero VAD + cross-channel level gate; storage fixes)
+### Not yet committed · documents `f5bce64`
+
+- **Type:** Risk mitigation
+- **Change:** § 10 adds *Why no table is missed*: the tables that hold participant codes, session ids and audio files are listed once (the personal-data map), every look-up, erasure and deletion works from that list, and a test fails when a table is missing from it or still holds an erased code.
+- **Reason:** The list of tables with participant codes was written in five places with nothing checking that they agreed, so a table added later could have been left out of an erasure (privacy).
+
+### 2026-11-19 · `490686a` · Docs: headset gate engine, speech model, storage fixes
 
 - **Type:** Risk mitigation
 - **Change:** § 1, § 2 and § 8 say that who spoke when now combines a speech/non-speech model (Silero VAD) with loudness, and why that is not biometric processing (no voice description, the model's numbers are not stored). § 10 and § 11 add that an erasure removes the erased seat from the other seats' overlap partners and clears the session's job summaries, that erasure and session deletion wait for a running attribution or audio export, and that audio exports are written under a `.partial` name; risks #19, #22 and #26 reflect the headset set-up.
 - **Reason:** A model now processes the voices, and the commit closes gaps where an erased seat or an unregistered folder of voice files could remain (privacy, data protection).
 
-### Not yet committed · documents `0f6971a`…`abcacbe` (microphone audio, checked against the build)
+### 2026-11-19 · `2428109` · Docs: audio design document (AUDIO.md), docs sweep against the built behaviour and change logs (U14) (#14)
 
 - **Type:** Bug fix
 - **Change:** The text written before the build is corrected. The **consent hold** replaces "keep the room quiet during consent" and the open decliner placeholder (no mic opens until every real seat has consented). Raw deletion removes cleaned tracks too, and `--scope all` removes every audio row including speech segments (the text said they stayed). Erasure removes every seat's cleaned track and the session's attribution results (the text said they were kept). Export contents, the register entry, the `audio-deletions` command, the verify checks and the placeholder list are brought in line.

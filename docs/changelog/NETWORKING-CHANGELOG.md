@@ -4,25 +4,31 @@ History of [NETWORKING.md](../NETWORKING.md). Newest first. How entries are writ
 
 ## Unreleased
 
-### Not yet committed · documents `880ecba` (Headset gate engine: Silero VAD + cross-channel level gate; storage fixes) and `c438572` (e2e server: speech by energy for the bots' synthetic audio)
+### Not yet committed · documents `86effaf` and `18f6ee0`
+
+- **Type:** Bug fix
+- **Change:** § 7 adds the seat gate with a table of the five delivery policies (`once`, `whileSeated`, `attempt`, `retry`, `resend`) and the messages that use them, and states that telemetry waits for the seat and that an onboarding request refused as "Not seated" is sent again once seated, while an unanswered one is still never resent.
+- **Reason:** An onboarding request that reached the server during a reconnect showed an error although sending it again would have worked, and each kind of message had its own waiting and resend rules.
+
+### 2026-11-19 · `490686a` · Docs: headset gate engine, speech model, storage fixes
 
 - **Type:** Feature
 - **Change:** § 4 adds the environment variable `WKWA_SPEECH_MODEL` (`off` = speech found by energy instead of the speech model, for bots and demos; the e2e server sets it). In § 10, session deletion and participant erasure are refused (409) while an attribution or audio export of the session runs, the audio export folder is written as `.partial` and renamed once registered, and the job summary names the speech detector (the per-seat lag figure is gone).
 - **Reason:** The commit adds the setting, new refusals and a new export sequence, and changes the attribution summary sent over REST.
 
-### Not yet committed · `detached` keeps seats across session switches; audio waits for the seat
+### 2026-11-19 · `f309df0` · Seats survive session switches; read-only GameState; audio waits for the seat
 
 - **Type:** Bug fix
 - **Change:** The generated catalogue adds the `/player` message `detached` and narrows `unbound` to a released seat. § 7 gets a subsection *Switching sessions keeps the seats* with a sequence diagram, and a bullet on audio uploads waiting for the seat (and the cancelled attempt that prevents a double send).
 - **Reason:** Resuming another session, an erasure's reload or a deletion sent `unbound`, so every browser deleted its seat token: switching back left the players unable to re-claim seats that are locked after onboarding. Audio uploads after a reconnect were refused as "Not seated" first and only then retried.
 
-### Not yet committed · typed socket protocol, intent resend after reconnect
+### 2026-11-19 · `0f343ea` · Typed socket protocol, intent resend after reconnect, CalibrationRunner
 
 - **Type:** Bug fix
 - **Change:** § 7 now says how the browser keeps an action until it is answered: it sends only while its socket is seated, resends unanswered actions unchanged after every reconnect, and gives up after 45 s; the server answers a resend with its first answer, also after a restart. It explains the transient "Not seated" refusal (`retry: true`) and why onboarding requests wait for `hello`'s answer. The reconnect diagram marks the moment the socket is seated again. § 9 describes the schema tables and the typed Socket.IO event maps derived from them.
 - **Reason:** § 7 described a resend that the browser did not do: an action made during a drop was flushed by Socket.IO before `hello`, refused as "Not seated" and lost. The browser now does what the document said, and the protocol types are now checked at both ends.
 
-### Not yet committed · documents `0f6971a`…`abcacbe` (microphone audio)
+### 2026-11-19 · `2428109` · Docs: audio design document (AUDIO.md), docs sweep against the built behaviour and change logs (U14) (#14)
 
 - **Type:** Feature
 - **Change:** The REST table adds the six audio routes and the `audio` export kind. § 8 notes that audio timestamps use the clock offset. A new § 14 *Microphone audio on the network* covers the secure context, messages, chunk size, data rate, acknowledgements, retries, late chunks, volatile levels, reconnects and the fingerprint comparison. § 12 and § 13 get audio rows. The advice not to install a certificate on participants' laptops is stated (compare fingerprints instead).

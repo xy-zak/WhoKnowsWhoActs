@@ -2,9 +2,7 @@
 
 History of [AESTHETIC-RULES.md](../AESTHETIC-RULES.md). Newest first. How entries are written: [README.md](README.md).
 
-## Unreleased
-
-### Not yet committed · documents `abcacbe`
+### 2026-11-19 · `2428109` · Docs: audio design document (AUDIO.md), docs sweep against the built behaviour and change logs (U14) (#14)
 
 - **Type:** Bug fix
 - **Change:** § 8.1 "Where they appear" is corrected to the built screens: the game has a `RecTag` in the status line and a banner only while the microphone needs the participant (not a permanent banner), the onboarding screens have the recording line, the mic check and calibration screens have their own meter, and the facilitator status bar and calibration card are listed.
