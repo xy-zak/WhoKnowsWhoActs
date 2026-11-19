@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { EXPORT_FILES, expandColumns, normaliseParticipantCode } from "@wkwa/shared";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { backupDatabase, openDatabase, rekeyDatabase, WrongPassphraseError } from "../src/db/database";
 import { PersonalDataMap } from "../src/db/personalData";
 import { Store } from "../src/db/store";
@@ -268,6 +268,30 @@ describe("GDPR tooling", () => {
 
     // erasing again is a no-op
     expect(new PersonalDataMap(srv.ctx.store).erase(code).erased).toBe(false);
+  });
+
+  it("an erasure whose session reload fails still answers with its result and detaches the session", async () => {
+    const code = codes[1]!;
+    expect(srv.ctx.hub.session?.sessionId).toBe(sessionId);
+    // e.g. config/consent.json was edited into an invalid file since the session was loaded
+    const broken = vi.spyOn(srv.ctx.hub as unknown as { sessionDeps(): never }, "sessionDeps");
+    broken.mockImplementation(() => {
+      throw new Error("invalid consent.json");
+    });
+    try {
+      const res = await fetch(`${srv.url}/api/participants/${code}/erase`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ confirm: code }),
+      });
+      expect(res.status).toBe(200);
+      expect(((await res.json()) as { erased: boolean }).erased).toBe(true);
+    } finally {
+      broken.mockRestore();
+    }
+    // the old manager, which still held the erased code, is gone
+    expect(srv.ctx.hub.session).toBeNull();
+    expect(new PersonalDataMap(srv.ctx.store).lookup(code).occurrences).toHaveLength(0);
   });
 
   it("writes encrypted backups and supports changing the passphrase", async () => {

@@ -702,7 +702,12 @@ function ErasurePanel({ conn, onDone }: { conn: FacilitatorConnection; onDone: (
   const [input, setInput] = useState("");
   const [look, setLook] = useState<Lookup | null>(null);
   const [note, setNote] = useState("");
-  const [result, setResult] = useState<{ text: string; audio: string | null; failed: string[] } | null>(null);
+  const [result, setResult] = useState<{
+    text: string;
+    audio: string | null;
+    failed: string[];
+    compactionError: string | null;
+  } | null>(null);
   const code = normaliseParticipantCode(input);
   const audioTracks = look?.occurrences.reduce((n, o) => n + (o.audioTracks ?? 0), 0) ?? 0;
   const audioMs = look?.occurrences.reduce((n, o) => n + (o.audioMs ?? 0), 0) ?? 0;
@@ -772,6 +777,7 @@ function ErasurePanel({ conn, onDone }: { conn: FacilitatorConnection; onDone: (
           ? `Audio: ${plural(r.rows.audioTracks ?? 0, "track")} (${plural(r.rows.audioChunks ?? 0, "chunk")}) and ${plural(r.rows.audioDerivatives ?? 0, "derived result")} deleted with their keys; ${plural(r.audioFiles?.removed ?? 0, "encrypted file")} removed. The attribution results and every seat's cleaned tracks of ${audioSessions.join(", ") || "the session"} were removed with them: run the speaker attribution again there (if its raw audio is still stored).`
           : null,
       failed: r.audioFiles?.failed ?? [],
+      compactionError: r.audioFiles?.compactionError ?? null,
     });
     setLook(null);
     setInput("");
@@ -870,8 +876,8 @@ function ErasurePanel({ conn, onDone }: { conn: FacilitatorConnection; onDone: (
         )}
         {result && (
           <Callout
-            tone={result.failed.length ? "warn" : "live"}
-            icon={result.failed.length ? "warning" : "ok"}
+            tone={result.failed.length || result.compactionError ? "warn" : "live"}
+            icon={result.failed.length || result.compactionError ? "warning" : "ok"}
           >
             {result.text}
             {result.audio && (
@@ -886,6 +892,16 @@ function ErasurePanel({ conn, onDone }: { conn: FacilitatorConnection; onDone: (
                 <span className="t-danger">
                   <Icon name="error" /> Audio files that could not be removed (unreadable: their keys are
                   gone; delete them by hand): {result.failed.join(", ")}
+                </span>
+              </>
+            )}
+            {result.compactionError && (
+              <>
+                <br />
+                <span className="t-danger">
+                  <Icon name="error" /> The database could not be compacted: the data is deleted, but its old
+                  pages may stay in the file until the next erasure or deletion compacts it (
+                  {result.compactionError}).
                 </span>
               </>
             )}

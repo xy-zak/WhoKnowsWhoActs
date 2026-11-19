@@ -536,7 +536,7 @@ export class PersonalDataMap {
     ];
 
     const rows: SessionDeletionRows = { ...NO_SESSION_ROWS };
-    this.removeInTransaction(() => {
+    const done = this.removeInTransaction(() => {
       for (const t of PERSONAL_DATA) {
         const n = db.prepare(`DELETE FROM ${t.table} WHERE ${t.ofSession}`).run(sessionId).changes;
         if (t.counts.session) rows[t.counts.session] = n;
@@ -555,6 +555,10 @@ export class PersonalDataMap {
       );
       return [];
     });
+    // shortcut: a failed compaction still fails the committed deletion (no audio files to unlink here),
+    // report it in SessionDeletionResult once the delete popup can show it
+    const { compactionError } = done();
+    if (compactionError) throw new Error(compactionError);
 
     let exportsDeleted = false;
     if (opts.deleteExports && existsSync(sessionDir)) {
@@ -726,15 +730,20 @@ export class PersonalDataMap {
    * Run `remove` in one transaction (it writes its register row inside), then
    * forget cached event sequence numbers and compact the database. Returns a
    * function that unlinks the audio files `remove` returned: call it after the
-   * commit. Unlink failures are collected, never thrown, so the database part
-   * always stands (the files are unreadable: their keys are gone).
+   * commit. Unlink and compaction failures are reported, never thrown, so the
+   * database part always stands (the files are unreadable: their keys are gone).
    */
   private removeInTransaction(remove: () => FileRef[]): () => AudioFilesRemoved {
     const files = this.db.transaction(remove)();
     this.store.resetSeqCache();
-    compactAfterDelete(this.db);
+    let compactionError: string | undefined;
+    try {
+      compactAfterDelete(this.db);
+    } catch (e) {
+      compactionError = (e as Error).message;
+    }
     return () => {
-      const out: AudioFilesRemoved = { removed: 0, failed: [] };
+      const out: AudioFilesRemoved = { removed: 0, failed: [], ...(compactionError && { compactionError }) };
       const audioFiles = this.store.audioFiles;
       if (!audioFiles) return out;
       for (const f of files) {

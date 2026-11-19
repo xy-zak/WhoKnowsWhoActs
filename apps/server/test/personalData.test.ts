@@ -8,7 +8,7 @@ import {
   reduceEvents,
   type TelemetryItem,
 } from "@wkwa/shared";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AudioFileStore } from "../src/audio/fileStore";
 import { sha256 } from "../src/content";
 import { type DB, openDatabase } from "../src/db/database";
@@ -293,6 +293,20 @@ describe("personal-data map", () => {
     expect(store.listEvents(sessionId).some((e) => e.type === "ParticipantWithdrawn")).toBe(false);
     const seat = reduceEvents(store.listEvents(sessionId)).seats[2]!;
     expect(seat).toMatchObject({ participantCode: b, withdrawn: false });
+  });
+
+  it("an erasure whose compaction fails still unlinks the audio files and reports the error", async () => {
+    const code = generateParticipantCode();
+    await seedSession(store, files, { 1: code });
+    const exec = db.exec.bind(db);
+    vi.spyOn(db, "exec").mockImplementation((sql: string) => {
+      if (sql === "VACUUM") throw new Error("disk I/O error");
+      return exec(sql);
+    });
+    const r = map.erase(code);
+    expect(r.erased).toBe(true);
+    expect(r.audioFiles).toEqual({ removed: 2, failed: [], compactionError: "disk I/O error" });
+    expect(store.codeExists(code)).toBe(false);
   });
 
   it("after deleting a session no table holds its id, and the other session is untouched", async () => {

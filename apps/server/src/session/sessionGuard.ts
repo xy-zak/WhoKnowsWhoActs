@@ -39,7 +39,7 @@ export interface AttachedSessionSource {
   } | null;
   /** Detach the session if it is attached (connected players return to the waiting screen). */
   release(sessionId: string): void;
-  /** Reload the attached session from its (changed) event log. */
+  /** Reload the attached session from its (changed) event log; detaches it if that fails (never throws). */
   reloadActiveSession(): void;
 }
 

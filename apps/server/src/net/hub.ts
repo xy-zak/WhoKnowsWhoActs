@@ -748,7 +748,13 @@ export class Hub {
   reloadActiveSession() {
     const m = this.session;
     if (!m) return;
-    this.resumeSession(m.sessionId);
+    try {
+      this.resumeSession(m.sessionId);
+    } catch (e) {
+      // the erasure is committed: never keep the old manager (with the erased code) attached
+      this.deps.log.error({ err: e, sessionId: m.sessionId }, "reload after an erasure failed");
+      this.release(m.sessionId);
+    }
   }
 
   close() {
