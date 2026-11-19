@@ -6,6 +6,7 @@ import {
   AUDIO_SAMPLE_RATE,
   type AudioStartReason,
   type AudioStopReason,
+  EngineCaptureSettingsSchema,
 } from "@wkwa/shared";
 import type { ChunkDraft } from "./chunker";
 import { classifyMicError, MicError, type MicErrorInfo, micSupportProblem } from "./errors";
@@ -154,19 +155,7 @@ function browserEnv(): RecorderEnv {
 
 /** Copies only the processing settings: never deviceId, groupId or label. */
 export function pickSettings(s: MediaTrackSettings): EngineCaptureSettings {
-  const src = s as Record<string, unknown>;
-  const out: EngineCaptureSettings = {};
-  for (const k of ["sampleRate", "sampleSize", "channelCount", "latency"] as const) {
-    const v = src[k];
-    if (typeof v === "number" && Number.isFinite(v)) out[k] = v;
-  }
-  for (const k of ["noiseSuppression", "autoGainControl", "voiceIsolation"] as const) {
-    const v = src[k];
-    if (typeof v === "boolean") out[k] = v;
-  }
-  const ec = src.echoCancellation;
-  if (typeof ec === "boolean" || typeof ec === "string") out.echoCancellation = ec;
-  return out;
+  return EngineCaptureSettingsSchema.safeParse(s).data ?? {};
 }
 
 function stopStream(stream: MediaStream) {
