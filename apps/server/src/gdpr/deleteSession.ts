@@ -1,33 +1,10 @@
 import { existsSync, rmSync } from "node:fs";
 import path from "node:path";
+import type { SessionDeletionResult, SessionDeletionRows } from "@wkwa/shared";
 import { sha256 } from "../content";
 import { compactAfterDelete } from "../db/database";
 import type { Store } from "../db/store";
 import { nowTs, wall } from "../runtime";
-
-/** Rows deleted with a session (also the shape of `session_deletions.rows_json`; older entries lack audio). */
-export interface SessionDeletionRows {
-  events: number;
-  telemetry: number;
-  exports: number;
-  audioTracks: number;
-  audioChunks: number;
-  audioDerivatives: number;
-  audioJobs: number;
-}
-
-export interface SessionDeletionResult {
-  sessionId: string;
-  rows: SessionDeletionRows;
-  /** Export folders of this session (deleted from disk only when requested). */
-  exportPaths: string[];
-  exportsDeleted: boolean;
-  /**
-   * The session's encrypted audio folder (data/audio/<sessionId>), always removed.
-   * `error` says why it could not be (its files are unreadable: their keys are gone).
-   */
-  audio: { dirRemoved: boolean; files: number; error?: string };
-}
 
 const NO_AUDIO_ROWS = { audioTracks: 0, audioChunks: 0, audioDerivatives: 0, audioJobs: 0 };
 
@@ -49,17 +26,7 @@ export function deleteSession(
   const row = store.getSession(sessionId);
   if (!row) throw new Error(`Unknown session ${sessionId}`);
   const db = store.db;
-  const codes = (
-    db
-      .prepare(
-        `SELECT DISTINCT participant_code AS c FROM events WHERE session_id = @id AND participant_code IS NOT NULL
-         UNION SELECT DISTINCT participant_code FROM telemetry WHERE session_id = @id
-         UNION SELECT DISTINCT participant_code FROM audio_tracks WHERE session_id = @id
-         UNION SELECT DISTINCT participant_code FROM audio_derivatives
-           WHERE session_id = @id AND participant_code IS NOT NULL`,
-      )
-      .all({ id: sessionId }) as Array<{ c: string }>
-  ).map((r) => sha256(r.c));
+  const codes = store.sessionCodes(sessionId).map(sha256);
   const exportRows = db.prepare("SELECT path FROM exports WHERE session_id = ?").all(sessionId) as Array<{
     path: string;
   }>;
@@ -71,21 +38,18 @@ export function deleteSession(
   let events = 0;
   let telemetry = 0;
   let exports = 0;
-  const audio = { ...NO_AUDIO_ROWS };
+  let audio = { ...NO_AUDIO_ROWS };
   db.transaction(() => {
     events = db.prepare("DELETE FROM events WHERE session_id = ?").run(sessionId).changes;
     telemetry = db.prepare("DELETE FROM telemetry WHERE session_id = ?").run(sessionId).changes;
     exports = db.prepare("DELETE FROM exports WHERE session_id = ?").run(sessionId).changes;
-    audio.audioChunks = db
-      .prepare(
-        "DELETE FROM audio_chunks WHERE track_id IN (SELECT track_id FROM audio_tracks WHERE session_id = ?)",
-      )
-      .run(sessionId).changes;
-    audio.audioTracks = db.prepare("DELETE FROM audio_tracks WHERE session_id = ?").run(sessionId).changes;
-    audio.audioDerivatives = db
-      .prepare("DELETE FROM audio_derivatives WHERE session_id = ?")
-      .run(sessionId).changes;
-    audio.audioJobs = db.prepare("DELETE FROM audio_jobs WHERE session_id = ?").run(sessionId).changes;
+    const r = store.deleteSessionAudioRows(sessionId);
+    audio = {
+      audioTracks: r.tracks,
+      audioChunks: r.chunks,
+      audioDerivatives: r.derivatives,
+      audioJobs: r.jobs,
+    };
     db.prepare("DELETE FROM sessions WHERE id = ?").run(sessionId);
     db.prepare(
       `INSERT INTO session_deletions (session_id, deleted_wall, created_wall, rows_json, code_hashes_json, exports_json, note)

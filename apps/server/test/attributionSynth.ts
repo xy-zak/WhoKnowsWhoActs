@@ -15,6 +15,7 @@
  * be added.
  */
 
+import { AUDIO_SAMPLE_RATE } from "@wkwa/shared";
 import {
   type CalibrationTurn,
   type ChunkMeta,
@@ -24,7 +25,7 @@ import {
 import type { AttributionResult, TrackAlignment } from "../src/audio/attribution/types";
 import { sampleTime } from "../src/audio/attribution/types";
 
-export const FS = 16_000;
+export const FS = AUDIO_SAMPLE_RATE;
 const CHUNK = 80_000;
 
 export function mulberry32(seed: number): () => number {

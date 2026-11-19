@@ -53,6 +53,13 @@ export interface ClockFit {
   serverTsFallbacks: number;
 }
 
+/** End of a track's audio: one past the last sample any of its chunks holds (0 without chunks). */
+export function trackSampleEnd(chunks: Iterable<Pick<ChunkMeta, "startSample" | "sampleCount">>): number {
+  let end = 0;
+  for (const c of chunks) end = Math.max(end, c.startSample + c.sampleCount);
+  return end;
+}
+
 export function driftFromMsPerSample(msPerSample: number, sampleRate: number): number {
   return (1000 / (msPerSample * sampleRate) - 1) * 1e6;
 }

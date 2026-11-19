@@ -1,4 +1,6 @@
 import type {
+  AudioDeletionScope,
+  AudioDerivativeKind,
   EventType,
   NewEvent,
   SessionConfig,
@@ -47,7 +49,8 @@ export interface SessionSummary {
 
 /* ─────────── audio rows (schema v6) ─────────── */
 
-export type AudioTrackStatus = "recording" | "closed" | "deleted";
+/** A track's lifecycle as stored (the REST `AudioTrackStatus` is derived from it and the stop reason). */
+export type AudioTrackRowStatus = "recording" | "closed" | "deleted";
 
 /** A new track: the file comes from AudioFileStore.createFile (name + key). */
 export interface NewAudioTrack {
@@ -86,7 +89,7 @@ export interface AudioTrackRow extends Omit<NewAudioTrack, "fileName" | "fileKey
   droppedChunks: number;
   /** Payload bytes received (PCM bytes of unique chunks). */
   bytes: number;
-  status: AudioTrackStatus;
+  status: AudioTrackRowStatus;
   /** samples / sampleRate, in ms. */
   durationMs: number;
 }
@@ -123,7 +126,7 @@ export interface NewAudioDerivative {
   /** Null for session-wide results (e.g. speech segments of all seats). */
   seat: number | null;
   participantCode: string | null;
-  /** e.g. speech_segments, clean_track, aligned_track, transcript (gdpr/deleteAudio.ts says which count as audio). */
+  /** e.g. speech_segments, clean, transcript (DERIVATIVE_KINDS in audio/records.ts says which hold sound). */
   kind: string;
   /** Track ids the result was computed from (erasure removes results computed from a participant's tracks). */
   sourceTracks: string[];
@@ -170,8 +173,6 @@ export type NewAudioJob = Omit<AudioJobRow, "startedWall" | "finishedWall"> & {
   finishedWall?: string | null;
 };
 
-export type AudioDeletionScope = "raw" | "all";
-
 export interface AudioDeletionRow {
   id: number;
   sessionId: string;
@@ -190,7 +191,7 @@ export interface AudioFileRef {
   fileName: string;
   key: Buffer | null;
   /** Track status; null for derivatives. */
-  status: AudioTrackStatus | null;
+  status: AudioTrackRowStatus | null;
 }
 
 interface AudioTrackDbRow {
@@ -212,7 +213,7 @@ interface AudioTrackDbRow {
   chunks: number;
   dropped_chunks: number;
   bytes: number;
-  status: AudioTrackStatus;
+  status: AudioTrackRowStatus;
 }
 
 interface AudioChunkDbRow {
@@ -735,7 +736,7 @@ export class Store {
   /** A session's tracks, by seat and start time. */
   listAudioTracks(
     sessionId: string,
-    opts: { seat?: number; status?: AudioTrackStatus } = {},
+    opts: { seat?: number; status?: AudioTrackRowStatus } = {},
   ): AudioTrackRow[] {
     const rows = this.db
       .prepare(
@@ -756,7 +757,7 @@ export class Store {
   insertAudioChunk(c: NewAudioChunk): boolean {
     return this.db.transaction(() => {
       const track = this.db.prepare("SELECT status FROM audio_tracks WHERE track_id = ?").get(c.trackId) as
-        | { status: AudioTrackStatus }
+        | { status: AudioTrackRowStatus }
         | undefined;
       if (!track) throw new Error(`Unknown audio track ${c.trackId}`);
       if (track.status === "deleted") throw new Error(`The audio of track ${c.trackId} was deleted`);
@@ -852,7 +853,10 @@ export class Store {
   }
 
   /** A session's derivatives (without data), oldest first. */
-  listAudioDerivatives(sessionId: string, opts: { kind?: string; seat?: number } = {}): AudioDerivativeRow[] {
+  listAudioDerivatives(
+    sessionId: string,
+    opts: { kind?: AudioDerivativeKind; seat?: number } = {},
+  ): AudioDerivativeRow[] {
     const rows = this.db
       .prepare(
         `SELECT ${DERIVATIVE_COLUMNS} FROM audio_derivatives
@@ -873,6 +877,28 @@ export class Store {
     this.db.prepare("DELETE FROM audio_derivatives WHERE derivative_id = ?").run(derivativeId);
     const { data: _data, ...row } = found;
     return row;
+  }
+
+  /**
+   * Delete every audio row of a session: chunks, tracks (with their file keys), derivatives and
+   * jobs. Returns the row counts. Run it inside the caller's transaction; the files are the
+   * caller's to unlink (they are unreadable once their keys are gone).
+   */
+  deleteSessionAudioRows(sessionId: string): {
+    tracks: number;
+    chunks: number;
+    derivatives: number;
+    jobs: number;
+  } {
+    const run = (sql: string) => this.db.prepare(sql).run(sessionId).changes;
+    return {
+      chunks: run(
+        "DELETE FROM audio_chunks WHERE track_id IN (SELECT track_id FROM audio_tracks WHERE session_id = ?)",
+      ),
+      tracks: run("DELETE FROM audio_tracks WHERE session_id = ?"),
+      derivatives: run("DELETE FROM audio_derivatives WHERE session_id = ?"),
+      jobs: run("DELETE FROM audio_jobs WHERE session_id = ?"),
+    };
   }
 
   /* ─────────── audio jobs ─────────── */
@@ -976,7 +1002,7 @@ export class Store {
       session_id: string;
       file_name: string;
       file_key: Buffer | null;
-      status: AudioTrackStatus;
+      status: AudioTrackRowStatus;
     }>;
     const derived = this.db
       .prepare(
@@ -1013,6 +1039,19 @@ export class Store {
     return Store.CODE_TABLES.some((t) =>
       this.db.prepare(`SELECT 1 FROM ${t} WHERE participant_code = ? LIMIT 1`).get(code),
     );
+  }
+
+  /** Every participant code that occurs in a session (events, telemetry, audio rows), unordered. */
+  sessionCodes(sessionId: string): string[] {
+    const rows = this.db
+      .prepare(
+        `SELECT participant_code AS c FROM events WHERE session_id = @id AND participant_code IS NOT NULL
+         UNION SELECT participant_code FROM telemetry WHERE session_id = @id
+         UNION SELECT participant_code FROM audio_tracks WHERE session_id = @id
+         UNION SELECT participant_code FROM audio_derivatives WHERE session_id = @id AND participant_code IS NOT NULL`,
+      )
+      .all({ id: sessionId }) as Array<{ c: string }>;
+    return rows.map((r) => r.c);
   }
 
   /** Where does a participant code occur? (for takedown look-ups) */

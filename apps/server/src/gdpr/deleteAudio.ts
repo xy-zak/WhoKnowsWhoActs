@@ -1,30 +1,9 @@
-import { fileBytes } from "../audio/records";
+import type { AudioDeleteResult, AudioDeletionCounts, AudioDeletionScope } from "@wkwa/shared";
+import { fileBytes, isAudioDerivativeKind } from "../audio/records";
 import { compactAfterDelete } from "../db/database";
-import type { AudioDeletionRow, AudioDeletionScope, AudioTrackStatus, Store } from "../db/store";
+import type { AudioDeletionRow, AudioTrackRowStatus, Store } from "../db/store";
 import { nowTs, wall } from "../runtime";
-import { type AudioFilesRemoved, unlinkAudioFiles } from "./erase";
-
-/**
- * Derivative kinds that hold no sound: they survive "delete raw audio".
- * Every other kind counts as audio (clean_track, aligned_track and any kind
- * added later), so an unlisted kind errs on the side of deleting voice.
- * Transcripts are text: personal data, but not voice recordings.
- */
-export const NON_AUDIO_DERIVATIVE_KINDS: ReadonlySet<string> = new Set([
-  "speech_segments",
-  "talk_time",
-  "quality_report",
-  "leakage_matrix",
-  "transcript",
-]);
-
-/** Derivative kinds known to hold sound (the rule is isAudioDerivativeKind, not this list). */
-export const AUDIO_DERIVATIVE_KINDS: ReadonlySet<string> = new Set(["clean", "clean_track", "aligned_track"]);
-
-/** Does a derivative of this kind hold sound (and so go with the raw audio)? */
-export function isAudioDerivativeKind(kind: string): boolean {
-  return !NON_AUDIO_DERIVATIVE_KINDS.has(kind);
-}
+import { unlinkAudioFiles } from "./erase";
 
 /** Refused because the session is attached and still running. REST routes answer 409. */
 export class SessionRunningError extends Error {
@@ -49,29 +28,8 @@ export function isSessionRunning(hub: ActiveSessionProbe | undefined, sessionId:
   return Boolean(s && s.sessionId === sessionId && !s.isFinal && s.state.phase !== "game_complete");
 }
 
-export interface AudioDeletionCounts {
-  /** raw: tracks whose audio was deleted (rows kept as `deleted`); all: track rows deleted. */
-  tracks: number;
-  /** Recorded duration of those tracks, in ms. */
-  audioMs: number;
-  /** Chunk rows deleted (raw keeps them: they are timing metadata). */
-  chunks: number;
-  derivatives: number;
-  jobs: number;
-  /** Encrypted files whose keys were deleted (and which were then unlinked). */
-  files: number;
-  /** Their size on disk before the deletion (bytes). */
-  bytes: number;
-  /** Seats whose audio was deleted, as a bit mask (bit n = seat n), so the register keeps plain numbers. */
-  seatMask: number;
-}
-
-export interface AudioDeletionResult {
-  sessionId: string;
-  scope: AudioDeletionScope;
-  counts: AudioDeletionCounts;
-  /** Files unlinked; `all` also removes the session's audio folder. */
-  audioFiles: AudioFilesRemoved & { dirRemoved: boolean };
+/** What deleteSessionAudio did (the REST result adds the register entry as `record`). */
+export interface AudioDeletionResult extends Omit<AudioDeleteResult, "record" | "audioExportsOnDisk"> {
   /** The register entry (audio_deletions). */
   entry: AudioDeletionRow;
 }
@@ -129,7 +87,7 @@ export function deleteSessionAudio(
         file_name: string | null;
         samples: number;
         sample_rate: number;
-        status: AudioTrackStatus;
+        status: AudioTrackRowStatus;
       }>
     ).filter((t) => scope === "all" || t.status !== "deleted");
     const derived = (
@@ -147,24 +105,22 @@ export function deleteSessionAudio(
       if (t.seat > 0 && t.seat < 31) counts.seatMask |= 1 << t.seat;
       counts.audioMs += t.sample_rate > 0 ? (t.samples * 1000) / t.sample_rate : 0;
       if (t.file_name && t.status !== "deleted") files.push({ sessionId, fileName: t.file_name });
-      if (scope === "raw") {
-        counts.tracks += db
-          .prepare("UPDATE audio_tracks SET status = 'deleted', file_key = NULL WHERE track_id = ?")
-          .run(t.track_id).changes;
-      } else {
-        counts.chunks += db.prepare("DELETE FROM audio_chunks WHERE track_id = ?").run(t.track_id).changes;
-        counts.tracks += db.prepare("DELETE FROM audio_tracks WHERE track_id = ?").run(t.track_id).changes;
-      }
     }
     for (const d of derived) {
       if (d.seat !== null && d.seat > 0 && d.seat < 31) counts.seatMask |= 1 << d.seat;
       if (d.file_name) files.push({ sessionId, fileName: d.file_name });
-      counts.derivatives += db
-        .prepare("DELETE FROM audio_derivatives WHERE derivative_id = ?")
-        .run(d.derivative_id).changes;
     }
-    if (scope === "all")
-      counts.jobs = db.prepare("DELETE FROM audio_jobs WHERE session_id = ?").run(sessionId).changes;
+    if (scope === "all") Object.assign(counts, store.deleteSessionAudioRows(sessionId));
+    else {
+      for (const t of tracks)
+        counts.tracks += db
+          .prepare("UPDATE audio_tracks SET status = 'deleted', file_key = NULL WHERE track_id = ?")
+          .run(t.track_id).changes;
+      for (const d of derived)
+        counts.derivatives += db
+          .prepare("DELETE FROM audio_derivatives WHERE derivative_id = ?")
+          .run(d.derivative_id).changes;
+    }
     counts.audioMs = Math.round(counts.audioMs);
     counts.files = files.length;
     counts.bytes = files.reduce((n, f) => n + fileBytes(store, f.sessionId, f.fileName), 0);

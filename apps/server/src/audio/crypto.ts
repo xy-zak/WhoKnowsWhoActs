@@ -14,7 +14,7 @@
  *
  * Only node:crypto is used: no third-party cryptography.
  */
-import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
+import { createCipheriv, createDecipheriv, randomBytes, randomFillSync } from "node:crypto";
 
 export const MAGIC = Buffer.from("WKA1", "ascii");
 export const FORMAT_VERSION = 1;
@@ -88,15 +88,18 @@ export function encodeRecord(key: Buffer, fileId: Buffer, seq: number, plaintext
   checkSeq(seq);
   if (plaintext.length > MAX_RECORD_PAYLOAD_BYTES)
     throw new Error(`record payload over ${MAX_RECORD_PAYLOAD_BYTES} bytes`);
-  const nonce = randomBytes(NONCE_BYTES);
+  // payloadLen | seq | nonce | ciphertext | tag, written into one buffer (GCM: ciphertext length = plaintext length)
+  const out = Buffer.allocUnsafe(RECORD_OVERHEAD_BYTES + plaintext.length);
+  out.writeUInt32BE(plaintext.length, 0);
+  out.writeUInt32BE(seq, 4);
+  const nonce = randomFillSync(out.subarray(RECORD_PREFIX_BYTES, RECORD_PREFIX_BYTES + NONCE_BYTES));
   const cipher = createCipheriv(CIPHER, key, nonce, { authTagLength: TAG_BYTES });
   cipher.setAAD(recordAad(fileId, seq));
-  const ct = Buffer.concat([cipher.update(plaintext), cipher.final()]);
-  const tag = cipher.getAuthTag();
-  const prefix = Buffer.alloc(RECORD_PREFIX_BYTES);
-  prefix.writeUInt32BE(plaintext.length, 0);
-  prefix.writeUInt32BE(seq, 4);
-  return Buffer.concat([prefix, nonce, ct, tag]);
+  let off = RECORD_PREFIX_BYTES + NONCE_BYTES;
+  off += cipher.update(plaintext).copy(out, off);
+  off += cipher.final().copy(out, off);
+  cipher.getAuthTag().copy(out, off);
+  return out;
 }
 
 /**

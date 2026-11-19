@@ -15,6 +15,7 @@
 import { cpSync, existsSync, readdirSync, rmSync, statSync, unlinkSync } from "node:fs";
 import { type FileHandle, mkdir, open } from "node:fs/promises";
 import path from "node:path";
+import { AUDIO_ENGINE_FILE_EXT } from "@wkwa/shared";
 import {
   decodeHeader,
   decodeRecordBody,
@@ -36,8 +37,7 @@ export function audioDirOf(dataDir: string): string {
   return path.join(dataDir, AUDIO_DIR_NAME);
 }
 
-export const AUDIO_FILE_EXT = ".wka";
-const FILE_NAME_PATTERN = /^[0-9a-f]{32}\.wka$/;
+const FILE_NAME_PATTERN = new RegExp(`^[0-9a-f]{${FILE_ID_BYTES * 2}}\\${AUDIO_ENGINE_FILE_EXT}$`);
 /** Session ids are `S-YYYYMMDD-XXXX` / `SIM-…`; anything path-like is refused. */
 const SESSION_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 
@@ -80,14 +80,6 @@ export interface VerifyResult {
   truncatedTailBytes: number;
   /** The seq numbers of the valid records, in file order (duplicates included). */
   seqs: number[];
-  issues: AudioReadIssue[];
-}
-
-export interface TrackChunks {
-  /** One entry per seq, ascending; for a seq written twice the first valid record wins. */
-  chunks: Array<{ seq: number; data: Buffer }>;
-  /** Valid records skipped because their seq was already read (client resends). */
-  duplicates: number;
   issues: AudioReadIssue[];
 }
 
@@ -181,7 +173,7 @@ export class AudioFileStore {
     const dir = this.sessionDir(sessionId);
     await mkdir(dir, { recursive: true, mode: 0o700 });
     const fileId = newFileId();
-    const fileName = `${fileId.toString("hex")}${AUDIO_FILE_EXT}`;
+    const fileName = `${fileId.toString("hex")}${AUDIO_ENGINE_FILE_EXT}`;
     const file = path.join(dir, fileName);
     const fh = await open(file, "wx", 0o600);
     try {
@@ -231,11 +223,12 @@ export class AudioFileStore {
     const fh = await open(file, "r+");
     try {
       const size = (await fh.stat()).size;
-      await this.checkHeader(fh, size, fileName);
       let end = this.ends.get(file);
       let droppedTailBytes = 0;
       if (end !== size) {
-        // first append in this process, or the file changed: find the end of the last complete record
+        // first append in this process, or the file changed: check it is still this file's `.wka`
+        // and find the end of the last complete record
+        await this.checkHeader(fh, size, fileName);
         end = await this.scanEnd(fh, size, fileName);
         if (size > end) {
           await fh.truncate(end);
@@ -380,32 +373,22 @@ export class AudioFileStore {
     }
   }
 
-  /** The chunks of a track, one per seq in ascending order (first valid record wins). Never throws on bad records. */
-  async readTrackChunks(sessionId: string, fileName: string, key: Buffer): Promise<TrackChunks> {
-    const issues: AudioReadIssue[] = [];
-    const bySeq = new Map<number, Buffer>();
-    let duplicates = 0;
-    for await (const r of this.readRecords(sessionId, fileName, key, { onIssue: (i) => issues.push(i) })) {
-      if (bySeq.has(r.seq)) duplicates++;
-      else bySeq.set(r.seq, r.data);
-    }
-    const chunks = [...bySeq].sort((a, b) => a[0] - b[0]).map(([seq, data]) => ({ seq, data }));
-    return { chunks, duplicates, issues };
-  }
-
-  /** A track's PCM: its chunks deduplicated by seq and concatenated in seq order (gaps are not filled). */
-  async readTrackPcm(
+  /**
+   * Like readRecords, but only the first valid record of each seq, in file order: a chunk the
+   * browser resent is stored twice, and the first copy wins. Same issue handling as readRecords.
+   */
+  async *readUniqueRecords(
     sessionId: string,
     fileName: string,
     key: Buffer,
-  ): Promise<{ pcm: Buffer; seqs: number[]; duplicates: number; issues: AudioReadIssue[] }> {
-    const r = await this.readTrackChunks(sessionId, fileName, key);
-    return {
-      pcm: Buffer.concat(r.chunks.map((c) => c.data)),
-      seqs: r.chunks.map((c) => c.seq),
-      duplicates: r.duplicates,
-      issues: r.issues,
-    };
+    opts: { onIssue?: (issue: AudioReadIssue) => void } = {},
+  ): AsyncGenerator<AudioRecord> {
+    const seen = new Set<number>();
+    for await (const r of this.readRecords(sessionId, fileName, key, opts)) {
+      if (seen.has(r.seq)) continue;
+      seen.add(r.seq);
+      yield r;
+    }
   }
 
   /** Check a file: header, every GCM tag, and the framing. */
