@@ -5,7 +5,6 @@ import {
   FAKE_PLAYER_PACES,
   type FakePlayerPace,
   fakeSeats,
-  type GameState,
   isOnboardingComplete,
   isSimulated,
   K_LABELS,
@@ -19,9 +18,10 @@ import {
   pairingText,
   quotaLimit,
   quotaUsed,
+  type ReadonlyGameState,
+  type ReadonlySeatState,
   type Scenario,
   type SeatMicStats,
-  type SeatState,
   seatList,
 } from "@wkwa/shared";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -66,7 +66,7 @@ function useNow(ms = 1000) {
 /* ─────────────────────────── Who holds a seat ─────────────────────────── */
 
 /** Status tags of a seat's occupant: an agent, or a client (connection state) that may be a fake player. */
-export function OccupantTags({ seat: s }: { seat: SeatState }) {
+export function OccupantTags({ seat: s }: { seat: ReadonlySeatState }) {
   if (s.agent) {
     return (
       <StatusTag icon="agent" title={`Agent: ${policyLabel(s.agent.policy)}`}>
@@ -250,7 +250,7 @@ export function BindEditor({ conn, dash }: { conn: FacilitatorConnection; dash: 
 
 /* ─────────────────────────── Agents (setup step 7 of a simulated session) ─────────────────────────── */
 
-export function AgentsTable({ st }: { st: GameState }) {
+export function AgentsTable({ st }: { st: ReadonlyGameState }) {
   return (
     <table className="grid">
       <thead>
@@ -292,7 +292,7 @@ export function AgentsTable({ st }: { st: GameState }) {
 type Draft = Record<number, { k: KLabel | ""; view: string }>;
 type PairingChoice = { mode: PairingMode; id: number | null };
 
-export function labelsComplete(st: GameState): boolean {
+export function labelsComplete(st: ReadonlyGameState): boolean {
   return seatList(st).every((s) => s.k && s.p && s.view) && st.labelPairing !== null;
 }
 
@@ -343,7 +343,7 @@ export function LabelsEditor({
   onSaved,
 }: {
   conn: FacilitatorConnection;
-  st: GameState;
+  st: ReadonlyGameState;
   scenario: Scenario | null;
   onSaved?: () => void;
 }) {
@@ -581,8 +581,8 @@ export function MicColumn({
   trend,
   serverNow,
 }: {
-  st: GameState;
-  seat: SeatState;
+  st: ReadonlyGameState;
+  seat: ReadonlySeatState;
   mic: SeatMicStats | undefined;
   trend: BacklogTrend | undefined;
   serverNow: number;

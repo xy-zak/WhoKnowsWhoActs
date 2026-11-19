@@ -4,14 +4,14 @@ import {
   type AudioTrackSummary,
   type CalibrationQuality,
   currentCalibrationTurn,
-  type GameState,
   isParticipant,
   type MicCheckStatus,
   micCheckApplies,
   RECORDING_PHASES,
+  type ReadonlyGameState,
+  type ReadonlySeatState,
   type SeatLiveStats,
   type SeatMicStats,
-  type SeatState,
   type StoredEvent,
   seatList,
   shouldRecord,
@@ -53,7 +53,7 @@ export interface MicCell {
 }
 
 /** Should this seat record if recording were not paused? (The denominator of "mics n/m".) */
-export function recordingExpected(st: GameState, seat: SeatState): boolean {
+export function recordingExpected(st: ReadonlyGameState, seat: ReadonlySeatState): boolean {
   return shouldRecord({ ...st, audio: { ...st.audio, recordingPaused: false } }, seat);
 }
 
@@ -63,7 +63,11 @@ export function recordingExpected(st: GameState, seat: SeatState): boolean {
  * check, for seats that are never recorded (fake player, agent, no audio consent, withdrawn) and
  * while there is no reading (`idle`, e.g. the browser disconnected).
  */
-export function micCell(st: GameState, seat: SeatState, mic: SeatMicStats | undefined): MicCell {
+export function micCell(
+  st: ReadonlyGameState,
+  seat: ReadonlySeatState,
+  mic: SeatMicStats | undefined,
+): MicCell {
   const off = (tip: string): MicCell => ({ state: "off", tip, db: null, peakDb: null });
   if (!st.audio.enabled) return off("This session does not record audio");
   if (!seat.bound) return off("No client in this seat");
@@ -137,7 +141,7 @@ export function chunkAge(
  * Mic check status of a seat, for the mic column during onboarding: null when the check does not
  * apply (no audio, unbound, withdrawn, fake player or agent, no audio consent, consent not given).
  */
-export function micCheckStatus(st: GameState, seat: SeatState): MicCheckStatus | null {
+export function micCheckStatus(st: ReadonlyGameState, seat: ReadonlySeatState): MicCheckStatus | null {
   if (!seat.bound || seat.withdrawn || seat.consent !== "given" || !micCheckApplies(st, seat)) return null;
   return seat.micCheck;
 }
@@ -156,7 +160,10 @@ export interface MicsSummary {
   missing: number[];
 }
 
-export function micsSummary(st: GameState, mics: Record<number, SeatMicStats | undefined>): MicsSummary {
+export function micsSummary(
+  st: ReadonlyGameState,
+  mics: Record<number, SeatMicStats | undefined>,
+): MicsSummary {
   const show = st.audio.enabled && RECORDING_PHASES.has(st.phase);
   const expected = seatList(st).filter((s) => recordingExpected(st, s));
   const ok = expected.filter((s) => mics[s.seat]?.state === "recording");
@@ -187,7 +194,7 @@ export interface CalibrationSummary {
  * The calibration's state as a tag (NEXT panel and calibration card): not run yet, running (who
  * reads now), checking the audio, the separation verdict (weak seats with their margins), skipped.
  */
-export function calibrationSummary(st: GameState): CalibrationSummary {
+export function calibrationSummary(st: ReadonlyGameState): CalibrationSummary {
   const c = st.audio.calibration;
   switch (c.status) {
     case "running": {
@@ -293,7 +300,7 @@ const BROKEN_STOPS: Partial<Record<AudioStopReason, string>> = {
  * stored tracks (null while not loaded yet). Interrupted tracks and missing chunks are listed too.
  */
 export function wrapUpAudioCheck(
-  st: GameState,
+  st: ReadonlyGameState,
   mics: Record<number, SeatMicStats | undefined>,
   tracks: TrackStatusLite[] | null,
 ): AudioCheck {

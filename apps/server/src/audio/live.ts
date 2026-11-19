@@ -44,12 +44,12 @@ import {
   type AudioStart,
   type AudioStop,
   type AudioStopReason,
-  type GameState,
   isMicCheckHeld,
   isParticipant,
   micCheckApplies,
   type NewEvent,
   RECORDING_PHASES,
+  type ReadonlyGameState,
   type StoredEvent,
   samplesToMs,
   shouldRecord,
@@ -84,7 +84,7 @@ export interface LiveAudioDeps {
   store: Store;
   clock: () => number;
   log: Logger;
-  state: () => GameState;
+  state: () => ReadonlyGameState;
   /** Append an event (only inside `run`). */
   append: (ev: NewEvent) => StoredEvent;
   /** Run a command: events appended inside are delivered as one batch. */
@@ -230,8 +230,8 @@ export class LiveAudio {
     const st = this.state;
     if (st.audio.recordingPaused) return "Recording is paused";
     if (!RECORDING_PHASES.has(st.phase)) return `Nothing is recorded in phase '${st.phase}'`;
-    const s = st.seats[seat]!;
-    return shouldRecord(st, s) ? null : "This seat should not record now";
+    const s = st.seats[seat];
+    return s && shouldRecord(st, s) ? null : "This seat should not record now";
   }
 
   /**
@@ -278,7 +278,7 @@ export class LiveAudio {
     }
     const why = this.startRefusal(seat);
     if (why) return reject(why);
-    const files = store.audioFiles!;
+    const files = store.requireAudioFiles(); // refusal() refused already when there is none
     let file: { fileName: string; key: Buffer };
     try {
       file = await files.createFile(sessionId);
@@ -289,15 +289,15 @@ export class LiveAudio {
     // the state may have changed while the file was created
     const late =
       this.startRefusal(seat) ?? (store.getAudioTrack(msg.trackId) ? "Track id already used" : null);
-    if (late) {
+    const code = this.state.seats[seat]?.participantCode ?? null;
+    if (late || !code) {
       files.deleteFile(sessionId, file.fileName);
-      return reject(late);
+      return reject(late ?? "This seat has no participant code");
     }
     this.deps.run(() => {
       // one seat records one track at a time: a track still open (another window, a lost stop) ends here
       for (const t of store.listAudioTracks(sessionId, { seat, status: "recording" }))
         this.closeTrack(t, "interrupted", "system");
-      const code = this.state.seats[seat]!.participantCode!;
       store.insertAudioTrack({
         trackId: msg.trackId,
         sessionId,
@@ -360,7 +360,7 @@ export class LiveAudio {
     const pcm = toBuffer(msg.pcm).subarray(0, keep * 2);
     if (!key || !track.fileName) return reject("The audio of this track was deleted");
     try {
-      await store.audioFiles!.appendRecord(sessionId, track.fileName, key, msg.seq, pcm);
+      await store.requireAudioFiles().appendRecord(sessionId, track.fileName, key, msg.seq, pcm);
     } catch (e) {
       this.deps.log.error({ err: e, sessionId, seat, seq: msg.seq }, "could not store an audio chunk");
       return retry("Could not store the audio");

@@ -205,6 +205,7 @@ sequenceDiagram
 - Socket.IO reconnects automatically with back-off. The player sees a "Reconnecting…" overlay.
 - **Actions are never lost and never made twice.** The browser keeps every action (`intent`) until the server has answered it (`apps/client/src/player/intents.ts`). It sends an action only while its socket is *seated* (the server has answered `hello` with the seat, or sent `bound`), and sends every unanswered one again, unchanged (same `clientSeq` and click time), each time the socket is seated again. The server stores an action once and answers a resend with its first answer (`duplicate: true`); it keeps the answers of each seat's last 50 actions and rebuilds them from the event log after a restart, so a resend gets the exact answer then too. An action still unanswered after 45 s is given up: the player is told to check the map, and it is never sent again.
 - **Why the browser waits for `hello`'s answer.** On a reconnect, Socket.IO sends what was emitted while offline *before* the `connect` handler runs, so before `hello`: the server's new socket holds no seat yet and refuses it. Requests from a socket without a seat are refused as transient (`{ ok: false, error: "Not seated", retry: true }`), and the browser's onboarding requests (consent, mic check, demographics, briefing) also wait until the socket is seated before they are sent.
+- **Audio uploads wait for the seat too.** The recorder's send queue (`apps/client/src/audio/queue.ts`) delivers one item at a time; each attempt waits until the socket is seated before it is emitted (within its 20 s budget). After a reconnect the queue gives up on the attempt in flight and sends it again; an attempt it gave up on while still waiting for the seat is cancelled (an `AbortSignal`), so the item is not sent twice.
 - Telemetry produced while offline is buffered in the browser and sent after reconnecting. Its `clientTs` keeps the original timing.
 - A reload, or even closing and reopening the tab, keeps the seat, because the token is in `localStorage` (`wkwa.seat`). Clearing the browser's site data, or using a different browser profile, loses it.
 
@@ -229,6 +230,27 @@ sequenceDiagram
   S-->>B: ack (seat), then state (full snapshot)
 ```
 - The game never resumes automatically. The facilitator decides when to press *Resume*, and the pause duration is logged.
+
+### Switching sessions keeps the seats
+
+A server restart is not the only way a session is detached: the facilitator may create or resume another session, an erasure reloads the attached session, and deleting a session detaches it. In each case the server sends **`detached`** (not `unbound`) to every seated browser. The browser drops its view and shows the waiting screen, but **keeps its seat token** (`wkwa.seat`); unanswered actions and unsent audio stay queued. When the session is attached again, `rehello` re-claims each seat exactly as after a restart. `unbound` is only sent when a seat itself is released (the facilitator unbinds it, or the seat is opened in another window); only then does the browser forget its token.
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant B as Player browser (seat 2 of session A)
+  participant S as Server
+  participant F as Facilitator
+  F->>S: session:resume (session B)
+  S-->>B: detached ("Switching session"), token kept
+  S->>B: rehello (broadcast)
+  B->>S: hello (seatToken of A)
+  S-->>B: ack (seat null: B has no such seat)
+  F->>S: session:resume (session A)
+  S->>B: rehello (broadcast)
+  B->>S: hello (seatToken of A)
+  S-->>B: ack (seat 2), bound, state
+```
 
 ## 8. Clock synchronisation
 
@@ -286,7 +308,8 @@ Every client→server payload is validated with the zod schema listed here. Inva
 | --- | --- | --- | --- |
 | `terminal` | `{ terminal: number }` | — | Client number assigned to this browser (shown in large type while unassigned). |
 | `bound` | `{ seat: number, sessionId: string, seatToken: string }` | — (SeatBound is logged when the facilitator binds) | This browser was bound to a seat; carries the reconnect token. |
-| `unbound` | `{ reason: string }` | — | The seat binding was removed (or the session ended); return to the waiting screen. |
+| `unbound` | `{ reason: string }` | — | The seat binding was removed (the facilitator unbound it, or it was opened in another window); the client forgets its seat token and returns to the waiting screen. |
+| `detached` | `{ reason: string }` | — | The session was detached on the server (another session was resumed or created, it was reloaded after an erasure, or it was deleted). The client KEEPS its seat token and waits; when the session is attached again, `rehello` re-claims the seat. |
 | `rehello` | `{}` | — | A session was (re)attached on the server; the client re-sends `hello` with its stored seat token so its seat is re-claimed. |
 | `state` | `PlayerView` | Client acknowledges with telemetry 'state_received' | Full projected state for this player (PlayerView): phase, round, own labels and quotas, the grid (board size, knowledge-type names), the scores of the OWN knowledge type only, the map score, which knowledge type the player acts on, and the marks (proposals and decisions). |
 

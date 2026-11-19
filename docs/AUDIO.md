@@ -136,6 +136,7 @@ flowchart TD
 | The page is reloaded | Starts again (shows **Resume recording** if the browser needs a click) | start `reload` |
 | The mic is lost (unplugged, permission revoked) | Waits for **Try again** or a device change | stop `permission_lost` or `track_ended`, then start `permission_regained` |
 | Game complete, seat withdrawn, mic check skipped | Stops, drains the queue | stop `game_complete`, `withdrawn` or `skipped` |
+| The session is detached (the facilitator resumes another, an erasure reloads it); the seat is kept | Stops, keeps what is pending; resends it and starts again once the seat is re-claimed | stop `disconnect`, start `reconnect` |
 | The seat is unbound | Stops and clears what is pending | stop `client_stop` |
 
 The full lists of start and stop reasons, with their meaning, are in [NETWORKING.md § 9](NETWORKING.md#9-message-catalogue) (`audio:start`, `audio:stop`) and [DATA-TYPES.md](DATA-TYPES.md#audiotrackstarted) (`AudioTrackStarted`, `AudioTrackStopped`).
@@ -182,6 +183,8 @@ sequenceDiagram
   B->>S: audio:start (reason reconnect, new trackId)
   S-->>B: ack ok
 ```
+
+**Waiting for the seat.** Each upload attempt waits until the socket holds its seat again (`hello` answered) before it is emitted, so nothing is refused as "Not seated" after a reconnect. When the queue resends after a reconnect, an older attempt still waiting is cancelled, so an item is not sent twice.
 
 **Acknowledgements.** Every ack is `{ ok: true }` (also for a duplicate) or `{ ok: false, error, retry }`. `retry: false` is a permanent refusal (for example a withdrawn seat): the browser drops the item and counts it. `retry: true` is a transient fault (a storage error): the browser sends it again with back-off. A missing or malformed ack counts as "send again". This is why the same `(trackId, seq)` can arrive twice and is still stored once.
 

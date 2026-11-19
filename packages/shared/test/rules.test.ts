@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  afterReplay,
   DEFAULT_VALIDATORS,
-  type GameState,
   isOnboardingComplete,
   playerView,
   reduceEvents,
@@ -35,6 +35,15 @@ describe("session setup", () => {
       expect(seat.p).toMatch(/^P[a-d]$/);
       expect(isOnboardingComplete(s, seat)).toBe(true);
     }
+  });
+
+  it("after a replay on load nobody is connected until their browser says hello (agents always are)", () => {
+    const log = readySession();
+    expect(seatList(log.state).every((x) => x.connected)).toBe(true);
+    const agent = log.state.seats[2]!;
+    agent.agent = { policy: "random", policyVersion: "1", params: {}, seed: "s" };
+    afterReplay(log.state);
+    expect(seatList(log.state).map((x) => x.connected)).toEqual([false, true, false, false]);
   });
 });
 
@@ -140,7 +149,7 @@ describe("rounds and quotas (default: 5 propose + 5 decide, 3 rounds)", () => {
   it("custom validators can be added (game-design hook)", () => {
     const log = readySession();
     startRound(log, 1);
-    const decideOnlyProposed: Validator = (state: GameState, _seat, intent) =>
+    const decideOnlyProposed: Validator = (state, _seat, intent) =>
       intent.kind === "decide" &&
       !state.actions.some((a) => a.kind === "propose" && a.regionId === intent.regionId && !a.revoked)
         ? { ok: false, reason: "rule", detail: "Decide only on proposed sub-squares" }

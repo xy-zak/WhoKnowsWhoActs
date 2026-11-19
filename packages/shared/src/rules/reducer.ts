@@ -13,6 +13,16 @@ import {
 } from "../state";
 
 /**
+ * The log was replayed to load a session on the server (a restart, a resume, a reload after an
+ * erasure): no browser is connected to it yet, so every seat counts as disconnected until its
+ * browser says hello again (an agent is always there). Not used by replays of a past session.
+ */
+export function afterReplay(state: GameState): GameState {
+  for (const s of Object.values(state.seats)) if (!s.agent) s.connected = false;
+  return state;
+}
+
+/**
  * Apply one event to the state (mutates `state` in place and returns it).
  *
  * The reducer is the ONLY place game state changes. It must stay pure with

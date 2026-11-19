@@ -18,9 +18,9 @@
 import {
   activeSeats,
   calibrationWaitingSeats,
-  type GameState,
   type NewEvent,
   type OnboardingContent,
+  type ReadonlyGameState,
   type StoredEvent,
   shouldRecord,
 } from "@wkwa/shared";
@@ -46,7 +46,7 @@ export interface CalibrationDeps {
   sessionId: string;
   clock: () => number;
   log: Logger;
-  state: () => GameState;
+  state: () => ReadonlyGameState;
   /** Append an event (only inside `run`). */
   append: (ev: NewEvent) => StoredEvent;
   /** Run a command: events appended inside are delivered as one batch. */

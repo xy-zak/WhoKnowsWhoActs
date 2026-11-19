@@ -499,7 +499,16 @@ export const MESSAGES: MessageCatalogue = {
   unbound: {
     namespace: "/player",
     direction: "server→client",
-    description: "The seat binding was removed (or the session ended); return to the waiting screen.",
+    description:
+      "The seat binding was removed (the facilitator unbound it, or it was opened in another window); the client forgets its seat token and returns to the waiting screen.",
+    schema: "{ reason: string }",
+    logged: "—",
+  },
+  detached: {
+    namespace: "/player",
+    direction: "server→client",
+    description:
+      "The session was detached on the server (another session was resumed or created, it was reloaded after an erasure, or it was deleted). The client KEEPS its seat token and waits; when the session is attached again, `rehello` re-claims the seat.",
     schema: "{ reason: string }",
     logged: "—",
   },
@@ -820,7 +829,7 @@ export interface SeatMicStats {
 }
 
 export interface DashboardMsg {
-  state: import("./state").GameState | null;
+  state: import("./state").ReadonlyGameState | null;
   serverTs: number;
   terminals: TerminalInfo[];
   stats: Record<number, SeatLiveStats>;

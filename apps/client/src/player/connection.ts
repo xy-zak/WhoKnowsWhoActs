@@ -32,6 +32,8 @@ export interface PlayerConnState {
 
 const TERMINAL_KEY = "wkwa.terminalKey";
 const SEAT_KEY = "wkwa.seat";
+/** One audio upload attempt: waiting for the seat plus the server's answer (the queue retries after). */
+const AUDIO_SEND_TIMEOUT_MS = 20_000;
 
 function terminalKey(): string {
   try {
@@ -117,14 +119,26 @@ export class PlayerConnection {
     this.clock = new ClockSync(this.socket, (r) => this.track("clock_sync", r));
     this.telemetry = new Telemetry(this.socket, this.clock);
     this.recording = new RecordingController({
-      send: (event, payload) =>
-        new Promise((resolve) => {
-          const t = setTimeout(() => resolve(undefined), 20_000);
+      // Waits for the seat like every other request (an upload from a socket without one is only
+      // refused with "Not seated"); within one 20 s budget. An attempt the queue gave up on while
+      // waiting (`signal`) is never emitted, so a reconnect does not send the item twice.
+      send: async (event, payload, signal) => {
+        const start = Date.now();
+        try {
+          await this.whenSeated(AUDIO_SEND_TIMEOUT_MS, signal);
+        } catch {
+          return undefined;
+        }
+        if (signal?.aborted) return undefined;
+        return new Promise((resolve) => {
+          const left = Math.max(0, AUDIO_SEND_TIMEOUT_MS - (Date.now() - start));
+          const t = setTimeout(() => resolve(undefined), left);
           emitPlayer(this.socket, event, payload, (ack) => {
             clearTimeout(t);
             resolve(ack);
           });
-        }),
+        });
+      },
       level: (p) => this.socket.volatile.emit("audio:level", p),
       now: () => this.clock.now(),
       clockOffsetMs: () => this.clock.offsetMs,
@@ -171,6 +185,15 @@ export class PlayerConnection {
       this.intents.failAll("Your seat was released, so the action was not made");
       this.recording.onUnbound();
     });
+    // The session was detached on the server (switched, reloaded after an erasure, deleted): the
+    // seat token is KEPT, so `rehello` re-claims the seat when the session is attached again.
+    // Unanswered actions stay queued until then (or their deadline).
+    this.socket.on("detached", (m) => {
+      this.telemetry.enabled = false;
+      this.store.set((s) => ({ ...s, seat: null, view: null, notice: m.reason }));
+      this.setSeated(false);
+      this.recording.onDetached();
+    });
     this.socket.on("state", (v) => {
       // Telemetry only after consent (mirrors the server-side rule).
       this.telemetry.enabled = v.me.consent === "given" || v.me.consent === "skipped";
@@ -199,19 +222,25 @@ export class PlayerConnection {
     this.seatWaiters.clear();
   }
 
-  /** Resolves once this socket is seated (at once if it is); rejects after `timeoutMs`. */
-  private whenSeated(timeoutMs: number): Promise<void> {
+  /** Resolves once this socket is seated (at once if it is); rejects after `timeoutMs` or on `signal`. */
+  private whenSeated(timeoutMs: number, signal?: AbortSignal): Promise<void> {
     if (this.store.get().seated) return Promise.resolve();
     return new Promise((resolve, reject) => {
+      const stop = (msg: string) => {
+        clearTimeout(t);
+        this.seatWaiters.delete(wake);
+        signal?.removeEventListener("abort", onAbort);
+        reject(new Error(msg));
+      };
+      const onAbort = () => stop("Cancelled");
       const wake = () => {
         clearTimeout(t);
+        signal?.removeEventListener("abort", onAbort);
         resolve();
       };
-      const t = setTimeout(() => {
-        this.seatWaiters.delete(wake);
-        reject(new Error("Not connected to the server — check the connection"));
-      }, timeoutMs);
+      const t = setTimeout(() => stop("Not connected to the server — check the connection"), timeoutMs);
       this.seatWaiters.add(wake);
+      signal?.addEventListener("abort", onAbort, { once: true });
     });
   }
 

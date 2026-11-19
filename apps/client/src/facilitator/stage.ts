@@ -1,4 +1,4 @@
-import type { GameState } from "@wkwa/shared";
+import type { ReadonlyGameState } from "@wkwa/shared";
 
 /**
  * The first tab has two faces. SETUP covers everything before participants
@@ -8,7 +8,7 @@ import type { GameState } from "@wkwa/shared";
  */
 export type Stage = "setup" | "live";
 
-export function stageOf(state: GameState | null | undefined): Stage {
+export function stageOf(state: ReadonlyGameState | null | undefined): Stage {
   if (!state) return "setup";
   return ["onboarding", "round_active", "round_complete", "game_complete"].includes(state.phase)
     ? "live"
@@ -16,11 +16,11 @@ export function stageOf(state: GameState | null | undefined): Stage {
 }
 
 /** A session is attached and still in its lobby (setup steps 7–10). */
-export function inLobby(state: GameState | null | undefined): boolean {
+export function inLobby(state: ReadonlyGameState | null | undefined): boolean {
   return state?.phase === "lobby";
 }
 
-export const PHASE_LABEL: Record<GameState["phase"], string> = {
+export const PHASE_LABEL: Record<ReadonlyGameState["phase"], string> = {
   lobby: "LOBBY",
   onboarding: "ONBOARDING",
   round_active: "ROUND",

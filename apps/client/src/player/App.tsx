@@ -90,10 +90,10 @@ export function App({ conn }: { conn: PlayerConnection }) {
   const screenKey = shown === "paused" || shown === "round_break" ? "game" : shown;
 
   const body = useMemo(() => {
-    const v = st.view;
+    const waiting = <Waiting terminal={st.terminal} connected={st.connected} notice={st.notice} />;
     switch (shown) {
       case "waiting":
-        return <Waiting terminal={st.terminal} connected={st.connected} notice={st.notice} />;
+        return waiting;
       case "lobby":
         return (
           <Centered title="Welcome" icon="seat">
@@ -101,32 +101,37 @@ export function App({ conn }: { conn: PlayerConnection }) {
             <p className="muted cursor">The session will start shortly. Please wait</p>
           </Centered>
         );
-      case "consent":
-        return <ConsentScreen conn={conn} view={v!} />;
       case "declined":
         return <DeclinedScreen />;
+    }
+    // every other screen shows this seat's view (screenFor only picks them when there is one)
+    const v = st.view;
+    if (!v) return waiting;
+    switch (shown) {
+      case "consent":
+        return <ConsentScreen conn={conn} view={v} />;
       case "mic_check":
-        return <MicCheckScreen conn={conn} view={v!} />;
+        return <MicCheckScreen conn={conn} view={v} />;
       case "demographics":
-        return <DemographicsScreen conn={conn} view={v!} />;
+        return <DemographicsScreen conn={conn} view={v} />;
       case "briefing":
-        return <BriefingScreen conn={conn} view={v!} />;
+        return <BriefingScreen conn={conn} view={v} />;
       case "calibration":
-        return <CalibrationScreen conn={conn} view={v!} />;
+        return <CalibrationScreen conn={conn} view={v} />;
       case "ready":
         // audio sessions: the waiting state of the calibration, until the facilitator runs or skips it
-        return v!.audio.enabled && v!.audio.calibration.status === "pending" ? (
-          <CalibrationPendingScreen view={v!} />
+        return v.audio.enabled && v.audio.calibration.status === "pending" ? (
+          <CalibrationPendingScreen view={v} />
         ) : (
-          <ReadyScreen view={v!} waitingFor="round 1" />
+          <ReadyScreen view={v} waitingFor="round 1" />
         );
       case "game":
       case "paused":
       case "round_break":
-        return <Game conn={conn} view={v!} />;
+        return <Game conn={conn} view={v} />;
       case "end":
       case "withdrawn":
-        return <EndScreen view={v!} withdrawn={shown === "withdrawn"} />;
+        return <EndScreen view={v} withdrawn={shown === "withdrawn"} />;
     }
   }, [shown, st.view, st.terminal, st.connected, st.notice, st.seat, conn]);
   const line = st.view && RECORDING_LINE.has(screen) ? <RecordingLine conn={conn} view={st.view} /> : null;
@@ -148,13 +153,13 @@ export function App({ conn }: { conn: PlayerConnection }) {
         >
           {body}
         </div>
-        {keepBase && (
+        {keepBase && st.view && (
           <div
             key="calibration"
             className={`screen-switch ${signal}`}
             style={{ flex: "1 1 0", minHeight: 0 }}
           >
-            <CalibrationScreen conn={conn} view={st.view!} />
+            <CalibrationScreen conn={conn} view={st.view} />
           </div>
         )}
       </div>

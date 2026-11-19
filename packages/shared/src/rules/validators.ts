@@ -2,7 +2,7 @@ import { parseCellId } from "../board";
 import type { PayloadOf } from "../events";
 import { actorOf, rulesFor } from "../game/scoring";
 import type { ActionKind } from "../labels";
-import type { GameState } from "../state";
+import type { ReadonlyGameState } from "../state";
 import { ruleFor } from "./roundRules";
 
 export interface Intent {
@@ -24,7 +24,7 @@ export type ValidationResult = { ok: true } | { ok: false; reason: RejectionReas
  * `targetOf` and `validators`); `gameRulesAllow` below runs them. That way a
  * rule change never touches this file. Add a unit test in packages/shared/test.
  */
-export type Validator = (state: GameState, seat: number, intent: Intent) => ValidationResult;
+export type Validator = (state: ReadonlyGameState, seat: number, intent: Intent) => ValidationResult;
 
 const OK: ValidationResult = { ok: true };
 
@@ -93,7 +93,7 @@ export const DEFAULT_VALIDATORS: Validator[] = [
 ];
 
 export function validateIntent(
-  state: GameState,
+  state: ReadonlyGameState,
   seat: number,
   intent: Intent,
   validators: Validator[] = DEFAULT_VALIDATORS,

@@ -89,6 +89,7 @@ export interface PlayerServerToClient {
   terminal: (m: { terminal: number }) => void;
   bound: (m: BoundMsg) => void;
   unbound: (m: { reason: string }) => void;
+  detached: (m: { reason: string }) => void;
   rehello: () => void;
   state: (v: PlayerView) => void;
 }

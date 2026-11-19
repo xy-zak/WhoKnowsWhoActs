@@ -4,6 +4,12 @@ History of [ARCHITECTURE.md](../ARCHITECTURE.md). Newest first. How entries are 
 
 ## Unreleased
 
+### Not yet committed · read-only game state; `detached` on session switch
+
+- **Type:** Risk mitigation
+- **Change:** § 5 adds the invariant that only the reducer changes state (`ReadonlyGameState` everywhere else; `afterReplay` for the reset after a load). § 11 says that switching sessions keeps the players' seats.
+- **Reason:** The "reducer is the only place state changes" rule was a convention: `SessionManager.load` reset `connected` outside it, and nothing stopped other code from writing. The compiler now enforces it.
+
 ### Not yet committed · typed socket protocol, intent resend, CalibrationRunner
 
 - **Type:** Risk mitigation

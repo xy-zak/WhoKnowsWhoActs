@@ -4,7 +4,6 @@ import {
   type FacilitatorCommand,
   type FacilitatorPayload,
   fakeSeats,
-  type GameState,
   hasParticipants,
   isOnboardingComplete,
   isSimulated,
@@ -13,6 +12,7 @@ import {
   pairingText,
   quotaLimit,
   quotaUsed,
+  type ReadonlyGameState,
   roundActiveMs,
   roundRemainingMs,
   seatList,
@@ -53,7 +53,11 @@ function useNow(ms = 1000) {
 
 /* ─────────────────────────── lifecycle (order of events) ─────────────────────────── */
 
-function lifecycle(st: GameState): { steps: StepDef[]; current: number; done: (i: number) => boolean } {
+function lifecycle(st: ReadonlyGameState): {
+  steps: StepDef[];
+  current: number;
+  done: (i: number) => boolean;
+} {
   const simulated = isSimulated(st);
   const steps: StepDef[] = [
     simulated ? { key: "onboarding", label: "Agents" } : { key: "onboarding", label: "Onboarding" },
@@ -83,7 +87,7 @@ function NextPanel({
   onWrapUp,
 }: {
   conn: FacilitatorConnection;
-  st: GameState;
+  st: ReadonlyGameState;
   onWrapUp: () => void;
 }) {
   const now = useNow();
@@ -278,7 +282,7 @@ function ToolsPanel({
   onLabels,
 }: {
   conn: FacilitatorConnection;
-  st: GameState;
+  st: ReadonlyGameState;
   onLabels: () => void;
 }) {
   const confirm = useConfirm();
@@ -423,7 +427,15 @@ const WRAP_STEPS: StepDef[] = [
   { key: "close", label: "Close" },
 ];
 
-function WrapUp({ conn, st, onClose }: { conn: FacilitatorConnection; st: GameState; onClose: () => void }) {
+function WrapUp({
+  conn,
+  st,
+  onClose,
+}: {
+  conn: FacilitatorConnection;
+  st: ReadonlyGameState;
+  onClose: () => void;
+}) {
   const simulated = isSimulated(st);
   // no participants (agents or fake players only): no takedown cards
   const steps = hasParticipants(st) ? WRAP_STEPS : WRAP_STEPS.filter((s) => s.key !== "cards");

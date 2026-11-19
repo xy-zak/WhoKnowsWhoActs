@@ -1,7 +1,7 @@
 import {
   EVENT_TYPES,
   formatScoreChanges,
-  type GameState,
+  type ReadonlyGameState,
   type StoredEvent,
   type StoredTelemetry,
   samplesToMs,
@@ -117,7 +117,7 @@ export function EventLog({
   maxHeight = 360,
 }: {
   events: StoredEvent[];
-  state: GameState | null;
+  state: ReadonlyGameState | null;
   regionName: (id: string) => string;
   onRevoke?: (seq: number) => void;
   highlightSeq?: number;

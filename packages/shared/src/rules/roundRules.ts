@@ -1,5 +1,5 @@
 import type { ActionKind } from "../labels";
-import { actionsOf, activeSeats, type GameState } from "../state";
+import { actionsOf, activeSeats, type ReadonlyGameState } from "../state";
 
 export type RuleResult = { ok: true } | { ok: false; reason: "quota_exhausted" | "rule"; detail: string };
 
@@ -15,20 +15,20 @@ export interface RoundRule {
   id: string;
   description: string;
   /** May `seat` perform `kind` right now (quota-style limits)? */
-  canAct(state: GameState, seat: number, kind: ActionKind): RuleResult;
+  canAct(state: ReadonlyGameState, seat: number, kind: ActionKind): RuleResult;
   /** Is the current round finished (checked after every accepted action)? */
-  isComplete(state: GameState): boolean;
+  isComplete(state: ReadonlyGameState): boolean;
 }
 
-export function quotaLimit(state: GameState, kind: ActionKind): number | null {
+export function quotaLimit(state: ReadonlyGameState, kind: ActionKind): number | null {
   return state.roundSpec?.quota[kind] ?? null;
 }
 
-export function quotaUsed(state: GameState, seat: number, kind: ActionKind): number {
+export function quotaUsed(state: ReadonlyGameState, seat: number, kind: ActionKind): number {
   return actionsOf(state, seat, state.round, kind).length;
 }
 
-function checkQuota(state: GameState, seat: number, kind: ActionKind): RuleResult {
+function checkQuota(state: ReadonlyGameState, seat: number, kind: ActionKind): RuleResult {
   const limit = quotaLimit(state, kind);
   if (limit === null) return { ok: true };
   const used = quotaUsed(state, seat, kind);
@@ -70,7 +70,7 @@ export const ROUND_RULES: Record<string, RoundRule> = {
   [manualRule.id]: manualRule,
 };
 
-export function ruleFor(state: GameState): RoundRule {
+export function ruleFor(state: ReadonlyGameState): RoundRule {
   const id = state.roundSpec?.rule ?? "quota";
   const rule = ROUND_RULES[id];
   if (!rule) throw new Error(`Unknown round rule '${id}'`);

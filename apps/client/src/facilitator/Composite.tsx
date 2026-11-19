@@ -2,7 +2,6 @@ import {
   cellId,
   cellName,
   formatMapScore,
-  type GameState,
   getGameRules,
   type Highlight,
   K_LABELS,
@@ -10,6 +9,7 @@ import {
   mapScoreOf,
   parseCellId,
   playerView,
+  type ReadonlyGameState,
   rulesFor,
   type Scenario,
   type Scores,
@@ -21,7 +21,7 @@ import { ActSwatch, Button, Check, LabelTag, Panel, SeatDot, StatusTag } from ".
 import { OccupantTags } from "./seats";
 
 /** The board of a session (recorded at creation; the scenario's for sessions before the grid map). */
-function boardOf(state: GameState, scenario: Scenario) {
+function boardOf(state: ReadonlyGameState, scenario: Scenario) {
   return state.board ?? scenario.board;
 }
 
@@ -33,7 +33,7 @@ function SquareComparison({
   onRevoke,
 }: {
   scenario: Scenario;
-  state: GameState;
+  state: ReadonlyGameState;
   square: string;
   onRevoke?: (seq: number) => void;
 }) {
@@ -149,7 +149,7 @@ export function CompositeMap({
   height = 560,
 }: {
   scenario: Scenario;
-  state: GameState;
+  state: ReadonlyGameState;
   presence?: Record<number, string | null>;
   onRevoke?: (seq: number) => void;
   height?: number;
@@ -281,7 +281,7 @@ export function PlayerMirrors({
   now,
 }: {
   scenario: Scenario;
-  state: GameState;
+  state: ReadonlyGameState;
   presence?: Record<number, string | null>;
   now: number;
 }) {

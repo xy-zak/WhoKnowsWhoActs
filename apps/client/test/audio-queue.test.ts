@@ -244,4 +244,28 @@ describe("send queue", () => {
     expect(q.dropped).toBe(0);
     expect(q.pendingBytes).toBe(0);
   });
+
+  it("aborts the signal of an attempt it gives up on (reconnect, timeout, clear), never of a live one", async () => {
+    const signals: AbortSignal[] = [];
+    const q = new SendQueue<Item>({
+      deliver: (_item, signal) => {
+        signals.push(signal);
+        return new Promise<SendResult>(() => {}); // e.g. still waiting for the seat
+      },
+      size: (i) => ({ samples: i.samples, bytes: 0 }),
+      maxPendingSamples: 1_000_000,
+      retryDelaysMs: [1000],
+      ackTimeoutMs: 20_000,
+    });
+    q.push(chunk("c0"));
+    expect(signals.map((s) => s.aborted)).toEqual([false]);
+    q.retryNow(); // a reconnect: the waiting attempt must not send as well as its resend
+    expect(signals.map((s) => s.aborted)).toEqual([true, false]);
+    await vi.advanceTimersByTimeAsync(20_000); // the resend timed out
+    expect(signals[1]!.aborted).toBe(true);
+    await vi.advanceTimersByTimeAsync(1000); // retried after the back-off
+    expect(signals).toHaveLength(3);
+    q.clear();
+    expect(signals.every((s) => s.aborted)).toBe(true);
+  });
 });

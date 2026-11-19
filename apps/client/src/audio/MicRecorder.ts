@@ -52,11 +52,12 @@ export interface MicRecorderOptions {
   /** the ClockSync offset in use (ms) */
   clockOffsetMs(): number;
   /** delivers a track start; resolve true when acked (undefined counts as delivered) */
-  sendStart(info: AudioStartInfo): Promise<SendResult> | SendResult | undefined;
+  sendStart(info: AudioStartInfo, signal?: AbortSignal): Promise<SendResult> | SendResult | undefined;
   /** delivers a chunk; resolve true when acked, false to retry, "rejected" to drop */
-  sendChunk(chunk: AudioChunk): Promise<SendResult>;
+  sendChunk(chunk: AudioChunk, signal?: AbortSignal): Promise<SendResult>;
   /** delivers a track stop; resolve true when acked (undefined counts as delivered) */
-  sendStop(info: AudioStopInfo): Promise<SendResult> | SendResult | undefined;
+  sendStop(info: AudioStopInfo, signal?: AbortSignal): Promise<SendResult> | SendResult | undefined;
+  // signal (all three): the send queue gave up on this attempt — see SendQueueOptions.deliver
   /** ~4 Hz level of the input, for meters and the volatile audio:level message (never stored) */
   onLevel?(level: MicLevel): void;
   /** every change of state, track, error, needsGesture or muted */
@@ -259,12 +260,12 @@ export class MicRecorder {
     this.noSignalMs = options.noSignalMs ?? 3000;
     const maxPendingSeconds = options.maxPendingSeconds ?? DEFAULT_MAX_PENDING_SECONDS;
     this.queue = new SendQueue<Outgoing>({
-      deliver: (m) =>
+      deliver: (m, signal) =>
         m.kind === "chunk"
-          ? this.o.sendChunk(m.chunk)
+          ? this.o.sendChunk(m.chunk, signal)
           : m.kind === "start"
-            ? this.o.sendStart(m.info)
-            : this.o.sendStop(m.info),
+            ? this.o.sendStart(m.info, signal)
+            : this.o.sendStop(m.info, signal),
       size: (m) =>
         m.kind === "chunk"
           ? { samples: m.chunk.sampleCount, bytes: m.chunk.pcm.byteLength }

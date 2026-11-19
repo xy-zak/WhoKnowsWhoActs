@@ -22,7 +22,12 @@ export interface QueueEntrySize {
 }
 
 export interface SendQueueOptions<T> {
-  deliver(item: T): Promise<SendResult> | SendResult | undefined;
+  /**
+   * Delivers one attempt. `signal` aborts once the queue gave up on this attempt (a reconnect's
+   * retryNow, its ack timeout, the cap dropped it, clear): a delivery still WAITING to be sent
+   * (e.g. for the seat) must then not send, or the item goes out twice.
+   */
+  deliver(item: T, signal: AbortSignal): Promise<SendResult> | SendResult | undefined;
   size(item: T): QueueEntrySize;
   maxPendingSamples: number;
   /** back-off after consecutive failures; the last value repeats. Default 1 s, 2 s, 5 s, 10 s, 30 s */
@@ -43,7 +48,7 @@ const DEFAULT_RETRY = [1000, 2000, 5000, 10_000, 30_000] as const;
 
 export class SendQueue<T> {
   private entries: Entry<T>[] = [];
-  private inFlight: { entry: Entry<T>; attempt: number } | null = null;
+  private inFlight: { entry: Entry<T>; attempt: number; abort: AbortController } | null = null;
   private attempts = 0;
   private failures = 0;
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -93,7 +98,7 @@ export class SendQueue<T> {
     if (this.retryTimer !== null) clearTimeout(this.retryTimer);
     this.retryTimer = null;
     this.failures = 0;
-    this.inFlight = null;
+    this.abandon();
     this.pump();
   }
 
@@ -107,7 +112,7 @@ export class SendQueue<T> {
   clear(): number {
     const chunks = this.chunkCount;
     this.entries = [];
-    this.inFlight = null;
+    this.abandon();
     this.chunkCount = 0;
     this.sampleCount = 0;
     this.byteCount = 0;
@@ -131,8 +136,14 @@ export class SendQueue<T> {
       const [e] = this.entries.splice(i, 1);
       this.account(e!);
       this.dropped++;
-      if (this.inFlight?.entry === e) this.inFlight = null;
+      if (this.inFlight?.entry === e) this.abandon();
     }
+  }
+
+  /** Gives up on the attempt in flight (its late answer is still accepted as a success). */
+  private abandon() {
+    this.inFlight?.abort.abort();
+    this.inFlight = null;
   }
 
   private account(e: Entry<T>) {
@@ -164,7 +175,8 @@ export class SendQueue<T> {
       return;
     }
     const attempt = ++this.attempts;
-    this.inFlight = { entry, attempt };
+    const abort = new AbortController();
+    this.inFlight = { entry, attempt, abort };
     let settled = false;
     const finish = (r: SendResult) => {
       if (settled) return;
@@ -172,10 +184,13 @@ export class SendQueue<T> {
       clearTimeout(timer);
       this.onResult(entry, attempt, r);
     };
-    const timer = setTimeout(() => finish(false), this.o.ackTimeoutMs ?? 30_000);
+    const timer = setTimeout(() => {
+      abort.abort(); // timed out: a delivery still waiting must not send after its retry
+      finish(false);
+    }, this.o.ackTimeoutMs ?? 30_000);
     let result: ReturnType<SendQueueOptions<T>["deliver"]>;
     try {
-      result = this.o.deliver(entry.item);
+      result = this.o.deliver(entry.item, abort.signal);
     } catch {
       result = false;
     }

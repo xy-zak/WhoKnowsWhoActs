@@ -221,7 +221,7 @@ function trackPcmChunks(
   chunks: readonly AudioChunkRow[],
   onIssue: (i: AudioReadIssue) => void,
 ) {
-  return seqOrderedChunks(store.audioFiles!, row.sessionId, row.fileName!, key, chunks, { onIssue });
+  return seqOrderedChunks(store.requireAudioFiles(), row.sessionId, row.fileName!, key, chunks, { onIssue });
 }
 
 /** Write header + samples to a new file, hashing as it goes. */
@@ -477,7 +477,7 @@ export class AudioService {
       });
     const seats = [...new Set([...tl.audioSeats, ...tracks.map((t) => t.seat)])].sort((a, b) => a - b);
     return {
-      audioRoot: this.store.audioFiles!.root,
+      audioRoot: this.store.requireAudioFiles().root,
       sessionId,
       seats,
       tracks,
@@ -789,7 +789,7 @@ export class AudioService {
           const name = audioExportFileName(sessionId, seat, "clean");
           let bad = 0;
           const blocks = async function* () {
-            for await (const r of store.audioFiles!.readUniqueRecords(sessionId, d.fileName!, key, {
+            for await (const r of store.requireAudioFiles().readUniqueRecords(sessionId, d.fileName!, key, {
               onIssue: (i) => {
                 if (i.kind !== "truncated") bad++;
               },

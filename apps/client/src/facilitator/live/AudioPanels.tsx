@@ -2,8 +2,8 @@ import {
   currentCalibrationTurn,
   type FacilitatorCommand,
   type FacilitatorPayload,
-  type GameState,
   RECORDING_PHASES,
+  type ReadonlyGameState,
 } from "@wkwa/shared";
 import { useEffect, useMemo, useState } from "react";
 import { fmtSigned, fmtTime, formatDb, PLACEHOLDER } from "../../common/format";
@@ -32,7 +32,7 @@ import { CalibrationTag } from "./AudioControls";
  * last turn and the check, then per seat the margin of its own voice over the loudest other mic,
  * the verdict and plain advice for each seat that failed. Hidden until a calibration ran.
  */
-export function CalibrationCard({ st }: { st: GameState }) {
+export function CalibrationCard({ st }: { st: ReadonlyGameState }) {
   if (!st.audio.enabled) return null;
   const c = st.audio.calibration;
   const cancelled = c.status === "pending" ? c.lastCancel : null;
@@ -160,7 +160,7 @@ export function CalibrationCard({ st }: { st: GameState }) {
  * Players cannot mute themselves; both are logged by the server. Only possible while audio is
  * recorded (onboarding and rounds).
  */
-export function RecordingControl({ conn, st }: { conn: FacilitatorConnection; st: GameState }) {
+export function RecordingControl({ conn, st }: { conn: FacilitatorConnection; st: ReadonlyGameState }) {
   const promptReason = usePromptReason();
   const [busy, setBusy] = useState(false);
   if (!st.audio.enabled) return null;
@@ -255,7 +255,7 @@ const POLL_MS = 5000;
  * way and what went missing. Polling starts again if a seat reports pending chunks later.
  * Non-blocking: the facilitator can still close. Returns the check for the caller's buttons.
  */
-export function useAudioCheck(conn: FacilitatorConnection, st: GameState): AudioCheck | null {
+export function useAudioCheck(conn: FacilitatorConnection, st: ReadonlyGameState): AudioCheck | null {
   const stats = useStore(conn.store).dashboard?.stats;
   const [tracks, setTracks] = useState<TrackStatusLite[] | null>(null);
   const id = st.sessionId;

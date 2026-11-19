@@ -144,8 +144,8 @@ export function registerGdprApi(ctx: AppContext, guard: Guard) {
       if (confirm !== code) return reply.code(400).send({ error: "Confirmation does not match the code" });
       const active = hub.session;
       const attached =
-        active?.state.seats && Object.values(active.state.seats).some((s) => s.participantCode === code);
-      if (attached && !active!.isFinal && active!.state.phase !== "game_complete") {
+        active != null && Object.values(active.state.seats).some((s) => s.participantCode === code);
+      if (attached && !active.isFinal && active.state.phase !== "game_complete") {
         return reply.code(409).send({
           error: "This participant is in the running session. Withdraw them, end the session, then erase.",
         });

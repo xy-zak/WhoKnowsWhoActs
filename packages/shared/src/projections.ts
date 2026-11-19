@@ -14,7 +14,8 @@ import {
   nextOnboardingStep,
   type OnboardingStep,
   type Phase,
-  type SeatState,
+  type ReadonlyGameState,
+  type ReadonlySeatState,
   seatList,
   shouldRecord,
   visibleActions,
@@ -152,8 +153,8 @@ function withoutAudioTexts(onboarding: OnboardingContent | null): OnboardingCont
 }
 
 function playerAudioView(
-  state: GameState,
-  seat: SeatState,
+  state: ReadonlyGameState,
+  seat: ReadonlySeatState,
   nextStep: OnboardingStep | null,
   onboarding: OnboardingContent | null,
 ): PlayerAudioView {
@@ -182,7 +183,7 @@ function playerAudioView(
   };
 }
 
-function quotaFor(state: GameState, seat: number): Record<ActionKind, QuotaStatus> {
+function quotaFor(state: ReadonlyGameState, seat: number): Record<ActionKind, QuotaStatus> {
   return {
     propose: { used: quotaUsed(state, seat, "propose"), limit: quotaLimit(state, "propose") },
     decide: { used: quotaUsed(state, seat, "decide"), limit: quotaLimit(state, "decide") },
@@ -192,7 +193,7 @@ function quotaFor(state: GameState, seat: number): Record<ActionKind, QuotaStatu
 const END_PHASES: ReadonlySet<Phase> = new Set(["game_complete", "closed", "aborted"]);
 
 export function playerView(
-  state: GameState,
+  state: ReadonlyGameState,
   scenario: Scenario,
   seatNo: number,
   onboarding: OnboardingContent | null,
@@ -267,7 +268,7 @@ export function playerView(
     })),
     broadcasts: state.broadcasts.slice(-5),
     onboarding: nextStep ? withoutAudioTexts(onboarding) : null,
-    onboardingSteps: state.onboardingSteps,
+    onboardingSteps: [...state.onboardingSteps],
     study: END_PHASES.has(state.phase) || seat.withdrawn ? (onboarding?.study ?? null) : null,
     visibility: vis,
     audio: playerAudioView(state, seat, nextStep, onboarding),
@@ -276,10 +277,10 @@ export function playerView(
 
 /** The facilitator sees everything: full state + every view (the composite). */
 export interface FacilitatorView {
-  state: GameState;
+  state: ReadonlyGameState;
   serverTs: number;
 }
 
-export function facilitatorView(state: GameState, now: number): FacilitatorView {
+export function facilitatorView(state: ReadonlyGameState, now: number): FacilitatorView {
   return { state, serverTs: now };
 }

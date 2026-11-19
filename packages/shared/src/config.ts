@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { DEFAULT_GAME_RULES } from "./game/rules";
 import { MAX_SEATS } from "./labels";
+import type { DeepReadonly } from "./state";
 
 /* ─────────────────────────── Rounds ─────────────────────────── */
 
@@ -309,7 +310,7 @@ export function normaliseForPlayers(config: SessionConfig): SessionConfig {
 }
 
 /** Effective round spec for round `n` (1-based). */
-export function roundSpecFor(config: SessionConfig, round: number): RoundSpec {
+export function roundSpecFor(config: DeepReadonly<SessionConfig>, round: number): RoundSpec {
   return config.roundOverrides[String(round)] ?? config.defaultRound;
 }
 

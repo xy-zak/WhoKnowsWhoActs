@@ -71,8 +71,16 @@ export type AudioLevelPayload = ReturnType<(typeof AudioLevel)["parse"]>;
 export type AudioUploadEvent = "audio:start" | "audio:chunk" | "audio:stop";
 
 export interface RecordingDeps {
-  /** Emit with an acknowledgement; resolves with the ack, or undefined after a timeout. */
-  send<K extends AudioUploadEvent>(event: K, payload: PlayerPayload<K>): Promise<PlayerAcks[K] | undefined>;
+  /**
+   * Emit with an acknowledgement once this socket holds its seat; resolves with the ack, or
+   * undefined after a timeout or when `signal` aborts first (the send queue gave up on the
+   * attempt: it must then not be emitted at all).
+   */
+  send<K extends AudioUploadEvent>(
+    event: K,
+    payload: PlayerPayload<K>,
+    signal?: AbortSignal,
+  ): Promise<PlayerAcks[K] | undefined>;
   /** Volatile `audio:level` (dropped when the network is busy). */
   level(payload: AudioLevelPayload): void;
   /** Server-epoch time (ClockSync.now()). */
@@ -227,6 +235,8 @@ export class RecordingController {
   private everTracked = false;
   private nextReason: AudioStartReason | null = null;
   private reconnectPending = false;
+  /** the session was detached (seat kept): the running track stops as a disconnect */
+  private detached = false;
   private connectedOnce = false;
   private clearWhenIdle = false;
   private syncing = false;
@@ -265,8 +275,23 @@ export class RecordingController {
     this.nextReason = null;
     this.failed = false;
     this.reconnectPending = false;
+    this.detached = false;
     this.clearWhenIdle = true;
     setTrackedBefore(false);
+    this.publish();
+    if (this.rec) this.kick();
+  }
+
+  /**
+   * The session was detached on the server, but the seat is kept (its token re-claims it when the
+   * session is attached again). Like a disconnect: the track stops with `disconnect`, chunks not
+   * yet acknowledged stay queued and are resent once seated again, and capture restarts with
+   * `reconnect`. The server already closed the track (`interrupted`) and accepts its late chunks.
+   */
+  onDetached() {
+    this.view = null;
+    this.detached = true;
+    this.reconnectPending = true;
     this.publish();
     if (this.rec) this.kick();
   }
@@ -319,9 +344,9 @@ export class RecordingController {
     this.rec = this.deps.createRecorder({
       now: () => this.deps.now(),
       clockOffsetMs: () => this.deps.clockOffsetMs(),
-      sendStart: (info) => this.sendStart(info),
-      sendChunk: (chunk) => this.sendChunk(chunk),
-      sendStop: (info) => this.sendStop(info),
+      sendStart: (info, signal) => this.sendStart(info, signal),
+      sendChunk: (chunk, signal) => this.sendChunk(chunk, signal),
+      sendStop: (info, signal) => this.sendStop(info, signal),
       onLevel: (l) => this.onLevel(l),
       onState: (_s, status) => this.onState(status),
     });
@@ -352,6 +377,7 @@ export class RecordingController {
     const rec = this.rec ?? (v?.audio.enabled ? this.ensure() : null);
     if (!rec) return;
     const want = wantsRecording(v);
+    if (v) this.detached = false;
     if (this.reconnectPending && v) {
       this.reconnectPending = false;
       // resend what was not acknowledged (oldest first), then close the old track and open a new one
@@ -371,8 +397,9 @@ export class RecordingController {
       this.begin();
     } else if (!want && this.running) {
       this.running = false;
-      const reason = stopReasonFor(v);
+      const reason = this.detached ? "disconnect" : stopReasonFor(v);
       if (reason === "paused") this.nextReason = "resume";
+      if (reason === "disconnect") this.nextReason = "reconnect";
       await rec.stop(reason);
       this.reportDrained();
       this.publish();
@@ -511,24 +538,32 @@ export class RecordingController {
     }));
   }
 
-  private async sendStart(info: AudioStartInfo): Promise<SendResult> {
+  private async sendStart(info: AudioStartInfo, signal?: AbortSignal): Promise<SendResult> {
     this.store.set((s) => ({ ...s, contextSampleRate: info.context.sampleRate }));
-    const ack = await this.deps.send("audio:start", { ...info, reason: wireStartReason(info.reason) });
+    const ack = await this.deps.send(
+      "audio:start",
+      { ...info, reason: wireStartReason(info.reason) },
+      signal,
+    );
     return audioSendResult(ack);
   }
 
-  private async sendChunk(chunk: AudioChunk): Promise<SendResult> {
-    return audioSendResult(await this.deps.send("audio:chunk", chunk));
+  private async sendChunk(chunk: AudioChunk, signal?: AbortSignal): Promise<SendResult> {
+    return audioSendResult(await this.deps.send("audio:chunk", chunk, signal));
   }
 
-  private async sendStop(info: AudioStopInfo): Promise<SendResult> {
+  private async sendStop(info: AudioStopInfo, signal?: AbortSignal): Promise<SendResult> {
     const m = this.dropMarks.get(info.trackId);
     const dropped = m ? Math.max(0, (m.to ?? this.rec?.droppedChunks ?? m.from) - m.from) : 0;
-    const ack = await this.deps.send("audio:stop", {
-      ...info,
-      reason: wireStopReason(info.reason),
-      droppedChunks: Math.min(dropped, info.chunks),
-    });
+    const ack = await this.deps.send(
+      "audio:stop",
+      {
+        ...info,
+        reason: wireStopReason(info.reason),
+        droppedChunks: Math.min(dropped, info.chunks),
+      },
+      signal,
+    );
     const r = audioSendResult(ack);
     if (r !== false) this.dropMarks.delete(info.trackId);
     return r;

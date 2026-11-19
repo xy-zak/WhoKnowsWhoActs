@@ -4,6 +4,12 @@ History of [AUDIO.md](../AUDIO.md). Newest first. How entries are written: [READ
 
 ## Unreleased
 
+### Not yet committed · uploads wait for the seat; a detached session keeps the unsent audio
+
+- **Type:** Bug fix
+- **Change:** The browser-events table adds the detached session (the seat kept: stop `disconnect`, start `reconnect`, unsent chunks kept). A paragraph *Waiting for the seat* says that each upload attempt waits until the socket is seated, and that an attempt the queue gave up on is cancelled before it is sent.
+- **Reason:** Uploads emitted right after a reconnect were refused ("Not seated") and retried; a session switch dropped the unsent audio together with the seat token.
+
 ### Not yet committed · calibration moved to CalibrationRunner
 
 - **Type:** Risk mitigation

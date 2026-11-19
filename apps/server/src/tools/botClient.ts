@@ -181,6 +181,10 @@ export class Bot {
       this.seat = null;
       this.seatToken = null;
     });
+    // the session was detached: the token is kept for when it is attached again (`rehello`)
+    this.socket.on("detached", () => {
+      this.seat = null;
+    });
     this.socket.on("state", (v) => {
       this.view = v;
       if (opts.record !== false) this.states.push(v);

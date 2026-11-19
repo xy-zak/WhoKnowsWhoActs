@@ -426,6 +426,12 @@ export class Store {
     readonly audioFiles: AudioFileStore | null = null,
   ) {}
 
+  /** The audio file store, for code that only runs for a database that has one (it throws otherwise). */
+  requireAudioFiles(): AudioFileStore {
+    if (!this.audioFiles) throw new Error("This database stores no audio (the simulation database)");
+    return this.audioFiles;
+  }
+
   /* ─────────── sessions ─────────── */
 
   insertSession(row: Omit<SessionRow, "updated_wall" | "condition">) {

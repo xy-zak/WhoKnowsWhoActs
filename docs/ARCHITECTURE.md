@@ -238,6 +238,7 @@ Properties that follow from this design:
 
 - **Complete audit trail.** Nothing is ever updated or deleted in normal operation. Undo is a new event (`ActionRevoked`) that marks the original as revoked.
 - **Deterministic replay.** The reducer is pure: no clock, no randomness. Replaying the log reproduces every intermediate state exactly. The facilitator's replay view and the tests rely on this.
+- **Only the reducer changes state.** Everything outside `rules/reducer.ts` sees the state as `ReadonlyGameState` (a deep read-only type): `SessionManager.state`, the projections, rules, validators, `LiveAudio`, `CalibrationRunner` and the facilitator UI. The compiler rejects a write anywhere else. `SessionManager` holds the one mutable copy privately and hands it only to `applyEvent` and `afterReplay` (which marks every human seat disconnected after a load, until its browser says hello again).
 - **Idempotency.** Each intent carries a per-seat `clientSeq`. The browser resends an unanswered intent, unchanged, after every reconnect; the resend returns the original acknowledgement and appends nothing, also after a server restart (the answers are rebuilt from the log). See [NETWORKING.md § 7](NETWORKING.md#7-disconnects-and-reconnects).
 - **Facilitator commands are events too** (`SeatBound`, `LabelsAssigned`, `RoundStarted`, `GamePaused`, …), so the log also documents how the session was run.
 
@@ -401,6 +402,7 @@ Clients estimate their clock offset with an NTP-style exchange (5 samples on con
 - The **event log is the database of record.** `GameState` is never persisted; it is rebuilt from the log whenever a session is loaded.
 - **Two database files.** Sessions with participants live in `data/wkwa.db`, simulated sessions in `data/wkwa-sim.db` (same schema, same passphrase). Every API call and *Resume* finds the right file from the session id.
 - **Server restart:** start the server again, enter the passphrase, then use *Resume* on the dashboard (`session:resume`). The server broadcasts `rehello`, and every player browser re-claims its seat with the reconnect token stored in `localStorage` (see [NETWORKING.md § 7](NETWORKING.md#7-disconnects-and-reconnects)). Durations keep counting from the logged timestamps.
+- **Switching sessions** (create or resume another, an erasure's reload, a deletion) sends `detached` to the seated browsers: they keep their tokens, so resuming the session again gives every player their seat back.
 - **Reproducibility:** `SessionCreated` stores the full effective configuration, the scenario id, version and **SHA-256 hash**, and the harness version and git commit. Together with the event log, that is enough to replay exactly what every participant saw.
 - **Encryption at rest:** the SQLite file is encrypted with SQLCipher. The passphrase is typed at start-up and never stored (see [DATA-MANAGEMENT.md](DATA-MANAGEMENT.md#9-encryption-and-key-management)).
 

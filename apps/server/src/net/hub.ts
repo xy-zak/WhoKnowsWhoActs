@@ -234,7 +234,7 @@ export class Hub {
       { sessionId: created.sessionId, scenario: scenario.id, players: config.players },
       "session created",
     );
-    this.afterAttach();
+    this.afterAttach(created);
     return created;
   }
 
@@ -247,7 +247,7 @@ export class Hub {
     const m = SessionManager.load(deps, sessionId);
     this.session = m;
     this.deps.log.info({ sessionId }, "session resumed");
-    this.afterAttach();
+    this.afterAttach(m);
     return m;
   }
 
@@ -276,8 +276,10 @@ export class Hub {
     }
     this.session.dispose();
     this.session = null;
+    // `detached`, not `unbound`: the browser keeps its seat token, so when this session is
+    // attached again (resume, reload after an erasure) `rehello` re-claims the seat
     for (const [, sock] of this.seatSockets) {
-      sock.emit("unbound", { reason });
+      sock.emit("detached", { reason });
       sock.data.seat = null;
     }
     this.seatSockets.clear();
@@ -286,8 +288,7 @@ export class Hub {
     this.liveTelemetry = [];
   }
 
-  private afterAttach() {
-    const m = this.session!;
+  private afterAttach(m: SessionManager) {
     for (const s of Object.values(m.state.seats)) this.stats.set(s.seat, emptyStats(s.seat));
     // Connected browsers re-send hello with their stored seat token, so seats are re-claimed
     // by token only (terminal numbers are not stable across server restarts).
@@ -781,7 +782,11 @@ export class Hub {
       // Socket.IO's listener type cannot follow a generic name (see seatHandler in onPlayer)
       sock.on(name, handler as never);
     };
-    const s = () => this.session!;
+    /** The attached session (cmd() refuses a command that needs one before it runs). */
+    const s = (): SessionManager => {
+      if (!this.session) throw new CommandError("No active session");
+      return this.session;
+    };
     /** A command that answers with no data (whatever the session's method returns is not sent). */
     const act = <K extends Exclude<FacilitatorCommand, keyof FacilitatorResults>>(
       name: K,

@@ -2,8 +2,8 @@ import {
   calibrationWaitingSeats,
   type FacilitatorCommand,
   type FacilitatorPayload,
-  type GameState,
   micCheckHoldSeats,
+  type ReadonlyGameState,
   seatsInMicCheck,
 } from "@wkwa/shared";
 import { Button, Callout, Icon, SeatDot, StatusTag, usePromptReason } from "../../ui";
@@ -24,7 +24,7 @@ const SKIP_REASON = {
 };
 
 /** The calibration's state as a tag: with its detail (NEXT panel), or `short` (the calibration card). */
-export function CalibrationTag({ st, short = false }: { st: GameState; short?: boolean }) {
+export function CalibrationTag({ st, short = false }: { st: ReadonlyGameState; short?: boolean }) {
   const s = calibrationSummary(st);
   return (
     <StatusTag tone={s.tone} icon={s.icon} tip={s.tip}>
@@ -43,7 +43,7 @@ export function AudioNext({
   primary,
 }: {
   conn: FacilitatorConnection;
-  st: GameState;
+  st: ReadonlyGameState;
   primary: boolean;
 }) {
   const promptReason = usePromptReason();

@@ -142,8 +142,10 @@ export function SetupStage({ conn }: { conn: FacilitatorConnection }) {
   const confirm = useConfirm();
   const dash = fs.dashboard;
   const st = dash?.state ?? null;
-  const lobby = inLobby(st);
-  const sessionId = lobby ? st!.sessionId! : null;
+  /** the attached session while it is in its lobby (steps 7–10), else null */
+  const ls = st && inLobby(st) ? st : null;
+  const lobby = ls !== null;
+  const sessionId = ls?.sessionId ?? null;
 
   const [scenarios, setScenarios] = useState<ScenarioInfo[]>([]);
   const [draft, setDraftState] = useState<Draft | null>(loadDraft);
@@ -196,19 +198,19 @@ export function SetupStage({ conn }: { conn: FacilitatorConnection }) {
 
   /* derived step state */
   // simulated players: from the attached session once created, from the draft before
-  const simulated = lobby ? isSimulated(st!) : draft?.config.players === "simulated";
+  const simulated = lobby ? isSimulated(ls) : draft?.config.players === "simulated";
   const steps = setupSteps(simulated);
-  const allBound = lobby && seatList(st!).every((s) => s.bound);
-  const fakes = lobby ? fakeSeats(st!) : [];
+  const allBound = lobby && seatList(ls).every((s) => s.bound);
+  const fakes = lobby ? fakeSeats(ls) : [];
   // all seats taken by agents or fake players: nobody to write on a key sheet
-  const noParticipants = allBound && !hasParticipants(st!);
+  const noParticipants = allBound && !hasParticipants(ls);
   const skipped = (i: number) => (simulated && SKIPPED_WHEN_SIMULATED.has(i)) || (noParticipants && i === 8);
-  const labelled = lobby && labelsComplete(st!);
+  const labelled = lobby && labelsComplete(ls);
   const labelsRow: ChecklistRow = [
-    `Labels assigned (${lobby ? pairingName(st!.labelPairing) : "—"})`,
+    `Labels assigned (${lobby ? pairingName(ls.labelPairing) : "—"})`,
     labelled,
     lobby
-      ? seatList(st!)
+      ? seatList(ls)
           .map((s) => `${s.seat}:${s.k ?? "–"}/${s.p ?? "–"}`)
           .join(" ")
       : "",
@@ -353,8 +355,8 @@ export function SetupStage({ conn }: { conn: FacilitatorConnection }) {
   ]);
 
   /* one-line summaries shown on collapsed steps */
-  const cfg = lobby ? st!.config : draft?.config;
-  const sc = scenarios.find((s) => s.id === (lobby ? st!.scenario?.id : draft?.scenarioId));
+  const cfg = lobby ? ls.config : draft?.config;
+  const sc = scenarios.find((s) => s.id === (lobby ? ls.scenario?.id : draft?.scenarioId));
   const summary = (i: number): string => {
     if (!cfg) return "";
     const r = cfg.defaultRound;
@@ -381,11 +383,11 @@ export function SetupStage({ conn }: { conn: FacilitatorConnection }) {
         return lobby ? `created · ${sessionId}` : "check everything, then create the session";
       case 6:
         return lobby
-          ? `${seatList(st!).filter((s) => s.bound).length}/${cfg.seatCount} seats bound${fakes.length ? ` (${fakes.length} fake)` : ""}`
+          ? `${seatList(ls).filter((s) => s.bound).length}/${cfg.seatCount} seats bound${fakes.length ? ` (${fakes.length} fake)` : ""}`
           : "after the session is created";
       case 7:
         return lobby && labelled
-          ? `${pairingName(st!.labelPairing)} · ${seatList(st!)
+          ? `${pairingName(ls.labelPairing)} · ${seatList(ls)
               .map((s) => `${s.seat}:${s.k}/${s.p}`)
               .join("  ")}`
           : "K per seat; P from the pairing (aligned or dissociated D1–D6)";
@@ -408,7 +410,7 @@ export function SetupStage({ conn }: { conn: FacilitatorConnection }) {
         return "skipped: agents have no onboarding";
       case 6:
         return lobby
-          ? `${seatList(st!).filter((s) => s.agent).length} agents · seed ${cfg.simulation.seed}`
+          ? `${seatList(ls).filter((s) => s.agent).length} agents · seed ${cfg.simulation.seed}`
           : "every seat gets an agent when the session is created";
       case 8:
         return "skipped: no participants, so no names or codes";
@@ -468,7 +470,7 @@ export function SetupStage({ conn }: { conn: FacilitatorConnection }) {
           </div>
         ) : null;
       case 7:
-        return lobby ? <LabelsEditor conn={conn} st={st!} scenario={fs.scenario} /> : null;
+        return lobby ? <LabelsEditor conn={conn} st={ls} scenario={fs.scenario} /> : null;
       case 8:
         if (lobby && noParticipants) {
           return (
@@ -521,7 +523,7 @@ export function SetupStage({ conn }: { conn: FacilitatorConnection }) {
                 [
                   "All seats bound",
                   allBound,
-                  `${seatList(st!).filter((s) => s.bound).length}/${st!.config.seatCount}`,
+                  `${seatList(ls).filter((s) => s.bound).length}/${ls.config.seatCount}`,
                 ],
                 labelsRow,
                 ["Key sheet printed", keySheetDone, noParticipants ? "not needed (fake players only)" : ""],
@@ -539,7 +541,7 @@ export function SetupStage({ conn }: { conn: FacilitatorConnection }) {
             <Callout icon="onboarding">
               Seat the participants first. <strong>Start onboarding</strong> locks the seats and sends every
               player to{" "}
-              {onboardingStepsText(st!.config, { mic_check: "the mic check", briefing: "the briefing" }) ||
+              {onboardingStepsText(ls.config, { mic_check: "the mic check", briefing: "the briefing" }) ||
                 "the waiting screen"}
               . The tab then switches to <span className="t-live strong">LIVE</span>.
               {fakes.length > 0 && " Fake players skip onboarding and are ready at once."}
@@ -553,6 +555,7 @@ export function SetupStage({ conn }: { conn: FacilitatorConnection }) {
 
   /** Steps 07, 09 and 10 of a simulated session. */
   function simulatedBody(i: number) {
+    if (!ls) return null; // steps 7–10: only reachable in the lobby
     switch (i) {
       case 6:
         return (
@@ -561,7 +564,7 @@ export function SetupStage({ conn }: { conn: FacilitatorConnection }) {
               Every seat is taken by an <strong>agent</strong>: no player PCs, client binding or participant
               codes. The agents act once the simulation starts (step 10).
             </Callout>
-            <AgentsTable st={st!} />
+            <AgentsTable st={ls} />
           </div>
         );
       case 8:
@@ -579,17 +582,17 @@ export function SetupStage({ conn }: { conn: FacilitatorConnection }) {
                 [
                   "Agents in every seat",
                   allBound,
-                  `${seatList(st!).filter((s) => s.agent).length}/${st!.config.seatCount} · ${policySummary(st!.config.simulation, st!.config.seatCount)}`,
+                  `${seatList(ls).filter((s) => s.agent).length}/${ls.config.seatCount} · ${policySummary(ls.config.simulation, ls.config.seatCount)}`,
                 ],
                 labelsRow,
               ]}
             />
             <Callout icon="simulation">
               <strong>Start simulation</strong> locks the seats and starts round 1 straight away. The agents
-              then take a turn every {paceText(st!.config.simulation)} (seed{" "}
-              <span className="mono">{st!.config.simulation.seed}</span>). Rounds after the first start{" "}
-              {st!.config.roundAdvance === "auto"
-                ? `automatically after ${st!.config.autoAdvanceDelaySec} s`
+              then take a turn every {paceText(ls.config.simulation)} (seed{" "}
+              <span className="mono">{ls.config.simulation.seed}</span>). Rounds after the first start{" "}
+              {ls.config.roundAdvance === "auto"
+                ? `automatically after ${ls.config.autoAdvanceDelaySec} s`
                 : "when you start them in LIVE"}
               . The tab switches to <span className="t-live strong">LIVE</span>.
             </Callout>

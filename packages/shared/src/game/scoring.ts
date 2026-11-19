@@ -1,6 +1,6 @@
 import type { Scores } from "../board";
 import type { ActionKind } from "../labels";
-import type { GameState } from "../state";
+import type { ReadonlyGameState } from "../state";
 import {
   DEFAULT_GAME_RULES,
   type GameRules,
@@ -16,7 +16,7 @@ import {
  * score, what a player acts on). */
 
 /** The rule set of a session (the one recorded at creation, else the configured one). */
-export function rulesFor(state: GameState): GameRules {
+export function rulesFor(state: ReadonlyGameState): GameRules {
   const id = state.rules?.id ?? state.config.rules ?? DEFAULT_GAME_RULES;
   const rules = getGameRules(id);
   if (!rules) throw new Error(`Unknown game rules '${id}'`);
@@ -24,14 +24,14 @@ export function rulesFor(state: GameState): GameRules {
 }
 
 /** A seat as the rules see it (current labels). */
-export function actorOf(state: GameState, seat: number): RulesActor {
+export function actorOf(state: ReadonlyGameState, seat: number): RulesActor {
   const s = state.seats[seat];
   return { seat, k: s?.k ?? null, p: s?.p ?? null };
 }
 
 /** Score changes an intent would cause if accepted now (empty for sessions without a board). */
 export function scoreChangesForIntent(
-  state: GameState,
+  state: ReadonlyGameState,
   seat: number,
   intent: { kind: ActionKind; regionId: string },
 ): ScoreChange[] {
@@ -48,7 +48,7 @@ export function scoreChangesForIntent(
  * Score changes caused by revoking the action with seq `targetSeq`: the
  * scores are replayed from the start without it, and compared with now.
  */
-export function scoreChangesForRevoke(state: GameState, targetSeq: number): ScoreChange[] {
+export function scoreChangesForRevoke(state: ReadonlyGameState, targetSeq: number): ScoreChange[] {
   if (!state.board) return [];
   const without = replayScores(
     rulesFor(state),
@@ -72,7 +72,7 @@ export function scoreChangesForRevoke(state: GameState, targetSeq: number): Scor
 }
 
 /** The score of the whole map right now (null for sessions without a board). */
-export function mapScoreOf(state: GameState, scores: Readonly<Scores> = state.scores): number | null {
+export function mapScoreOf(state: ReadonlyGameState, scores: Readonly<Scores> = state.scores): number | null {
   if (!state.board) return null;
   return rulesFor(state).mapScore(scores, state.board);
 }

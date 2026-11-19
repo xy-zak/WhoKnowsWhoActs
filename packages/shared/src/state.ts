@@ -162,6 +162,22 @@ export interface AudioState {
   calibration: CalibrationState;
 }
 
+/** A read-only view of a value, all the way down (functions are kept as they are). */
+export type DeepReadonly<T> = T extends (...args: never[]) => unknown
+  ? T
+  : T extends ReadonlyArray<infer U>
+    ? ReadonlyArray<DeepReadonly<U>>
+    : T extends object
+      ? { readonly [K in keyof T]: DeepReadonly<T[K]> }
+      : T;
+
+/**
+ * The game state as everything outside the reducer sees it: read-only. Only `applyEvent` (and
+ * `afterReplay`) change a `GameState`; the server, projections, rules and UI read it.
+ */
+export type ReadonlyGameState = DeepReadonly<GameState>;
+export type ReadonlySeatState = DeepReadonly<SeatState>;
+
 export interface GameState {
   sessionId: string | null;
   createdTs: number | null;
@@ -315,34 +331,34 @@ export function onboardingStepsFor(
   return ONBOARDING_STEPS.filter((step) => used[step]);
 }
 
-export function seatList(state: GameState): SeatState[] {
+export function seatList(state: ReadonlyGameState): ReadonlySeatState[] {
   return Object.values(state.seats).sort((a, b) => a.seat - b.seat);
 }
 
 /** Is this a session with simulated players (agents) instead of participants? */
-export function isSimulated(state: GameState): boolean {
+export function isSimulated(state: ReadonlyGameState): boolean {
   return state.config.players === "simulated";
 }
 
 /** Seats taking part in the game: bound and not withdrawn. */
-export function activeSeats(state: GameState): SeatState[] {
+export function activeSeats(state: ReadonlyGameState): ReadonlySeatState[] {
   return seatList(state).filter((s) => s.bound && !s.withdrawn);
 }
 
 /** Seats bound to fake players (test clients the server created), in seat order. */
-export function fakeSeats(state: GameState): number[] {
+export function fakeSeats(state: ReadonlyGameState): number[] {
   return seatList(state)
     .filter((s) => s.bound && s.fake)
     .map((s) => s.seat);
 }
 
 /** A seat held (or to be held) by a person: not a fake player and not an agent. */
-export function isParticipant(seat: SeatState): boolean {
+export function isParticipant(seat: ReadonlySeatState): boolean {
   return !seat.fake && !seat.agent;
 }
 
 /** Is any bound seat held by a real participant (who has a code, a key-sheet line and a takedown card)? */
-export function hasParticipants(state: GameState): boolean {
+export function hasParticipants(state: ReadonlyGameState): boolean {
   return seatList(state).some((s) => s.bound && isParticipant(s));
 }
 
@@ -350,7 +366,7 @@ export function hasParticipants(state: GameState): boolean {
  * Does the mic check apply to this seat? Only when the session records audio and the participant
  * permitted it: nobody who refused (or was never asked) is asked to speak into the microphone.
  */
-export function micCheckApplies(state: GameState, seat: SeatState): boolean {
+export function micCheckApplies(state: ReadonlyGameState, seat: ReadonlySeatState): boolean {
   return state.audio.enabled && isParticipant(seat) && seat.audioConsent;
 }
 
@@ -364,7 +380,7 @@ export function micCheckApplies(state: GameState, seat: SeatState): boolean {
  * before they agreed, or although they then decline. To go on without a decliner, the facilitator
  * withdraws that seat.
  */
-export function micCheckHoldSeats(state: GameState): number[] {
+export function micCheckHoldSeats(state: ReadonlyGameState): number[] {
   if (!state.audio.enabled || !state.onboardingSteps.includes("mic_check")) return [];
   return seatList(state)
     .filter((s) => s.bound && !s.withdrawn && isParticipant(s) && s.consent !== "given")
@@ -372,12 +388,12 @@ export function micCheckHoldSeats(state: GameState): number[] {
 }
 
 /** Are the mic checks held because a seat is still in consent (see micCheckHoldSeats)? */
-export function isMicCheckHeld(state: GameState): boolean {
+export function isMicCheckHeld(state: ReadonlyGameState): boolean {
   return micCheckHoldSeats(state).length > 0;
 }
 
 /** Is this onboarding step done for the seat? (The mic check counts as done when passed or skipped.) */
-function stepDone(state: GameState, seat: SeatState, step: OnboardingStep): boolean {
+function stepDone(state: ReadonlyGameState, seat: ReadonlySeatState, step: OnboardingStep): boolean {
   switch (step) {
     case "consent":
       return seat.consent === "given";
@@ -391,7 +407,7 @@ function stepDone(state: GameState, seat: SeatState, step: OnboardingStep): bool
 }
 
 /** Fake players and agents have no onboarding: there is nobody to inform or ask. */
-export function isOnboardingComplete(state: GameState, seat: SeatState): boolean {
+export function isOnboardingComplete(state: ReadonlyGameState, seat: ReadonlySeatState): boolean {
   return nextOnboardingStep(state, seat) === null;
 }
 
@@ -400,7 +416,7 @@ export function isOnboardingComplete(state: GameState, seat: SeatState): boolean
  * consent → mic_check → demographics → briefing, skipping steps the session does not use
  * (and the mic check for a participant who did not permit audio recording).
  */
-export function nextOnboardingStep(state: GameState, seat: SeatState): OnboardingStep | null {
+export function nextOnboardingStep(state: ReadonlyGameState, seat: ReadonlySeatState): OnboardingStep | null {
   if (!isParticipant(seat)) return null;
   for (const step of ONBOARDING_STEPS) {
     if (state.onboardingSteps.includes(step) && !stepDone(state, seat, step)) return step;
@@ -419,7 +435,7 @@ export const RECORDING_PHASES: ReadonlySet<Phase> = new Set(["onboarding", "roun
  * recording is not paused by the facilitator, and the phase is onboarding, round_active or
  * round_complete (breaks and game pauses are recorded too).
  */
-export function shouldRecord(state: GameState, seat: SeatState): boolean {
+export function shouldRecord(state: ReadonlyGameState, seat: ReadonlySeatState): boolean {
   if (state.audio.recordingPaused || !RECORDING_PHASES.has(state.phase)) return false;
   if (!seat.bound || seat.withdrawn || !micCheckApplies(state, seat)) return false;
   if (seat.consent !== "given" || seat.micCheck === "skipped") return false;
@@ -433,14 +449,14 @@ export function shouldRecord(state: GameState, seat: SeatState): boolean {
  * Audio gate for round 1: with audio and `requireCalibration` on, the calibration must be done
  * or skipped first. (The onboarding checks are separate: see isOnboardingComplete.)
  */
-export function canStartFirstRound(state: GameState): boolean {
+export function canStartFirstRound(state: ReadonlyGameState): boolean {
   if (!state.audio.enabled || !state.audio.requireCalibration) return true;
   const status = state.audio.calibration.status;
   return status === "done" || status === "skipped";
 }
 
 /** Real seats the calibration waits for: active participants not past their mic check yet (consent included). */
-export function calibrationWaitingSeats(state: GameState): SeatState[] {
+export function calibrationWaitingSeats(state: ReadonlyGameState): ReadonlySeatState[] {
   return activeSeats(state).filter(
     (s) =>
       isParticipant(s) && (s.consent !== "given" || (micCheckApplies(state, s) && s.micCheck === "pending")),
@@ -448,7 +464,7 @@ export function calibrationWaitingSeats(state: GameState): SeatState[] {
 }
 
 /** Seats in their own mic check now (onboarding, consent given, check pending): the facilitator may skip them. */
-export function seatsInMicCheck(state: GameState): SeatState[] {
+export function seatsInMicCheck(state: ReadonlyGameState): ReadonlySeatState[] {
   if (state.phase !== "onboarding") return [];
   return activeSeats(state).filter(
     (s) => micCheckApplies(state, s) && s.consent === "given" && s.micCheck === "pending",
@@ -459,7 +475,7 @@ export function seatsInMicCheck(state: GameState): SeatState[] {
  * The latest calibration turn while the calibration runs, or null. Its nominal end is
  * startTs + turnMs; the gap before the next turn has no event of its own.
  */
-export function currentCalibrationTurn(state: GameState): CalibrationTurnRecord | null {
+export function currentCalibrationTurn(state: ReadonlyGameState): DeepReadonly<CalibrationTurnRecord> | null {
   const c = state.audio.calibration;
   if (c.status !== "running" || c.turnIndex === null) return null;
   const turn = c.turns[c.turns.length - 1];
@@ -467,28 +483,33 @@ export function currentCalibrationTurn(state: GameState): CalibrationTurnRecord 
 }
 
 /** Non-revoked actions of a seat (optionally of one kind) in a round. */
-export function actionsOf(state: GameState, seat: number, round: number, kind?: ActionKind): ActionRecord[] {
+export function actionsOf(
+  state: ReadonlyGameState,
+  seat: number,
+  round: number,
+  kind?: ActionKind,
+): readonly DeepReadonly<ActionRecord>[] {
   return state.actions.filter(
     (a) => a.seat === seat && a.round === round && !a.revoked && (kind === undefined || a.kind === kind),
   );
 }
 
 /** Live (non-revoked) actions currently shown on the map. */
-export function visibleActions(state: GameState): ActionRecord[] {
+export function visibleActions(state: ReadonlyGameState): readonly DeepReadonly<ActionRecord>[] {
   return state.actions.filter(
     (a) => !a.revoked && (!state.config.clearHighlightsEachRound || a.round === state.round),
   );
 }
 
 /** Milliseconds of active (un-paused) time elapsed in the current round at time `now`. */
-export function roundActiveMs(state: GameState, now: number): number {
+export function roundActiveMs(state: ReadonlyGameState, now: number): number {
   if (state.roundStartedTs === null) return 0;
   const pausedNow = state.paused && state.pausedSince !== null ? now - state.pausedSince : 0;
   return Math.max(0, now - state.roundStartedTs - state.roundPausedMs - pausedNow);
 }
 
 /** Remaining ms of the round's time limit (null = no limit). */
-export function roundRemainingMs(state: GameState, now: number): number | null {
+export function roundRemainingMs(state: ReadonlyGameState, now: number): number | null {
   const limit = state.roundSpec?.timeLimitSec;
   if (!limit || state.phase !== "round_active") return null;
   return Math.max(0, limit * 1000 - roundActiveMs(state, now));

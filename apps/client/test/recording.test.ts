@@ -321,6 +321,20 @@ describe("RecordingController", () => {
     expect(t.ctl.snapshot.gesture).toBe(false);
   });
 
+  it("on a detached session stops with disconnect, keeps what was not sent, and resends once seated again", async () => {
+    const t = setup();
+    const game = view({ phase: "round_active", nextStep: null });
+    t.ctl.onConnect();
+    t.ctl.update(game);
+    await settle();
+    t.ctl.onDetached(); // another session was resumed: the seat token is kept
+    await settle();
+    expect(t.rec().calls).toEqual(["start:reload", "stop:disconnect"]);
+    t.ctl.update(game); // the session is attached again and the seat re-claimed
+    await settle();
+    expect(t.rec().calls).toEqual(["start:reload", "stop:disconnect", "onReconnect", "start:reconnect"]);
+  });
+
   it("sends documented reasons, the dropped chunks of the track and volatile levels", async () => {
     const t = setup();
     t.ctl.update(view({ nextStep: "briefing" }));

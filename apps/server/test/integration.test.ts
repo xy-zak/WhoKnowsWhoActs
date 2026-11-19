@@ -195,6 +195,31 @@ describe("robustness", () => {
     }
   });
 
+  it("keeps seats across a session switch and an erasure reload: browsers re-claim them with their token", async () => {
+    const { fac, bots, sessionId } = await setupSession(srv.url, {}, 4, { autoPlay: false });
+    const tokens = bots.map((b) => b.seatToken);
+    expect(tokens.every((t) => typeof t === "string")).toBe(true);
+
+    // another session is created (the first is detached): the browsers lose the seat, not the token
+    await fac.cmd("session:create", { scenarioId: "demo", config: { seatCount: 4 }, notes: "other" });
+    await vi.waitFor(() => expect(bots.map((b) => b.seat)).toEqual([null, null, null, null]));
+    expect(bots.map((b) => b.seatToken)).toEqual(tokens);
+
+    // switching back: `rehello` re-claims every seat
+    await fac.cmd("session:resume", { sessionId });
+    await vi.waitFor(() => expect(bots.map((b) => b.seat)).toEqual([1, 2, 3, 4]), { timeout: 5000 });
+
+    // an erasure reloads the attached session the same way (gdprRoutes → reloadActiveSession)
+    srv.ctx.hub.reloadActiveSession();
+    await vi.waitFor(() => expect(bots.map((b) => b.seat)).toEqual([1, 2, 3, 4]), { timeout: 5000 });
+    expect(bots.map((b) => b.seatToken)).toEqual(tokens);
+    await fac.cmd("round:start");
+    await Promise.all(bots.map((b) => b.waitFor((v) => v.phase === "round_active")));
+
+    for (const x of bots) x.stop();
+    fac.close();
+  });
+
   it("refuses a request from a socket that holds no seat as transient (retry), so it is sent again", async () => {
     const { fac, bots } = await setupSession(srv.url, {}, 4, { autoPlay: false });
     const stranger = new Bot({ url: srv.url, autoPlay: false });

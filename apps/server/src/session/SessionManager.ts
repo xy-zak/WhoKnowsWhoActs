@@ -3,6 +3,7 @@ import {
   type ActionKind,
   AUDIO_CONSENT_ITEM,
   activeSeats,
+  afterReplay,
   agentSeed,
   applyEvent,
   canStartFirstRound,
@@ -37,6 +38,7 @@ import {
   quotaLimit,
   quotaUsed,
   RECORDING_PHASES,
+  type ReadonlyGameState,
   randomCrockford,
   resolvePolicyParams,
   roundActiveMs,
@@ -104,7 +106,11 @@ function intentAckOf(ev: StoredEvent): IntentAck | null {
  * notifies the network layer. All state changes go through `append`.
  */
 export class SessionManager {
-  readonly state: GameState = initialState();
+  /** Changed only by the reducer (`append`, `load`); everything else reads `state`. */
+  private readonly game: GameState = initialState();
+  get state(): ReadonlyGameState {
+    return this.game;
+  }
   private pending: StoredEvent[] = [];
   private depth = 0;
   private roundTimer: NodeJS.Timeout | null = null;
@@ -279,7 +285,7 @@ export class SessionManager {
     const events = deps.store.listEvents(sessionId);
     if (events.length === 0) throw new Error(`Session ${sessionId} has no events`);
     for (const ev of events) {
-      applyEvent(m.state, ev);
+      applyEvent(m.game, ev);
       m.audio.observe(ev, true);
       m.calibration.observe(ev);
       if (ev.clientSeq !== null && ev.seat !== null) {
@@ -304,8 +310,7 @@ export class SessionManager {
         );
       }
     }
-    // connection status is not meaningful across restarts (agents are always there)
-    for (const s of seatList(m.state)) if (!s.agent) s.connected = false;
+    afterReplay(m.game);
     m.run(() => {
       m.audio.recover();
       // the calibration's timers did not survive the restart: end that run (the facilitator can redo it)
@@ -360,7 +365,7 @@ export class SessionManager {
     const before = this.state.phase;
     const round = ev.type === "RoundStarted" ? ev.payload.round : this.state.round;
     const stored = this.deps.store.appendEvent(this.sessionId, ev, round, this.clock());
-    applyEvent(this.state, stored);
+    applyEvent(this.game, stored);
     this.pending.push(stored);
     if (this.state.phase !== before) this.deps.store.setSessionStatus(this.sessionId, this.state.phase);
     // close audio tracks the event ends (pause, withdrawal, disconnect, game complete, ...)

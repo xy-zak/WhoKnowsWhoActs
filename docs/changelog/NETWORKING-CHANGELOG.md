@@ -4,6 +4,12 @@ History of [NETWORKING.md](../NETWORKING.md). Newest first. How entries are writ
 
 ## Unreleased
 
+### Not yet committed · `detached` keeps seats across session switches; audio waits for the seat
+
+- **Type:** Bug fix
+- **Change:** The generated catalogue adds the `/player` message `detached` and narrows `unbound` to a released seat. § 7 gets a subsection *Switching sessions keeps the seats* with a sequence diagram, and a bullet on audio uploads waiting for the seat (and the cancelled attempt that prevents a double send).
+- **Reason:** Resuming another session, an erasure's reload or a deletion sent `unbound`, so every browser deleted its seat token: switching back left the players unable to re-claim seats that are locked after onboarding. Audio uploads after a reconnect were refused as "Not seated" first and only then retried.
+
 ### Not yet committed · typed socket protocol, intent resend after reconnect
 
 - **Type:** Bug fix
