@@ -37,7 +37,6 @@ export {
   type AudioContextInfo,
   type AudioStartInfo,
   type AudioStopInfo,
-  DEFAULT_MAX_PENDING_SECONDS,
   type EngineCaptureSettings,
   MIC_CONSTRAINTS,
   type MicLevel,

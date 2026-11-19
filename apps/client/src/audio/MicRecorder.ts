@@ -1,6 +1,7 @@
 import {
   AUDIO_CHUNK_SECONDS,
   AUDIO_MAX_CHUNK_SECONDS,
+  AUDIO_MAX_PENDING_SECONDS,
   AUDIO_SAMPLE_RATE,
   type AudioStartReason,
   type AudioStopReason,
@@ -15,7 +16,6 @@ import {
   type AudioChunk,
   type AudioStartInfo,
   type AudioStopInfo,
-  DEFAULT_MAX_PENDING_SECONDS,
   type EngineCaptureSettings,
   MIC_CONSTRAINTS,
   type MicLevel,
@@ -70,7 +70,7 @@ export interface MicRecorderOptions {
   onState?(state: RecorderState, status: RecorderStatus): void;
   /** default 5 s; at most 6 s (AUDIO_MAX_CHUNK_SECONDS: the server refuses longer chunks) */
   chunkSeconds?: number;
-  /** unacked audio kept in memory before the oldest chunks are dropped; default 1800 s */
+  /** unacked audio kept in memory before the oldest chunks are dropped; default AUDIO_MAX_PENDING_SECONDS */
   maxPendingSeconds?: number;
   /** level window; default 250 ms */
   levelIntervalMs?: number;
@@ -266,7 +266,7 @@ export class MicRecorder {
     this.chunkSamples = Math.round(chunkSeconds * AUDIO_SAMPLE_RATE);
     if (this.chunkSamples < 1) throw new RangeError("MicRecorder: chunkSeconds is too small");
     this.noSignalMs = options.noSignalMs ?? 3000;
-    const maxPendingSeconds = options.maxPendingSeconds ?? DEFAULT_MAX_PENDING_SECONDS;
+    const maxPendingSeconds = options.maxPendingSeconds ?? AUDIO_MAX_PENDING_SECONDS;
     this.queue = new SendQueue<Outgoing>({
       deliver: (m, signal) =>
         m.kind === "chunk"

@@ -4,7 +4,9 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   AUDIO_CONSENT_ITEM,
+  AUDIO_LATE_CHUNK_GRACE_MS,
   AUDIO_MAX_CHUNK_SAMPLES,
+  AUDIO_MAX_PENDING_SECONDS,
   AudioChunk,
   AudioContentSchema,
   AudioSettingsSchema,
@@ -762,6 +764,10 @@ describe("player view: audio", () => {
 });
 
 describe("audio messages", () => {
+  it("keeps late chunks for longer than the browser buffers them, so a long outage is not lost", () => {
+    expect(AUDIO_LATE_CHUNK_GRACE_MS).toBeGreaterThanOrEqual(AUDIO_MAX_PENDING_SECONDS * 1000);
+  });
+
   const chunk = (pcm: unknown, sampleCount = 4) => ({
     trackId: "1b4e28ba-2fa1-4d2b-883f-0016d3cca427",
     seq: 0,

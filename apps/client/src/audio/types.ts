@@ -15,9 +15,6 @@ import type {
   MicLevelState,
 } from "@wkwa/shared";
 
-/** Default cap of unacknowledged audio kept in memory (30 min ≈ 57.6 MB). */
-export const DEFAULT_MAX_PENDING_SECONDS = 1800;
-
 /**
  * Raw capture: no echo cancellation, noise suppression or automatic gain, so
  * the server can compare the energy of the four microphones later.

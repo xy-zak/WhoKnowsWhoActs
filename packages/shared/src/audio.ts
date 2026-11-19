@@ -103,13 +103,18 @@ export const Dbfs = (d: string) =>
 
 /* Track start and stop reasons and microphone states: the catalogue in audioReasons.ts. */
 
+/** Most unacknowledged audio a browser keeps in memory while offline (s; 30 min ≈ 57.6 MB). */
+export const AUDIO_MAX_PENDING_SECONDS = 1800;
+
 /**
- * How long after its close (or its last late chunk) a track still accepts late chunks (ms; 10 min):
+ * How long after its close (or its last late chunk) a track still accepts late chunks (ms; 35 min):
  * the server closes a seat's track when its browser disconnects, and the browser resends what was
- * not acknowledged once it is back. Audio captured while recording was paused or after the game was
- * complete is never stored, late or not (see the server's live audio ingest).
+ * not acknowledged once it is back. It outlasts the browser's buffer (AUDIO_MAX_PENDING_SECONDS)
+ * plus a margin, so the oldest chunk an outage left in memory is still taken. Audio captured while
+ * recording was paused or after the game was complete is never stored, late or not (see the
+ * server's live audio ingest).
  */
-export const AUDIO_LATE_CHUNK_GRACE_MS = 10 * 60_000;
+export const AUDIO_LATE_CHUNK_GRACE_MS = (AUDIO_MAX_PENDING_SECONDS + 5 * 60) * 1000;
 
 /**
  * What is recorded about a microphone: the processing flags the browser actually applied and
