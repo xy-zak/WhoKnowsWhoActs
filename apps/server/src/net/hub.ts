@@ -52,6 +52,11 @@ interface TerminalEntry {
   sockets: Set<PlayerSocket>;
 }
 
+/** The seat one of the terminal's sockets holds, if any. */
+function seatOf(entry: TerminalEntry): number | undefined {
+  return [...entry.sockets].map((x) => x.data.seat).find((x) => x) ?? undefined;
+}
+
 interface PlayerSocketData {
   terminalKey?: string;
   terminal?: number;
@@ -404,7 +409,7 @@ export class Hub {
     const [key, entry] =
       [...this.terminals].find(([, t]) => t.terminal === terminal && t.sockets.size > 0) ?? [];
     if (!key || !entry) throw new CommandError(`Client ${terminal} is not connected`);
-    const seated = [...entry.sockets].map((x) => x.data.seat).find((x) => x);
+    const seated = seatOf(entry);
     if (seated && seated !== seat) throw new CommandError(`Client ${terminal} is already seat ${seated}`);
     return m.bindSeat(terminal, seat, { fake: this.fakes.isFake(key), fakePace });
   }
@@ -472,15 +477,12 @@ export class Hub {
   dashboard(): DashboardMsg {
     const m = this.session;
     const terminals: TerminalInfo[] = [...this.terminals]
-      .map(([key, t]) => {
-        const seated = [...t.sockets].map((x) => x.data.seat).find((x) => x);
-        return {
-          terminal: t.terminal,
-          connected: t.sockets.size > 0,
-          seat: seated ?? null,
-          fake: this.fakes.isFake(key),
-        };
-      })
+      .map(([key, t]) => ({
+        terminal: t.terminal,
+        connected: t.sockets.size > 0,
+        seat: seatOf(t) ?? null,
+        fake: this.fakes.isFake(key),
+      }))
       .filter((t) => t.connected || t.seat !== null)
       .sort((a, b) => a.terminal - b.terminal);
     const stats: Record<number, SeatLiveStats> = {};
@@ -519,10 +521,7 @@ export class Hub {
   /** Throttled dashboard refresh (telemetry-driven stats changes; agents' actions). */
   private schedulePush(ms = 1000) {
     if (this.statsTimer) return;
-    this.statsTimer = setTimeout(() => {
-      this.statsTimer = null;
-      this.facilitator.emit("dashboard", this.dashboard());
-    }, ms);
+    this.statsTimer = setTimeout(() => this.pushDashboard(), ms);
   }
 
   /* ═════════════════════════ players ═════════════════════════ */
@@ -629,14 +628,11 @@ export class Hub {
       fn: (m: SessionManager, seat: number, msg: PlayerMessage<K>) => PlayerAcks[K] | Promise<PlayerAcks[K]>,
     ) => seatHandler(name, fn, (error, retry) => ({ ok: false, error, retry }));
 
-    const done = undefined; // a command that returns nothing: acked { ok: true }
     seatCmd("consent:submit", (m, seat, msg) => {
       m.submitConsent(seat, msg);
-      return done;
     });
     seatCmd("mic:check", (m, seat, msg) => {
       m.submitMicCheck(seat, msg);
-      return done;
     });
     audioCmd("audio:start", (m, seat, msg) => m.audio.start(seat, msg));
     audioCmd("audio:chunk", async (m, seat, msg) => {
@@ -648,11 +644,9 @@ export class Hub {
     audioCmd("audio:stop", (m, seat, msg) => m.audio.stop(seat, msg));
     seatCmd("demographics:submit", (m, seat, msg) => {
       m.submitDemographics(seat, msg);
-      return done;
     });
     seatCmd("briefing:ack", (m, seat, msg) => {
       m.acknowledgeBriefing(seat, msg);
-      return done;
     });
     seatCmd("intent", (m, seat, msg) => m.intent(seat, msg));
     seatCmd("telemetry", (m, seat, msg) => ({ stored: this.ingestTelemetry(m, seat, msg) }));
