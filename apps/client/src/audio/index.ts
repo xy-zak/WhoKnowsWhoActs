@@ -39,8 +39,6 @@ export {
   type AudioStopInfo,
   DEFAULT_MAX_PENDING_SECONDS,
   type EngineCaptureSettings,
-  /** @deprecated the engine's settings type is EngineCaptureSettings (player/recording.ts still uses this name) */
-  type EngineCaptureSettings as AudioCaptureSettings,
   MIC_CONSTRAINTS,
   type MicLevel,
   type RecorderState,

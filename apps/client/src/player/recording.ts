@@ -10,10 +10,10 @@ import {
   type TelemetryPayloadOf,
 } from "@wkwa/shared";
 import type {
-  AudioCaptureSettings,
   AudioChunk,
   AudioStartInfo,
   AudioStopInfo,
+  EngineCaptureSettings,
   MicLevel,
   MicRecorderOptions,
   RecorderState,
@@ -51,7 +51,7 @@ export interface RecorderLike {
   readonly pendingChunks: number;
   readonly pendingBytes: number;
   readonly droppedChunks: number;
-  readonly captureSettings: AudioCaptureSettings;
+  readonly captureSettings: EngineCaptureSettings;
   prepare(): boolean;
   resume(): Promise<boolean>;
   start(reason?: string): Promise<RecorderState>;
@@ -306,7 +306,7 @@ export class RecordingController {
   }
 
   /** What the browser applied (whitelisted: never a device id or label). */
-  get captureSettings(): AudioCaptureSettings {
+  get captureSettings(): EngineCaptureSettings {
     return this.rec?.captureSettings ?? {};
   }
 

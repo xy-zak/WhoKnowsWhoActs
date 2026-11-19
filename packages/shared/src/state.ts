@@ -308,7 +308,7 @@ export function onboardingStepsFor(
   const o = config.onboarding;
   const used: Record<OnboardingStep, boolean> = {
     consent: o.consent,
-    mic_check: config.audio.enabled && config.players !== "simulated",
+    mic_check: audioEnabled(config),
     demographics: o.demographics,
     briefing: o.briefing,
   };
