@@ -10,6 +10,7 @@ import type {
 } from "@wkwa/shared";
 import { io } from "socket.io-client";
 import { emitFacilitator, type FacilitatorSocket } from "../net/socket";
+import { safeStorage } from "../net/storage";
 import { Store } from "../net/store";
 import type { ToastMsg } from "../ui/Toast";
 
@@ -25,22 +26,26 @@ export interface FacState {
 }
 
 const TOKEN_KEY = "wkwa.adminToken";
+const tokenStore = safeStorage(() => sessionStorage);
 
-/** Optional ADMIN_TOKEN (remote facilitator access): taken from ?token=… once, then kept in localStorage. */
+/**
+ * Optional ADMIN_TOKEN (remote facilitator access): taken from ?token=… once, then kept in
+ * sessionStorage, so it survives a reload but not a closed tab (player pages share this origin).
+ */
 function adminToken(): string | null {
+  // older builds kept it in localStorage: drop that copy
+  safeStorage(() => localStorage).removeItem(TOKEN_KEY);
   try {
     const url = new URL(location.href);
     const t = url.searchParams.get("token");
     if (t) {
-      localStorage.setItem(TOKEN_KEY, t);
+      tokenStore.setItem(TOKEN_KEY, t);
       url.searchParams.delete("token");
       history.replaceState(null, "", url.toString());
       return t;
     }
-    return localStorage.getItem(TOKEN_KEY);
-  } catch {
-    return null;
-  }
+  } catch {}
+  return tokenStore.getItem(TOKEN_KEY);
 }
 
 export class FacilitatorConnection {
