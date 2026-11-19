@@ -4,6 +4,12 @@ History of [DATA-TYPES.md](../DATA-TYPES.md). Newest first. How entries are writ
 
 ## Unreleased
 
+### Not yet committed · documents `simplify/audio-cleanup` (#16)
+
+- **Type:** Correction
+- **Change:** The `audio_tracks.status` row now lists the stop reason `interrupted` among those the REST API shows as `interrupted`.
+- **Reason:** The cleanup in #16 merged the two `trackStatusOf` copies; the one REST and CSV now use also counts the stop reason `interrupted` as interrupted, as the shared schema already said.
+
 ### Not yet committed · documents `0f6971a`…`abcacbe` (microphone audio)
 
 - **Type:** Feature

@@ -2987,7 +2987,7 @@ The cipher is AES-256-GCM with a random 32-byte key per file. The authenticated 
 | | `reason`, `stop_reason` | TEXT | Why it started and why it stopped (lists: [NETWORKING.md § 9](NETWORKING.md#9-message-catalogue)) |
 | | `started_server_ts`, `started_client_ts`, `clock_offset_ms`, `closed_server_ts` | REAL | Start on the server clock, the browser's own timestamp and offset, close time |
 | | `samples`, `chunks`, `dropped_chunks`, `bytes` | INTEGER | Totals; `dropped_chunks` counts chunks the browser had to discard from its full queue |
-| | `status` | TEXT | `recording`, `closed` or `deleted` (raw audio removed, metadata kept). The REST API adds `interrupted` for tracks that ended with `disconnect`, `permission_lost` or `error` (a track closed with the stop reason `interrupted` after a restart reads as `closed` there). |
+| | `status` | TEXT | `recording`, `closed` or `deleted` (raw audio removed, metadata kept). The REST API adds `interrupted` for tracks that ended with `disconnect`, `interrupted` (still open after a restart), `permission_lost` or `error`. |
 | `audio_chunks` | `track_id`, `seq` | TEXT, INTEGER | Primary key: a resent chunk is stored once. `seq` is also the record number in the file. |
 | | `start_sample`, `sample_count` | INTEGER | Position and length in the track |
 | | `client_ts`, `clock_offset_ms`, `server_ts`, `server_wall` | REAL, TEXT | Capture time on the server clock (as the browser computed it), the offset used, arrival time |
