@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import path from "node:path";
 import { expect, type Page, test } from "@playwright/test";
 import { CONTEXT, crop, prime, scenario, shot, writeReport } from "./screenshots/capture";
 import {
@@ -7,6 +8,7 @@ import {
   bind,
   blur,
   briefing,
+  calibrate,
   chooseScenario,
   confirmKeySheet,
   consent,
@@ -132,8 +134,6 @@ scenario(
     await consent(p2);
     await expect(p1.getByText("Information and consent").first()).toBeVisible({ timeout: 20_000 });
     await shot(p1, "client/03-consent");
-    await shot(fac, "server/live-01-onboarding");
-    await crop(fac, "server/live-panel-seats-onboarding", panel(fac, "Seats"));
     await consent(p1);
     await expect(p1.getByRole("button", { name: /Start mic check/ })).toBeVisible({ timeout: 30_000 });
     await shot(p1, "client/audio-02-mic-check-ready");
@@ -144,6 +144,9 @@ scenario(
     await micCheck(p3);
     await aboutYou(p3);
     await micCheck(p2);
+    // the seats at different steps: 4 ready, 3 at the briefing, 2 at about you, 1 in the mic check
+    await shot(fac, "server/live-01-onboarding");
+    await crop(fac, "server/live-panel-seats-onboarding", panel(fac, "Seats"));
     // seat 1: listening (the level meter moves), then passed
     await p1.getByRole("button", { name: /Start mic check/ }).click();
     await expect(p1.getByText("Speech heard")).toBeVisible();
@@ -429,6 +432,8 @@ scenario(
           keepMouse: true,
           wait: 0,
         });
+        // a redraw during the capture drops the tooltip from the crop without an error: check it
+        await expect(fac.locator(".tooltip")).toBeVisible({ timeout: 100 });
         break;
       } catch (e) {
         if (attempt >= 10) throw e;
@@ -651,8 +656,7 @@ scenario(
     await expect(onMicCheck(p1)).toHaveCount(0, { timeout: 30_000 });
     await aboutYou(p1);
     await briefing(p1);
-    await fac.getByRole("button", { name: "Start calibration" }).click();
-    await expect(fac.getByText(/done · /)).toBeVisible({ timeout: 90_000 });
+    await calibrate(fac);
     const start1 = fac.getByRole("button", { name: /Start round 1 of 1/ });
     await expect(start1).toBeEnabled();
     await start1.click();
@@ -699,7 +703,7 @@ scenario(
     await current(fac, "connect");
     // tsx directly (not through npx), so that SIGTERM at the end reaches the bots
     const bots = spawn(
-      "node_modules/.bin/tsx",
+      path.resolve("node_modules/.bin/tsx"),
       [
         "apps/server/src/tools/bots.ts",
         "--url",
@@ -715,17 +719,26 @@ scenario(
       ],
       { stdio: "inherit" },
     );
+    // a spawn error or an early exit of the bots fails the waits below at once
+    const botsDied = new Promise<never>((_, reject) => {
+      bots.once("error", reject);
+      bots.once("exit", (code) => reject(new Error(`the bots exited early (code ${code})`)));
+    });
+    botsDied.catch(() => {}); // handled by the races; the exit after kill() below is expected
+    const whileBots = <T>(p: Promise<T>) => Promise.race([p, botsDied]);
     try {
-      await expect(fac.locator(".live-indicator")).toBeVisible({ timeout: 60_000 });
-      const sessionId = (await fac.locator(".live-indicator").textContent())?.match(/S-[0-9A-Z-]+/)?.[0];
+      await whileBots(expect(fac.locator(".live-indicator")).toBeVisible({ timeout: 60_000 }));
+      const sessionId = (await fac.locator(".live-indicator").textContent())?.match(
+        /\bS-\d{8}-[0-9A-Z]{4}\b/,
+      )?.[0];
       expect(sessionId).toBeTruthy();
-      await expect(fac.getByText(/Game complete/).first()).toBeVisible({ timeout: 400_000 });
+      await whileBots(expect(fac.getByText(/Game complete/).first()).toBeVisible({ timeout: 400_000 }));
       await wrapUp(fac, true);
 
       await blur(fac);
       await fac.keyboard.press("3");
       await expect(fac.locator("nav.subtabs .tab.active")).toContainText("Participants");
-      const row = fac.getByRole("row", { name: new RegExp(`^${sessionId}`) });
+      const row = fac.getByRole("row", { name: new RegExp(`^${sessionId}\\b`) });
       await expect(row).toBeVisible();
       await shot(fac, "server/audio-db-01-list");
 

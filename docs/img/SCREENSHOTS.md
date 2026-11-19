@@ -118,7 +118,7 @@ Players go through consent → about you → briefing; the facilitator sees whic
 | v1 · 2026-11-18 | v2 · 2026-11-19 |
 | --- | --- |
 | ![Facilitator · LIVE during onboarding v1\|340](./server/live-01-onboarding.png) | ![Facilitator · LIVE during onboarding v2\|340](./server/live-01-onboarding-v2.png) |
-| Every seat at a different onboarding step. | Onboarding with audio: calibration row in NEXT, Mic column, mic checks held until all consented. |
+| Every seat at a different onboarding step. | Onboarding with audio: calibration row and Skip mic check in NEXT, Mic column, mics n/m. |
 
 **Facilitator · Seats panel** · 2 versions, oldest first
 
@@ -128,7 +128,7 @@ Players go through consent → about you → briefing; the facilitator sees whic
 
 ![Facilitator · Seats panel v2|700](./server/live-panel-seats-onboarding-v2.png)
 
-**v2 · 2026-11-19:** New Mic column: each seat's recording state; mic checks pending until everyone has consented.
+**v2 · 2026-11-19:** New Mic column: off until the mic check, then REC with the live level and the check result.
 
 **Facilitator · NEXT panel** · 2 versions, oldest first
 
@@ -443,6 +443,11 @@ Optional microphone recording (setup step 04, "Record audio"): each player's own
 
 **Facilitator · Calibration quality:** Calibration quality: each seat's own voice against the loudest other mic, verdict and advice.
 
+| | |
+| --- | --- |
+| ![Facilitator · Event log: the calibration\|340](./server/audio-event-log.png) |  |
+| **Facilitator · Event log: the calibration:** Event log after the calibration: its start, each seat's turn, completion and the quality check. |  |
+
 ![Facilitator · Status bar with mics n/m|700](./server/audio-status-bar.png)
 
 **Facilitator · Status bar with mics n/m:** Status bar with mics 4/4: how many seats are recording right now.
@@ -503,8 +508,8 @@ Newest first: every new version of a screen, and when new screens were added.
 | 2026-11-19 | Consent | v2 | Mic check step in the progress bar; the consent text gains an Audio recording section. |
 | 2026-11-19 | About you | v2 | REC bar on top while the microphone records; the mic check step is done in the progress bar. |
 | 2026-11-19 | Ready | v2 | Ready with audio: REC bar on top, and a note that a short sound calibration comes next. |
-| 2026-11-19 | LIVE during onboarding | v2 | Onboarding with audio: calibration row in NEXT, Mic column, mic checks held until all consented. |
-| 2026-11-19 | Seats panel | v2 | New Mic column: each seat's recording state; mic checks pending until everyone has consented. |
+| 2026-11-19 | LIVE during onboarding | v2 | Onboarding with audio: calibration row and Skip mic check in NEXT, Mic column, mics n/m. |
+| 2026-11-19 | Seats panel | v2 | New Mic column: off until the mic check, then REC with the live level and the check result. |
 | 2026-11-19 | NEXT panel | v2 | Everyone ready: with audio, NEXT asks for the calibration before round 1. |
 | 2026-11-19 | Status line | v2 | REC tag in the status line while the microphone records. |
 | 2026-11-19 | LIVE during round 1 | v2 | Round with audio: calibration card, Mic column with live levels, mics n/m in the status bar. |
@@ -517,5 +522,5 @@ Newest first: every new version of a screen, and when new screens were added.
 | 2026-11-19 | DATABASE · Simulations | v2 | Audio column in the simulation list too: simulated sessions never record audio. |
 | 2026-11-19 | REPLAY · A session | v2 | Replay shows audio events in the event line and mic lanes in the timeline. |
 | 2026-11-19 | Erasure lookup | v2 | Erasure lookup also counts the code's audio tracks and their recorded time. |
-| 2026-11-19 | 24 screens | v1 | First version. |
+| 2026-11-19 | 25 screens | v1 | First version. |
 | 2026-11-18 | 77 screens | v1 | First version. |

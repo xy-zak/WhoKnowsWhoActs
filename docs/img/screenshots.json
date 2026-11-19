@@ -1,11 +1,5 @@
 {
-  "reviewedUpTo": "fc32ce7",
-  "reviewed": {
-    "apps/client/src/facilitator/Timeline.tsx": "0a54957b290825ea869c4a9bb83d2a32dd5ac690",
-    "apps/client/src/player/Game.tsx": "37eee6eb24c2cac6c40548cb67da7ab25dcfe044",
-    "apps/client/src/ui/theme.css": "a173a458ab850fb8718b2224bd92897258472dd0",
-    "config/briefing.md": "4233e5266b468a4c72efdc3a0572245cc5e883f0"
-  },
+  "reviewedUpTo": "3f93e17",
   "shots": {
     "server/setup-01-scenario": [
       {
@@ -238,9 +232,9 @@
         "v": 2,
         "file": "server/live-01-onboarding-v2.png",
         "date": "2026-11-19",
-        "at": "2026-11-19T00:49:02Z",
-        "commit": "125d503",
-        "caption": "Onboarding with audio: calibration row in NEXT, Mic column, mic checks held until all consented."
+        "at": "2026-11-19T00:55:50Z",
+        "commit": "3f93e17",
+        "caption": "Onboarding with audio: calibration row and Skip mic check in NEXT, Mic column, mics n/m."
       }
     ],
     "server/live-panel-seats-onboarding": [
@@ -256,9 +250,9 @@
         "v": 2,
         "file": "server/live-panel-seats-onboarding-v2.png",
         "date": "2026-11-19",
-        "at": "2026-11-19T00:49:02Z",
-        "commit": "125d503",
-        "caption": "New Mic column: each seat's recording state; mic checks pending until everyone has consented."
+        "at": "2026-11-19T00:55:50Z",
+        "commit": "3f93e17",
+        "caption": "New Mic column: off until the mic check, then REC with the live level and the check result."
       }
     ],
     "server/live-panel-next-ready": [
@@ -925,6 +919,16 @@
         "at": "2026-11-19T00:48:58Z",
         "commit": "125d503",
         "caption": "Calibration quality: each seat's own voice against the loudest other mic, verdict and advice."
+      }
+    ],
+    "server/audio-event-log": [
+      {
+        "v": 1,
+        "file": "server/audio-event-log.png",
+        "date": "2026-11-19",
+        "at": "2026-11-19T00:50:36Z",
+        "commit": "3f93e17",
+        "caption": "Event log after the calibration: its start, each seat's turn, completion and the quality check."
       }
     ],
     "server/audio-status-bar": [

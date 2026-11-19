@@ -475,7 +475,7 @@ export const SHOTS = [
     id: "server/audio-event-log",
     group: "audio",
     subgroup: "Facilitator: LIVE",
-    title: "Event log: mic checks and calibration",
+    title: "Event log: the calibration",
     size: "half",
     sources: [`${C}/facilitator/EventLog.tsx`, `${C}/facilitator/audioLive.ts`],
   },
