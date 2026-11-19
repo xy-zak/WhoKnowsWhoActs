@@ -184,7 +184,11 @@ export function applyEvent(state: GameState, ev: StoredEvent): GameState {
     case "CalibrationSkipped": {
       // stopped by the server (recording paused, restart): not done, so it has to run (or be skipped) again
       if (ev.payload.cancelled) {
-        if (state.audio.calibration.status === "running") state.audio.calibration = emptyCalibration();
+        if (state.audio.calibration.status === "running")
+          state.audio.calibration = {
+            ...emptyCalibration(),
+            lastCancel: { reason: ev.payload.reason, ts: ev.serverTs },
+          };
         break;
       }
       const c = state.audio.calibration;
@@ -198,9 +202,13 @@ export function applyEvent(state: GameState, ev: StoredEvent): GameState {
     }
     case "RecordingPaused":
       state.audio.recordingPaused = true;
+      state.audio.pausedTs = ev.serverTs;
+      state.audio.pauseReason = ev.payload.reason ?? null;
       break;
     case "RecordingResumed":
       state.audio.recordingPaused = false;
+      state.audio.pausedTs = null;
+      state.audio.pauseReason = null;
       break;
     case "DemographicsSubmitted": {
       const s = seatOf(ev.seat);
