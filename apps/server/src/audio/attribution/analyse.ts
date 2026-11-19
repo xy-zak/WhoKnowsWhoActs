@@ -33,6 +33,10 @@ import {
 const round = (v: number, digits = 2) => Math.round(v * 10 ** digits) / 10 ** digits;
 const roundOrNull = (v: number | null, digits = 2) => (v === null ? null : round(v, digits));
 
+/** A leakage matrix with nothing measured: 0 on the diagonal, null elsewhere. */
+const unmeasuredLeakage = (seats: readonly number[]): (number | null)[][] =>
+  seats.map((_, s) => seats.map((_, j) => (s === j ? 0 : null)));
+
 /** One seat's features on the session timeline (`NaN` = no data). */
 export interface SeatChannel {
   seat: number;
@@ -132,7 +136,7 @@ export function measureCalibration(
 ): CalibrationReport {
   const n = channels.length;
   const seats = channels.map((c) => c.seat);
-  const L: (number | null)[][] = seats.map((_, s) => seats.map((_, j) => (s === j ? 0 : null)));
+  const L = unmeasuredLeakage(seats);
   const rows: Array<Omit<CalibrationSeatQuality, "marginDb" | "ok" | "advice"> | null> = seats.map(
     () => null,
   );
@@ -164,10 +168,10 @@ export function measureCalibration(
       for (let j = 0; j < n; j++) {
         if (j === s) continue;
         const other = channels[j]!.energyDb;
-        const diffs = active.filter((f) => other[f]! > DEAD_DB).map((f) => other[f]! - ch.energyDb[f]!);
-        if (diffs.length < opts.minCalibrationFrames / 2) continue;
-        L[s]![j] = round(median(diffs), 1);
-        const level = median(active.filter((f) => other[f]! > DEAD_DB).map((f) => other[f]!));
+        const heard = active.filter((f) => other[f]! > DEAD_DB);
+        if (heard.length < opts.minCalibrationFrames / 2) continue;
+        L[s]![j] = round(median(heard.map((f) => other[f]! - ch.energyDb[f]!)), 1);
+        const level = median(heard.map((f) => other[f]!));
         if (bestOtherDb === null || level > bestOtherDb) {
           bestOtherDb = level;
           bestOtherSeat = seats[j]!;
@@ -247,11 +251,7 @@ export function quickCalibrationCheck(
     return {
       ok: false,
       seats: [],
-      leakage: {
-        seats,
-        matrixDb: seats.map((_, s) => seats.map((_, j) => (s === j ? 0 : null))),
-        source: "default",
-      },
+      leakage: { seats, matrixDb: unmeasuredLeakage(seats), source: "default" },
       warnings: ["No audio arrived for the calibration."],
     };
   return measureCalibration(channels, timeline, turns, opts);
@@ -333,6 +333,50 @@ function gate(
 
 /* ─────────── analyse ─────────── */
 
+/** Coverage, clipping, levels, drift and talk time of each seat (`valid`: frames with data). */
+function measureSeats(
+  channels: readonly SeatChannel[],
+  valid: readonly Uint8Array[],
+  masks: readonly Uint8Array[],
+  passed: readonly Uint8Array[],
+  alignment: readonly TrackAlignment[],
+  tl: Timeline,
+): SeatQuality[] {
+  return channels.map((ch, s) => {
+    let data = 0;
+    let clipped = 0;
+    let talk = 0;
+    let overlap = 0;
+    const speech: number[] = [];
+    for (let f = 0; f < tl.frames; f++) {
+      if (valid[s]![f]) {
+        data++;
+        clipped += ch.clipped[f]!;
+      }
+      if (!masks[s]![f]) continue;
+      talk++;
+      if (masks.some((m, k) => k !== s && m[f])) overlap++;
+      if (passed[s]![f] && speech.length < 200_000) speech.push(ch.energyDb[f]!);
+    }
+    const floor = Number.isFinite(ch.floorDb) ? ch.floorDb : null;
+    const level = speech.length ? median(speech) : null;
+    const seatTracks = alignment.filter((a) => a.seat === ch.seat);
+    const longest = [...seatTracks].sort((a, b) => b.samples - a.samples)[0];
+    return {
+      seat: ch.seat,
+      tracks: seatTracks.length,
+      coverage: round(tl.frames ? data / tl.frames : 0, 4),
+      clippingShare: round(data ? clipped / data : 0, 4),
+      noiseFloorDb: roundOrNull(floor, 1),
+      speechLevelDb: roundOrNull(level, 1),
+      snrDb: roundOrNull(level !== null && floor !== null ? level - floor : null, 1),
+      driftPpm: longest ? longest.driftPpm : null,
+      talkTimeMs: talk * HOP_MS,
+      overlapMs: overlap * HOP_MS,
+    };
+  });
+}
+
 export function analyse(input: AnalysisInput): AttributionResult {
   const opts = resolveOptions(input.options);
   const seats = [...new Set([...(input.seats ?? []), ...input.tracks.map((t) => t.seat)])].sort(
@@ -352,11 +396,7 @@ export function analyse(input: AnalysisInput): AttributionResult {
   // leakage
   const turns = input.calibration?.turns ?? [];
   let calibration: CalibrationSeatQuality[] | null = null;
-  let leakage: LeakageReport = {
-    seats,
-    matrixDb: seats.map((_, s) => seats.map((_, j) => (s === j ? 0 : null))),
-    source: "default",
-  };
+  let leakage: LeakageReport = { seats, matrixDb: unmeasuredLeakage(seats), source: "default" };
   if (turns.length && tl.frames) {
     const r = measureCalibration(channels, tl, turns, opts);
     calibration = r.seats;
@@ -391,38 +431,7 @@ export function analyse(input: AnalysisInput): AttributionResult {
   for (let f = 0; f < tl.frames; f++) if (masks.reduce((k, m) => k + m[f]!, 0) >= 2) overlapFrames++;
 
   // quality
-  const seatQuality: SeatQuality[] = channels.map((ch, s) => {
-    let data = 0;
-    let clipped = 0;
-    let talk = 0;
-    let overlap = 0;
-    const speech: number[] = [];
-    for (let f = 0; f < tl.frames; f++) {
-      if (valid[s]![f]) {
-        data++;
-        clipped += ch.clipped[f]!;
-      }
-      if (!masks[s]![f]) continue;
-      talk++;
-      if (masks.some((m, k) => k !== s && m[f])) overlap++;
-      if (g.passed[s]![f] && speech.length < 200_000) speech.push(ch.energyDb[f]!);
-    }
-    const floor = Number.isFinite(ch.floorDb) ? ch.floorDb : null;
-    const level = speech.length ? median(speech) : null;
-    const longest = alignment.filter((a) => a.seat === ch.seat).sort((a, b) => b.samples - a.samples)[0];
-    return {
-      seat: ch.seat,
-      tracks: alignment.filter((a) => a.seat === ch.seat).length,
-      coverage: round(tl.frames ? data / tl.frames : 0, 4),
-      clippingShare: round(data ? clipped / data : 0, 4),
-      noiseFloorDb: roundOrNull(floor, 1),
-      speechLevelDb: roundOrNull(level, 1),
-      snrDb: roundOrNull(level !== null && floor !== null ? level - floor : null, 1),
-      driftPpm: longest ? longest.driftPpm : null,
-      talkTimeMs: talk * HOP_MS,
-      overlapMs: overlap * HOP_MS,
-    };
-  });
+  const seatQuality = measureSeats(channels, valid, masks, g.passed, alignment, tl);
   for (const q of seatQuality) {
     if (q.coverage === 0) warnings.push(`Seat ${q.seat}: no audio at all; its speech is not attributed.`);
     else if (q.coverage < 0.95)

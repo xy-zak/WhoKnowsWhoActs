@@ -12,7 +12,7 @@
  * so the caller decides when the model runs and memory stays at about one chunk.
  */
 
-import { HOP_SAMPLES, type TrackFeatures } from "./types";
+import { HOP_SAMPLES, SILENCE_DB, type TrackFeatures } from "./types";
 
 /** A voice activity detector over fixed windows of 16 kHz audio (float, −1…1). */
 export interface Vad {
@@ -127,7 +127,7 @@ export class FeatureBuilder {
     for (let f = 0; f < frames; f++) {
       const n = count[f]!;
       energyDb[f] =
-        n > 0 ? Math.max(-120, 10 * Math.log10(sumSq[f]! / n / FULL_SCALE_SQ + 1e-12)) : Number.NaN;
+        n > 0 ? Math.max(SILENCE_DB, 10 * Math.log10(sumSq[f]! / n / FULL_SCALE_SQ + 1e-12)) : Number.NaN;
     }
     let speech: Float32Array | null = null;
     if (this.vad) {

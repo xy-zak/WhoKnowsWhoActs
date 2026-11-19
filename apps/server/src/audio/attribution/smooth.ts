@@ -9,7 +9,7 @@
  *    start, so soft word tails and onsets are kept; never into frames without data.
  */
 
-import type { SpeechSegment, Timeline } from "./types";
+import { SILENCE_DB, type SpeechSegment, type Timeline } from "./types";
 
 export interface SmoothingFrames {
   minGap: number;
@@ -108,7 +108,7 @@ export function segmentsFromMasks(
         startTs: tl.t0 + a * tl.hopMs,
         endTs: tl.t0 + b * tl.hopMs,
         durationMs: (b - a) * tl.hopMs,
-        meanDb: speechFrames ? Math.round(100 * Math.log10(pow / speechFrames)) / 10 : -120,
+        meanDb: speechFrames ? Math.round(100 * Math.log10(pow / speechFrames)) / 10 : SILENCE_DB,
         confidence: Math.round((conf / (b - a)) * 1000) / 1000,
         overlap: overlap > 0,
         overlapMs: overlap * tl.hopMs,
