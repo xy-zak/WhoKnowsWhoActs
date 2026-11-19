@@ -46,7 +46,7 @@ export interface BotOptions {
   clientSeqStart?: number;
   /** Keep every received state and ack in memory (default true; tests read them). Off for long-lived fake players. */
   record?: boolean;
-  /** Accept a self-signed certificate (the server connecting to itself over TLS). */
+  /** Accept any certificate, also on another machine (see tlsClientOpts; loopback is never checked). */
   insecureTls?: boolean;
   /**
    * Sessions that record audio: tick the audio consent item, pass the mic check and upload
@@ -82,6 +82,22 @@ export interface BotAudioStats {
 const BOT_NOISE_DB = -62;
 /** How much quieter another seat's voice is on this bot's "mic" (headset-like crosstalk). */
 const BOT_LEAKAGE_DB = 22;
+const LOOPBACK_HOSTS: ReadonlySet<string> = new Set(["localhost", "127.0.0.1", "[::1]"]);
+
+/**
+ * Socket.IO client TLS options for `url`. The server's self-signed certificate (WKWA_TLS=auto) is
+ * not trusted by Node, so it is not checked over loopback (this laptop) or when `insecure` is set;
+ * otherwise (and for plain HTTP) the defaults apply.
+ */
+export function tlsClientOpts(
+  url: string,
+  opts: { insecure?: boolean } = {},
+): { rejectUnauthorized?: false } {
+  const u = new URL(url);
+  if (u.protocol !== "https:") return {};
+  return opts.insecure || LOOPBACK_HOSTS.has(u.hostname) ? { rejectUnauthorized: false } : {};
+}
+
 const BOT_SETTINGS = {
   sampleRate: 48_000,
   echoCancellation: false,
@@ -122,7 +138,7 @@ export class Bot {
       transports: ["websocket"],
       reconnection: true,
       forceNew: true,
-      ...(opts.insecureTls ? { rejectUnauthorized: false } : {}),
+      ...tlsClientOpts(opts.url, { insecure: opts.insecureTls }),
     });
     this.socket.on("connect", () => {
       // the server closed the track at the disconnect: finish it (its chunks are resent) and start a new one
@@ -194,8 +210,17 @@ export class Bot {
     return this.terminal;
   }
 
-  emit<T = unknown>(event: string, payload: unknown): Promise<T> {
-    return new Promise((resolve) => this.socket.emit(event, payload, (ack: T) => resolve(ack)));
+  /** Emit and wait for the ack; with `timeoutMs`, resolves null when no ack came in time. */
+  emit<T = unknown>(event: string, payload: unknown): Promise<T>;
+  emit<T = unknown>(event: string, payload: unknown, timeoutMs: number): Promise<T | null>;
+  emit<T = unknown>(event: string, payload: unknown, timeoutMs?: number): Promise<T | null> {
+    return new Promise((resolve) => {
+      if (timeoutMs === undefined) this.socket.emit(event, payload, (ack: T) => resolve(ack));
+      else
+        this.socket
+          .timeout(timeoutMs)
+          .emit(event, payload, (err: unknown, ack: T) => resolve(err ? null : ack));
+    });
   }
 
   track<T extends TelemetryItem["type"]>(type: T, payload: Extract<TelemetryItem, { type: T }>["payload"]) {
@@ -424,15 +449,10 @@ export class Bot {
     if (n <= 0 || (!final && n < AUDIO_SAMPLE_RATE / 10)) return;
     n = Math.max(1, n);
     const startSample = track.nextSample;
-    const pcm = this.synthesise(track.t0, startSample, n);
-    let sum = 0;
-    let peak = 0;
-    for (let i = 0; i < n; i++) {
-      const x = pcm.readInt16LE(i * 2);
-      sum += x * x;
-      peak = Math.max(peak, Math.abs(x));
-    }
-    const toDb = (v: number) => clampDb(20 * Math.log10(v / 32768));
+    const { pcm, sumSquares, peak } = this.synthesise(track.t0, startSample, n);
+    const toDb = (v: number) => Math.round(clampDb(20 * Math.log10(v / 32768)) * 10) / 10;
+    const rmsDb = toDb(Math.sqrt(sumSquares / n));
+    const peakDb = toDb(peak);
     this.sendAudio("audio:chunk", {
       trackId: track.trackId,
       seq: track.nextSeq++,
@@ -440,8 +460,8 @@ export class Bot {
       sampleCount: n,
       clientTs: track.t0 + (startSample * 1000) / AUDIO_SAMPLE_RATE,
       clockOffsetMs: 0,
-      rmsDb: Math.round(toDb(Math.sqrt(sum / n)) * 10) / 10,
-      peakDb: Math.round(toDb(peak) * 10) / 10,
+      rmsDb,
+      peakDb,
       clippedSamples: 0,
       pcm,
     });
@@ -449,8 +469,8 @@ export class Bot {
     if (this.view?.audio.enabled) {
       this.socket.volatile.emit("audio:level", {
         state: "recording",
-        rmsDb: Math.round(toDb(Math.sqrt(sum / n)) * 10) / 10,
-        peakDb: Math.round(toDb(peak) * 10) / 10,
+        rmsDb,
+        peakDb,
         pendingChunks: 0,
         pendingBytes: 0,
       });
@@ -471,8 +491,13 @@ export class Bot {
    * Synthetic 16 kHz s16le audio: a noise floor, plus speech-like bursts (noise with a 4 Hz
    * syllable rhythm). In a calibration turn the speaking seat is loud on its own mic and
    * BOT_LEAKAGE_DB quieter on the others; during rounds a bot talks now and then at its own level.
+   * Also returns the sum of squares and the peak of the samples (for the chunk's levels).
    */
-  private synthesise(t0: number, startSample: number, n: number): Buffer {
+  private synthesise(
+    t0: number,
+    startSample: number,
+    n: number,
+  ): { pcm: Buffer; sumSquares: number; peak: number } {
     const out = Buffer.alloc(n * 2);
     const me = this.seat;
     const voice = 32768 * 10 ** (this.voiceDb() / 20);
@@ -481,10 +506,16 @@ export class Bot {
     const inRound = this.view?.phase === "round_active";
     let talkUntil = -1;
     let talking = false;
+    let sumSquares = 0;
+    let peak = 0;
+    // only the calibration turns that overlap this chunk
+    const from = t0 + (startSample * 1000) / AUDIO_SAMPLE_RATE;
+    const to = t0 + ((startSample + n) * 1000) / AUDIO_SAMPLE_RATE;
+    const turns = this.turns.filter((x) => x.from < to && x.to > from);
     for (let i = 0; i < n; i++) {
       const t = t0 + ((startSample + i) * 1000) / AUDIO_SAMPLE_RATE;
       let amp = 0;
-      const turn = this.turns.find((x) => t >= x.from && t < x.to);
+      const turn = turns.length > 0 ? turns.find((x) => t >= x.from && t < x.to) : undefined;
       if (turn) amp = turn.seat === me ? voice : leak;
       else if (inRound) {
         if (t >= talkUntil) {
@@ -495,20 +526,19 @@ export class Bot {
       }
       const syllable = 0.5 + 0.5 * Math.sin((2 * Math.PI * 4 * t) / 1000);
       const v = (this.random() * 2 - 1) * (noise + amp * syllable * syllable * 1.7);
-      out.writeInt16LE(Math.max(-32767, Math.min(32767, Math.round(v))), i * 2);
+      const x = Math.max(-32767, Math.min(32767, Math.round(v)));
+      out.writeInt16LE(x, i * 2);
+      sumSquares += x * x;
+      peak = Math.max(peak, Math.abs(x));
     }
-    return out;
+    return { pcm: out, sumSquares, peak };
   }
 
   /** Send an audio message in order, retrying transient refusals and timeouts (not "rejected" ones). */
   private sendAudio(event: string, payload: unknown) {
     const deliver = async () => {
       for (let attempt = 0; attempt < 30 && !this.stopped; attempt++) {
-        const ack = await new Promise<unknown>((resolve) =>
-          this.socket
-            .timeout(10_000)
-            .emit(event, payload, (err: unknown, a: unknown) => resolve(err ? null : a)),
-        );
+        const ack = await this.emit(event, payload, 10_000);
         const r = audioSendResult(ack);
         if (r === true) {
           if (event === "audio:chunk") this.audioStats.chunksAcked++;
@@ -555,8 +585,7 @@ export class FacilitatorClient {
       transports: ["websocket"],
       forceNew: true,
       auth: token ? { token } : {},
-      // the server's self-signed certificate (WKWA_TLS=auto) is not trusted by Node
-      ...(opts.insecureTls ? { rejectUnauthorized: false } : {}),
+      ...tlsClientOpts(url, { insecure: opts.insecureTls }),
     });
     this.socket.on("dashboard", (d: DashboardMsg) => {
       this.dashboard = d;

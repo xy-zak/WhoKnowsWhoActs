@@ -56,7 +56,8 @@ export class FakePlayers {
       maxDelayMs: pace.maxDelayMs,
       telemetry: false,
       record: false,
-      insecureTls: url.startsWith("https:"),
+      // this server's own certificate (also when it is reached by a LAN address, not loopback)
+      insecureTls: true,
       log: (m) => this.deps.log.debug(m),
     });
     this.bots.set(terminalKey, bot);

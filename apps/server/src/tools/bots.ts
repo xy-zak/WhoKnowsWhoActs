@@ -25,7 +25,7 @@
  */
 import https from "node:https";
 import { parseArgs } from "node:util";
-import { Bot, FacilitatorClient } from "./botClient";
+import { Bot, FacilitatorClient, tlsClientOpts } from "./botClient";
 
 const { values } = parseArgs({
   options: {
@@ -58,7 +58,11 @@ function speaksHttps(port: number): Promise<boolean> {
     req.on("error", (e: NodeJS.ErrnoException) =>
       resolve(!(e.code === "EPROTO" || e.code === "ECONNRESET" || e.code?.startsWith("ERR_SSL"))),
     );
-    req.on("timeout", () => req.destroy());
+    // destroy() then reports ECONNRESET, which would read as plain HTTP: resolve first
+    req.on("timeout", () => {
+      resolve(true);
+      req.destroy();
+    });
   });
 }
 
@@ -67,8 +71,8 @@ const count = Number(values.count);
 const port = Number(process.env.PORT ?? 3000);
 const url = values.url ?? `${(await speaksHttps(port)) ? "https" : "http"}://localhost:${port}`;
 // self-signed (WKWA_TLS=auto): Node does not trust it. Skipped only over loopback or when asked.
-const loopback = /^https:\/\/(localhost|127\.0\.0\.1|\[::1\])(:|\/|$)/.test(url);
-const insecureTls = url.startsWith("https:") && (loopback || values.insecure);
+const insecureTls = values.insecure;
+const unchecked = tlsClientOpts(url, { insecure: insecureTls }).rejectUnauthorized === false;
 const log = (m: string) => console.log(`${new Date().toLocaleTimeString()} ${m}`);
 
 const bots = Array.from(
@@ -84,7 +88,7 @@ const bots = Array.from(
       log,
     }),
 );
-log(`${count} bot(s) connecting to ${url}${insecureTls ? " (certificate not checked)" : ""}`);
+log(`${count} bot(s) connecting to ${url}${unchecked ? " (certificate not checked)" : ""}`);
 
 if (values.auto) void autoFacilitate();
 
