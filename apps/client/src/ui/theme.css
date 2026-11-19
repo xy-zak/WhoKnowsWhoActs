@@ -217,9 +217,6 @@ code,
 .panel.flush {
   padding: calc(var(--s4) + 2px) 0 0;
 }
-.panel.tight {
-  padding-bottom: var(--s2);
-}
 
 /* ─── buttons: [ LABEL ] ─── */
 .btn {
@@ -333,8 +330,7 @@ code,
   color: var(--primary);
 }
 
-kbd,
-.kbd {
+kbd {
   display: inline-block;
   font: inherit;
   font-size: var(--fs-micro);

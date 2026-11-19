@@ -1,5 +1,6 @@
 import {
   AUDIO_CHUNK_SECONDS,
+  AUDIO_LEVEL_INTERVAL_MS,
   AUDIO_MAX_CHUNK_SECONDS,
   AUDIO_SAMPLE_RATE,
   type AudioStartReason,
@@ -72,7 +73,7 @@ export interface MicRecorderOptions {
   chunkSeconds?: number;
   /** unacked audio kept in memory before the oldest chunks are dropped; default 1800 s */
   maxPendingSeconds?: number;
-  /** level window; default 250 ms */
+  /** level window; default AUDIO_LEVEL_INTERVAL_MS */
   levelIntervalMs?: number;
   /** digital silence this long counts as no signal; default 3000 ms */
   noSignalMs?: number;
@@ -284,7 +285,7 @@ export class MicRecorder {
     });
     this.level = new LevelMeter({
       sampleRate: AUDIO_SAMPLE_RATE,
-      intervalMs: options.levelIntervalMs ?? 250,
+      intervalMs: options.levelIntervalMs ?? AUDIO_LEVEL_INTERVAL_MS,
       onLevel: (l, ms) => this.onLevelWindow(l, ms),
     });
   }
@@ -325,11 +326,6 @@ export class MicRecorder {
     return this.queue.dropped;
   }
 
-  /** Items the server refused permanently ("rejected"). */
-  get rejectedItems(): number {
-    return this.queue.rejected;
-  }
-
   /** The AudioContext waits for a user gesture: call resume() from a click. */
   get needsGesture(): boolean {
     const c = this.ctx;
@@ -339,10 +335,6 @@ export class MicRecorder {
   /** What the browser applied to the current microphone (whitelisted, no device identifiers). */
   get captureSettings(): EngineCaptureSettings {
     return { ...this.settings };
-  }
-
-  get lastError(): MicErrorInfo | null {
-    return this.error;
   }
 
   // ── control ────────────────────────────────────────────────────────────

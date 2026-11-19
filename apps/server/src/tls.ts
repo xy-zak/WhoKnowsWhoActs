@@ -67,12 +67,12 @@ export interface HostFacts {
   interfaces: NodeJS.Dict<os.NetworkInterfaceInfo[]>;
 }
 
-export function currentHost(): HostFacts {
+function currentHost(): HostFacts {
   return { hostname: os.hostname(), interfaces: os.networkInterfaces() };
 }
 
 /** Non-internal IPv4 addresses with their interface names: where player PCs reach this laptop. */
-export function lanIPv4(
+function lanIPv4(
   interfaces: NodeJS.Dict<os.NetworkInterfaceInfo[]> = os.networkInterfaces(),
 ): Array<{ address: string; iface: string }> {
   const out: Array<{ address: string; iface: string }> = [];
@@ -85,7 +85,7 @@ export function lanIPv4(
 }
 
 /** `[::1]` for an IPv6 address, the address or name itself otherwise (for URLs). */
-export function urlHost(host: string): string {
+function urlHost(host: string): string {
   return host.includes(":") && !host.startsWith("[") ? `[${host}]` : host;
 }
 
@@ -94,7 +94,7 @@ export function isWildcardHost(host: string): boolean {
   return host === "0.0.0.0" || host === "::";
 }
 
-export function schemeOf(tlsEnabled: boolean): "https" | "http" {
+function schemeOf(tlsEnabled: boolean): "https" | "http" {
   return tlsEnabled ? "https" : "http";
 }
 
@@ -150,7 +150,7 @@ export function wantedSans(host: HostFacts): string[] {
 }
 
 /** SANs, expiry and SHA-256 fingerprint of a PEM certificate (the first one, if it holds a chain). */
-export function certificateFacts(certPem: string | Buffer): {
+function certificateFacts(certPem: string | Buffer): {
   x509: X509Certificate;
   sans: string[];
   validFrom: Date;

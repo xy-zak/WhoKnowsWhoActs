@@ -82,7 +82,7 @@ function TlsNote({ tls }: { tls: ServerInfo["tls"] }) {
 }
 
 /** The ten setup steps. 01–06 configure (no session yet); 07–10 prepare the created session (lobby). */
-export const SETUP_STEPS: Array<StepDef & { icon: IconName; title: string }> = [
+const SETUP_STEPS: Array<StepDef & { icon: IconName; title: string }> = [
   { key: "scenario", label: "Scenario", title: "Scenario", icon: "scenario" },
   { key: "rounds", label: "Rounds", title: "Rounds", icon: "rounds" },
   { key: "players", label: "Players", title: "Players & visibility", icon: "visibility" },
@@ -122,7 +122,7 @@ function Checklist({ rows }: { rows: ChecklistRow[] }) {
   );
 }
 
-export function setupSteps(simulated: boolean) {
+function setupSteps(simulated: boolean) {
   return SETUP_STEPS.map((d, i) => (simulated ? { ...d, ...SIMULATED_STEPS[i] } : d));
 }
 

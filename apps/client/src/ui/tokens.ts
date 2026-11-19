@@ -21,17 +21,6 @@ function cat(theme: CatTheme, name: CatName): string {
   return flavors[theme].colors[name].hex;
 }
 
-/** Mix a colour with black (t = 0…1). Used for Latte's text-safe accent variants. */
-export function shade(hex: string, t: number): string {
-  return `#${[1, 3, 5]
-    .map((i) =>
-      Math.round(Number.parseInt(hex.slice(i, i + 2), 16) * (1 - t))
-        .toString(16)
-        .padStart(2, "0"),
-    )
-    .join("")}`;
-}
-
 /** Mix two colours (t = share of b). */
 export function mix(a: string, b: string, t: number): string {
   return `#${[1, 3, 5]
@@ -63,7 +52,7 @@ const LATTE_DARKEN: Partial<Record<CatName, number>> = {
 
 function accent(theme: CatTheme, name: CatName): string {
   const hex = cat(theme, name);
-  return theme === "latte" ? shade(hex, LATTE_DARKEN[name] ?? 0) : hex;
+  return theme === "latte" ? mix(hex, "#000000", LATTE_DARKEN[name] ?? 0) : hex;
 }
 
 /**
@@ -86,7 +75,7 @@ export const KNOWLEDGE_COLOURS: Record<
   c: { hue: "red", latte: "#c43b47", mocha: "#e05a6c", contrast: "#ff5c7a" },
   d: { hue: "teal", latte: "#008f8a", mocha: "#13a3a6", contrast: "#00d6c8" },
 };
-export const KNOWLEDGE_LETTERS = ["a", "b", "c", "d"] as const;
+const KNOWLEDGE_LETTERS = ["a", "b", "c", "d"] as const;
 
 /** The darker or lighter ink, whichever contrasts more with `fill`. */
 function inkOn(fill: string, dark: string, light: string): string {

@@ -182,12 +182,12 @@ export function scopeSentence(scope: AudioDeleteScope): string {
 
 /* ─────────────────────────── Availability of the actions ─────────────────────────── */
 
-export function hasRawAudio(view: AudioSessionView): boolean {
+function hasRawAudio(view: AudioSessionView): boolean {
   return view.seats.some((s) => !s.rawDeleted && s.durationMs > 0);
 }
 
 /** Like the server: the attribution needs every track's raw audio (none deleted). */
-export function rawComplete(view: AudioSessionView): boolean {
+function rawComplete(view: AudioSessionView): boolean {
   return hasRawAudio(view) && !view.tracks.some((t) => t.status === "deleted");
 }
 

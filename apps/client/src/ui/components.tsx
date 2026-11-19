@@ -94,10 +94,6 @@ export function Button({
   );
 }
 
-export function Kbd({ children }: { children: ReactNode }) {
-  return <kbd>{children}</kbd>;
-}
-
 /* ─────────────────────────── Status tags, chips, progress ─────────────────────────── */
 
 export type Tone = "neutral" | "live" | "ok" | "warn" | "danger" | "primary";
@@ -208,7 +204,7 @@ export function SeatDot({ seat }: { seat: number }) {
  * CSS colour of a knowledge type (Ka–Kd) or power type (Pa–Pd): both use the
  * colour of their letter (--k-a … --k-d). Unknown labels get the text colour.
  */
-export function labelColour(label: string | null | undefined): string {
+function labelColour(label: string | null | undefined): string {
   const letter = label?.[1];
   return letter && "abcd".includes(letter) ? `var(--k-${letter})` : "var(--text)";
 }

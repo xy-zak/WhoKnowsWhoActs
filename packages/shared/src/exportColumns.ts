@@ -586,38 +586,6 @@ export type AudioExportKind = "raw" | "clean";
 /** What an "Export audio" request asks for: one kind, or both (one WAV of each per seat). */
 export type AudioExportRequestKind = AudioExportKind | "both";
 
-export interface AudioExportFileDef {
-  /** File name pattern; `<sessionId>` and `<seat>` are replaced. */
-  pattern: string;
-  format: "wav" | "json";
-  description: string;
-  dataClass: DataClass;
-}
-
-export const AUDIO_EXPORT_FILES: AudioExportFileDef[] = [
-  {
-    pattern: "<sessionId>_seat<seat>_raw.wav",
-    format: "wav",
-    description:
-      "The seat's raw microphone audio on the session timeline: 16 kHz mono 16-bit PCM, sample 0 = the timeline start in manifest.json, clock drift corrected, silence where the seat has no audio. Every seat's file has the same length, so the files line up sample for sample. Other seats' voices are audible (same room).",
-    dataClass: "voice",
-  },
-  {
-    pattern: "<sessionId>_seat<seat>_clean.wav",
-    format: "wav",
-    description:
-      "The same, with everything not attributed to the seat attenuated by 30 dB (speaker attribution by loudness comparison). Overlapping speech stays at full level.",
-    dataClass: "voice",
-  },
-  {
-    pattern: "manifest.json",
-    format: "json",
-    description:
-      "{ exportId, kind: 'audio', audioKind, sessionId, createdWall, requestedBy, note, format, timeline, files: [{ name, seat, kind, samples, durationMs, bytes, sha256 }] } — no participant codes. The export is also recorded in the export register.",
-    dataClass: "non-personal",
-  },
-];
-
 /** File name of one seat's WAV in an audio export (never contains a participant code). */
 export function audioExportFileName(sessionId: string, seat: number, kind: AudioExportKind): string {
   return `${sessionId}_seat${seat}_${kind}.wav`;

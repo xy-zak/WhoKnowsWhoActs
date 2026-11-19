@@ -115,8 +115,3 @@ export function seededRandom(seed: string): () => number {
 export function generateAnonymousId(): string {
   return `A-${randomCrockford(6)}`;
 }
-
-/** Random opaque token (hex) — used for browser terminal keys. */
-export function randomToken(bytes = 16): string {
-  return Array.from(randomBytes(bytes), (b) => b.toString(16).padStart(2, "0")).join("");
-}

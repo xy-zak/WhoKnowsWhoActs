@@ -2,7 +2,6 @@ import type {
   AudioDeletionScope,
   AudioDerivativeKind,
   NewEvent,
-  SessionConfig,
   StoredEvent,
   StoredTelemetry,
   TelemetryItem,
@@ -250,11 +249,6 @@ export class Store {
 
   getSession(id: string): SessionRow | undefined {
     return this.db.prepare("SELECT * FROM sessions WHERE id = ?").get(id) as SessionRow | undefined;
-  }
-
-  sessionConfig(id: string): SessionConfig | null {
-    const row = this.getSession(id);
-    return row ? (JSON.parse(row.config_json) as SessionConfig) : null;
   }
 
   listSessions(): SessionSummary[] {

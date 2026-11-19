@@ -16,7 +16,7 @@ interface Loaded {
 }
 
 /** Playback rhythm: every propose/decide action is shown for exactly this long. */
-export const MS_PER_ACTION = 1000;
+const MS_PER_ACTION = 1000;
 
 const isAction = (e: StoredEvent) => e.type === "ProposalMade" || e.type === "DecisionMade";
 
