@@ -116,6 +116,9 @@ export const AUDIO_MAX_PENDING_SECONDS = 1800;
  */
 export const AUDIO_LATE_CHUNK_GRACE_MS = (AUDIO_MAX_PENDING_SECONDS + 5 * 60) * 1000;
 
+/** A sample rate a browser's audio engine may capture at (Hz). */
+export const CaptureSampleRate = z.number().int().min(8000).max(384000);
+
 /**
  * What is recorded about a microphone: the processing flags the browser actually applied and
  * the capture sample rate (from `MediaStreamTrack.getSettings()`). Unknown keys are stripped, so a
@@ -123,14 +126,9 @@ export const AUDIO_LATE_CHUNK_GRACE_MS = (AUDIO_MAX_PENDING_SECONDS + 5 * 60) * 
  */
 export const AudioSettingsSchema = z
   .object({
-    sampleRate: z
-      .number()
-      .int()
-      .min(8000)
-      .max(384000)
-      .describe(
-        "Native sample rate of the capture, before resampling to 16 000 Hz (Hz): from getSettings(), or the AudioContext's rate where the browser does not report it (e.g. Firefox)",
-      ),
+    sampleRate: CaptureSampleRate.describe(
+      "Native sample rate of the capture, before resampling to 16 000 Hz (Hz): from getSettings(), or the AudioContext's rate where the browser does not report it (e.g. Firefox)",
+    ),
     echoCancellation: z
       .boolean()
       .optional()
@@ -164,35 +162,17 @@ export type AudioSettings = z.infer<typeof AudioSettingsSchema>;
  * echo cancellation as a mode string. `toAudioSettings` turns this into `AudioSettings`. Unknown
  * keys (a deviceId, groupId or label sent by mistake) are stripped.
  */
-export const AudioCaptureSettingsSchema = z
-  .object({
-    sampleRate: z
-      .number()
-      .int()
-      .min(8000)
-      .max(384000)
-      .optional()
-      .describe("Native sample rate of the capture (Hz), if the browser reports it"),
-    echoCancellation: z
-      .union([z.boolean(), z.string().max(40)])
-      .optional()
-      .describe(
-        "Echo cancellation applied: a boolean, or a mode such as 'all' / 'remote-only' (newer Chrome); stored as a boolean",
-      ),
-    noiseSuppression: z.boolean().optional().describe("Noise suppression applied (absent if not reported)"),
-    autoGainControl: z
-      .boolean()
-      .optional()
-      .describe("Automatic gain control applied (absent if not reported)"),
-    channelCount: z
-      .number()
-      .int()
-      .min(1)
-      .max(32)
-      .optional()
-      .describe("Channels the browser delivered (absent if not reported)"),
-  })
-  .describe("Microphone processing settings as reported by the browser; never the device name or id");
+export const AudioCaptureSettingsSchema = AudioSettingsSchema.extend({
+  sampleRate: CaptureSampleRate.optional().describe(
+    "Native sample rate of the capture (Hz), if the browser reports it",
+  ),
+  echoCancellation: z
+    .union([z.boolean(), z.string().max(40)])
+    .optional()
+    .describe(
+      "Echo cancellation applied: a boolean, or a mode such as 'all' / 'remote-only' (newer Chrome); stored as a boolean",
+    ),
+}).describe("Microphone processing settings as reported by the browser; never the device name or id");
 export type AudioCaptureSettings = z.infer<typeof AudioCaptureSettingsSchema>;
 
 /**
@@ -211,12 +191,9 @@ export type EngineCaptureSettings = z.infer<typeof EngineCaptureSettingsSchema>;
 /** The browser's AudioContext a track was captured with (timing details; nothing about the device). */
 export const AudioContextInfoSchema = z
   .object({
-    sampleRate: z
-      .number()
-      .int()
-      .min(8000)
-      .max(384000)
-      .describe("Rate the audio engine captured at, before resampling to 16 000 Hz (Hz)"),
+    sampleRate: CaptureSampleRate.describe(
+      "Rate the audio engine captured at, before resampling to 16 000 Hz (Hz)",
+    ),
     baseLatencyMs: z.number().nullable().describe("AudioContext.baseLatency (ms; null = not reported)"),
     outputLatencyMs: z.number().nullable().describe("AudioContext.outputLatency (ms; null = not reported)"),
     timingMethod: z

@@ -2,21 +2,16 @@ import { z } from "zod";
 import {
   AUDIO_BYTES_PER_SAMPLE,
   AUDIO_MAX_CHUNK_SAMPLES,
-  AUDIO_SAMPLE_RATE,
   AudioCaptureSettingsSchema,
   AudioContextInfoSchema,
+  CaptureSampleRate,
   Dbfs,
   PcmSchema,
   pcmByteLength,
   TrackIdSchema,
   toAudioSettings,
 } from "./audio";
-import {
-  AudioStartReasonSchema,
-  AudioStopReasonSchema,
-  type MicLevelState,
-  MicLevelStateSchema,
-} from "./audioReasons";
+import { AudioStopReasonSchema, type MicLevelState, MicLevelStateSchema } from "./audioReasons";
 import { FakePaceSchema, SessionConfigSchema } from "./config";
 import { EVENT_DEFS } from "./events";
 import { ActionKindSchema, KLabelSchema, SeatSchema } from "./labels";
@@ -98,13 +93,9 @@ const NO_SAMPLE_RATE = {
   message: "settings.sampleRate (or the audio engine's sample rate) is needed",
   path: ["settings", "sampleRate"],
 };
-const ContextSampleRate = z
-  .number()
-  .int()
-  .min(8000)
-  .max(384000)
-  .optional()
-  .describe("Rate of the browser's audio engine (Hz): used as the sample rate when settings has none");
+const ContextSampleRate = CaptureSampleRate.optional().describe(
+  "Rate of the browser's audio engine (Hz): used as the sample rate when settings has none",
+);
 
 /**
  * Result of the player's own mic check (logged as MicCheckCompleted). The settings are taken as the
@@ -135,13 +126,10 @@ export type MicCheckResult = z.output<typeof MicCheckSubmit>;
  * `inputLatencyMs` are optional, the settings are normalised to AudioSettings, unknown keys are
  * stripped.
  */
-export const AudioStart = z
-  .object({
-    trackId: TrackIdSchema,
-    reason: AudioStartReasonSchema,
-    sampleRate: z
-      .literal(AUDIO_SAMPLE_RATE)
-      .describe("Sample rate of the uploaded audio (Hz; always 16 000)"),
+export const AudioStart = EVENT_DEFS.AudioTrackStarted.payload
+  // pick, not extend: keeps the field order, so a refusal names the same first issue
+  .pick({ trackId: true, reason: true, sampleRate: true })
+  .extend({
     chunkSamples: z
       .number()
       .int()

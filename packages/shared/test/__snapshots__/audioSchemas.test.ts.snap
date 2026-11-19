@@ -1,0 +1,988 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`audio settings schemas (parse snapshot) > AudioCaptureSettingsSchema 1`] = `
+[
+  {
+    "ok": {
+      "autoGainControl": false,
+      "channelCount": 1,
+      "echoCancellation": false,
+      "noiseSuppression": true,
+      "sampleRate": 48000,
+    },
+  },
+  {
+    "ok": {
+      "autoGainControl": false,
+      "channelCount": 1,
+      "echoCancellation": false,
+      "noiseSuppression": true,
+      "sampleRate": 48000,
+    },
+  },
+  {
+    "ok": {
+      "autoGainControl": false,
+      "channelCount": 1,
+      "echoCancellation": false,
+      "noiseSuppression": true,
+      "sampleRate": 48000,
+    },
+  },
+  {
+    "ok": {},
+  },
+  {
+    "ok": {
+      "echoCancellation": "remote-only",
+    },
+  },
+  {
+    "ok": {
+      "autoGainControl": false,
+      "channelCount": 1,
+      "echoCancellation": "none",
+      "noiseSuppression": true,
+      "sampleRate": 48000,
+    },
+  },
+  {
+    "issues": [
+      {
+        "code": "too_big",
+        "message": "Too big: expected string to have <=40 characters",
+        "path": [
+          "echoCancellation",
+        ],
+      },
+    ],
+  },
+  {
+    "ok": {
+      "autoGainControl": false,
+      "channelCount": 1,
+      "echoCancellation": false,
+      "noiseSuppression": true,
+      "sampleRate": 8000,
+    },
+  },
+  {
+    "ok": {
+      "autoGainControl": false,
+      "channelCount": 1,
+      "echoCancellation": false,
+      "noiseSuppression": true,
+      "sampleRate": 384000,
+    },
+  },
+  {
+    "issues": [
+      {
+        "code": "too_small",
+        "message": "Too small: expected number to be >=8000",
+        "path": [
+          "sampleRate",
+        ],
+      },
+    ],
+  },
+  {
+    "issues": [
+      {
+        "code": "too_big",
+        "message": "Too big: expected number to be <=384000",
+        "path": [
+          "sampleRate",
+        ],
+      },
+    ],
+  },
+  {
+    "issues": [
+      {
+        "code": "invalid_type",
+        "message": "Invalid input: expected int, received number",
+        "path": [
+          "sampleRate",
+        ],
+      },
+    ],
+  },
+  {
+    "issues": [
+      {
+        "code": "invalid_type",
+        "message": "Invalid input: expected number, received string",
+        "path": [
+          "sampleRate",
+        ],
+      },
+    ],
+  },
+  {
+    "issues": [
+      {
+        "code": "too_small",
+        "message": "Too small: expected number to be >=1",
+        "path": [
+          "channelCount",
+        ],
+      },
+    ],
+  },
+  {
+    "issues": [
+      {
+        "code": "too_big",
+        "message": "Too big: expected number to be <=32",
+        "path": [
+          "channelCount",
+        ],
+      },
+    ],
+  },
+  {
+    "issues": [
+      {
+        "code": "invalid_type",
+        "message": "Invalid input: expected boolean, received string",
+        "path": [
+          "noiseSuppression",
+        ],
+      },
+    ],
+  },
+  {
+    "issues": [
+      {
+        "code": "invalid_type",
+        "message": "Invalid input: expected object, received null",
+        "path": [],
+      },
+    ],
+  },
+]
+`;
+
+exports[`audio settings schemas (parse snapshot) > AudioContextInfoSchema 1`] = `
+[
+  {
+    "ok": {
+      "baseLatencyMs": 5.8,
+      "outputLatencyMs": null,
+      "sampleRate": 44100,
+      "timingMethod": "current-time",
+    },
+  },
+  {
+    "ok": {
+      "baseLatencyMs": 5.8,
+      "outputLatencyMs": null,
+      "sampleRate": 44100,
+      "timingMethod": "current-time",
+    },
+  },
+  {
+    "issues": [
+      {
+        "code": "too_small",
+        "message": "Too small: expected number to be >=8000",
+        "path": [
+          "sampleRate",
+        ],
+      },
+    ],
+  },
+  {
+    "issues": [
+      {
+        "code": "too_big",
+        "message": "Too big: expected number to be <=384000",
+        "path": [
+          "sampleRate",
+        ],
+      },
+    ],
+  },
+  {
+    "issues": [
+      {
+        "code": "invalid_type",
+        "message": "Invalid input: expected int, received number",
+        "path": [
+          "sampleRate",
+        ],
+      },
+    ],
+  },
+  {
+    "issues": [
+      {
+        "code": "too_big",
+        "message": "Too big: expected string to have <=40 characters",
+        "path": [
+          "timingMethod",
+        ],
+      },
+    ],
+  },
+  {
+    "issues": [
+      {
+        "code": "invalid_type",
+        "message": "Invalid input: expected number, received undefined",
+        "path": [
+          "baseLatencyMs",
+        ],
+      },
+    ],
+  },
+]
+`;
+
+exports[`audio settings schemas (parse snapshot) > AudioSettingsSchema 1`] = `
+[
+  {
+    "ok": {
+      "autoGainControl": false,
+      "channelCount": 1,
+      "echoCancellation": false,
+      "noiseSuppression": true,
+      "sampleRate": 48000,
+    },
+  },
+  {
+    "ok": {
+      "autoGainControl": false,
+      "channelCount": 1,
+      "echoCancellation": false,
+      "noiseSuppression": true,
+      "sampleRate": 48000,
+    },
+  },
+  {
+    "ok": {
+      "autoGainControl": false,
+      "channelCount": 1,
+      "echoCancellation": false,
+      "noiseSuppression": true,
+      "sampleRate": 48000,
+    },
+  },
+  {
+    "issues": [
+      {
+        "code": "invalid_type",
+        "message": "Invalid input: expected number, received undefined",
+        "path": [
+          "sampleRate",
+        ],
+      },
+    ],
+  },
+  {
+    "issues": [
+      {
+        "code": "invalid_type",
+        "message": "Invalid input: expected number, received undefined",
+        "path": [
+          "sampleRate",
+        ],
+      },
+      {
+        "code": "invalid_type",
+        "message": "Invalid input: expected boolean, received string",
+        "path": [
+          "echoCancellation",
+        ],
+      },
+    ],
+  },
+  {
+    "issues": [
+      {
+        "code": "invalid_type",
+        "message": "Invalid input: expected boolean, received string",
+        "path": [
+          "echoCancellation",
+        ],
+      },
+    ],
+  },
+  {
+    "issues": [
+      {
+        "code": "invalid_type",
+        "message": "Invalid input: expected boolean, received string",
+        "path": [
+          "echoCancellation",
+        ],
+      },
+    ],
+  },
+  {
+    "ok": {
+      "autoGainControl": false,
+      "channelCount": 1,
+      "echoCancellation": false,
+      "noiseSuppression": true,
+      "sampleRate": 8000,
+    },
+  },
+  {
+    "ok": {
+      "autoGainControl": false,
+      "channelCount": 1,
+      "echoCancellation": false,
+      "noiseSuppression": true,
+      "sampleRate": 384000,
+    },
+  },
+  {
+    "issues": [
+      {
+        "code": "too_small",
+        "message": "Too small: expected number to be >=8000",
+        "path": [
+          "sampleRate",
+        ],
+      },
+    ],
+  },
+  {
+    "issues": [
+      {
+        "code": "too_big",
+        "message": "Too big: expected number to be <=384000",
+        "path": [
+          "sampleRate",
+        ],
+      },
+    ],
+  },
+  {
+    "issues": [
+      {
+        "code": "invalid_type",
+        "message": "Invalid input: expected int, received number",
+        "path": [
+          "sampleRate",
+        ],
+      },
+    ],
+  },
+  {
+    "issues": [
+      {
+        "code": "invalid_type",
+        "message": "Invalid input: expected number, received string",
+        "path": [
+          "sampleRate",
+        ],
+      },
+    ],
+  },
+  {
+    "issues": [
+      {
+        "code": "too_small",
+        "message": "Too small: expected number to be >=1",
+        "path": [
+          "channelCount",
+        ],
+      },
+    ],
+  },
+  {
+    "issues": [
+      {
+        "code": "too_big",
+        "message": "Too big: expected number to be <=32",
+        "path": [
+          "channelCount",
+        ],
+      },
+    ],
+  },
+  {
+    "issues": [
+      {
+        "code": "invalid_type",
+        "message": "Invalid input: expected boolean, received string",
+        "path": [
+          "noiseSuppression",
+        ],
+      },
+    ],
+  },
+  {
+    "issues": [
+      {
+        "code": "invalid_type",
+        "message": "Invalid input: expected object, received null",
+        "path": [],
+      },
+    ],
+  },
+]
+`;
+
+exports[`audio settings schemas (parse snapshot) > AudioStart 1`] = `
+[
+  {
+    "ok": {
+      "chunkSamples": 80000,
+      "clientTs": 1794826000000,
+      "clockOffsetMs": -3,
+      "context": {
+        "baseLatencyMs": 5.8,
+        "outputLatencyMs": null,
+        "sampleRate": 44100,
+        "timingMethod": "current-time",
+      },
+      "inputLatencyMs": 12,
+      "reason": "mic_check",
+      "sampleRate": 16000,
+      "settings": {
+        "autoGainControl": false,
+        "channelCount": 1,
+        "echoCancellation": false,
+        "noiseSuppression": true,
+        "sampleRate": 48000,
+      },
+      "trackId": "1b4e28ba-2fa1-4d2b-883f-0016d3cca427",
+    },
+  },
+  {
+    "ok": {
+      "chunkSamples": 80000,
+      "clientTs": 1794826000000,
+      "clockOffsetMs": -3,
+      "context": {
+        "baseLatencyMs": 5.8,
+        "outputLatencyMs": null,
+        "sampleRate": 44100,
+        "timingMethod": "current-time",
+      },
+      "inputLatencyMs": 12,
+      "reason": "mic_check",
+      "sampleRate": 16000,
+      "settings": {
+        "autoGainControl": false,
+        "channelCount": 1,
+        "echoCancellation": false,
+        "noiseSuppression": true,
+        "sampleRate": 48000,
+      },
+      "trackId": "1b4e28ba-2fa1-4d2b-883f-0016d3cca427",
+    },
+  },
+  {
+    "ok": {
+      "chunkSamples": 80000,
+      "clientTs": 1794826000000,
+      "clockOffsetMs": -3,
+      "context": {
+        "baseLatencyMs": 5.8,
+        "outputLatencyMs": null,
+        "sampleRate": 44100,
+        "timingMethod": "current-time",
+      },
+      "inputLatencyMs": 12,
+      "reason": "mic_check",
+      "sampleRate": 16000,
+      "settings": {
+        "echoCancellation": true,
+        "sampleRate": 44100,
+      },
+      "trackId": "1b4e28ba-2fa1-4d2b-883f-0016d3cca427",
+    },
+  },
+  {
+    "issues": [
+      {
+        "code": "custom",
+        "message": "settings.sampleRate (or the audio engine's sample rate) is needed",
+        "path": [
+          "settings",
+          "sampleRate",
+        ],
+      },
+    ],
+  },
+  {
+    "ok": {
+      "chunkSamples": undefined,
+      "clientTs": 1794826000000,
+      "clockOffsetMs": -3,
+      "context": undefined,
+      "inputLatencyMs": undefined,
+      "reason": "mic_check",
+      "sampleRate": 16000,
+      "settings": {
+        "autoGainControl": false,
+        "channelCount": 1,
+        "echoCancellation": false,
+        "noiseSuppression": true,
+        "sampleRate": 48000,
+      },
+      "trackId": "1b4e28ba-2fa1-4d2b-883f-0016d3cca427",
+    },
+  },
+  {
+    "issues": [
+      {
+        "code": "invalid_value",
+        "message": "Invalid input: expected 16000",
+        "path": [
+          "sampleRate",
+        ],
+      },
+    ],
+  },
+  {
+    "issues": [
+      {
+        "code": "invalid_value",
+        "message": "Invalid option: expected one of "mic_check"|"resume"|"reconnect"|"reload"|"permission_regained"|"context_resumed"|"clock_jump"|"discontinuity"|"cleared"",
+        "path": [
+          "reason",
+        ],
+      },
+    ],
+  },
+  {
+    "issues": [
+      {
+        "code": "invalid_format",
+        "message": "Invalid UUID",
+        "path": [
+          "trackId",
+        ],
+      },
+    ],
+  },
+  {
+    "issues": [
+      {
+        "code": "too_small",
+        "message": "Too small: expected number to be >=1",
+        "path": [
+          "chunkSamples",
+        ],
+      },
+    ],
+  },
+  {
+    "issues": [
+      {
+        "code": "too_big",
+        "message": "Too big: expected number to be <=10000",
+        "path": [
+          "inputLatencyMs",
+        ],
+      },
+    ],
+  },
+  {
+    "issues": [
+      {
+        "code": "too_small",
+        "message": "Too small: expected number to be >=8000",
+        "path": [
+          "context",
+          "sampleRate",
+        ],
+      },
+    ],
+  },
+  {
+    "issues": [
+      {
+        "code": "invalid_type",
+        "message": "Invalid input: expected string, received undefined",
+        "path": [
+          "trackId",
+        ],
+      },
+      {
+        "code": "invalid_value",
+        "message": "Invalid option: expected one of "mic_check"|"resume"|"reconnect"|"reload"|"permission_regained"|"context_resumed"|"clock_jump"|"discontinuity"|"cleared"",
+        "path": [
+          "reason",
+        ],
+      },
+      {
+        "code": "invalid_value",
+        "message": "Invalid input: expected 16000",
+        "path": [
+          "sampleRate",
+        ],
+      },
+      {
+        "code": "invalid_type",
+        "message": "Invalid input: expected number, received undefined",
+        "path": [
+          "clientTs",
+        ],
+      },
+      {
+        "code": "invalid_type",
+        "message": "Invalid input: expected number, received undefined",
+        "path": [
+          "clockOffsetMs",
+        ],
+      },
+      {
+        "code": "invalid_type",
+        "message": "Invalid input: expected object, received undefined",
+        "path": [
+          "settings",
+        ],
+      },
+    ],
+  },
+]
+`;
+
+exports[`audio settings schemas (parse snapshot) > AudioTrackStarted payload 1`] = `
+[
+  {
+    "ok": {
+      "reason": "resume",
+      "sampleRate": 16000,
+      "settings": {
+        "autoGainControl": false,
+        "channelCount": 1,
+        "echoCancellation": false,
+        "noiseSuppression": true,
+        "sampleRate": 48000,
+      },
+      "trackId": "1b4e28ba-2fa1-4d2b-883f-0016d3cca427",
+    },
+  },
+  {
+    "ok": {
+      "reason": "resume",
+      "sampleRate": 16000,
+      "settings": {
+        "autoGainControl": false,
+        "channelCount": 1,
+        "echoCancellation": false,
+        "noiseSuppression": true,
+        "sampleRate": 48000,
+      },
+      "trackId": "1b4e28ba-2fa1-4d2b-883f-0016d3cca427",
+    },
+  },
+  {
+    "issues": [
+      {
+        "code": "invalid_type",
+        "message": "Invalid input: expected number, received undefined",
+        "path": [
+          "settings",
+          "sampleRate",
+        ],
+      },
+    ],
+  },
+  {
+    "issues": [
+      {
+        "code": "invalid_value",
+        "message": "Invalid input: expected 16000",
+        "path": [
+          "sampleRate",
+        ],
+      },
+    ],
+  },
+]
+`;
+
+exports[`audio settings schemas (parse snapshot) > EngineCaptureSettingsSchema 1`] = `
+[
+  {
+    "ok": {
+      "autoGainControl": false,
+      "channelCount": 1,
+      "echoCancellation": false,
+      "noiseSuppression": true,
+      "sampleRate": 48000,
+    },
+  },
+  {
+    "ok": {
+      "autoGainControl": false,
+      "channelCount": 1,
+      "echoCancellation": false,
+      "noiseSuppression": true,
+      "sampleRate": 48000,
+    },
+  },
+  {
+    "ok": {
+      "autoGainControl": false,
+      "channelCount": 1,
+      "echoCancellation": false,
+      "latency": 0.01,
+      "noiseSuppression": true,
+      "sampleRate": 48000,
+      "sampleSize": 16,
+      "voiceIsolation": true,
+    },
+  },
+  {
+    "ok": {},
+  },
+  {
+    "ok": {
+      "echoCancellation": "remote-only",
+    },
+  },
+  {
+    "ok": {
+      "autoGainControl": false,
+      "channelCount": 1,
+      "echoCancellation": "none",
+      "noiseSuppression": true,
+      "sampleRate": 48000,
+    },
+  },
+  {
+    "issues": [
+      {
+        "code": "too_big",
+        "message": "Too big: expected string to have <=40 characters",
+        "path": [
+          "echoCancellation",
+        ],
+      },
+    ],
+  },
+  {
+    "ok": {
+      "autoGainControl": false,
+      "channelCount": 1,
+      "echoCancellation": false,
+      "noiseSuppression": true,
+      "sampleRate": 8000,
+    },
+  },
+  {
+    "ok": {
+      "autoGainControl": false,
+      "channelCount": 1,
+      "echoCancellation": false,
+      "noiseSuppression": true,
+      "sampleRate": 384000,
+    },
+  },
+  {
+    "issues": [
+      {
+        "code": "too_small",
+        "message": "Too small: expected number to be >=8000",
+        "path": [
+          "sampleRate",
+        ],
+      },
+    ],
+  },
+  {
+    "issues": [
+      {
+        "code": "too_big",
+        "message": "Too big: expected number to be <=384000",
+        "path": [
+          "sampleRate",
+        ],
+      },
+    ],
+  },
+  {
+    "issues": [
+      {
+        "code": "invalid_type",
+        "message": "Invalid input: expected int, received number",
+        "path": [
+          "sampleRate",
+        ],
+      },
+    ],
+  },
+  {
+    "issues": [
+      {
+        "code": "invalid_type",
+        "message": "Invalid input: expected number, received string",
+        "path": [
+          "sampleRate",
+        ],
+      },
+    ],
+  },
+  {
+    "issues": [
+      {
+        "code": "too_small",
+        "message": "Too small: expected number to be >=1",
+        "path": [
+          "channelCount",
+        ],
+      },
+    ],
+  },
+  {
+    "issues": [
+      {
+        "code": "too_big",
+        "message": "Too big: expected number to be <=32",
+        "path": [
+          "channelCount",
+        ],
+      },
+    ],
+  },
+  {
+    "issues": [
+      {
+        "code": "invalid_type",
+        "message": "Invalid input: expected boolean, received string",
+        "path": [
+          "noiseSuppression",
+        ],
+      },
+    ],
+  },
+  {
+    "issues": [
+      {
+        "code": "invalid_type",
+        "message": "Invalid input: expected object, received null",
+        "path": [],
+      },
+    ],
+  },
+]
+`;
+
+exports[`audio settings schemas (parse snapshot) > MicCheckSubmit 1`] = `
+[
+  {
+    "ok": {
+      "attempts": 1,
+      "clientTs": 1,
+      "durationMs": 9000,
+      "noiseFloorDb": -60,
+      "passed": true,
+      "settings": {
+        "autoGainControl": false,
+        "channelCount": 1,
+        "echoCancellation": false,
+        "noiseSuppression": true,
+        "sampleRate": 48000,
+      },
+      "speechDb": -22,
+      "speechMs": 2500,
+    },
+  },
+  {
+    "ok": {
+      "attempts": 1,
+      "clientTs": 1,
+      "durationMs": 9000,
+      "noiseFloorDb": -60,
+      "passed": true,
+      "settings": {
+        "autoGainControl": false,
+        "channelCount": 1,
+        "echoCancellation": false,
+        "noiseSuppression": true,
+        "sampleRate": 48000,
+      },
+      "speechDb": -22,
+      "speechMs": 2500,
+    },
+  },
+  {
+    "ok": {
+      "attempts": 1,
+      "clientTs": 1,
+      "durationMs": 9000,
+      "noiseFloorDb": -60,
+      "passed": true,
+      "settings": {
+        "echoCancellation": false,
+        "sampleRate": 44100,
+      },
+      "speechDb": -22,
+      "speechMs": 2500,
+    },
+  },
+  {
+    "issues": [
+      {
+        "code": "custom",
+        "message": "settings.sampleRate (or the audio engine's sample rate) is needed",
+        "path": [
+          "settings",
+          "sampleRate",
+        ],
+      },
+    ],
+  },
+  {
+    "issues": [
+      {
+        "code": "too_small",
+        "message": "Too small: expected number to be >=8000",
+        "path": [
+          "contextSampleRate",
+        ],
+      },
+    ],
+  },
+  {
+    "issues": [
+      {
+        "code": "too_big",
+        "message": "Too big: expected number to be <=384000",
+        "path": [
+          "contextSampleRate",
+        ],
+      },
+    ],
+  },
+  {
+    "issues": [
+      {
+        "code": "invalid_type",
+        "message": "Invalid input: expected int, received number",
+        "path": [
+          "contextSampleRate",
+        ],
+      },
+    ],
+  },
+  {
+    "ok": {
+      "attempts": 1,
+      "clientTs": 1,
+      "durationMs": 9000,
+      "noiseFloorDb": -60,
+      "passed": true,
+      "settings": {
+        "autoGainControl": false,
+        "channelCount": 1,
+        "echoCancellation": false,
+        "noiseSuppression": true,
+        "sampleRate": 48000,
+      },
+      "speechDb": -22,
+      "speechMs": 2500,
+    },
+  },
+]
+`;
