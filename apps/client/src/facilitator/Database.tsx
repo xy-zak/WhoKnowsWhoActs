@@ -1,5 +1,6 @@
 import { isSimulatedSessionId, normaliseParticipantCode, type PlayerMode } from "@wkwa/shared";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { fmtDuration, fmtMinutes, plural } from "../common/format";
 import {
   Button,
   Callout,
@@ -15,14 +16,7 @@ import {
 } from "../ui";
 import type { FacilitatorConnection } from "./connection";
 import { AudioPopup } from "./database/AudioPopup";
-import {
-  type AudioSessionView,
-  audioCell,
-  formatDuration,
-  formatMinutes,
-  plural,
-  whenWall as when,
-} from "./database/audioModel";
+import { type AudioSessionView, audioCell, whenWall as when } from "./database/audioModel";
 
 interface SessionSummary {
   id: string;
@@ -199,7 +193,7 @@ export function Database({
             {s.telemetryCount} telemetry rows, including the participants' consent and demographics
             {audio && audio.tracks > 0 && (
               <>
-                , and its audio: {plural(audio.tracks, "track")} ({formatMinutes(audio.ms)} recorded) and{" "}
+                , and its audio: {plural(audio.tracks, "track")} ({fmtMinutes(audio.ms)} recorded) and{" "}
                 {plural(audio.files, "encrypted audio file")} with their keys
                 {audio.files === 0 && " (the raw audio was already deleted: metadata only)"}
               </>
@@ -362,7 +356,7 @@ export function Database({
                           icon="voice"
                           tip={
                             s.audioTracks
-                              ? `${plural(s.audioTracks, "audio track")}, ${formatDuration(s.audioMs)} recorded. Open the audio of this session: seats, speaker attribution, export audio, delete audio.`
+                              ? `${plural(s.audioTracks, "audio track")}, ${fmtDuration(s.audioMs)} recorded. Open the audio of this session: seats, speaker attribution, export audio, delete audio.`
                               : "No stored audio. Open to see the audio metadata and deletion register of this session."
                           }
                           onClick={() => setAudioFor(s.id)}
@@ -745,7 +739,7 @@ function ErasurePanel({ conn, onDone }: { conn: FacilitatorConnection; onDone: (
             <span className="mono">{look.code}</span> in {look.occurrences.length} session(s)
             {audioTracks > 0 && (
               <>
-                , and their audio: {plural(audioTracks, "track")} ({formatDuration(audioMs)}) with their
+                , and their audio: {plural(audioTracks, "track")} ({fmtDuration(audioMs)}) with their
                 encrypted files and keys where still stored
               </>
             )}
@@ -853,7 +847,7 @@ function ErasurePanel({ conn, onDone }: { conn: FacilitatorConnection; onDone: (
                         <td>{o.telemetry} telemetry</td>
                         <td>
                           {o.audioTracks ? (
-                            `${plural(o.audioTracks, "audio track")} (${formatDuration(o.audioMs)})`
+                            `${plural(o.audioTracks, "audio track")} (${fmtDuration(o.audioMs)})`
                           ) : (
                             <span className="faint">no audio</span>
                           )}
