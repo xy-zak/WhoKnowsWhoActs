@@ -1,4 +1,4 @@
-import { Store } from "../db/store";
+import type { Store } from "../db/store";
 import { KEY_BYTES } from "./crypto";
 import type { AudioFileInfo, AudioFileStore } from "./fileStore";
 
@@ -68,10 +68,7 @@ export async function verifyAudio(store: Store, files: AudioFileStore): Promise<
       );
     if (ref.owner === "track") {
       const inFile = new Set(v.seqs);
-      const seqs = store.db
-        .prepare("SELECT seq FROM audio_chunks WHERE track_id = ? ORDER BY seq")
-        .pluck()
-        .all(ref.id) as number[];
+      const seqs = store.listAudioChunks(ref.id).map((c) => c.seq);
       const missing = seqs.filter((s) => !inFile.has(s));
       if (missing.length)
         problem(
@@ -89,15 +86,9 @@ export async function verifyAudio(store: Store, files: AudioFileStore): Promise<
 
   // codes live only in participant_code columns, never in file or folder names
   const codeSet = new Set<string>();
-  for (const t of Store.CODE_TABLES) {
-    const rows = store.db
-      .prepare(`SELECT DISTINCT participant_code FROM ${t} WHERE participant_code IS NOT NULL`)
-      .pluck()
-      .all() as string[];
-    for (const c of rows) {
-      codeSet.add(c.toUpperCase());
-      codeSet.add(c.replace(/-/g, "").toUpperCase());
-    }
+  for (const c of store.participantCodes()) {
+    codeSet.add(c.toUpperCase());
+    codeSet.add(c.replace(/-/g, "").toUpperCase());
   }
   const codes = [...codeSet];
   for (const f of listed) {

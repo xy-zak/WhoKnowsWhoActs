@@ -428,7 +428,7 @@ export class AudioFileStore {
   /** Remove a session's whole audio folder (only ever inside the audio folder). */
   deleteSessionDir(sessionId: string): { removed: boolean; files: number } {
     // sessionDir() resolves the path and refuses anything outside the audio folder
-    // (the same containment rule as gdpr/deleteSession.ts uses for export folders)
+    // (the same containment rule as PersonalDataMap.deleteSession uses for export folders)
     const dir = this.sessionDir(sessionId);
     if (!existsSync(dir)) return { removed: false, files: 0 };
     const files: AudioFileInfo[] = [];

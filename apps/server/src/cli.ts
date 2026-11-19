@@ -34,11 +34,9 @@ import { AudioFileStore, audioDirOf } from "./audio/fileStore";
 import { verifyAudio } from "./audio/verify";
 import { ScenarioLibrary } from "./content";
 import { backupDatabase, getMeta, openDatabase, rekeyDatabase } from "./db/database";
+import { PersonalDataMap } from "./db/personalData";
 import { Store } from "./db/store";
 import { dbFile as dbFileOf, exportsDirFor } from "./db/stores";
-import { deleteSessionAudio } from "./gdpr/deleteAudio";
-import { deleteSession, listSessionDeletions } from "./gdpr/deleteSession";
-import { eraseParticipant, listErasures, lookupParticipant } from "./gdpr/erase";
 import { exportSession } from "./gdpr/exporter";
 import { obtainPassphrase, promptHidden } from "./passphrase";
 import { runtimeFromEnv } from "./runtime";
@@ -108,6 +106,7 @@ async function main() {
   // audio belongs to the participant database only (simulated sessions never record)
   const audioFiles = values.sim ? null : new AudioFileStore(audioDirOf(runtime.dataDir));
   const store = new Store(db, audioFiles);
+  const personalData = new PersonalDataMap(store);
   const scenarios = new ScenarioLibrary(runtime.scenariosDir);
   const need = (v: string | undefined, flag: string) => {
     if (!v) throw new Error(`Missing --${flag}\n${USAGE}`);
@@ -127,7 +126,7 @@ async function main() {
         break;
       }
       case "lookup": {
-        const r = lookupParticipant(store, need(values.code, "code"));
+        const r = personalData.lookup(need(values.code, "code"));
         console.log(`Participant ${r.code}`);
         if (r.occurrences.length === 0) console.log("  no data found");
         for (const o of r.occurrences)
@@ -149,7 +148,7 @@ async function main() {
         break;
       }
       case "erase": {
-        const look = lookupParticipant(store, need(values.code, "code"));
+        const look = personalData.lookup(need(values.code, "code"));
         console.log(`Participant ${look.code}`);
         if (look.occurrences.length === 0) {
           console.log("No data found for this code — nothing to erase.");
@@ -173,7 +172,7 @@ async function main() {
           console.log("Cancelled.");
           break;
         }
-        const r = eraseParticipant(store, look.code, values.note);
+        const r = personalData.erase(look.code, values.note);
         console.log(
           `Erased ${r.rows.events} events and ${r.rows.telemetry} telemetry rows. Register entry added.`,
         );
@@ -198,7 +197,7 @@ async function main() {
         break;
       }
       case "erasures": {
-        const rows = listErasures(store);
+        const rows = personalData.erasures();
         if (rows.length === 0) console.log("Erasure register is empty.");
         for (const e of rows) {
           console.log(
@@ -227,7 +226,7 @@ async function main() {
             break;
           }
         }
-        const r = deleteSession(store, id, {
+        const r = personalData.deleteSession(id, {
           exportsDir,
           deleteExports: values["delete-exports"],
           note: values.note,
@@ -257,7 +256,7 @@ async function main() {
         break;
       }
       case "deletions": {
-        const rows = listSessionDeletions(store);
+        const rows = personalData.sessionDeletions();
         if (rows.length === 0) console.log("Session-deletion register is empty.");
         for (const d of rows)
           console.log(
@@ -304,7 +303,7 @@ async function main() {
           process.exitCode = 1;
           break;
         }
-        const r = deleteSessionAudio({ store }, id, { scope, note: values.note });
+        const r = personalData.deleteAudio(id, { scope, note: values.note });
         console.log(
           `Deleted (${scope}): ${r.counts.tracks} tracks (${duration(r.counts.audioMs)}), ${r.counts.chunks} chunk rows, ` +
             `${r.counts.derivatives} derived results, ${r.counts.jobs} jobs; ${r.audioFiles.removed} encrypted files removed` +
@@ -411,15 +410,8 @@ async function main() {
             `  audio: ${a.filesChecked} encrypted files, ${a.records} records authenticated, ${a.orphans.length} orphan files`,
           );
         } else {
-          const n = db
-            .prepare(
-              "SELECT (SELECT count(*) FROM audio_tracks) + (SELECT count(*) FROM audio_derivatives) AS n",
-            )
-            .get() as {
-            n: number;
-          };
-          if (n.n > 0)
-            report(`${n.n} audio rows in the simulation database (simulations never record audio)`);
+          const n = store.audioRowCount();
+          if (n > 0) report(`${n} audio rows in the simulation database (simulations never record audio)`);
         }
         console.log(problems === 0 ? "✓ Database OK" : `${problems} problem(s) found`);
         if (problems) process.exitCode = 1;

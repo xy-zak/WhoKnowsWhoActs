@@ -155,7 +155,7 @@ export interface ScopeExplanation {
   keeps: string;
 }
 
-/** What each "delete audio" scope removes and keeps (matches the server's deleteSessionAudio). */
+/** What each "delete audio" scope removes and keeps (matches the server's PersonalDataMap.deleteAudio). */
 export const DELETE_SCOPES: Record<AudioDeleteScope, ScopeExplanation> = {
   raw: {
     label: "Raw audio, keep derived",

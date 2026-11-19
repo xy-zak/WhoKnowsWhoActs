@@ -4,8 +4,8 @@ import path from "node:path";
 import { EXPORT_FILES, expandColumns, normaliseParticipantCode } from "@wkwa/shared";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { backupDatabase, openDatabase, rekeyDatabase, WrongPassphraseError } from "../src/db/database";
+import { PersonalDataMap } from "../src/db/personalData";
 import { Store } from "../src/db/store";
-import { eraseParticipant, listErasures, lookupParticipant } from "../src/gdpr/erase";
 import { exportSession, readManifest } from "../src/gdpr/exporter";
 import { REPO_ROOT } from "../src/runtime";
 import { cleanup, PASSPHRASE, setupSession, startTestServer, type TestServer } from "./harness";
@@ -190,7 +190,7 @@ describe("GDPR tooling", () => {
   it("erases a participant completely and records it in the register", async () => {
     const code = codes[0]!;
     const sloppy = code.toLowerCase().replace(/-/g, " ");
-    const before = lookupParticipant(srv.ctx.store, sloppy);
+    const before = new PersonalDataMap(srv.ctx.store).lookup(sloppy);
     expect(before.occurrences[0]!.events).toBeGreaterThan(5);
     expect(before.occurrences[0]!.telemetry).toBeGreaterThan(0);
     expect(before.exports.length).toBe(2); // standard + anonymised from the tests above
@@ -222,10 +222,10 @@ describe("GDPR tooling", () => {
     });
     expect(marker.seq).toBeGreaterThan(lastSeqBefore); // seq numbers are never reused
     expect(JSON.stringify(events)).not.toContain(code);
-    expect(listErasures(srv.ctx.store)).toHaveLength(1);
-    expect(listErasures(srv.ctx.store)[0]!.note).toBe("test request");
-    expect(lookupParticipant(srv.ctx.store, code).occurrences).toHaveLength(0);
-    expect(lookupParticipant(srv.ctx.store, code).previouslyErased).toHaveLength(1);
+    expect(new PersonalDataMap(srv.ctx.store).erasures()).toHaveLength(1);
+    expect(new PersonalDataMap(srv.ctx.store).erasures()[0]!.note).toBe("test request");
+    expect(new PersonalDataMap(srv.ctx.store).lookup(code).occurrences).toHaveLength(0);
+    expect(new PersonalDataMap(srv.ctx.store).lookup(code).previouslyErased).toHaveLength(1);
 
     // the reloaded session shows the seat as withdrawn, the other three untouched
     const st = srv.ctx.hub.session!.state;
@@ -247,7 +247,7 @@ describe("GDPR tooling", () => {
     });
 
     // erasing again is a no-op
-    expect(eraseParticipant(srv.ctx.store, code).erased).toBe(false);
+    expect(new PersonalDataMap(srv.ctx.store).erase(code).erased).toBe(false);
   });
 
   it("writes encrypted backups and supports changing the passphrase", async () => {
