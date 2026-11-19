@@ -1,4 +1,5 @@
 import {
+  AUDIO_CHUNK_SECONDS,
   type DashboardMsg,
   DISSOCIATED_PAIRINGS,
   FAKE_PLAYER_PACES,
@@ -24,7 +25,7 @@ import {
   seatList,
 } from "@wkwa/shared";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { fmtDuration } from "../common/format";
+import { fmtDuration, fmtMinutes, plural } from "../common/format";
 import {
   ActSwatch,
   AsciiProgress,
@@ -45,9 +46,8 @@ import {
   type BacklogTrend,
   backlogTone,
   chunkAge,
-  fmtMinutes,
   micCell,
-  micCheckText,
+  micCheckStatus,
   nextBacklogTrend,
   STALE_CHUNK_MS,
 } from "./audioLive";
@@ -587,7 +587,7 @@ export function MicColumn({
   serverNow: number;
 }) {
   const cell = micCell(st, seat, mic);
-  const check = st.phase === "onboarding" ? micCheckText(st, seat) : null;
+  const check = st.phase === "onboarding" ? micCheckStatus(st, seat) : null;
   const meter = cell.state !== "off" && cell.state !== "skipped";
   if (!meter && !check) return <RecTag compact state={cell.state} tip={cell.tip} />;
   const pending = mic?.pendingChunks ?? 0;
@@ -613,7 +613,7 @@ export function MicColumn({
           <span
             className={`row nowrap ${pendingWarn ? "t-warn" : "muted"}`}
             style={{ gap: 2 }}
-            data-tip={`Upload backlog: ${pending} chunk${pending === 1 ? "" : "s"} (about ${pending * 5} s of audio) recorded but not yet on the server${pendingWarn ? ". Growing or large: check this browser's network connection" : ""}`}
+            data-tip={`Upload backlog: ${plural(pending, "chunk")} (about ${pending * AUDIO_CHUNK_SECONDS} s of audio) recorded but not yet on the server${pendingWarn ? ". Growing or large: check this browser's network connection" : ""}`}
           >
             <Icon name="upload" /> ↑ {pending}
           </span>
@@ -625,7 +625,7 @@ export function MicColumn({
             data-tip={
               age.stale
                 ? `No audio stored from this seat for more than ${STALE_CHUNK_MS / 1000} s although it says it records: check its browser and network`
-                : "Time since the server last stored audio from this seat (chunks arrive every 5 s)"
+                : `Time since the server last stored audio from this seat (chunks arrive every ${AUDIO_CHUNK_SECONDS} s)`
             }
           >
             {age.stale && <Icon name="clock" />}
@@ -635,17 +635,17 @@ export function MicColumn({
         {mic && mic.tracks > 0 && (
           <span
             className="faint"
-            data-tip={`Audio stored for this seat so far, in ${mic.tracks} track${mic.tracks === 1 ? "" : "s"}`}
+            data-tip={`Audio stored for this seat so far, in ${plural(mic.tracks, "track")}`}
           >
             {fmtMinutes(mic.recordedMs)}
           </span>
         )}
         {check && (
           <span
-            className={check === "check pending" ? "muted" : "faint"}
+            className={check === "pending" ? "muted" : "faint"}
             data-tip="The seat's own mic check (onboarding step after consent)"
           >
-            {check}
+            check {check}
           </span>
         )}
       </span>

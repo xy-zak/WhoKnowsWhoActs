@@ -137,30 +137,63 @@ export function Chip({ children }: { children: ReactNode }) {
   return <span className="chip">{children}</span>;
 }
 
-/** `▰▰▰▱▱ 3/5` — quota / progress bar in text form. */
+/**
+ * `▰▰▰▱▱ 3/5` — quota / progress bar in text form. At most `width` cells (fewer for a smaller
+ * limit). `label` makes it a `role="progressbar"` with that name and its values; without a label
+ * and without text it is decorative (hidden from screen readers). `text` replaces `used/limit`
+ * (null: no text), `filled` the rounded count of lit cells, `color` the lit cells' colour.
+ */
 export function AsciiProgress({
   used,
   limit,
   width = 5,
+  label,
+  text,
+  filled,
+  color,
+  className = "",
 }: {
   used: number;
   limit: number | null;
   width?: number;
+  label?: string;
+  text?: ReactNode;
+  filled?: number;
+  color?: string;
+  className?: string;
 }) {
   if (limit === null) {
     return (
-      <span className="ascii-progress">
+      <span className={`ascii-progress ${className}`.trim()}>
         <span className="on">{used}</span>
         <span className="faint">/∞</span>
       </span>
     );
   }
   const n = Math.max(1, Math.min(width, limit || width));
-  const filled = limit === 0 ? n : Math.round((Math.min(used, limit) / limit) * n);
+  const on = Math.max(
+    0,
+    Math.min(n, filled ?? (limit === 0 ? n : Math.round((Math.min(used, limit) / limit) * n))),
+  );
+  const shown = text === undefined ? `${used}/${limit}` : text;
+  const a11y = label
+    ? {
+        role: "progressbar",
+        "aria-label": label,
+        "aria-valuemin": 0,
+        "aria-valuemax": limit,
+        "aria-valuenow": Math.min(used, limit),
+      }
+    : shown === null
+      ? { "aria-hidden": true }
+      : {};
   return (
-    <span className={`ascii-progress${used >= limit ? " full" : ""}`}>
-      <span className="on">{"▰".repeat(filled)}</span>
-      <span className="off">{"▱".repeat(n - filled)}</span> {used}/{limit}
+    <span className={`ascii-progress${used >= limit ? " full" : ""} ${className}`.trim()} {...a11y}>
+      <span className="on" style={color ? { color } : undefined}>
+        {"▰".repeat(on)}
+      </span>
+      <span className="off">{"▱".repeat(n - on)}</span>
+      {shown !== null && <> {shown}</>}
     </span>
   );
 }

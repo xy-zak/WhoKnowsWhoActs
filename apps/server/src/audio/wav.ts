@@ -14,6 +14,7 @@
  *
  * Only 16-bit PCM is produced (the capture format); mono by default.
  */
+import { int16ToLeBytes } from "@wkwa/shared";
 
 export interface WavFormat {
   sampleRate: number;
@@ -38,7 +39,6 @@ export interface WavInfo {
 
 export const WAV_HEADER_BYTES = 44;
 const MAX_DATA_BYTES = 0xffff_ffff - 36;
-const LITTLE_ENDIAN = new Uint8Array(new Uint16Array([1]).buffer)[0] === 1;
 
 /** The 44-byte header of a PCM WAV file with `dataBytes` of sample data. */
 export function wavHeader(format: WavFormat, dataBytes: number): Uint8Array {
@@ -116,15 +116,6 @@ export function parseWavHeader(bytes: Uint8Array, fileBytes?: number): WavInfo {
   throw new Error("no data chunk");
 }
 
-/** The samples as little-endian bytes (a view when the host is little-endian, else a swapped copy). */
-export function pcm16Bytes(samples: Int16Array): Uint8Array {
-  if (LITTLE_ENDIAN) return new Uint8Array(samples.buffer, samples.byteOffset, samples.byteLength);
-  const out = new Uint8Array(samples.byteLength);
-  const v = new DataView(out.buffer);
-  for (let i = 0; i < samples.length; i++) v.setInt16(i * 2, samples[i]!, true);
-  return out;
-}
-
 /**
  * Header plus exactly `totalSamples` samples (per channel) from `blocks`, as byte chunks ready to be
  * written to a socket or file. Missing samples at the end are silence; extra samples are dropped.
@@ -141,13 +132,13 @@ export async function* wavStream(
   for await (const block of blocks) {
     if (written >= totalValues) break;
     const take = Math.min(block.length, totalValues - written);
-    yield pcm16Bytes(take === block.length ? block : block.subarray(0, take));
+    yield int16ToLeBytes(take === block.length ? block : block.subarray(0, take));
     written += take;
   }
   const silence = new Int16Array(16_384);
   while (written < totalValues) {
     const take = Math.min(silence.length, totalValues - written);
-    yield pcm16Bytes(silence.subarray(0, take));
+    yield int16ToLeBytes(silence.subarray(0, take));
     written += take;
   }
 }
@@ -176,7 +167,7 @@ export class WavWriter {
 
   write(samples: Int16Array): void {
     if ((this.samples + samples.length) * 2 > MAX_DATA_BYTES) throw new Error("WAV file would exceed 4 GiB");
-    this.sink(pcm16Bytes(samples));
+    this.sink(int16ToLeBytes(samples));
     this.samples += samples.length;
   }
 
@@ -196,6 +187,6 @@ export function encodeWav(samples: Int16Array, format: WavFormat): Uint8Array {
   const header = wavHeader(format, samples.byteLength);
   const out = new Uint8Array(header.length + samples.byteLength);
   out.set(header, 0);
-  out.set(pcm16Bytes(samples), header.length);
+  out.set(int16ToLeBytes(samples), header.length);
   return out;
 }

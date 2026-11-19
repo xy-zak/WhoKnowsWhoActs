@@ -40,21 +40,22 @@ import {
   AUDIO_MAX_CHUNK_SAMPLES,
   AUDIO_SAMPLE_RATE,
   type AudioAck,
-  type AudioSettings,
-  type AudioStartReason,
+  type AudioChunk,
+  type AudioStart,
+  type AudioStop,
   type AudioStopReason,
   type GameState,
   isMicCheckHeld,
   isParticipant,
   micCheckApplies,
   type NewEvent,
-  pcmByteLength,
   RECORDING_PHASES,
   type StoredEvent,
   samplesToMs,
   shouldRecord,
 } from "@wkwa/shared";
 import type { Logger } from "pino";
+import type { z } from "zod";
 import type { AudioTrackRow, Store } from "../db/store";
 import { CALIBRATION_MARGIN_MS, CalibrationCollector } from "./calibration";
 
@@ -63,33 +64,13 @@ const FUTURE_TOLERANCE_MS = 5000;
 /** Longest track the server accepts (samples; 24 h). */
 const MAX_TRACK_SAMPLES = 24 * 3600 * AUDIO_SAMPLE_RATE;
 
-export interface AudioStartMsg {
-  trackId: string;
-  reason: AudioStartReason;
-  sampleRate: number;
-  settings: AudioSettings;
-  clientTs: number;
-  clockOffsetMs: number;
-}
-
-export interface AudioChunkMsg {
-  trackId: string;
-  seq: number;
-  startSample: number;
-  sampleCount: number;
-  clientTs: number;
-  clockOffsetMs: number;
-  rmsDb: number;
-  peakDb: number;
-  clippedSamples: number;
-  pcm: ArrayBuffer | ArrayBufferView;
-}
-
-export interface AudioStopMsg {
-  trackId: string;
-  reason: AudioStopReason;
-  droppedChunks: number;
-}
+/** Validated messages (the hub parses them with the shared schemas first). */
+export type AudioStartMsg = Pick<
+  z.output<typeof AudioStart>,
+  "trackId" | "reason" | "sampleRate" | "settings" | "clientTs" | "clockOffsetMs"
+>;
+export type AudioChunkMsg = z.output<typeof AudioChunk>;
+export type AudioStopMsg = Pick<z.output<typeof AudioStop>, "trackId" | "reason" | "droppedChunks">;
 
 /** Per-seat figures for the facilitator's LIVE mic column. */
 export interface SeatAudioStats {
@@ -139,6 +120,8 @@ export class LiveAudio {
   /** Server time of the last late chunk accepted per closed track (the grace period runs from it). */
   private lastLate = new Map<string, number>();
   private stats = new Map<number, SeatAudioStats>();
+  /** Row and file key of each open track, read once on its first chunk (dropped when it closes). */
+  private openTracks = new Map<string, { row: AudioTrackRow; key: Buffer }>();
   private collector: CalibrationCollector | null = null;
 
   constructor(private readonly deps: LiveAudioDeps) {}
@@ -192,6 +175,7 @@ export class LiveAudio {
     const open = this.deps.store.listAudioTracks(this.deps.sessionId, { status: "recording" });
     for (const t of open) {
       if (this.deps.isFinal()) {
+        this.openTracks.delete(t.trackId);
         this.deps.store.closeAudioTrack(t.trackId, {
           closedServerTs: this.deps.clock(),
           stopReason: "interrupted",
@@ -218,8 +202,11 @@ export class LiveAudio {
 
   /* ═════════════════════════ gates ═════════════════════════ */
 
-  /** Why this seat may not be recorded at all (null = it may). Pauses are handled per chunk. */
-  private seatRefusal(seat: number): string | null {
+  /**
+   * Why this seat may not be recorded at all (null = it may). Pauses are handled per chunk. The hub
+   * also drops the LIVE meter readings (`audio:level`) of a seat refused here.
+   */
+  refusal(seat: number): string | null {
     const st = this.state;
     if (!st.audio.enabled) return "This session does not record audio";
     if (!this.deps.store.audioFiles) return "This database does not record audio";
@@ -238,12 +225,11 @@ export class LiveAudio {
 
   /** Why this seat may not start a track now (null = it may). */
   private startRefusal(seat: number): string | null {
-    const why = this.seatRefusal(seat);
+    const why = this.refusal(seat);
     if (why) return why;
     const st = this.state;
     if (st.audio.recordingPaused) return "Recording is paused";
     if (!RECORDING_PHASES.has(st.phase)) return `Nothing is recorded in phase '${st.phase}'`;
-    if (isMicCheckHeld(st)) return "Waiting for every seat to finish the consent form";
     const s = st.seats[seat]!;
     return shouldRecord(st, s) ? null : "This seat should not record now";
   }
@@ -353,11 +339,11 @@ export class LiveAudio {
   private async doChunk(seat: number, msg: AudioChunkMsg): Promise<ChunkAck> {
     const { store, sessionId } = this.deps;
     const data = { trackId: msg.trackId, seq: msg.seq };
-    const track = store.getAudioTrack(msg.trackId);
+    const { track, key } = this.trackOf(msg.trackId);
     if (!track || track.sessionId !== sessionId || track.seat !== seat) return reject("Unknown track");
     if (track.status === "deleted") return reject("The audio of this track was deleted");
     if (store.hasAudioChunk(msg.trackId, msg.seq)) return { ok: true, data, duplicate: true };
-    const why = this.seatRefusal(seat);
+    const why = this.refusal(seat);
     if (why) return reject(why);
     const now = this.deps.clock();
     if (track.status !== "recording") {
@@ -367,13 +353,11 @@ export class LiveAudio {
     // sanity: each earlier chunk holds at most AUDIO_MAX_CHUNK_SAMPLES samples
     if (msg.startSample > msg.seq * AUDIO_MAX_CHUNK_SAMPLES) return reject("startSample does not fit seq");
     if (msg.startSample + msg.sampleCount > MAX_TRACK_SAMPLES) return reject("The track is too long");
-    if (pcmByteLength(msg.pcm) !== msg.sampleCount * 2) return reject("pcm must hold sampleCount × 2 bytes");
     if (msg.clientTs > now + FUTURE_TOLERANCE_MS) return reject("clientTs lies in the future");
     const keep = this.keepSamples(msg.clientTs, msg.sampleCount);
     if (keep <= 0)
       return reject("Recording was paused or the game was complete when this audio was captured");
     const pcm = toBuffer(msg.pcm).subarray(0, keep * 2);
-    const key = store.getAudioTrackKey(msg.trackId);
     if (!key || !track.fileName) return reject("The audio of this track was deleted");
     try {
       await store.audioFiles!.appendRecord(sessionId, track.fileName, key, msg.seq, pcm);
@@ -382,7 +366,7 @@ export class LiveAudio {
       return retry("Could not store the audio");
     }
     // the seat may have withdrawn (or the session ended) while the chunk was written: then it does not count
-    const after = this.seatRefusal(seat);
+    const after = this.refusal(seat);
     if (after) return reject(after);
     const st = this.state;
     const serverTs = this.deps.clock();
@@ -404,6 +388,7 @@ export class LiveAudio {
       });
     } catch (e) {
       // the track's raw audio was deleted meanwhile (erasure)
+      this.openTracks.delete(msg.trackId);
       this.deps.log.warn({ err: e, sessionId, seat }, "audio chunk for a deleted track");
       return reject("The audio of this track was deleted");
     }
@@ -422,6 +407,20 @@ export class LiveAudio {
     return { ok: true, data, duplicate: !inserted };
   }
 
+  /**
+   * A track's row and file key: from the cache while it is open, else read (a closed track's late
+   * chunks are rare). Only an open track is cached, so its status in the cache is always current.
+   */
+  private trackOf(trackId: string): { track: AudioTrackRow | undefined; key: Buffer | null } {
+    const cached = this.openTracks.get(trackId);
+    if (cached) return { track: cached.row, key: cached.key };
+    const { store } = this.deps;
+    const track = store.getAudioTrack(trackId);
+    const key = track ? store.getAudioTrackKey(trackId) : null;
+    if (track?.status === "recording" && key) this.openTracks.set(trackId, { row: track, key });
+    return { track, key };
+  }
+
   /* ═════════════════════════ audio:stop and server-side closes ═════════════════════════ */
 
   /** The browser stopped a track. Always accepted for the seat's own tracks (closing never records anything). */
@@ -431,6 +430,7 @@ export class LiveAudio {
     if (!track || track.sessionId !== sessionId || track.seat !== seat) return reject("Unknown track");
     if (track.status === "recording") {
       if (this.deps.isFinal()) {
+        this.openTracks.delete(track.trackId);
         store.closeAudioTrack(track.trackId, {
           closedServerTs: this.deps.clock(),
           stopReason: msg.reason,
@@ -452,6 +452,7 @@ export class LiveAudio {
     droppedChunks = 0,
   ) {
     const { store } = this.deps;
+    this.openTracks.delete(track.trackId);
     const closed = store.closeAudioTrack(track.trackId, {
       closedServerTs: this.deps.clock(),
       stopReason: reason,

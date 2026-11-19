@@ -9,6 +9,7 @@ import {
   AudioLevel,
   AudioStart,
   AudioStop,
+  audioEnabled,
   BriefingAck,
   BroadcastMsg,
   CalibrationSkip,
@@ -24,11 +25,8 @@ import {
   LabelsSet,
   LIVE_TELEMETRY_TYPES,
   MicCheckSubmit,
-  type MicLevelState,
   MicSkip,
-  micCheckApplies,
   NoteMsg,
-  normaliseForPlayers,
   PlayerHello,
   Presence,
   parseSessionConfig,
@@ -54,7 +52,7 @@ import {
 } from "@wkwa/shared";
 import type { Logger } from "pino";
 import type { Namespace, Server, Socket } from "socket.io";
-import type { ZodType } from "zod";
+import type { ZodType, z } from "zod";
 import { loadOnboardingContent, type ScenarioLibrary } from "../content";
 import { getMeta } from "../db/database";
 import type { Store } from "../db/store";
@@ -76,17 +74,7 @@ interface PlayerSocketData {
 }
 
 /** Latest `audio:level` of a seat (volatile: never stored). */
-interface MicLevelReading {
-  state: MicLevelState;
-  rmsDb: number;
-  peakDb: number;
-  pendingChunks: number;
-}
-
-/** Does a session with this config record audio? (Never a simulated one.) */
-function recordsAudio(config: unknown): boolean {
-  return normaliseForPlayers(parseSessionConfig(config)).audio.enabled;
-}
+type MicLevelReading = z.output<typeof AudioLevel>;
 
 export interface HubDeps {
   io: Server;
@@ -183,12 +171,24 @@ export class Hub {
     return this.session?.store ?? this.deps.stores.real;
   }
 
-  private sessionDeps(scenario: Scenario, store: Store, audio: boolean) {
+  /**
+   * What a SessionManager needs, for a new config or a stored one (`config_json`). Throws a
+   * CommandError if that config or the onboarding content cannot be loaded (e.g. consent.json lost
+   * its audio item), before anything changed: the attached session stays as it is.
+   */
+  private sessionDeps(scenario: Scenario, store: Store, config: SessionConfig | string) {
+    let onboarding: ReturnType<typeof loadOnboardingContent>;
+    try {
+      const parsed = typeof config === "string" ? parseSessionConfig(JSON.parse(config)) : config;
+      // composed for the session: the consent form has its audio section and item only with audio
+      onboarding = loadOnboardingContent(this.deps.configDir, { audio: audioEnabled(parsed) });
+    } catch (e) {
+      throw new CommandError((e as Error).message);
+    }
     return {
       store,
       scenario,
-      // composed for the session: the consent form has its audio section and item only with audio
-      onboarding: loadOnboardingContent(this.deps.configDir, { audio }),
+      onboarding,
       serverSecret: this.secret,
       log: this.deps.log,
       onEvents: (evs: StoredEvent[]) => this.onEvents(evs),
@@ -197,13 +197,7 @@ export class Hub {
 
   createSession(scenarioId: string, config: SessionConfig, notes: string): SessionManager {
     const scenario = this.deps.scenarios.load(scenarioId);
-    const store = this.deps.stores.of(config.players);
-    let deps: ReturnType<Hub["sessionDeps"]>;
-    try {
-      deps = this.sessionDeps(scenario, store, recordsAudio(config));
-    } catch (e) {
-      throw new CommandError((e as Error).message);
-    }
+    const deps = this.sessionDeps(scenario, this.deps.stores.of(config.players), config);
     this.detach("A new session was created");
     // this.session is null while creating, so the SessionCreated batch is delivered by afterAttach()
     const created = SessionManager.create(deps, config, notes);
@@ -220,13 +214,7 @@ export class Hub {
     const found = this.deps.stores.find(sessionId);
     if (!found) throw new CommandError(`Unknown session ${sessionId}`);
     const scenario = this.deps.scenarios.load(found.row.scenario_id);
-    let deps: ReturnType<Hub["sessionDeps"]>;
-    try {
-      deps = this.sessionDeps(scenario, found.store, recordsAudio(JSON.parse(found.row.config_json)));
-    } catch (e) {
-      // e.g. consent.json lost its audio item: keep the attached session as it is
-      throw new CommandError((e as Error).message);
-    }
+    const deps = this.sessionDeps(scenario, found.store, found.row.config_json);
     this.detach("Switching session");
     const m = SessionManager.load(deps, sessionId);
     this.session = m;
@@ -465,17 +453,15 @@ export class Hub {
       })
       .filter((t) => t.connected || t.seat !== null)
       .sort((a, b) => a.terminal - b.terminal);
-    const audio = m?.state.audio.enabled ? m.state.audio : undefined;
     const stats: Record<number, SeatLiveStats> = {};
     for (const [seat, st] of this.stats)
-      stats[seat] = audio && m ? { ...st, mic: this.micStats(m, seat) } : st;
+      stats[seat] = m?.state.audio.enabled ? { ...st, mic: this.micStats(m, seat) } : st;
     return {
       state: m?.state ?? null,
       serverTs: nowTs(),
       terminals,
       stats,
       live: Boolean(m && !m.isFinal),
-      ...(audio ? { audio } : {}),
     };
   }
 
@@ -560,70 +546,62 @@ export class Hub {
       if (msg.success) ack?.({ t0: msg.data.t0, serverTs: nowTs() });
     });
 
-    const seatCmd = <T>(
+    /**
+     * A seated player's command: refused when the socket holds no seat or the payload is invalid;
+     * `fn` may be async. `refuse` builds the refusal ack (`retry`: the player may send it again).
+     */
+    const seatHandler = <T, R>(
       name: string,
       schema: ZodType<T>,
-      fn: (m: SessionManager, seat: number, msg: T) => unknown,
+      fn: (m: SessionManager, seat: number, msg: T) => R | Promise<R>,
+      { refuse }: { refuse: (error: string, retry: boolean) => unknown },
     ) => {
-      sock.on(name, (raw, ack?: (a: Ack | unknown) => void) => {
+      sock.on(name, async (raw, ack?: (a: unknown) => void) => {
         const m = this.session;
         const seat = data.seat;
-        if (!m || seat === null || seat === undefined) return ack?.({ ok: false, error: "Not seated" });
+        if (!m || seat === null || seat === undefined) return ack?.(refuse("Not seated", true));
         const msg = schema.safeParse(raw);
-        if (!msg.success) return ack?.({ ok: false, error: "Invalid message" });
+        if (!msg.success)
+          return ack?.(refuse(`Invalid message: ${msg.error.issues[0]?.message ?? ""}`, false));
         try {
-          const result = fn(m, seat, msg.data);
-          ack?.(result ?? { ok: true });
+          ack?.(await fn(m, seat, msg.data));
         } catch (e) {
-          if (e instanceof CommandError) return ack?.({ ok: false, error: e.message });
+          if (e instanceof CommandError) return ack?.(refuse(e.message, false));
           this.deps.log.error({ err: e, msg: name }, "player command failed");
-          ack?.({ ok: false, error: "Server error" });
+          ack?.(refuse("Server error", true));
         }
       });
     };
 
+    /** A command whose refusals are plain acks (`Ack`). */
+    const seatCmd = <T>(
+      name: string,
+      schema: ZodType<T>,
+      fn: (m: SessionManager, seat: number, msg: T) => unknown,
+    ) =>
+      seatHandler(name, schema, (m, seat, msg) => fn(m, seat, msg) ?? { ok: true }, {
+        refuse: (error) => ({ ok: false, error }),
+      });
+
     /**
-     * Audio uploads: like seatCmd, but every refusal says whether to retry (AudioAck). Not seated
-     * (e.g. right after a reconnect, before hello) is transient; a bad payload is permanent.
+     * Audio uploads: every refusal says whether to retry (AudioAck). Not seated (e.g. right after a
+     * reconnect, before hello) is transient; a bad payload is permanent.
      */
     const audioCmd = <T>(
       name: string,
       schema: ZodType<T>,
       fn: (m: SessionManager, seat: number, msg: T) => AudioAck<unknown> | Promise<AudioAck<unknown>>,
-    ) => {
-      sock.on(name, (raw, ack?: (a: AudioAck<unknown>) => void) => {
-        const m = this.session;
-        const seat = data.seat;
-        if (!m || seat === null || seat === undefined)
-          return ack?.({ ok: false, error: "Not seated", retry: true });
-        const msg = schema.safeParse(raw);
-        if (!msg.success)
-          return ack?.({
-            ok: false,
-            error: `Invalid message: ${msg.error.issues[0]?.message ?? ""}`,
-            retry: false,
-          });
-        Promise.resolve()
-          .then(() => fn(m, seat, msg.data))
-          .then(
-            (a) => {
-              ack?.(a);
-              // stored audio changes the LIVE mic column (throttled)
-              if (a.ok && this.session === m) this.schedulePush();
-            },
-            (e) => {
-              if (e instanceof CommandError) return ack?.({ ok: false, error: e.message, retry: false });
-              this.deps.log.error({ err: e, msg: name }, "audio upload failed");
-              ack?.({ ok: false, error: "Server error", retry: true });
-            },
-          );
-      });
-    };
+    ) => seatHandler(name, schema, fn, { refuse: (error, retry) => ({ ok: false, error, retry }) });
 
     seatCmd("consent:submit", ConsentSubmit, (m, seat, msg) => m.submitConsent(seat, msg));
     seatCmd("mic:check", MicCheckSubmit, (m, seat, msg) => m.submitMicCheck(seat, msg));
     audioCmd("audio:start", AudioStart, (m, seat, msg) => m.audio.start(seat, msg));
-    audioCmd("audio:chunk", AudioChunk, (m, seat, msg) => m.audio.chunk(seat, msg));
+    audioCmd("audio:chunk", AudioChunk, async (m, seat, msg) => {
+      const a = await m.audio.chunk(seat, msg);
+      // a stored chunk changes the LIVE mic column (throttled); start and stop push through their events
+      if (a.ok && !a.duplicate && this.session === m) this.schedulePush();
+      return a;
+    });
     audioCmd("audio:stop", AudioStop, (m, seat, msg) => m.audio.stop(seat, msg));
     seatCmd("demographics:submit", DemographicsSubmit, (m, seat, msg) => m.submitDemographics(seat, msg));
     seatCmd("briefing:ack", BriefingAck, (m, seat, msg) => m.acknowledgeBriefing(seat, msg));
@@ -643,13 +621,10 @@ export class Hub {
     sock.on("audio:level", (raw) => {
       const m = this.session;
       const seat = data.seat;
-      if (!m || !seat || !m.state.audio.enabled) return;
-      const s = m.state.seats[seat];
-      if (!s?.bound || s.withdrawn || !micCheckApplies(m.state, s) || s.micCheck === "skipped") return;
+      if (!m || !seat || m.audio.refusal(seat) !== null) return;
       const msg = AudioLevel.safeParse(raw);
       if (!msg.success) return;
-      const { state, rmsDb, peakDb, pendingChunks } = msg.data;
-      this.micLevels.set(seat, { state, rmsDb, peakDb, pendingChunks });
+      this.micLevels.set(seat, msg.data);
       this.schedulePush();
     });
 

@@ -545,7 +545,7 @@ classDiagram
   SpeechSegment ..> QualityReport : graded in
 ```
 
-The stored `audio_tracks.status` is only `recording`, `closed` or `deleted`. The REST and CSV view derives `open`, `closed`, `interrupted` and `deleted` from it and from the stop reason. A track that the server closed with `interrupted` after a restart therefore reads as `closed` in that view; its stop reason is kept in the data.
+The stored `audio_tracks.status` is only `recording`, `closed` or `deleted`. The REST and CSV view derives `open`, `closed`, `interrupted` and `deleted` from it and from the stop reason. A track reads as `interrupted` when it stopped with `disconnect`, `interrupted` (the server found it still open after a restart), `permission_lost`, `error` or an unknown reason; its stop reason is kept in the data.
 
 ## 13. Known limits
 

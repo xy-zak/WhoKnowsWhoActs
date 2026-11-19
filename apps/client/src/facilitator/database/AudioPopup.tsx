@@ -1,5 +1,17 @@
-import { useCallback, useEffect, useId, useReducer, useRef, useState } from "react";
-import { Button, Callout, Field, Icon, Panel, Popup, SeatDot, StatusTag, useConfirm } from "../../ui";
+import { memo, useCallback, useEffect, useId, useMemo, useReducer, useRef, useState } from "react";
+import { fmtBytes, fmtDuration, fmtShare, fmtSigned, PLACEHOLDER } from "../../common/format";
+import {
+  AsciiProgress,
+  Button,
+  Callout,
+  Field,
+  Icon,
+  Panel,
+  Popup,
+  SeatDot,
+  StatusTag,
+  useConfirm,
+} from "../../ui";
 import type { FacilitatorConnection } from "../connection";
 import {
   type AttributionJobView,
@@ -13,10 +25,6 @@ import {
   deleteBlock,
   EXPORTS_NOT_DELETED,
   exportBlock,
-  formatBytes,
-  formatDuration,
-  formatShare,
-  formatSigned,
   GRADE_TONE,
   hasCleanTrack,
   initialJobState,
@@ -437,15 +445,15 @@ function SeatsPanel({
                       </span>
                     </td>
                     <td>{s.tracks}</td>
-                    <td className="mono" data-tip={`First to last sample: ${formatDuration(s.spanMs)}`}>
-                      {formatDuration(s.durationMs)}
+                    <td className="mono" data-tip={`First to last sample: ${fmtDuration(s.spanMs)}`}>
+                      {fmtDuration(s.durationMs)}
                     </td>
                     <td data-tip="Chunks never received inside a track">{s.gaps}</td>
                     <td data-tip="Breaks between tracks: a recording pause, reload or reconnect">
                       {s.trackBreaks}
                     </td>
                     <td className="mono" data-tip="Time between the first and last sample without audio">
-                      {formatDuration(s.missingMs)}
+                      {fmtDuration(s.missingMs)}
                     </td>
                     <td>
                       <span className="row nowrap" style={{ gap: "var(--s1)" }}>
@@ -532,17 +540,15 @@ function AttributionPanel({
           </Button>
           {job.phase === "starting" && <span className="muted small">Starting…</span>}
           {p && job.phase === "active" && (
-            <span
-              className="ascii-progress small"
-              role="progressbar"
-              aria-label="Speaker attribution progress"
-              aria-valuemin={0}
-              aria-valuemax={100}
-              aria-valuenow={p.pct}
-            >
-              <span className="on">{"▰".repeat(p.on)}</span>
-              <span className="off">{"▱".repeat(p.off)}</span> {p.pct} % · {job.status}
-            </span>
+            <AsciiProgress
+              className="small"
+              used={p.pct}
+              limit={100}
+              width={p.on + p.off}
+              filled={p.on}
+              label="Speaker attribution progress"
+              text={`${p.pct} % · ${job.status}`}
+            />
           )}
           {a && job.phase !== "active" && job.phase !== "starting" && (
             <span className="hint">Re-running replaces the result below.</span>
@@ -556,8 +562,13 @@ function AttributionPanel({
   );
 }
 
-function AttributionResult({ a }: { a: NonNullable<AudioSessionView["attribution"]> }) {
-  const bars = talkBars(a.talkTimeMs);
+/** Memoised, like TimelinePanel: the job poll and the export note re-render the popup often. */
+const AttributionResult = memo(function AttributionResult({
+  a,
+}: {
+  a: NonNullable<AudioSessionView["attribution"]>;
+}) {
+  const bars = useMemo(() => talkBars(a.talkTimeMs), [a.talkTimeMs]);
   return (
     <div className="col">
       <div className="row small">
@@ -587,8 +598,8 @@ function AttributionResult({ a }: { a: NonNullable<AudioSessionView["attribution
         )}
         <span className="muted">
           {whenTs(a.createdServerTs)} · engine {a.engineVersion} · {a.segments} segments · overlap{" "}
-          <span className="mono">{formatDuration(a.overlapMs)}</span> · ambiguous{" "}
-          {formatShare(a.quality.ambiguousShare)}
+          <span className="mono">{fmtDuration(a.overlapMs)}</span> · ambiguous{" "}
+          {fmtShare(a.quality.ambiguousShare)}
         </span>
       </div>
       <div className="grid-2" style={{ alignItems: "start" }}>
@@ -598,12 +609,15 @@ function AttributionResult({ a }: { a: NonNullable<AudioSessionView["attribution
             <div key={b.seat} className="row nowrap small" style={{ gap: "var(--s2)" }}>
               <SeatDot seat={b.seat} />
               <strong style={{ minWidth: "6ch" }}>SEAT {b.seat}</strong>
-              <span className="ascii-progress" aria-hidden="true">
-                <span style={{ color: `var(--seat-${b.seat})` }}>{"▰".repeat(b.filled)}</span>
-                <span className="off">{"▱".repeat(b.width - b.filled)}</span>
-              </span>
-              <span className="mono">{formatDuration(b.ms)}</span>
-              <span className="muted">{formatShare(b.share)}</span>
+              <AsciiProgress
+                used={b.filled}
+                limit={b.width}
+                width={b.width}
+                text={null}
+                color={`var(--seat-${b.seat})`}
+              />
+              <span className="mono">{fmtDuration(b.ms)}</span>
+              <span className="muted">{fmtShare(b.share)}</span>
             </div>
           ))}
           <span className="hint">Overlapping speech counts for each speaker.</span>
@@ -627,10 +641,10 @@ function AttributionResult({ a }: { a: NonNullable<AudioSessionView["attribution
                     {q.seat}
                   </span>
                 </td>
-                <td className="mono">{formatSigned(q.marginDb, "dB")}</td>
-                <td className="mono">{formatSigned(q.driftPpm, "ppm", 0)}</td>
-                <td className="mono">{formatSigned(q.lagMs, "ms", 0)}</td>
-                <td className="mono">{formatShare(q.coverage)}</td>
+                <td className="mono">{fmtSigned(q.marginDb, "dB")}</td>
+                <td className="mono">{fmtSigned(q.driftPpm, "ppm", 0)}</td>
+                <td className="mono">{fmtSigned(q.lagMs, "ms", 0)}</td>
+                <td className="mono">{fmtShare(q.coverage)}</td>
               </tr>
             ))}
           </tbody>
@@ -648,16 +662,28 @@ function AttributionResult({ a }: { a: NonNullable<AudioSessionView["attribution
       )}
     </div>
   );
-}
+});
 
 /* ─────────────────────────── Speech timeline ─────────────────────────── */
 
-function TimelinePanel({ view, segments }: { view: AudioSessionView; segments: SegmentsView }) {
-  const span = timelineSpan(view.seats, segments.segments);
-  if (!span) return null;
-  const bars = timelineBars(segments.segments, span.t0, span.t1);
-  const seats = [...new Set([...view.seats.map((s) => s.seat), ...bars.keys()])].sort((a, b) => a - b);
-  const at = (ts: number) => formatDuration(ts - span.t0);
+/** Memoised: a session has thousands of segments, and the popup re-renders on every poll and keystroke. */
+const TimelinePanel = memo(function TimelinePanel({
+  view,
+  segments,
+}: {
+  view: AudioSessionView;
+  segments: SegmentsView;
+}) {
+  const layout = useMemo(() => {
+    const span = timelineSpan(view.seats, segments.segments);
+    if (!span) return null;
+    const bars = timelineBars(segments.segments, span.t0, span.t1);
+    const seats = [...new Set([...view.seats.map((s) => s.seat), ...bars.keys()])].sort((a, b) => a - b);
+    return { span, bars, seats };
+  }, [view.seats, segments.segments]);
+  if (!layout) return null;
+  const { span, bars, seats } = layout;
+  const at = (ts: number) => fmtDuration(ts - span.t0);
   return (
     <Panel title={`Speech timeline · ${segments.segments.length} segments`} icon="timeline" nested>
       <div className="col" style={{ gap: "var(--s1)" }}>
@@ -681,7 +707,7 @@ function TimelinePanel({ view, segments }: { view: AudioSessionView; segments: S
               {(bars.get(seat) ?? []).map((b) => (
                 <span
                   key={`${b.segment.startTs}-${b.segment.endTs}`}
-                  data-tip={`Seat ${seat} · ${at(b.segment.startTs)}–${at(b.segment.endTs)} (${formatDuration(b.segment.durationMs)})${b.segment.round ? ` · round ${b.segment.round}` : ""}${b.overlap ? ` · overlaps seat ${b.segment.overlapWith.join(", ")}` : ""}`}
+                  data-tip={`Seat ${seat} · ${at(b.segment.startTs)}–${at(b.segment.endTs)} (${fmtDuration(b.segment.durationMs)})${b.segment.round ? ` · round ${b.segment.round}` : ""}${b.overlap ? ` · overlaps seat ${b.segment.overlapWith.join(", ")}` : ""}`}
                   style={{
                     position: "absolute",
                     left: `${b.left}%`,
@@ -698,12 +724,12 @@ function TimelinePanel({ view, segments }: { view: AudioSessionView; segments: S
         <div className="row nowrap micro faint" style={{ paddingLeft: "calc(6ch + 0.8em + var(--s2) * 2)" }}>
           <span>0:00</span>
           <span className="spacer" />
-          <span>{formatDuration(span.t1 - span.t0)}</span>
+          <span>{fmtDuration(span.t1 - span.t0)}</span>
         </div>
       </div>
     </Panel>
   );
-}
+});
 
 /* ─────────────────────────── Export result and previous exports ─────────────────────────── */
 
@@ -724,8 +750,8 @@ function ExportResultView({ r }: { r: AudioExportResult }) {
           {r.files.map((f) => (
             <tr key={f.name}>
               <td className="mono small">{f.name}</td>
-              <td className="mono">{formatDuration(f.durationMs)}</td>
-              <td className="mono">{formatBytes(f.bytes)}</td>
+              <td className="mono">{fmtDuration(f.durationMs)}</td>
+              <td className="mono">{fmtBytes(f.bytes)}</td>
               <td className="mono small" data-tip={f.sha256}>
                 {shortSha(f.sha256)}
               </td>
@@ -776,8 +802,8 @@ function PreviousExports({ view }: { view: AudioSessionView }) {
                 <tr key={x.exportId}>
                   <td className="mono small">{x.exportId}</td>
                   <td className="small">{when(x.createdWall)}</td>
-                  <td>{x.audioKind ?? "—"}</td>
-                  <td>{x.seats.length ? x.seats.join(", ") : "—"}</td>
+                  <td>{x.audioKind ?? PLACEHOLDER}</td>
+                  <td>{x.seats.length ? x.seats.join(", ") : PLACEHOLDER}</td>
                   <td>{x.files}</td>
                   <td>
                     <span className="row nowrap" style={{ gap: "var(--s1)" }}>
@@ -863,9 +889,9 @@ function RetentionPanel({
                   <td>{d.id}</td>
                   <td className="small">{when(d.executedWall)}</td>
                   <td>{d.scope}</td>
-                  <td>{d.seats.join(", ") || "—"}</td>
+                  <td>{d.seats.join(", ") || PLACEHOLDER}</td>
                   <td className="small">
-                    {d.tracks} tracks · {d.derivatives} derived · {formatBytes(d.bytes)}
+                    {d.tracks} tracks · {d.derivatives} derived · {fmtBytes(d.bytes)}
                   </td>
                   <td className="small">{d.note}</td>
                 </tr>
@@ -885,11 +911,10 @@ function DeleteResultView({ r }: { r: AudioDeleteResult }) {
       <strong>
         Register entry #{r.record.id} · {DELETE_SCOPES[r.scope].label.toLowerCase()}
       </strong>{" "}
-      · {when(r.record.executedWall)} · seats {r.record.seats.join(", ") || "—"}
+      · {when(r.record.executedWall)} · seats {r.record.seats.join(", ") || PLACEHOLDER}
       <br />
-      {r.counts.tracks} tracks ({formatDuration(r.counts.audioMs)}) · {r.counts.derivatives} derived results ·{" "}
-      {r.counts.files} encrypted files ({formatBytes(r.counts.bytes)}), {r.audioFiles.removed} removed from
-      disk
+      {r.counts.tracks} tracks ({fmtDuration(r.counts.audioMs)}) · {r.counts.derivatives} derived results ·{" "}
+      {r.counts.files} encrypted files ({fmtBytes(r.counts.bytes)}), {r.audioFiles.removed} removed from disk
       {r.record.note && <> · note: {r.record.note}</>}
       {r.audioFiles.failed.length > 0 && (
         <>
@@ -929,8 +954,8 @@ function DeleteAudioForm({
     <div className="col">
       <p>
         Deletes audio of session <span className="mono">{view.sessionId}</span> ({stored.length} seat(s) with
-        raw audio, {formatDuration(stored.reduce((n, s) => n + s.durationMs, 0))} recorded). The encrypted
-        files and their keys are destroyed: this cannot be undone.
+        raw audio, {fmtDuration(stored.reduce((n, s) => n + s.durationMs, 0))} recorded). The encrypted files
+        and their keys are destroyed: this cannot be undone.
       </p>
       <fieldset className="segmented">
         <legend>What to delete</legend>

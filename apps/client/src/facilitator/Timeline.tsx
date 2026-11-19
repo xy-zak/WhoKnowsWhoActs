@@ -240,7 +240,7 @@ export function Timeline({
                 {audio.tracks.map((t) => {
                   const lane = seats.indexOf(t.seat);
                   if (lane < 0) return null;
-                  const tip = `Seat ${t.seat} recording · ${((t.s - start) / 60_000).toFixed(1)}–${(((t.e ?? now) - start) / 60_000).toFixed(1)} min · started: ${START_REASON_TEXT[t.reason] ?? t.reason}${t.e === null ? " · still recording" : ` · stopped: ${STOP_REASON_TEXT[t.stopReason ?? ""] ?? t.stopReason}`}`;
+                  const tip = `Seat ${t.seat} recording · ${((t.s - start) / 60_000).toFixed(1)}–${(((t.e ?? now) - start) / 60_000).toFixed(1)} min · started: ${START_REASON_TEXT[t.reason]}${t.stopReason === null ? " · still recording" : ` · stopped: ${STOP_REASON_TEXT[t.stopReason]}`}`;
                   return (
                     <rect
                       key={t.trackId}

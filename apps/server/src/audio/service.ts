@@ -21,20 +21,39 @@ import { open } from "node:fs/promises";
 import path from "node:path";
 import {
   type AttributionJob,
-  type AttributionSummary,
+  type AttributionJobView,
+  type AttributionSummaryView,
   AUDIO_SAMPLE_RATE,
+  type AudioDeleteResult,
   type AudioDeletionRecord,
+  type AudioDeletionScope,
+  type AudioDerivativeKind,
+  type AudioExportEntry,
+  type AudioExportFile,
   type AudioExportKind,
-  type AudioSessionSummary,
+  type AudioExportRequestKind,
+  type AudioExportResult,
+  type AudioSessionView,
   applyEvent,
   audioExportFileName,
   initialState,
+  int16FromLeBytes,
   randomCrockford,
+  type SpeechSegmentRow,
+  type SpeechSegmentsView,
   type StoredEvent,
+  samplesToMs,
 } from "@wkwa/shared";
 import type { Logger } from "pino";
 import { sha256 } from "../content";
-import type { AudioDeletionRow, AudioJobRow, AudioTrackRow, NewAudioDerivative, Store } from "../db/store";
+import type {
+  AudioChunkRow,
+  AudioDeletionRow,
+  AudioJobRow,
+  AudioTrackRow,
+  NewAudioDerivative,
+  Store,
+} from "../db/store";
 import {
   type ActiveSessionProbe,
   type AudioDeletionResult,
@@ -42,7 +61,7 @@ import {
   isSessionRunning,
   SessionRunningError,
 } from "../gdpr/deleteAudio";
-import { registerExport } from "../gdpr/exporter";
+import { listExports, registerExport } from "../gdpr/exporter";
 import { nowTs, wall } from "../runtime";
 import {
   type AttributionOptions,
@@ -59,24 +78,24 @@ import {
   type Timeline,
   type TrackAlignment,
   type TrackSource,
+  trackSampleEnd,
 } from "./attribution";
+import { round } from "./attribution/math";
 import type { AudioReadIssue } from "./fileStore";
 import { type AudioJobRunner, runInWorker, type TaskRunner } from "./jobs";
 import {
   type AttributionTaskInput,
   type AttributionTaskOutput,
   describeIssues,
-  int16Of,
   seqOrderedChunks,
 } from "./jobWorker";
 import {
   ATTRIBUTION_DERIVATIVE_KINDS,
   type CleanParams,
   derivativeSummary,
-  type SeatAudioSummary,
-  type SpeechSegmentRow,
   seatSummaries,
   speechSegmentsOf,
+  trackSummaries,
   trackViews,
 } from "./records";
 import { wavStream } from "./wav";
@@ -93,57 +112,6 @@ export class AudioRequestError extends Error {
 
 export const CLEAN_ATTENUATION_DB = -30;
 export const CLEAN_FADE_MS = 10;
-const SEGMENT_KIND = "speech_segments";
-
-/** The attribution summary of a job, plus the overall quality grade of the run. */
-export type AttributionSummaryView = AttributionSummary & { grade: "good" | "fair" | "poor" };
-export type AttributionJobView = Omit<AttributionJob, "summary"> & {
-  sessionId: string;
-  summary?: AttributionSummaryView;
-};
-
-export interface AudioExportEntry {
-  exportId: string;
-  createdWall: string;
-  audioKind: AudioExportKind | "both" | null;
-  seats: number[];
-  files: number;
-  /** Where the WAVs were written; `onDisk` = the folder still exists. */
-  path: string;
-  onDisk: boolean;
-}
-
-/** Everything the DATABASE tab shows about a session's audio (the shared summary plus per-seat totals). */
-export type AudioSessionView = AudioSessionSummary & {
-  jobs: AttributionJobView[];
-  seats: SeatAudioSummary[];
-  /** Summary of the latest finished attribution, or null. */
-  attribution: (AttributionSummaryView & { jobId: string | null; createdServerTs: number }) | null;
-  audioExports: AudioExportEntry[];
-  /** True while the session runs: attribution, export and deletion wait until it has ended. */
-  running: boolean;
-};
-
-export interface AudioExportFile {
-  name: string;
-  seat: number;
-  kind: AudioExportKind;
-  samples: number;
-  durationMs: number;
-  bytes: number;
-  sha256: string;
-}
-
-export interface AudioExportResult {
-  exportId: string;
-  sessionId: string;
-  dir: string;
-  files: AudioExportFile[];
-  /** `attribution` = the alignment of the latest attribution; `timestamps` = the chunks' timestamps only. */
-  timing: "attribution" | "timestamps";
-  /** Read problems (damaged or missing records play as silence), also in the manifest. */
-  warnings: string[];
-}
 
 export interface AudioServiceDeps {
   /** The participant database (the only one with audio). */
@@ -216,8 +184,7 @@ export function timestampTiming(
   const { fits } = fitClocks(tracks.filter((t) => t.chunks.length > 0));
   if (fits.length === 0) return null;
   const alignment: TrackAlignment[] = fits.map((f) => {
-    const t = tracks.find((x) => x.trackId === f.trackId)!;
-    const samples = t.chunks.reduce((n, c) => Math.max(n, c.startSample + c.sampleCount), 0);
+    const samples = trackSampleEnd(tracks.find((x) => x.trackId === f.trackId)!.chunks);
     return {
       trackId: f.trackId,
       seat: f.seat,
@@ -247,8 +214,13 @@ export function timestampTiming(
 /* ─────────── reading audio for export ─────────── */
 
 /** A track's PCM as render chunks, streamed in startSample order; read problems go to `onIssue`. */
-function trackPcmChunks(store: Store, row: AudioTrackRow, key: Buffer, onIssue: (i: AudioReadIssue) => void) {
-  const chunks = store.listAudioChunks(row.trackId);
+function trackPcmChunks(
+  store: Store,
+  row: AudioTrackRow,
+  key: Buffer,
+  chunks: readonly AudioChunkRow[],
+  onIssue: (i: AudioReadIssue) => void,
+) {
   return seqOrderedChunks(store.audioFiles!, row.sessionId, row.fileName!, key, chunks, { onIssue });
 }
 
@@ -282,11 +254,6 @@ function exportIdOf(now: number): string {
   const d = new Date(now).toISOString().replace(/[-:]/g, "").replace("T", "-").slice(0, 15);
   return `AU-${d}-${randomCrockford(4)}`;
 }
-
-const round = (v: number, digits: number) => {
-  const f = 10 ** digits;
-  return Math.round(v * f) / f;
-};
 
 /* ─────────── summaries ─────────── */
 
@@ -381,13 +348,18 @@ export class AudioService {
 
   /* ── summary ── */
 
-  summary(sessionId: string): AudioSessionView {
+  async summary(sessionId: string): Promise<AudioSessionView> {
     this.session(sessionId);
     const views = trackViews(this.store, sessionId);
-    const derivatives = this.store
-      .listAudioDerivatives(sessionId, { kind: "clean" })
-      .filter((d) => d.seat !== null)
-      .map((d) => derivativeSummary(this.store, d));
+    const [tracks, derivatives] = await Promise.all([
+      trackSummaries(this.store, views),
+      Promise.all(
+        this.store
+          .listAudioDerivatives(sessionId, { kind: "clean" })
+          .filter((d) => d.seat !== null)
+          .map((d) => derivativeSummary(this.store, d)),
+      ),
+    ]);
     const jobs = this.store.listAudioJobs(sessionId).map(jobView);
     const latest = this.store.listAudioDerivatives(sessionId, { kind: "talk_time" }).at(-1);
     const latestData = latest
@@ -397,7 +369,7 @@ export class AudioService {
       : null;
     return {
       sessionId,
-      tracks: views.map((v) => v.summary),
+      tracks,
       derivatives,
       jobs,
       deletions: this.store.listAudioDeletions(sessionId).map(deletionView),
@@ -416,29 +388,14 @@ export class AudioService {
   }
 
   private audioExports(sessionId: string): AudioExportEntry[] {
-    const rows = this.store.db
-      .prepare(
-        `SELECT id, created_wall, path, details_json, files_json FROM exports
-         WHERE session_id = ? AND kind = 'audio' ORDER BY created_wall DESC, id`,
-      )
-      .all(sessionId) as Array<{
-      id: string;
-      created_wall: string;
-      path: string;
-      details_json: string;
-      files_json: string;
-    }>;
-    return rows.map((r) => {
-      const details = JSON.parse(r.details_json) as {
-        audioKind?: AudioExportEntry["audioKind"];
-        seats?: unknown;
-      };
+    return listExports(this.store, { sessionId, kind: "audio" }).map((r) => {
+      const details = r.details as { audioKind?: AudioExportEntry["audioKind"]; seats?: unknown };
       return {
         exportId: r.id,
-        createdWall: r.created_wall,
+        createdWall: r.createdWall,
         audioKind: details.audioKind ?? null,
         seats: Array.isArray(details.seats) ? (details.seats as number[]) : [],
-        files: (JSON.parse(r.files_json) as unknown[]).length,
+        files: r.files,
         path: r.path,
         onDisk: existsSync(r.path),
       };
@@ -552,7 +509,7 @@ export class AudioService {
       const t = tracksOf(seat)[0];
       return t ? (store.getAudioTrack(t.trackId)?.participantCode ?? null) : null;
     };
-    const rows: NewAudioDerivative[] = [];
+    const rows: Array<NewAudioDerivative & { kind: AudioDerivativeKind }> = [];
     for (const seat of r.seats) {
       const own = tracksOf(seat);
       if (own.length === 0) continue;
@@ -578,7 +535,7 @@ export class AudioService {
         derivativeId: randomUUID(),
         seat,
         participantCode: codeOf(seat),
-        kind: SEGMENT_KIND,
+        kind: "speech_segments",
         sourceTracks: own.map((t) => t.trackId),
         fileName: null,
         fileKey: null,
@@ -611,7 +568,7 @@ export class AudioService {
         params,
       });
     }
-    const session = (kind: string, data: unknown) =>
+    const session = (kind: AudioDerivativeKind, data: unknown) =>
       rows.push({
         ...base,
         derivativeId: randomUUID(),
@@ -671,14 +628,9 @@ export class AudioService {
 
   /* ── speech segments ── */
 
-  speechSegments(sessionId: string): {
-    sessionId: string;
-    engineVersion: string | null;
-    jobId: string | null;
-    segments: SpeechSegmentRow[];
-  } {
+  speechSegments(sessionId: string): SpeechSegmentsView {
     this.session(sessionId);
-    const list = this.store.listAudioDerivatives(sessionId, { kind: SEGMENT_KIND });
+    const list = this.store.listAudioDerivatives(sessionId, { kind: "speech_segments" });
     const { segments } = speechSegmentsOf(this.store, sessionId);
     return {
       sessionId,
@@ -704,15 +656,10 @@ export class AudioService {
 
   /** SHA-256 of every participant code of the session: any of their voices can be in any seat's audio. */
   private sessionCodeHashes(sessionId: string): string[] {
-    const rows = this.store.db
-      .prepare(
-        `SELECT participant_code AS c FROM events WHERE session_id = @id AND participant_code IS NOT NULL
-         UNION SELECT participant_code FROM telemetry WHERE session_id = @id
-         UNION SELECT participant_code FROM audio_tracks WHERE session_id = @id
-         UNION SELECT participant_code FROM audio_derivatives WHERE session_id = @id AND participant_code IS NOT NULL`,
-      )
-      .all({ id: sessionId }) as Array<{ c: string }>;
-    return rows.map((r) => sha256(r.c)).sort();
+    return this.store
+      .sessionCodes(sessionId)
+      .map((c) => sha256(c))
+      .sort();
   }
 
   /** Sessions with an audio export in progress (it reads files that a deletion or a re-run would remove). */
@@ -728,7 +675,7 @@ export class AudioService {
 
   async exportAudio(
     sessionId: string,
-    opts: { kind: AudioExportKind | "both"; seats?: number[]; note?: string; requestedBy: string },
+    opts: { kind: AudioExportRequestKind; seats?: number[]; note?: string; requestedBy: string },
   ): Promise<AudioExportResult> {
     this.session(sessionId);
     this.refuseWhileRunning(sessionId, "Exporting audio");
@@ -749,7 +696,7 @@ export class AudioService {
 
   private async writeAudioExport(
     sessionId: string,
-    opts: { kind: AudioExportKind | "both"; seats?: number[]; note?: string; requestedBy: string },
+    opts: { kind: AudioExportRequestKind; seats?: number[]; note?: string; requestedBy: string },
   ): Promise<AudioExportResult> {
     const store = this.store;
     if (!store.audioFiles) throw new AudioRequestError(409, "This database stores no audio.");
@@ -783,7 +730,9 @@ export class AudioService {
     // Raw: every seat rendered on one timeline so the files line up sample for sample.
     let timing: StoredTiming | null = null;
     let timingSource: AudioExportResult["timing"] = "attribution";
+    const chunksOf = new Map<string, AudioChunkRow[]>();
     if (kinds.includes("raw")) {
+      for (const t of live) chunksOf.set(t.trackId, store.listAudioChunks(t.trackId));
       const withData = tracks.filter((t) => t.chunks > 0).map((t) => t.trackId);
       timing = this.storedTiming(sessionId, withData);
       if (!timing) {
@@ -793,7 +742,7 @@ export class AudioService {
             trackId: t.trackId,
             seat: t.seat,
             sampleRate: t.sampleRate,
-            chunks: store.listAudioChunks(t.trackId),
+            chunks: chunksOf.get(t.trackId)!,
           })),
         );
       }
@@ -813,13 +762,15 @@ export class AudioService {
           const issues: AudioReadIssue[] = [];
           const sources: TrackSource[] = live
             .filter((t) => t.seat === seat)
-            .map((t) => ({
-              trackId: t.trackId,
-              samples: store
-                .listAudioChunks(t.trackId)
-                .reduce((n, c) => Math.max(n, c.startSample + c.sampleCount), 0),
-              chunks: trackPcmChunks(store, t, store.getAudioTrackKey(t.trackId)!, (i) => issues.push(i)),
-            }));
+            .map((t) => {
+              const chunks = chunksOf.get(t.trackId)!;
+              const key = store.getAudioTrackKey(t.trackId)!;
+              return {
+                trackId: t.trackId,
+                samples: trackSampleEnd(chunks),
+                chunks: trackPcmChunks(store, t, key, chunks, (i) => issues.push(i)),
+              };
+            });
           const total = renderedSampleCount(timing.timeline);
           const name = audioExportFileName(sessionId, seat, "raw");
           const w = await writeWavFile(
@@ -827,7 +778,8 @@ export class AudioService {
             renderAligned(seat, sources, timing as RenderTiming),
             total,
           );
-          files.push({ name, seat, kind: "raw", samples: total, durationMs: Math.round(total / 16), ...w });
+          const durationMs = Math.round(samplesToMs(total));
+          files.push({ name, seat, kind: "raw", samples: total, durationMs, ...w });
           warnings.push(...describeIssues(seat, issues, { unindexed: 0 }));
         }
         if (kinds.includes("clean")) {
@@ -837,19 +789,16 @@ export class AudioService {
           const name = audioExportFileName(sessionId, seat, "clean");
           let bad = 0;
           const blocks = async function* () {
-            const seen = new Set<number>();
-            for await (const r of store.audioFiles!.readRecords(sessionId, d.fileName!, key, {
+            for await (const r of store.audioFiles!.readUniqueRecords(sessionId, d.fileName!, key, {
               onIssue: (i) => {
                 if (i.kind !== "truncated") bad++;
               },
-            })) {
-              if (seen.has(r.seq)) continue;
-              seen.add(r.seq);
-              yield int16Of(r.data);
-            }
+            }))
+              yield int16FromLeBytes(r.data);
           };
           const w = await writeWavFile(path.join(dir, name), blocks(), total);
-          files.push({ name, seat, kind: "clean", samples: total, durationMs: Math.round(total / 16), ...w });
+          const durationMs = Math.round(samplesToMs(total));
+          files.push({ name, seat, kind: "clean", samples: total, durationMs, ...w });
           if (bad)
             warnings.push(
               `Seat ${seat}: the cleaned track has damaged records; the WAV is incomplete (re-run the attribution).`,
@@ -907,8 +856,8 @@ export class AudioService {
 
   deleteAudio(
     sessionId: string,
-    opts: { confirm: string; scope: "raw" | "all"; note?: string },
-  ): AudioDeletionResult & { record: AudioDeletionRecord; audioExportsOnDisk: string[] } {
+    opts: { confirm: string; scope: AudioDeletionScope; note?: string },
+  ): AudioDeletionResult & Pick<AudioDeleteResult, "record" | "audioExportsOnDisk"> {
     this.session(sessionId);
     if (opts.confirm.trim() !== sessionId)
       throw new AudioRequestError(400, "Confirmation does not match the session id");

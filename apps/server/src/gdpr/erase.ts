@@ -1,4 +1,9 @@
-import { normaliseParticipantCode, reduceEvents } from "@wkwa/shared";
+import {
+  type AudioFilesRemoved,
+  type ErasureRows,
+  normaliseParticipantCode,
+  reduceEvents,
+} from "@wkwa/shared";
 import { sha256 } from "../content";
 import { compactAfterDelete } from "../db/database";
 import type { CodeOccurrence, Store } from "../db/store";
@@ -35,24 +40,6 @@ export function lookupParticipant(store: Store, input: string): LookupResult {
     exports: exportsContaining(store, code),
     previouslyErased: prev.map((p) => ({ executedWall: p.executed_wall })),
   };
-}
-
-/** Rows deleted by an erasure (also the shape of `erasures.rows_json`; older entries lack the audio counts). */
-export interface ErasureRows {
-  events: number;
-  telemetry: number;
-  audioTracks: number;
-  audioChunks: number;
-  audioDerivatives: number;
-}
-
-export interface AudioFilesRemoved {
-  removed: number;
-  /**
-   * Files that could not be unlinked, as `<sessionId>/<fileName>`. Their keys
-   * are gone with the rows, so they are unreadable; delete them by hand.
-   */
-  failed: string[];
 }
 
 export interface ErasureResult extends LookupResult {

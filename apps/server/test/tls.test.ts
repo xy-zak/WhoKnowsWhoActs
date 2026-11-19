@@ -348,7 +348,7 @@ describe("server with TLS on", () => {
   });
 
   it("lets fake players (loopback clients of the server itself) play a game over TLS", async () => {
-    const fac = new FacilitatorClient(srv.url, undefined, { insecureTls: true });
+    const fac = new FacilitatorClient(srv.url);
     try {
       await fac.connected();
       const { sessionId } = await fac.cmd<{ sessionId: string }>("session:create", {

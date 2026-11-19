@@ -15,7 +15,8 @@ import {
 import pino from "pino";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { AudioFileStore } from "../src/audio/fileStore";
-import { trackStatusOf } from "../src/audio/status";
+import type { AudioStartMsg } from "../src/audio/live";
+import { trackStatusOf } from "../src/audio/records";
 import { verifyAudio } from "../src/audio/verify";
 import { loadOnboardingContent, ScenarioLibrary, sha256 } from "../src/content";
 import { openDatabase } from "../src/db/database";
@@ -23,6 +24,7 @@ import { Store } from "../src/db/store";
 import { REPO_ROOT } from "../src/runtime";
 import { CALIBRATION_CHECK_WAIT_MS, CommandError, SessionManager } from "../src/session/SessionManager";
 import { Bot, FacilitatorClient } from "../src/tools/botClient";
+import { readTrackPcm } from "./audioFixtures";
 import { cleanup, PASSPHRASE, setupSession, startTestServer, type TestServer } from "./harness";
 
 const CONFIG_DIR = path.join(REPO_ROOT, "config");
@@ -73,7 +75,7 @@ function chunkMsg(trackId: string, seq: number, samples: number, clientTs: numbe
   };
 }
 
-function startMsg(trackId: string = randomUUID(), clientTs = Date.now()) {
+function startMsg(trackId: string = randomUUID(), clientTs = Date.now()): AudioStartMsg {
   return {
     trackId,
     reason: "mic_check" as const,
@@ -370,7 +372,8 @@ describe("chunk ingest", () => {
     );
     expect(refused(await d.m.audio.chunk(1, chunkMsg(t, 5, N, now + 60_000)))).toBe(true); // future
     // the stored audio decrypts to what was sent, in seq order
-    const back = await d.files.readTrackPcm(
+    const back = await readTrackPcm(
+      d.files,
       d.m.sessionId,
       d.store.getAudioTrack(t)!.fileName!,
       d.store.getAudioTrackKey(t)!,
@@ -679,8 +682,8 @@ describe("live recording with audio bots (sockets)", () => {
     await expect(fac.cmd("round:start")).rejects.toThrow(/calibration/);
     await fac.cmd("calibration:start");
     const d = await fac.waitForDashboard((x) => x.state?.audio.calibration.quality !== null, 25_000);
-    expect(d.audio?.calibration.status).toBe("done");
-    const q = d.audio!.calibration.quality!;
+    expect(d.state?.audio.calibration.status).toBe("done");
+    const q = d.state!.audio.calibration.quality!;
     expect(q.perSeat.map((s) => s.seat)).toEqual([1, 2]);
     for (const s of q.perSeat) expect(s.ownDb).not.toBeNull();
     expect(d.stats[1]!.mic).toMatchObject({ state: "recording" });
@@ -736,7 +739,8 @@ describe("live recording with audio bots (sockets)", () => {
     const all = filesUnder(audioDir);
     expect(all.length).toBe(tracks.length);
     const sample = tracks.find((t) => t.chunks > 0)!;
-    const plain = await srv.ctx.audioFiles.readTrackPcm(
+    const plain = await readTrackPcm(
+      srv.ctx.audioFiles,
       sessionId,
       sample.fileName!,
       store.getAudioTrackKey(sample.trackId)!,

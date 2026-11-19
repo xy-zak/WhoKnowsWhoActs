@@ -1,9 +1,9 @@
 import type { PlayerView } from "@wkwa/shared";
 import { useEffect, useRef, useState } from "react";
-import { Icon, LevelMeter, SeatDot, type StepDef, Stepper } from "../ui";
-import { Centered, OnboardingStepper } from "./chrome";
+import { Icon, SeatDot, type StepDef, Stepper } from "../ui";
+import { Centered, ReadyScreen } from "./chrome";
 import type { PlayerConnection } from "./connection";
-import { useRecording } from "./RecordingIndicator";
+import { MicLevelMeter, useRecording } from "./RecordingIndicator";
 
 /** Whole seconds left until `endsAt` (server clock), redrawn once a second: a static number, no animation. */
 function useSecondsLeft(conn: PlayerConnection, endsAt: number | null): number | null {
@@ -43,11 +43,22 @@ function TurnStepper({ view, last }: { view: PlayerView; last: number }) {
   return <Stepper steps={steps} current={idx} completed={(i) => (idx >= 0 ? i < idx : i <= last)} />;
 }
 
+/** READY in a session that records audio, until the facilitator runs (or skips) the calibration. */
+export function CalibrationPendingScreen({ view }: { view: PlayerView }) {
+  return (
+    <ReadyScreen view={view} waitingFor="the facilitator" width={720}>
+      <p>
+        <Icon name="voice" /> Next, the facilitator runs a short <strong>sound calibration</strong>: each
+        player in turn reads one sentence aloud, while everyone else stays quiet.
+      </p>
+    </ReadyScreen>
+  );
+}
+
 /**
- * The facilitator-led calibration (sessions that record audio): each seat in turn reads a sentence
- * aloud while the others stay quiet, which measures how much each voice reaches the other
- * microphones. Shown while it runs (it covers the onboarding screen underneath, which keeps its
- * answers), and as the waiting state on READY before the facilitator starts it.
+ * The facilitator-led calibration while it runs (sessions that record audio): each seat in turn
+ * reads a sentence aloud while the others stay quiet, which measures how much each voice reaches
+ * the other microphones. It covers the onboarding screen underneath, which keeps its answers.
  */
 export function CalibrationScreen({ conn, view }: { conn: PlayerConnection; view: PlayerView }) {
   const c = view.audio.calibration;
@@ -59,24 +70,6 @@ export function CalibrationScreen({ conn, view }: { conn: PlayerConnection; view
   if (c.status !== "running") lastTurn.current = -1;
   else if (c.turnSeat !== null) lastTurn.current = c.order.indexOf(c.turnSeat);
   const last = lastTurn.current;
-
-  if (c.status !== "running") {
-    const ready = view.others.filter((o) => o.ready).length + 1;
-    const total = view.others.length + 1;
-    return (
-      <Centered title="Ready" icon="ok" width={720}>
-        <OnboardingStepper v={view} current="ready" />
-        <h1>You're all set</h1>
-        <p>
-          <Icon name="voice" /> Next, the facilitator runs a short <strong>sound calibration</strong>: each
-          player in turn reads one sentence aloud, while everyone else stays quiet.
-        </p>
-        <p className="muted cursor">
-          Waiting for the other players ({ready}/{total} ready) and for the facilitator
-        </p>
-      </Centered>
-    );
-  }
 
   if (c.myTurn) {
     return (
@@ -106,7 +99,7 @@ export function CalibrationScreen({ conn, view }: { conn: PlayerConnection; view
             </>
           )}
         </p>
-        <LevelMeter db={capturing ? (snap.level?.rmsDb ?? null) : null} peakDb={snap.level?.peakDb ?? null} />
+        <MicLevelMeter conn={conn} capturing={capturing} />
       </Centered>
     );
   }

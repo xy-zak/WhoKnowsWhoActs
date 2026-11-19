@@ -2,6 +2,7 @@ import { execSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import type { TlsMode } from "@wkwa/shared";
 
 /** Repository root (…/WhoKnowsWhoActs). */
 export const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
@@ -66,7 +67,8 @@ export function runtimeFromEnv(env: NodeJS.ProcessEnv = process.env): RuntimeOpt
   };
 }
 
-export type TlsSetting = "auto" | "off";
+/** WKWA_TLS (TLS_CERT + TLS_KEY make it "provided"). */
+export type TlsSetting = Exclude<TlsMode, "provided">;
 
 function tlsSetting(value: string | undefined): TlsSetting {
   const v = value?.trim().toLowerCase() || "auto";

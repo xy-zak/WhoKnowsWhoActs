@@ -19,6 +19,7 @@
  * and reports over `parentPort` (see `runInWorker` in ./jobs.ts).
  */
 import { isMainThread, parentPort, workerData } from "node:worker_threads";
+import { AUDIO_CHUNK_SAMPLES, int16FromLeBytes, int16ToLeBytes } from "@wkwa/shared";
 import {
   type AnnotatedSegment,
   type AttributionOptions,
@@ -33,14 +34,14 @@ import {
   renderClean,
   type TrackInput,
   type TrackSource,
+  trackSampleEnd,
 } from "./attribution";
 import { AudioFileStore, type AudioReadIssue } from "./fileStore";
-import { pcm16Bytes } from "./wav";
 
 export const WORKER_TASK = "wkwa-audio-attribution";
 
 /** Samples per record of a cleaned track: 5 s, like the raw chunks. */
-export const CLEAN_RECORD_SAMPLES = 80_000;
+export const CLEAN_RECORD_SAMPLES = AUDIO_CHUNK_SAMPLES;
 
 export interface AttributionTaskTrack {
   trackId: string;
@@ -88,17 +89,6 @@ export interface TaskHooks {
   onFile?: (fileName: string) => void;
 }
 
-/** A Buffer of s16le samples as an Int16Array (a view when aligned and the host is little-endian, else a copy). */
-export function int16Of(buf: Uint8Array): Int16Array {
-  const n = Math.floor(buf.byteLength / 2);
-  const le = new Uint8Array(new Uint16Array([1]).buffer)[0] === 1;
-  if (le && buf.byteOffset % 2 === 0) return new Int16Array(buf.buffer, buf.byteOffset, n);
-  const out = new Int16Array(n);
-  const v = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
-  for (let i = 0; i < n; i++) out[i] = v.getInt16(i * 2, true);
-  return out;
-}
-
 const asBuffer = (key: Uint8Array) => (Buffer.isBuffer(key) ? key : Buffer.from(key));
 
 export function describeIssues(
@@ -142,7 +132,6 @@ export async function* seqOrderedChunks(
   const posOf = new Map(order.map((c, i) => [c.seq, i]));
   const maxHeld = opts.maxHeld ?? 24;
   const held = new Map<number, Int16Array>();
-  const seen = new Set<number>();
   const failed = new Set<number>();
   let next = 0;
   const skipFailed = () => {
@@ -157,17 +146,15 @@ export async function* seqOrderedChunks(
       skipFailed();
     }
   }
-  for await (const r of files.readRecords(sessionId, fileName, asBuffer(key), {
+  for await (const r of files.readUniqueRecords(sessionId, fileName, asBuffer(key), {
     onIssue: (issue) => {
       if (issue.kind === "tag_mismatch") failed.add(issue.seq);
       opts.onIssue?.(issue);
     },
   })) {
     const pos = posOf.get(r.seq);
-    if (pos === undefined || seen.has(r.seq)) continue;
-    seen.add(r.seq);
-    if (pos < next) continue; // came after it was given up on
-    held.set(pos, int16Of(r.data));
+    if (pos === undefined || pos < next) continue; // not indexed, or came after it was given up on
+    held.set(pos, int16FromLeBytes(r.data));
     yield* drain();
     if (held.size > maxHeld) {
       next = Math.min(...held.keys());
@@ -192,20 +179,18 @@ export async function runAttributionTask(
     const meta = new Map(t.chunks.map((c) => [c.seq, c]));
     const builder = new EnvelopeBuilder({ sampleRate: t.sampleRate });
     const issues: AudioReadIssue[] = [];
-    const seqs = new Set<number>();
     let unindexed = 0;
-    for await (const r of files.readRecords(input.sessionId, t.fileName, asBuffer(t.key), {
+    // a resent chunk is stored twice: the first valid copy wins
+    for await (const r of files.readUniqueRecords(input.sessionId, t.fileName, asBuffer(t.key), {
       onIssue: (x) => issues.push(x),
     })) {
-      if (seqs.has(r.seq)) continue; // a resent chunk: the first valid copy wins
       const m = meta.get(r.seq);
       if (!m) {
         unindexed++;
         continue;
       }
-      seqs.add(r.seq);
       // the builder places samples by startSample: records may come in any order
-      builder.push(int16Of(r.data), m.startSample);
+      builder.push(int16FromLeBytes(r.data), m.startSample);
     }
     readWarnings.push(...describeIssues(t.seat, issues, { unindexed }));
     trackInputs.push({
@@ -240,7 +225,7 @@ export async function runAttributionTask(
     const tracks = input.tracks.filter((t) => t.seat === mask.seat);
     const sources: TrackSource[] = tracks.map((t) => ({
       trackId: t.trackId,
-      samples: t.chunks.reduce((n, c) => Math.max(n, c.startSample + c.sampleCount), 0),
+      samples: trackSampleEnd(t.chunks),
       chunks: seqOrderedChunks(files, input.sessionId, t.fileName, t.key, t.chunks),
     }));
     const { fileName, key } = await files.createFile(input.sessionId);
@@ -252,7 +237,14 @@ export async function runAttributionTask(
       fadeMs: input.clean.fadeMs,
       blockSamples: CLEAN_RECORD_SAMPLES,
     })) {
-      await files.appendRecord(input.sessionId, fileName, key, seq++, Buffer.from(pcm16Bytes(block)));
+      const bytes = int16ToLeBytes(block);
+      await files.appendRecord(
+        input.sessionId,
+        fileName,
+        key,
+        seq++,
+        Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength),
+      );
       samples += block.length;
     }
     cleanFiles.push({

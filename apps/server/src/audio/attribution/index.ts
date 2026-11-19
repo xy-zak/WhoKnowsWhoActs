@@ -114,8 +114,14 @@
 
 export { analyse } from "./analyse";
 export { type AnnotatedSegment, annotate, type PhaseChange } from "./annotate";
-export { type ClockFit, driftFromMsPerSample, fitClocks, msPerSampleFromDrift } from "./clock";
-export { buildEnvelope, EnvelopeBuilder, type EnvelopeOptions, envelopeFromChunks } from "./envelope";
+export {
+  type ClockFit,
+  driftFromMsPerSample,
+  fitClocks,
+  msPerSampleFromDrift,
+  trackSampleEnd,
+} from "./clock";
+export { buildEnvelope, EnvelopeBuilder, type EnvelopeOptions } from "./envelope";
 export { type CalibrationChannel, calibrationChannelsFromTracks, quickCalibrationCheck } from "./leakage";
 export {
   type CleanOptions,

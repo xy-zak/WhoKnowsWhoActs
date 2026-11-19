@@ -2,10 +2,10 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import {
   type ActionKind,
   AUDIO_CONSENT_ITEM,
-  type AudioSettings,
   activeSeats,
   agentSeed,
   applyEvent,
+  calibrationWaitingSeats,
   canStartFirstRound,
   checkSimulationConfig,
   DEFAULT_VALIDATORS,
@@ -19,17 +19,18 @@ import {
   initialState,
   isMicCheckHeld,
   isOnboardingComplete,
-  isParticipant,
   isSimulated,
   K_LABELS,
   type KLabel,
   type LabelPairing,
+  type MicCheckResult,
   micCheckApplies,
   type NewEvent,
   nextOnboardingStep,
   normaliseForPlayers,
   type OnboardingContent,
   type OnboardingStep,
+  onboardingStepsFor,
   type PayloadOf,
   pairedP,
   parseSessionConfig,
@@ -91,18 +92,6 @@ const CALIBRATION_CHECK_POLL_MS = 500;
  * what arrived; a seat without audio is reported as such.
  */
 export const CALIBRATION_CHECK_WAIT_MS = 15_000;
-
-/** The mic check result, as it is logged (MicCheckCompleted). */
-export interface MicCheckResult {
-  passed: boolean;
-  attempts: number;
-  durationMs: number;
-  settings: AudioSettings;
-  noiseFloorDb: number;
-  speechDb: number;
-  speechMs: number;
-  clientTs: number;
-}
 
 /**
  * Owns ONE session: validates commands and intents, appends events to the
@@ -560,13 +549,8 @@ export class SessionManager {
       const unlabelled = seats.filter((s) => !s.k || !s.p || !s.view).map((s) => s.seat);
       if (unlabelled.length)
         throw new CommandError(`Assign labels first (missing: seat ${unlabelled.join(", ")})`);
-      const o = this.state.config.onboarding;
-      const steps: OnboardingStep[] = [];
-      if (o.consent) steps.push("consent");
       // recording starts at each participant's own mic check, right after consent
-      if (this.state.audio.enabled) steps.push("mic_check");
-      if (o.demographics) steps.push("demographics");
-      if (o.briefing) steps.push("briefing");
+      const steps = onboardingStepsFor(this.state.config);
       this.append({ type: "OnboardingStarted", actorKind: "facilitator", payload: { steps } });
     });
   }
@@ -1015,17 +999,6 @@ export class SessionManager {
 
   /* ═════════════════════════ audio: calibration ═════════════════════════ */
 
-  /** Seats the calibration waits for: active real participants not yet past their mic check. */
-  private calibrationWaiting(): number[] {
-    const st = this.state;
-    return activeSeats(st)
-      .filter(
-        (s) =>
-          isParticipant(s) && (s.consent !== "given" || (micCheckApplies(st, s) && s.micCheck === "pending")),
-      )
-      .map((s) => s.seat);
-  }
-
   /**
    * Facilitator: start the calibration (or run it again with `redo`). Possible once every real
    * seat is past its mic check. Each recorded seat in seat order gets a turn of `turnMs` to read
@@ -1043,7 +1016,7 @@ export class SessionManager {
       if (!redo && c.status !== "pending")
         throw new CommandError(`The calibration was already ${c.status}: use 'redo' to run it again`);
       if (st.audio.recordingPaused) throw new CommandError("Recording is paused: resume recording first");
-      const waiting = this.calibrationWaiting();
+      const waiting = calibrationWaitingSeats(st).map((s) => s.seat);
       if (waiting.length) throw new CommandError(`Waiting for the mic check of seat ${waiting.join(", ")}`);
       const order = activeSeats(st)
         .filter((s) => shouldRecord(st, s))

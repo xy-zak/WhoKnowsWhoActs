@@ -4,6 +4,12 @@ History of [AUDIO.md](../AUDIO.md). Newest first. How entries are written: [READ
 
 ## Unreleased
 
+### Not yet committed · documents `simplify/audio-cleanup` (#16)
+
+- **Type:** Correction
+- **Change:** The track-status paragraph now says a track closed with `interrupted` after a restart reads as `interrupted` in the REST and CSV view, not `closed`.
+- **Reason:** The cleanup in #16 merged the two `trackStatusOf` copies; the one REST and CSV now use also counts the stop reason `interrupted` as interrupted, as the shared schema already said.
+
 ### Not yet committed · documents `0f6971a`…`abcacbe` (microphone audio)
 
 - **Type:** Feature

@@ -1,11 +1,15 @@
 import type {
-  AttributionJob,
-  AttributionSummary,
-  AudioDeletionRecord,
-  AudioDerivativeSummary,
-  AudioTrackSummary,
+  AttributionGrade,
+  AttributionJobView,
+  AttributionSummaryView,
+  AudioDeletionScope,
+  AudioExportRequestKind,
+  AudioSessionView,
+  SeatAudioSummary,
+  SpeechSegmentRow,
+  SpeechSegmentsView,
 } from "@wkwa/shared";
-import { fmtDuration } from "../../common/format";
+import { fmtDuration, PLACEHOLDER } from "../../common/format";
 
 /*
  * Pure helpers of the DATABASE tab's audio views: the REST response shapes
@@ -16,149 +20,34 @@ import { fmtDuration } from "../../common/format";
 
 /* ─────────────────────────── REST response shapes ─────────────────────────── */
 
-export type AttributionGrade = "good" | "fair" | "poor";
-export type AttributionSummaryView = AttributionSummary & { grade: AttributionGrade };
-export type AttributionJobView = Omit<AttributionJob, "summary"> & {
-  sessionId: string;
-  summary?: AttributionSummaryView;
-};
-
+/* The server's views, from packages/shared/src/audio.ts (under the names this tab uses). */
+export type {
+  AttributionGrade,
+  AttributionJobView,
+  AttributionSummaryView,
+  AudioDeleteResult,
+  AudioExportEntry,
+  AudioExportFile,
+  AudioExportResult,
+  AudioSessionView,
+} from "@wkwa/shared";
 /** Per-seat totals of GET /api/sessions/:id/audio. */
-export interface SeatAudio {
-  seat: number;
-  tracks: number;
-  durationMs: number;
-  gaps: number;
-  trackBreaks: number;
-  spanMs: number;
-  missingMs: number;
-  firstServerTs: number | null;
-  lastServerTs: number | null;
-  rawDeleted: boolean;
-}
-
-export interface AudioExportEntry {
-  exportId: string;
-  createdWall: string;
-  audioKind: "raw" | "clean" | "both" | null;
-  seats: number[];
-  files: number;
-  path: string;
-  onDisk: boolean;
-}
-
-/** GET /api/sessions/:id/audio */
-export interface AudioSessionView {
-  sessionId: string;
-  tracks: AudioTrackSummary[];
-  derivatives: AudioDerivativeSummary[];
-  jobs: AttributionJobView[];
-  deletions: AudioDeletionRecord[];
-  seats: SeatAudio[];
-  attribution: (AttributionSummaryView & { jobId: string | null; createdServerTs: number }) | null;
-  audioExports: AudioExportEntry[];
-  running: boolean;
-}
-
-export interface SpeechSegment {
-  seat: number;
-  startTs: number;
-  endTs: number;
-  durationMs: number;
-  round: number | null;
-  phase: string | null;
-  paused: boolean;
-  recordingPaused: boolean;
-  meanDb: number;
-  confidence: number;
-  overlap: boolean;
-  overlapMs: number;
-  overlapWith: number[];
-}
-
+export type SeatAudio = SeatAudioSummary;
+export type SpeechSegment = SpeechSegmentRow;
 /** GET /api/sessions/:id/audio/segments */
-export interface SegmentsView {
-  sessionId: string;
-  engineVersion: string | null;
-  jobId: string | null;
-  segments: SpeechSegment[];
-}
-
-export type AudioExportKind = "raw" | "clean" | "both";
-
-export interface AudioExportFile {
-  name: string;
-  seat: number;
-  kind: "raw" | "clean";
-  samples: number;
-  durationMs: number;
-  bytes: number;
-  sha256: string;
-}
-
-/** POST /api/sessions/:id/audio/export */
-export interface AudioExportResult {
-  exportId: string;
-  sessionId: string;
-  dir: string;
-  files: AudioExportFile[];
-  timing: "attribution" | "timestamps";
-  warnings: string[];
-}
-
-export type AudioDeleteScope = "raw" | "all";
-
-/** POST /api/sessions/:id/audio/delete */
-export interface AudioDeleteResult {
-  sessionId: string;
-  scope: AudioDeleteScope;
-  counts: {
-    tracks: number;
-    audioMs: number;
-    chunks: number;
-    derivatives: number;
-    jobs: number;
-    files: number;
-    bytes: number;
-  };
-  audioFiles: { removed: number; failed: string[]; dirRemoved: boolean };
-  record: AudioDeletionRecord;
-  audioExportsOnDisk: string[];
-}
+export type SegmentsView = SpeechSegmentsView;
+/** What "Export audio" asks for: raw, clean or both. */
+export type AudioExportKind = AudioExportRequestKind;
+/** What "Delete audio" deletes: raw (and cleaned) audio, or all of it. */
+export type AudioDeleteScope = AudioDeletionScope;
 
 /* ─────────────────────────── Formatting ─────────────────────────── */
 
 const ok = (n: number | null | undefined): n is number => typeof n === "number" && Number.isFinite(n);
 
-/** `m:ss`, or `h:mm:ss` from one hour; "—" when unknown. Rounded to the second. */
-export function formatDuration(ms: number | null | undefined): string {
-  if (!ok(ms) || ms < 0) return "—";
-  return fmtDuration(ms);
-}
-
 /** A wall-clock ISO time as "YYYY-MM-DD HH:MM" (as the DATABASE tables show it). */
 export function whenWall(w: string): string {
   return w.replace("T", " ").slice(0, 16);
-}
-
-/** Minutes with one decimal, e.g. "12.5 min" (for confirmations). */
-export function formatMinutes(ms: number | null | undefined): string {
-  if (!ok(ms) || ms < 0) return "—";
-  return `${(ms / 60_000).toFixed(1)} min`;
-}
-
-/** File size in B / KB / MB / GB (1 KB = 1024 B). */
-export function formatBytes(n: number | null | undefined): string {
-  if (!ok(n) || n < 0) return "—";
-  if (n < 1024) return `${Math.round(n)} B`;
-  const units = ["KB", "MB", "GB", "TB"];
-  let v = n / 1024;
-  let i = 0;
-  while (v >= 1024 && i < units.length - 1) {
-    v /= 1024;
-    i++;
-  }
-  return `${v >= 100 ? Math.round(v) : v.toFixed(1)} ${units[i]}`;
 }
 
 /** First 12 hex digits of a SHA-256 and an ellipsis (the full hash is in the manifest). */
@@ -166,28 +55,10 @@ export function shortSha(sha: string): string {
   return sha.length > 12 ? `${sha.slice(0, 12)}…` : sha;
 }
 
-/** Share 0–1 as "25 %"; "—" when unknown. */
-export function formatShare(x: number | null | undefined): string {
-  return ok(x) ? `${Math.round(x * 100)} %` : "—";
-}
-
-/** Signed number with a unit, e.g. "+12.3 dB", "−4 ppm"; "—" when null. */
-export function formatSigned(x: number | null | undefined, unit: string, digits = 1): string {
-  if (!ok(x)) return "—";
-  const v = x.toFixed(digits);
-  const n = Number(v);
-  return `${n > 0 ? "+" : n < 0 ? "−" : ""}${Math.abs(n).toFixed(digits)} ${unit}`;
-}
-
-/** "1 track", "3 tracks" (regular English plurals only). */
-export function plural(n: number, word: string): string {
-  return `${n} ${word}${n === 1 ? "" : "s"}`;
-}
-
-/** The sessions list's audio cell: "4 tr · 3:12", or "—" when nothing is stored. */
+/** The sessions list's audio cell: "4 tr · 3:12", or the placeholder when nothing is stored. */
 export function audioCell(tracks: number | undefined, ms: number | undefined): string {
-  if (!tracks) return "—";
-  return `${tracks} tr · ${formatDuration(ms ?? 0)}`;
+  if (!tracks) return PLACEHOLDER;
+  return `${tracks} tr · ${fmtDuration(ms ?? 0)}`;
 }
 
 /* ─────────────────────────── Attribution result ─────────────────────────── */

@@ -8,9 +8,9 @@
  *   socket.on("connect", () => rec.onReconnect());
  *   await rec.stop("paused");
  *
- * No socket, UI or storage dependencies: all I/O is injected.
+ * No socket, UI or storage dependencies: all I/O is injected. The building blocks (PCM conversion,
+ * levels, resampler, chunker) are internal; their tests import the module files directly.
  */
-export type { ChunkDraft } from "./chunker";
 export {
   type BrowserFamily,
   classifyMicError,
@@ -24,30 +24,24 @@ export {
   micSupportProblem,
   type OsFamily,
 } from "./errors";
-export { LevelMeter, MIN_DB, peakDb, rmsDb, toDb } from "./levels";
 export {
   MicRecorder,
   type MicRecorderOptions,
-  pickSettings,
   type RecorderEnv,
   type RecorderStatus,
 } from "./MicRecorder";
-export { floatToInt16, int16FromLittleEndian, int16ToLittleEndian } from "./pcm";
-export { Resampler, resampledLength } from "./resampler";
 export { type SpeechCheckResult, SpeechDetector, type SpeechDetectorOptions } from "./speech";
 export type { TimingSample } from "./timing";
 export {
-  type AudioCaptureSettings,
   type AudioChunk,
   type AudioContextInfo,
   type AudioStartInfo,
   type AudioStopInfo,
-  DEFAULT_CHUNK_SECONDS,
   DEFAULT_MAX_PENDING_SECONDS,
+  type EngineCaptureSettings,
   MIC_CONSTRAINTS,
   type MicLevel,
   type RecorderState,
   type SendResult,
-  TARGET_SAMPLE_RATE,
   type TimingMethod,
 } from "./types";

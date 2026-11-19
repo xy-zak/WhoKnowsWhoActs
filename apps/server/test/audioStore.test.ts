@@ -15,7 +15,7 @@ import {
   AudioFileStore,
   type AudioReadIssue,
 } from "../src/audio/fileStore";
-import { pcmChunk } from "./audioFixtures";
+import { pcmChunk, readTrackPcm } from "./audioFixtures";
 import { cleanup } from "./harness";
 
 const SESSION = "S-20261118-TEST";
@@ -49,7 +49,7 @@ describe("encrypted audio file store", () => {
     expect(records.map((r) => r.seq)).toEqual([0, 2, 1, 3]);
     expect(records[1]!.data.equals(chunks[2]!)).toBe(true);
 
-    const { pcm, seqs, duplicates } = await files.readTrackPcm(SESSION, fileName, key);
+    const { pcm, seqs, duplicates } = await readTrackPcm(files, SESSION, fileName, key);
     expect(seqs).toEqual([0, 1, 2, 3]);
     expect(duplicates).toBe(0);
     expect(pcm.equals(Buffer.concat(chunks))).toBe(true);
@@ -63,10 +63,11 @@ describe("encrypted audio file store", () => {
     await files.appendRecord(SESSION, fileName, key, 0, pcmChunk(800, 0));
     await files.appendRecord(SESSION, fileName, key, 1, a);
     await files.appendRecord(SESSION, fileName, key, 1, pcmChunk(800, 5)); // a resend (different bytes, to tell them apart)
-    const r = await files.readTrackChunks(SESSION, fileName, key);
-    expect(r.chunks.map((c) => c.seq)).toEqual([0, 1]);
-    expect(r.chunks[1]!.data.equals(a)).toBe(true);
-    expect(r.duplicates).toBe(1);
+    const unique = [];
+    for await (const r of files.readUniqueRecords(SESSION, fileName, key)) unique.push(r);
+    expect(unique.map((c) => c.seq)).toEqual([0, 1]);
+    expect(unique[1]!.data.equals(a)).toBe(true);
+    expect((await readTrackPcm(files, SESSION, fileName, key)).duplicates).toBe(1);
   });
 
   it("serialises concurrent appends to one file", async () => {
@@ -120,7 +121,7 @@ describe("encrypted audio file store", () => {
     await expect(async () => {
       for await (const _ of files.readRecords(SESSION, fileName, key));
     }).rejects.toThrow(AudioFileError);
-    expect((await files.readTrackPcm(SESSION, fileName, key)).seqs).toEqual([0, 2]);
+    expect((await readTrackPcm(files, SESSION, fileName, key)).seqs).toEqual([0, 2]);
   });
 
   it("refuses renumbered records and records moved from another file", async () => {
@@ -183,7 +184,11 @@ describe("encrypted audio file store", () => {
     const file = files.pathOf(SESSION, fileName);
     writeFileSync(file, Buffer.concat([Buffer.from("RIFX"), readFileSync(file).subarray(4)]));
     expect((await files.verifyFile(SESSION, fileName, key)).firstError).toContain("bad magic");
-    await expect(files.appendRecord(SESSION, fileName, key, 0, pcmChunk(10))).rejects.toThrow(AudioFileError);
+    // the header is checked whenever the file is not as this store last left it (e.g. after a restart)
+    const restarted = new AudioFileStore(files.root);
+    await expect(restarted.appendRecord(SESSION, fileName, key, 0, pcmChunk(10))).rejects.toThrow(
+      AudioFileError,
+    );
     const missing = await files.verifyFile(SESSION, `${"0".repeat(32)}.wka`, key);
     expect(missing).toMatchObject({ exists: false, ok: false });
   });

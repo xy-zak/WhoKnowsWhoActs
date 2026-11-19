@@ -1,8 +1,8 @@
 import type { PlayerView } from "@wkwa/shared";
 import type { ReactNode } from "react";
-import type { MicErrorInfo } from "../audio";
+import type { MicErrorInfo, MicLevel } from "../audio";
 import { useStore } from "../net/store";
-import { Button, RecordingBanner, RecTag } from "../ui";
+import { Button, LevelMeter, RecordingBanner, RecTag } from "../ui";
 import type { PlayerConnection } from "./connection";
 import { needsClick, type RecordingSnapshot, recStateFor } from "./recording";
 
@@ -15,6 +15,20 @@ import { needsClick, type RecordingSnapshot, recStateFor } from "./recording";
 
 export function useRecording(conn: PlayerConnection): RecordingSnapshot {
   return useStore(conn.recording.store);
+}
+
+/** The live microphone level (~4 Hz; null when not capturing): only for the level meters. */
+export function useMicLevel(conn: PlayerConnection): MicLevel | null {
+  return useStore(conn.recording.levelStore);
+}
+
+/**
+ * The player's level meter, fed by the live level. Its own component, so the ~4 Hz level updates
+ * re-render only the meter, not the screen around it. `capturing` false shows no level.
+ */
+export function MicLevelMeter({ conn, capturing }: { conn: PlayerConnection; capturing: boolean }) {
+  const level = useMicLevel(conn);
+  return <LevelMeter db={capturing ? (level?.rmsDb ?? null) : null} peakDb={level?.peakDb ?? null} />;
 }
 
 /** The steps a participant can take to fix a microphone problem, as a short numbered list. */

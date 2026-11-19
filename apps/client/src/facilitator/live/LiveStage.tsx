@@ -1,4 +1,6 @@
 import {
+  calibrationWaitingSeats,
+  canStartFirstRound,
   fakeSeats,
   type GameState,
   hasParticipants,
@@ -35,7 +37,7 @@ import { EventLog, TelemetryFeed } from "../EventLog";
 import { LabelsEditor, SeatsPanel } from "../seats";
 import { paceText, policySummary } from "../simulation";
 import { Timeline } from "../Timeline";
-import { AudioNext, calibrationNeeded, calibrationWaiting } from "./AudioControls";
+import { AudioNext } from "./AudioControls";
 import { AudioCheckView, CalibrationCard, RecordingControl, useAudioCheck } from "./AudioPanels";
 
 function useNow(ms = 1000) {
@@ -97,10 +99,10 @@ function NextPanel({
   const calStatus = st.audio.calibration.status;
   const calPrimary =
     st.phase === "onboarding" &&
-    calibrationNeeded(st) &&
+    !canStartFirstRound(st) &&
     calStatus === "pending" &&
     !st.audio.recordingPaused &&
-    calibrationWaiting(st).length === 0;
+    calibrationWaitingSeats(st).length === 0;
   const showAudio = st.audio.enabled && (st.phase === "onboarding" || st.phase === "round_complete");
 
   if (st.phase === "onboarding") {
@@ -114,7 +116,7 @@ function NextPanel({
       action = () => run("calibration:start", {}, "Calibration started");
     } else if (waiting.length === 0 && calStatus === "running") {
       prompt = "Calibration running: each seat reads its sentence in turn. Keep the room quiet.";
-    } else if (waiting.length === 0 && calibrationNeeded(st)) {
+    } else if (waiting.length === 0 && !canStartFirstRound(st)) {
       // round 1 waits for the calibration, which cannot run while recording is paused
       prompt = "Everyone is ready. Resume recording, then run the calibration (or skip it).";
     } else if (waiting.length === 0) {
@@ -658,7 +660,7 @@ export function LiveStage({ conn }: { conn: FacilitatorConnection }) {
         <NextPanel conn={conn} st={st} onWrapUp={() => setWrapUp(true)} />
         <ToolsPanel conn={conn} st={st} onLabels={() => setLabels(true)} />
       </div>
-      <CalibrationCard st={st} events={fs.events} />
+      <CalibrationCard st={st} />
       <SeatsPanel conn={conn} dash={dash} scenario={scenario} />
       {scenario && (
         <div

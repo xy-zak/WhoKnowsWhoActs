@@ -1,18 +1,18 @@
-import { type GameState, RECORDING_PHASES, type StoredEvent } from "@wkwa/shared";
-import { useEffect, useState } from "react";
-import { fmtTime } from "../../common/format";
+import { currentCalibrationTurn, type GameState, RECORDING_PHASES } from "@wkwa/shared";
+import { useEffect, useMemo, useState } from "react";
+import { fmtSigned, fmtTime, formatDb, PLACEHOLDER } from "../../common/format";
 import { useStore } from "../../net/store";
-import { Button, Callout, formatDb, Icon, Panel, Popup, SeatDot, StatusTag } from "../../ui";
+import { Button, Callout, Icon, Panel, SeatDot, StatusTag, usePromptReason } from "../../ui";
 import {
   type AudioCheck,
   CALIBRATION_MIN_MARGIN_DB,
   calibrationAdvice,
-  fmtMargin,
   micStatsOf,
   type TrackStatusLite,
   wrapUpAudioCheck,
 } from "../audioLive";
 import type { FacilitatorConnection } from "../connection";
+import { CalibrationTag } from "./AudioControls";
 
 /*
  * LIVE audio monitoring beside the NEXT panel: the calibration quality card, the TOOLS panel's
@@ -21,33 +21,23 @@ import type { FacilitatorConnection } from "../connection";
 
 /* ─────────────────────────── calibration quality ─────────────────────────── */
 
-/** The last calibration event, when it was a server cancel (status back to pending). */
-function cancelledRun(events: readonly StoredEvent[]): { reason: string; ts: number } | null {
-  for (let i = events.length - 1; i >= 0; i--) {
-    const e = events[i]!;
-    if (e.type === "CalibrationSkipped")
-      return e.payload.cancelled ? { reason: e.payload.reason, ts: e.serverTs } : null;
-    if (e.type === "CalibrationStarted") return null;
-  }
-  return null;
-}
-
 /**
  * The calibration and its quality check: which turn runs, "checking…" between the end of the
  * last turn and the check, then per seat the margin of its own voice over the loudest other mic,
  * the verdict and plain advice for each seat that failed. Hidden until a calibration ran.
  */
-export function CalibrationCard({ st, events }: { st: GameState; events: readonly StoredEvent[] }) {
+export function CalibrationCard({ st }: { st: GameState }) {
   if (!st.audio.enabled) return null;
   const c = st.audio.calibration;
-  const cancelled = c.status === "pending" ? cancelledRun(events) : null;
+  const cancelled = c.status === "pending" ? c.lastCancel : null;
   if (c.status === "pending" && !cancelled) return null;
   const q = c.quality;
   const advice = q ? q.perSeat.map(calibrationAdvice).filter((a): a is string => a !== null) : [];
+  const turn = currentCalibrationTurn(st);
   return (
     <Panel title="Calibration" icon="voice">
       <div className="col">
-        {c.status === "pending" && cancelled && (
+        {cancelled && (
           <Callout tone="warn" icon="warning">
             The calibration was cancelled at {fmtTime(cancelled.ts)}
             {cancelled.reason ? ` (${cancelled.reason})` : ""}. Run it again (or skip it) in the NEXT panel
@@ -56,19 +46,17 @@ export function CalibrationCard({ st, events }: { st: GameState; events: readonl
         )}
         {c.status === "running" && (
           <div className="row">
-            <StatusTag tone="warn" icon="voice">
-              calibrating
-            </StatusTag>
+            <CalibrationTag st={st} short />
             <span>
-              {c.turnIndex === null
-                ? "Starting…"
-                : `Turn ${c.turnIndex + 1}/${c.order.length}: seat ${c.order[c.turnIndex]} reads its sentence aloud; everyone else stays quiet.`}
+              {turn
+                ? `Turn ${c.order.indexOf(turn.seat) + 1}/${c.order.length}: seat ${turn.seat} reads its sentence aloud; everyone else stays quiet.`
+                : "Starting…"}
             </span>
           </div>
         )}
         {c.status === "skipped" && (
           <div className="row">
-            <StatusTag icon="voice">skipped</StatusTag>
+            <CalibrationTag st={st} short />
             <span className="muted">
               No calibration: speaker attribution estimates the leakage between the microphones from the
               recordings (less exact with laptop microphones).
@@ -77,24 +65,14 @@ export function CalibrationCard({ st, events }: { st: GameState; events: readonl
         )}
         {c.status === "done" && !q && (
           <div className="row">
-            <StatusTag tone="warn" icon="idle">
-              checking…
-            </StatusTag>
+            <CalibrationTag st={st} short />
             <span>Calibration complete. Checking how well the microphones keep the voices apart…</span>
           </div>
         )}
         {c.status === "done" && q && (
           <>
             <div className="row">
-              {q.ok ? (
-                <StatusTag tone="live" icon="ok">
-                  calibration ok
-                </StatusTag>
-              ) : (
-                <StatusTag tone="warn" icon="microphoneWarning">
-                  needs attention
-                </StatusTag>
-              )}
+              <CalibrationTag st={st} short />
               <span className={q.ok ? "muted" : undefined}>
                 {q.ok
                   ? "Every seat's own voice stands out on its own microphone."
@@ -124,9 +102,11 @@ export function CalibrationCard({ st, events }: { st: GameState; events: readonl
                         <SeatDot seat={r.seat} /> <strong>{r.seat}</strong>
                       </span>
                     </td>
-                    <td className="mono small">{r.ownDb === null ? "—" : formatDb(r.ownDb)}</td>
-                    <td className="mono small">{r.bestOtherDb === null ? "—" : formatDb(r.bestOtherDb)}</td>
-                    <td className={`mono${r.ok ? "" : " t-warn strong"}`}>{fmtMargin(r.marginDb)}</td>
+                    <td className="mono small">{r.ownDb === null ? PLACEHOLDER : formatDb(r.ownDb)}</td>
+                    <td className="mono small">
+                      {r.bestOtherDb === null ? PLACEHOLDER : formatDb(r.bestOtherDb)}
+                    </td>
+                    <td className={`mono${r.ok ? "" : " t-warn strong"}`}>{fmtSigned(r.marginDb, "dB")}</td>
                     <td>
                       {r.ok ? (
                         <StatusTag tone="live" icon="ok">
@@ -169,51 +149,53 @@ export function CalibrationCard({ st, events }: { st: GameState; events: readonl
 
 /* ─────────────────────────── TOOLS: pause / resume recording ─────────────────────────── */
 
-/** The latest RecordingPaused, while recording is paused. */
-function lastPause(events: readonly StoredEvent[]): { ts: number; reason: string | null } | null {
-  for (let i = events.length - 1; i >= 0; i--) {
-    const e = events[i]!;
-    if (e.type === "RecordingResumed") return null;
-    if (e.type === "RecordingPaused") return { ts: e.serverTs, reason: e.payload.reason ?? null };
-  }
-  return null;
-}
-
 /**
  * Pause recording for every seat (after a confirmation with an optional reason) or resume it.
  * Players cannot mute themselves; both are logged by the server. Only possible while audio is
  * recorded (onboarding and rounds).
  */
 export function RecordingControl({ conn, st }: { conn: FacilitatorConnection; st: GameState }) {
-  const fs = useStore(conn.store);
-  const [asking, setAsking] = useState(false);
-  const [reason, setReason] = useState("");
+  const promptReason = usePromptReason();
   const [busy, setBusy] = useState(false);
   if (!st.audio.enabled) return null;
   const can = RECORDING_PHASES.has(st.phase);
-  const paused = st.audio.recordingPaused;
-  const since = paused ? lastPause(fs.events) : null;
+  const a = st.audio;
   const send = (name: string, payload: unknown, ok: string) => {
     setBusy(true);
-    return conn
+    void conn
       .cmd(name, payload, ok)
-      .then(
-        () => true,
-        () => false,
-      )
+      .catch(() => {})
       .finally(() => setBusy(false));
   };
-  const pause = () =>
-    void send("recording:pause", reason.trim() ? { reason: reason.trim() } : {}, "Recording paused").then(
-      (ok) => {
-        if (!ok) return;
-        setAsking(false);
-        setReason("");
+  const pause = async () => {
+    const reason = await promptReason({
+      title: "Pause recording for everyone?",
+      icon: "microphoneOff",
+      confirmLabel: "Pause recording",
+      reason: {
+        label: "Reason (optional, logged and exported: never type names)",
+        placeholder: "e.g. break, private conversation",
       },
-    );
+      message: (
+        <div className="col">
+          <p>
+            Every microphone stops recording now; the game itself goes on. Players see{" "}
+            <em>Recording paused by the facilitator</em> until you resume. The pause and your reason are
+            logged.
+          </p>
+          {a.calibration.status === "running" && (
+            <Callout tone="warn" icon="warning">
+              The calibration that is running is cancelled: run it again after resuming.
+            </Callout>
+          )}
+        </div>
+      ),
+    });
+    if (reason !== null) send("recording:pause", reason ? { reason } : {}, "Recording paused");
+  };
   return (
     <div className="row">
-      {paused ? (
+      {a.recordingPaused ? (
         <>
           <StatusTag
             tone="warn"
@@ -223,14 +205,14 @@ export function RecordingControl({ conn, st }: { conn: FacilitatorConnection; st
             recording paused
           </StatusTag>
           <span className="small muted">
-            {since ? `since ${fmtTime(since.ts)}` : ""}
-            {since?.reason ? ` · “${since.reason}”` : ""}
+            {a.pausedTs !== null ? `since ${fmtTime(a.pausedTs)}` : ""}
+            {a.pauseReason ? ` · “${a.pauseReason}”` : ""}
           </span>
           <span className="spacer" />
           <Button
             icon="microphone"
             disabled={!can || busy}
-            onClick={() => void send("recording:resume", {}, "Recording resumed")}
+            onClick={() => send("recording:resume", {}, "Recording resumed")}
             tip="Record every seat again (logged); each recorded seat starts a new track"
           >
             Resume recording
@@ -241,7 +223,7 @@ export function RecordingControl({ conn, st }: { conn: FacilitatorConnection; st
           <Button
             icon="microphoneOff"
             disabled={!can || busy}
-            onClick={() => setAsking(true)}
+            onClick={() => void pause()}
             tip={
               can
                 ? "Stop recording every microphone for now, e.g. for a private conversation (logged, with your reason); the game goes on"
@@ -253,50 +235,6 @@ export function RecordingControl({ conn, st }: { conn: FacilitatorConnection; st
           <span className="hint">For everyone: players cannot mute themselves.</span>
         </>
       )}
-      {asking && (
-        <Popup
-          title="Pause recording for everyone?"
-          icon="microphoneOff"
-          width={560}
-          onClose={() => setAsking(false)}
-          onPrimary={busy ? undefined : pause}
-          footer={
-            <>
-              <Button icon="close" kbd="Esc" onClick={() => setAsking(false)}>
-                Cancel
-              </Button>
-              <span className="spacer" />
-              <Button variant="primary" icon="microphoneOff" kbd="Enter" disabled={busy} onClick={pause}>
-                Pause recording
-              </Button>
-            </>
-          }
-        >
-          <div className="col">
-            <p>
-              Every microphone stops recording now; the game itself goes on. Players see{" "}
-              <em>Recording paused by the facilitator</em> until you resume. The pause and your reason are
-              logged.
-            </p>
-            {st.audio.calibration.status === "running" && (
-              <Callout tone="warn" icon="warning">
-                The calibration that is running is cancelled: run it again after resuming.
-              </Callout>
-            )}
-            <label className="field">
-              <span className="label">Reason (optional, logged and exported: never type names)</span>
-              <input
-                type="text"
-                aria-label="Reason for pausing the recording"
-                value={reason}
-                maxLength={200}
-                onChange={(e) => setReason(e.target.value)}
-                placeholder="e.g. break, private conversation"
-              />
-            </label>
-          </div>
-        </Popup>
-      )}
     </div>
   );
 }
@@ -306,28 +244,30 @@ export function RecordingControl({ conn, st }: { conn: FacilitatorConnection; st
 const POLL_MS = 5000;
 
 /**
- * The wrap-up's audio check, refreshed every few seconds: every real seat's tracks closed and no
- * upload pending ("All audio uploaded"), else what is still on its way and what went missing.
+ * The wrap-up's audio check, refreshed every few seconds until everything is on the server: every
+ * real seat's tracks closed and no upload pending ("All audio uploaded"), else what is still on its
+ * way and what went missing. Polling starts again if a seat reports pending chunks later.
  * Non-blocking: the facilitator can still close. Returns the check for the caller's buttons.
  */
 export function useAudioCheck(conn: FacilitatorConnection, st: GameState): AudioCheck | null {
-  const fs = useStore(conn.store);
+  const stats = useStore(conn.store).dashboard?.stats;
   const [tracks, setTracks] = useState<TrackStatusLite[] | null>(null);
   const id = st.sessionId;
   const enabled = st.audio.enabled;
+  const check = useMemo(
+    () => (enabled ? wrapUpAudioCheck(st, micStatsOf(stats), tracks) : null),
+    [enabled, st, stats, tracks],
+  );
+  const settled = check?.uploaded === true;
   useEffect(() => {
-    if (!enabled || !id) return;
+    if (!enabled || !id || settled) return;
     let stop = false;
     const load = async () => {
-      // a quiet fetch: a failed poll must not raise an error toast every few seconds
-      const headers = new Headers();
-      if (conn.token) headers.set("authorization", `Bearer ${conn.token}`);
-      try {
-        const res = await fetch(`/api/sessions/${encodeURIComponent(id)}/audio`, { headers });
-        if (!res.ok || stop) return;
-        const body = (await res.json()) as { tracks?: TrackStatusLite[] };
-        if (!stop) setTracks(body.tracks ?? []);
-      } catch {}
+      // quiet: a failed poll must not raise an error toast every few seconds
+      const body = await conn
+        .api<{ tracks?: TrackStatusLite[] }>(`/api/sessions/${encodeURIComponent(id)}/audio`, { quiet: true })
+        .catch(() => null);
+      if (body && !stop) setTracks(body.tracks ?? []);
     };
     void load();
     const t = setInterval(() => void load(), POLL_MS);
@@ -335,9 +275,8 @@ export function useAudioCheck(conn: FacilitatorConnection, st: GameState): Audio
       stop = true;
       clearInterval(t);
     };
-  }, [conn, id, enabled]);
-  if (!enabled) return null;
-  return wrapUpAudioCheck(st, micStatsOf(fs.dashboard?.stats), tracks);
+  }, [conn, id, enabled, settled]);
+  return check;
 }
 
 /** The audio check as shown at the top of every wrap-up step. */

@@ -10,14 +10,15 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { EventLog, TEST_MAP } from "../../../packages/shared/test/helpers";
+import { fmtSigned, PLACEHOLDER } from "../src/common/format";
 import {
   audioSpans,
   backlogTone,
   calibrationAdvice,
+  calibrationSummary,
   chunkAge,
-  fmtMargin,
   micCell,
-  micCheckText,
+  micCheckStatus,
   micsSummary,
   nextBacklogTrend,
   wrapUpAudioCheck,
@@ -157,10 +158,10 @@ describe("mic column state", () => {
 
   it("shows the mic check status of consented seats", () => {
     const st = audioSession({ checked: [1] }).state;
-    expect(micCheckText(st, st.seats[1]!)).toBe("check passed");
-    expect(micCheckText(st, st.seats[2]!)).toBe("check pending");
+    expect(micCheckStatus(st, st.seats[1]!)).toBe("passed");
+    expect(micCheckStatus(st, st.seats[2]!)).toBe("pending");
     const before = audioSession({ consented: [] }).state;
-    expect(micCheckText(before, before.seats[1]!)).toBeNull();
+    expect(micCheckStatus(before, before.seats[1]!)).toBeNull();
   });
 
   it("warns for a large or growing upload backlog", () => {
@@ -218,9 +219,35 @@ describe("calibration advice", () => {
   });
 
   it("shows margins with one decimal, so a failing 9.6 dB never reads as 10 dB", () => {
-    expect(fmtMargin(9.6)).toBe("+9.6 dB");
-    expect(fmtMargin(-2.04)).toBe("−2.0 dB");
-    expect(fmtMargin(null)).toBe("—");
+    expect(fmtSigned(9.6, "dB")).toBe("+9.6 dB");
+    expect(fmtSigned(-2.04, "dB")).toBe("−2.0 dB");
+    expect(fmtSigned(null, "dB")).toBe(PLACEHOLDER);
+  });
+
+  it("sums the calibration up in one tag: not run, who reads now, checking, the verdict", () => {
+    const log = audioSession({ checked: [1, 2] });
+    expect(calibrationSummary(log.state)).toMatchObject({ tone: "warn", text: "not run yet" });
+    log.push(
+      "CalibrationStarted",
+      { order: [2, 1], sentenceIds: ["s1", "s2"], turnMs: 6000, gapMs: 1000 },
+      { actor: "facilitator" },
+    );
+    expect(calibrationSummary(log.state).text).toBe("running · starting");
+    log.push("CalibrationTurn", { index: 1, seat: 1, sentenceId: "s2" });
+    expect(calibrationSummary(log.state)).toMatchObject({
+      tone: "live",
+      text: "running · seat 1 reading (2/2)",
+    });
+    log.push("CalibrationCompleted", { turns: [] });
+    expect(calibrationSummary(log.state).text).toBe("done · checking the audio");
+    log.push("CalibrationChecked", {
+      perSeat: [
+        { seat: 1, ownDb: -22, bestOtherDb: -40, marginDb: 18, ok: true },
+        { seat: 2, ownDb: -22, bestOtherDb: -40, marginDb: 18, ok: true },
+      ],
+      ok: true,
+    });
+    expect(calibrationSummary(log.state)).toMatchObject({ tone: "live", text: "done · separation ok" });
   });
 
   it("renders the quality card: checking…, then the margins, verdicts and advice", () => {
@@ -230,9 +257,9 @@ describe("calibration advice", () => {
       { order: [1, 2, 3, 4], sentenceIds: ["s1", "s2", "s3", "s4"], turnMs: 6000, gapMs: 1000 },
       { actor: "facilitator" },
     );
-    const render = () =>
-      renderToStaticMarkup(createElement(CalibrationCard, { st: log.state, events: log.events }));
+    const render = () => renderToStaticMarkup(createElement(CalibrationCard, { st: log.state }));
     log.push("CalibrationTurn", { index: 0, seat: 1, sentenceId: "s1" });
+    expect(render()).toContain("calibrating");
     expect(render()).toContain("Turn 1/4: seat 1 reads");
     log.push("CalibrationCompleted", { turns: [] });
     expect(render()).toContain("checking…");
@@ -253,8 +280,7 @@ describe("calibration advice", () => {
 
   it("is hidden while pending, and says so when the server cancelled a run", () => {
     const log = audioSession({ checked: [1, 2, 3, 4] });
-    const render = () =>
-      renderToStaticMarkup(createElement(CalibrationCard, { st: log.state, events: log.events }));
+    const render = () => renderToStaticMarkup(createElement(CalibrationCard, { st: log.state }));
     expect(render()).toBe("");
     log.push(
       "CalibrationStarted",

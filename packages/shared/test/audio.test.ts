@@ -12,6 +12,7 @@ import {
   AudioStop,
   audioSendResult,
   ConsentItemSchema,
+  calibrationWaitingSeats,
   canStartFirstRound,
   composeConsent,
   isMicCheckHeld,
@@ -22,12 +23,14 @@ import {
   normaliseForPlayers,
   type OnboardingContent,
   type OnboardingStep,
+  onboardingStepsFor,
   parseSessionConfig,
   playerView,
   reduceEvents,
   roundSpecFor,
   type SessionConfigInput,
   SessionConfigSchema,
+  seatsInMicCheck,
   shouldRecord,
 } from "../src";
 import { EventLog, readySession, TEST_MAP, testScenario } from "./helpers";
@@ -301,6 +304,18 @@ describe("consent composition", () => {
 });
 
 describe("onboarding steps with audio", () => {
+  it("derives the steps from the config (the mic check only when recording real players)", () => {
+    const steps = (c: SessionConfigInput) => onboardingStepsFor(SessionConfigSchema.parse(c));
+    expect(steps({ audio: { enabled: true } })).toEqual(AUDIO_STEPS);
+    expect(steps({})).toEqual(["consent", "demographics", "briefing"]);
+    expect(steps({ onboarding: { consent: true, demographics: false, briefing: true } })).toEqual([
+      "consent",
+      "briefing",
+    ]);
+    const simulated = SessionConfigSchema.parse({ audio: { enabled: true } });
+    expect(onboardingStepsFor({ ...simulated, players: "simulated" })).not.toContain("mic_check");
+  });
+
   it("orders consent → mic_check → demographics → briefing", () => {
     const log = onboardingSession();
     const s = () => seat(log, 1);
@@ -442,10 +457,15 @@ describe("shouldRecord", () => {
     );
     expect(shouldRecord(log.state, seat(log, 2))).toBe(false);
     expect(shouldRecord(log.state, seat(log, 3))).toBe(true);
-    log.push("RecordingPaused", { reason: "private conversation" }, { actor: "facilitator" });
-    expect(log.state.audio.recordingPaused).toBe(true);
+    const pause = log.push("RecordingPaused", { reason: "private conversation" }, { actor: "facilitator" });
+    expect(log.state.audio).toMatchObject({
+      recordingPaused: true,
+      pausedTs: pause.serverTs,
+      pauseReason: "private conversation",
+    });
     expect(shouldRecord(log.state, seat(log, 3))).toBe(false);
     log.push("RecordingResumed", {}, { actor: "facilitator" });
+    expect(log.state.audio).toMatchObject({ recordingPaused: false, pausedTs: null, pauseReason: null });
     expect(shouldRecord(log.state, seat(log, 3))).toBe(true);
   });
 
@@ -643,6 +663,38 @@ describe("calibration", () => {
     );
     log.push("CalibrationSkipped", { reason: "x" }, { actor: "facilitator", dt: 6800 });
     expect(log.state.audio.calibration.turns[0]!.endTs).toBe(t.serverTs + 6000);
+  });
+
+  it("keeps the server's cancel of a running calibration until the next start", () => {
+    const log = readyAudioSession();
+    const start = () =>
+      log.push(
+        "CalibrationStarted",
+        { order: [1], sentenceIds: ["h01-01"], turnMs: 6000, gapMs: 1000 },
+        { actor: "facilitator" },
+      );
+    start();
+    expect(log.state.audio.calibration.lastCancel).toBeNull();
+    const cancel = log.push("CalibrationSkipped", { reason: "recording paused", cancelled: true });
+    expect(log.state.audio.calibration).toMatchObject({
+      status: "pending",
+      lastCancel: { reason: "recording paused", ts: cancel.serverTs },
+    });
+    start();
+    expect(log.state.audio.calibration.lastCancel).toBeNull();
+    expect(reduceEvents(log.events).audio).toEqual(log.state.audio);
+  });
+
+  it("lists the seats the calibration waits for and the seats in their mic check", () => {
+    const log = onboardingSession(undefined, { fakeSeats: [4] });
+    const seats = (list: Array<{ seat: number }>) => list.map((s) => s.seat);
+    expect(seats(calibrationWaitingSeats(log.state))).toEqual([1, 2, 3]);
+    expect(seats(seatsInMicCheck(log.state))).toEqual([]);
+    for (const n of [1, 2, 3]) consent(log, n, fullConsent);
+    expect(seats(seatsInMicCheck(log.state))).toEqual([1, 2, 3]);
+    micCheck(log, 1);
+    expect(seats(calibrationWaitingSeats(log.state))).toEqual([2, 3]);
+    expect(seats(seatsInMicCheck(log.state))).toEqual([2, 3]);
   });
 
   it("does not gate round 1 when calibration is not required or audio is off", () => {

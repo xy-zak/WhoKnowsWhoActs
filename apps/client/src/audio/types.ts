@@ -2,19 +2,14 @@
  * Local types of the microphone capture engine.
  *
  * The field names match the socket messages `audio:start`, `audio:chunk`,
- * `audio:stop`, `audio:level` and `mic:check` defined in packages/shared; the
- * engine itself has no socket or UI dependency (all I/O is injected into
- * MicRecorder).
+ * `audio:stop`, `audio:level` and `mic:check` defined in packages/shared
+ * (`AudioChunk` and `SendResult` are derived from there); the engine itself has
+ * no socket or UI dependency (all I/O is injected into MicRecorder).
  */
+import type { AudioChunkInput, audioSendResult, MicLevelState } from "@wkwa/shared";
 
-/** Sample rate of every PCM chunk the engine produces (Hz). */
-export const TARGET_SAMPLE_RATE = 16000;
-/** Default length of one chunk: 5 s of 16 kHz mono s16le = 160 000 bytes (< Socket.IO's 1 MB limit). */
-export const DEFAULT_CHUNK_SECONDS = 5;
 /** Default cap of unacknowledged audio kept in memory (30 min ≈ 57.6 MB). */
 export const DEFAULT_MAX_PENDING_SECONDS = 1800;
-/** Longest chunk that still fits a 1 MB Socket.IO message. */
-export const MAX_CHUNK_SECONDS = 30;
 
 /**
  * Raw capture: no echo cancellation, noise suppression or automatic gain, so
@@ -27,22 +22,16 @@ export const MIC_CONSTRAINTS: MediaStreamConstraints = {
   video: false,
 };
 
-/** Recorder state, as shown to the participant and the facilitator. */
-export type RecorderState =
-  /** not recording (initially and after stop()) */
-  | "idle"
-  /** waiting for the permission prompt or setting up the audio graph */
-  | "requesting"
-  /** audio is flowing and has signal */
-  | "recording"
-  /** recording is wanted, but the AudioContext is suspended or interrupted (call resume() from a click) */
-  | "paused"
-  /** recording, but the input is muted or digital silence for a while (chunks are still sent) */
-  | "no_signal"
-  /** the participant or the system blocked microphone access */
-  | "denied"
-  /** any other failure (see RecorderStatus.error) */
-  | "error";
+/**
+ * Recorder state, as shown to the participant and the facilitator (the `audio:level` state):
+ * idle = not recording (initially and after stop()); requesting = waiting for the permission
+ * prompt or setting up the audio graph; recording = audio is flowing and has signal; paused =
+ * recording is wanted, but the AudioContext is suspended or interrupted (call resume() from a
+ * click); no_signal = recording, but the input is muted or digital silence for a while (chunks are
+ * still sent); denied = the participant or the system blocked microphone access; error = any
+ * other failure (see RecorderStatus.error).
+ */
+export type RecorderState = MicLevelState;
 
 /** Level of the last ~250 ms (dBFS, full-scale square wave = 0 dB, full-scale sine ≈ −3 dB). */
 export interface MicLevel {
@@ -56,8 +45,10 @@ export type TimingMethod = "output-timestamp" | "current-time";
 /**
  * Audio processing the browser actually applied, from `track.getSettings()`.
  * Only these whitelisted fields are copied: never `deviceId`, `groupId` or `label`.
+ * Wider than the shared `AudioCaptureSettings` (sampleSize, voiceIsolation, latency): the server
+ * keeps what it knows and strips the rest.
  */
-export interface AudioCaptureSettings {
+export interface EngineCaptureSettings {
   /** sample rate of the microphone track (Hz), before the engine resamples to 16 kHz */
   sampleRate?: number;
   sampleSize?: number;
@@ -99,31 +90,15 @@ export interface AudioStartInfo {
   clockOffsetMs: number;
   /** capture-side latency subtracted from every clientTs (ms): settings.latency, or 0 if not reported */
   inputLatencyMs: number;
-  settings: AudioCaptureSettings;
+  settings: EngineCaptureSettings;
   context: AudioContextInfo;
 }
 
-/** One chunk of a track: 16 kHz mono signed 16-bit little-endian PCM. */
-export interface AudioChunk {
-  trackId: string;
-  /** 0, 1, 2 … within the track */
-  seq: number;
-  /** index of the first sample in the track's 16 kHz timeline (contiguous: previous startSample + sampleCount) */
-  startSample: number;
-  sampleCount: number;
-  /** server-epoch ms estimate of when the chunk's first sample was captured */
-  clientTs: number;
-  /** ClockSync offset (ms) in use when clientTs was computed */
-  clockOffsetMs: number;
-  /** RMS level of the chunk (dBFS) */
-  rmsDb: number;
-  /** peak level of the chunk (dBFS) */
-  peakDb: number;
-  /** samples at or beyond 16-bit full scale */
-  clippedSamples: number;
-  /** sampleCount × 2 bytes of s16le PCM */
-  pcm: Uint8Array;
-}
+/**
+ * One chunk of a track (the `audio:chunk` message): 16 kHz mono signed 16-bit little-endian PCM,
+ * `startSample` contiguous (previous startSample + sampleCount), `pcm` exactly sampleCount × 2 bytes.
+ */
+export type AudioChunk = Omit<AudioChunkInput, "pcm"> & { pcm: Uint8Array };
 
 /** Sent once when a track ends, after its last chunk. */
 export interface AudioStopInfo {
@@ -143,4 +118,4 @@ export interface AudioStopInfo {
  * Result of one delivery attempt: true = the server stored it (acked),
  * false = transient failure (retried), "rejected" = permanent refusal (dropped, not retried).
  */
-export type SendResult = boolean | "rejected";
+export type SendResult = ReturnType<typeof audioSendResult>;

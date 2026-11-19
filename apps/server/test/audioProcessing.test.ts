@@ -5,6 +5,7 @@ import path from "node:path";
 import {
   AttributionJobSchema,
   AudioDeletionRecordSchema,
+  type AudioDerivativeKind,
   AudioSessionSummarySchema,
   EXPORT_FILES,
   expandColumns,
@@ -20,6 +21,7 @@ import { openDatabase } from "../src/db/database";
 import { Store } from "../src/db/store";
 import { eraseParticipant, lookupParticipant } from "../src/gdpr/erase";
 import { exportSession } from "../src/gdpr/exporter";
+import { readTrackPcm } from "./audioFixtures";
 import { type SeededSession, seedAudioSession } from "./audioSession";
 import { cleanup, PASSPHRASE } from "./harness";
 
@@ -87,8 +89,8 @@ describe("audio processing: jobs, derivatives, export", () => {
     expect(s.quality.perSeat).toHaveLength(4);
     expect(["good", "fair", "poor"]).toContain(s.grade);
 
-    const kinds = (k: string) => env.store.listAudioDerivatives(sessionId, { kind: k });
-    for (const k of ["talk_time", "quality_report", "leakage_matrix"]) {
+    const kinds = (k: AudioDerivativeKind) => env.store.listAudioDerivatives(sessionId, { kind: k });
+    for (const k of ["talk_time", "quality_report", "leakage_matrix"] as const) {
       expect(kinds(k)).toHaveLength(1);
       expect(kinds(k)[0]!.participantCode).toBeNull();
     }
@@ -106,7 +108,7 @@ describe("audio processing: jobs, derivatives, export", () => {
       expect(d.hasKey).toBe(true);
       expect(d.fileName).toMatch(/^[0-9a-f]{32}\.wka$/);
       const key = env.store.getAudioDerivativeKey(d.derivativeId)!;
-      const { pcm, issues } = await env.files.readTrackPcm(sessionId, d.fileName!, key);
+      const { pcm, issues } = await readTrackPcm(env.files, sessionId, d.fileName!, key);
       expect(issues).toEqual([]);
       expect(pcm.length).toBe((d.params.samples as number) * 2);
       // encrypted at rest: a stretch of the decrypted audio does not appear in the file
@@ -151,8 +153,8 @@ describe("audio processing: jobs, derivatives, export", () => {
     expect(env.files.findOrphans(known)).toEqual([]);
   }, 120_000);
 
-  it("summary: tracks, cleaned tracks, jobs and per-seat totals, typed by the shared schemas, no keys or codes", () => {
-    const sum = service.summary(seeded.sessionId);
+  it("summary: tracks, cleaned tracks, jobs and per-seat totals, typed by the shared schemas, no keys or codes", async () => {
+    const sum = await service.summary(seeded.sessionId);
     expect(AudioSessionSummarySchema.parse(sum)).toBeTruthy();
     expect(sum.tracks).toHaveLength(4);
     expect(sum.tracks.every((t) => t.status === "closed" && t.bytes > t.samples * 2)).toBe(true);
@@ -231,7 +233,7 @@ describe("audio processing: jobs, derivatives, export", () => {
     await expect(
       service.exportAudio(sessionId, { kind: "raw", seats: [9], requestedBy: "t" }),
     ).rejects.toThrow(/Seat 9 has no audio/);
-    expect(service.summary(sessionId).audioExports).toHaveLength(2);
+    expect((await service.summary(sessionId)).audioExports).toHaveLength(2);
   }, 60_000);
 
   it("CSV exports gain audio_tracks.csv and speech_segments.csv (pseudonymised like the other files)", () => {
@@ -351,7 +353,7 @@ describe("audio processing: jobs, derivatives, export", () => {
     expect(r.record).toMatchObject({ scope: "raw", seats: [1, 3, 4], tracks: 3, note: "retention 30 days" });
     expect(r.record.bytes).toBeGreaterThan(0);
     expect(r.audioExportsOnDisk.length).toBeGreaterThan(0); // WAV exports are the researcher's to delete
-    const sum = service.summary(sessionId);
+    const sum = await service.summary(sessionId);
     expect(sum.deletions).toHaveLength(1);
     expect(sum.tracks.every((t) => t.status === "deleted" && t.bytes === 0)).toBe(true);
     expect(sum.derivatives).toHaveLength(0); // cleaned tracks hold sound: deleted with the raw audio

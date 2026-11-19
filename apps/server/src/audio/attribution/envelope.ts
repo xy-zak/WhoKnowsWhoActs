@@ -274,14 +274,3 @@ export function buildEnvelope(pcm: Int16Array, options?: EnvelopeOptions): Envel
   b.push(pcm, 0);
   return b.finish();
 }
-
-/** Envelope of a track given as `{startSample, samples}` chunks (in any order of arrival). */
-export function envelopeFromChunks(
-  chunks: Iterable<{ startSample: number; samples: Int16Array }>,
-  options?: EnvelopeOptions,
-): Envelope {
-  const sorted = [...chunks].sort((a, b) => a.startSample - b.startSample);
-  const b = new EnvelopeBuilder(options);
-  for (const c of sorted) b.push(c.samples, c.startSample);
-  return b.finish();
-}

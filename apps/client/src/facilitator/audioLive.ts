@@ -1,9 +1,12 @@
 import {
-  AUDIO_SAMPLE_RATE,
+  type AudioStartReason,
+  type AudioStopReason,
   type AudioTrackSummary,
   type CalibrationQuality,
+  currentCalibrationTurn,
   type GameState,
   isParticipant,
+  type MicCheckStatus,
   micCheckApplies,
   RECORDING_PHASES,
   type SeatLiveStats,
@@ -13,7 +16,10 @@ import {
   seatList,
   shouldRecord,
 } from "@wkwa/shared";
+import { fmtSigned, plural } from "../common/format";
 import type { RecState } from "../ui/audioMeta";
+import type { Tone } from "../ui/components";
+import type { IconName } from "../ui/icons";
 
 /*
  * Pure helpers behind the facilitator's LIVE audio monitoring: the seats table's mic column,
@@ -68,7 +74,8 @@ export function micCell(st: GameState, seat: SeatState, mic: SeatMicStats | unde
     return off("Not recorded: the participant did not permit audio recording");
   if (seat.micCheck === "skipped")
     return { state: "skipped", tip: "Mic check skipped: this seat is not recorded", db: null, peakDb: null };
-  if (st.phase === "game_complete" || st.phase === "closed" || st.phase === "aborted")
+  // past the recording phases (the lobby comes before them)
+  if (st.phase !== "lobby" && !RECORDING_PHASES.has(st.phase))
     return off("Not recording: the game is complete");
   if (st.audio.recordingPaused)
     return {
@@ -126,21 +133,13 @@ export function chunkAge(
   return { ageMs, stale: mic.state === "recording" && ageMs > STALE_CHUNK_MS };
 }
 
-/** `0.0 min`, `12.3 min`: audio stored for a seat. */
-export function fmtMinutes(ms: number): string {
-  return `${(Math.max(0, ms) / 60_000).toFixed(1)} min`;
-}
-
-/** Mic check status of a seat, for the mic column during onboarding (null = not applicable). */
-export function micCheckText(st: GameState, seat: SeatState): string | null {
-  if (!st.audio.enabled || !seat.bound || seat.withdrawn || !isParticipant(seat)) return null;
-  if (seat.consent !== "given") return null;
-  if (!micCheckApplies(st, seat)) return null;
-  return seat.micCheck === "passed"
-    ? "check passed"
-    : seat.micCheck === "skipped"
-      ? "check skipped"
-      : "check pending";
+/**
+ * Mic check status of a seat, for the mic column during onboarding: null when the check does not
+ * apply (no audio, unbound, withdrawn, fake player or agent, no audio consent, consent not given).
+ */
+export function micCheckStatus(st: GameState, seat: SeatState): MicCheckStatus | null {
+  if (!seat.bound || seat.withdrawn || seat.consent !== "given" || !micCheckApplies(st, seat)) return null;
+  return seat.micCheck;
 }
 
 /* ─────────────────────────── status bar: "mics 3/4" ─────────────────────────── */
@@ -174,13 +173,81 @@ export function micsSummary(st: GameState, mics: Record<number, SeatMicStats | u
 
 export type SeatQuality = CalibrationQuality["perSeat"][number];
 
-/** `+4 dB`, `−2 dB`, `—` for a calibration margin. */
-export function fmtMargin(db: number | null): string {
-  if (db === null || !Number.isFinite(db)) return "—";
-  // one decimal: a failing 9.6 dB must not read as a passing "+10 dB"
-  const r = Math.round(db * 10) / 10;
-  if (r === 0) return "0.0 dB";
-  return `${r < 0 ? "−" : "+"}${Math.abs(r).toFixed(1)} dB`;
+export interface CalibrationSummary {
+  tone: Extract<Tone, "neutral" | "live" | "warn">;
+  icon: IconName;
+  /** The NEXT panel's tag: the state with its detail (who reads now, the weak seats). */
+  text: string;
+  /** The calibration card's tag: the state in a word or two (the card says the rest). */
+  label: string;
+  tip: string;
+}
+
+/**
+ * The calibration's state as a tag (NEXT panel and calibration card): not run yet, running (who
+ * reads now), checking the audio, the separation verdict (weak seats with their margins), skipped.
+ */
+export function calibrationSummary(st: GameState): CalibrationSummary {
+  const c = st.audio.calibration;
+  switch (c.status) {
+    case "running": {
+      const turn = currentCalibrationTurn(st);
+      return {
+        tone: "live",
+        icon: "voice",
+        text: turn
+          ? `running · seat ${turn.seat} reading (${c.order.indexOf(turn.seat) + 1}/${c.order.length})`
+          : "running · starting",
+        label: "calibrating",
+        tip: "Each seat reads its sentence while the others stay quiet",
+      };
+    }
+    case "done": {
+      const q = c.quality;
+      if (!q)
+        return {
+          tone: "warn",
+          icon: "idle",
+          text: "done · checking the audio",
+          label: "checking…",
+          tip: "The turns are over; the quick check waits for their audio",
+        };
+      const weak = q.perSeat.filter((p) => !p.ok);
+      if (weak.length === 0)
+        return {
+          tone: "live",
+          icon: "ok",
+          text: "done · separation ok",
+          label: "calibration ok",
+          tip: "Every seat's own voice is clearly louder on its own microphone",
+        };
+      return {
+        tone: "warn",
+        icon: "microphoneWarning",
+        text: `done · weak separation: ${weak
+          .map((p) => `seat ${p.seat}${p.marginDb !== null ? ` (${fmtSigned(p.marginDb, "dB")})` : ""}`)
+          .join(", ")}`,
+        label: "needs attention",
+        tip: "A seat's voice is nearly as loud on another microphone: move it closer to its own mic (or use a headset) and redo",
+      };
+    }
+    case "skipped":
+      return {
+        tone: "neutral",
+        icon: "close",
+        text: "skipped",
+        label: "skipped",
+        tip: "Skipped: attribution estimates the leakage between microphones from the recording",
+      };
+    default:
+      return {
+        tone: "warn",
+        icon: "idle",
+        text: "not run yet",
+        label: "not run yet",
+        tip: "Each seat reads a sentence in turn, before round 1",
+      };
+  }
 }
 
 /** Plain advice for one seat of the calibration check (null when the seat passed). */
@@ -189,7 +256,7 @@ export function calibrationAdvice(r: SeatQuality): string | null {
   if (r.ownDb === null || r.marginDb === null)
     return `No audio from seat ${r.seat}: check its microphone and connection, then redo the calibration.`;
   if (r.marginDb < CALIBRATION_MIN_MARGIN_DB)
-    return `Seat ${r.seat}: own voice only ${fmtMargin(r.marginDb)} over the others. Move the laptop closer or use a headset, then redo the calibration.`;
+    return `Seat ${r.seat}: own voice only ${fmtSigned(r.marginDb, "dB")} over the others. Move the laptop closer or use a headset, then redo the calibration.`;
   return `Seat ${r.seat}: its voice is hard to tell apart from the others on the other microphones. Move the laptop closer or use a headset, then redo the calibration.`;
 }
 
@@ -211,7 +278,8 @@ export interface AudioCheck {
   lines: AudioCheckLine[];
 }
 
-const BROKEN_STOPS: Record<string, string> = {
+/** Stop reasons that mean audio may be missing, and how the wrap-up check names them. */
+const BROKEN_STOPS: Partial<Record<AudioStopReason, string>> = {
   disconnect: "disconnected",
   interrupted: "not closed cleanly",
   error: "capture error",
@@ -241,7 +309,7 @@ export function wrapUpAudioCheck(
       lines.push({
         seat: s.seat,
         kind: "upload",
-        text: `Seat ${s.seat} still uploading ${pending} chunk${pending === 1 ? "" : "s"}: keep that browser open.`,
+        text: `Seat ${s.seat} still uploading ${plural(pending, "chunk")}: keep that browser open.`,
       });
     else if (open > 0)
       lines.push({
@@ -253,7 +321,7 @@ export function wrapUpAudioCheck(
     for (const t of mine) {
       // the server marks disconnect / error / permission stops `interrupted` too: name the reason first
       const why =
-        BROKEN_STOPS[t.stopReason ?? ""] ??
+        (t.stopReason ? BROKEN_STOPS[t.stopReason] : undefined) ??
         (t.status === "interrupted" ? BROKEN_STOPS.interrupted : undefined);
       if (why) broken.set(why, (broken.get(why) ?? 0) + 1);
     }
@@ -268,7 +336,7 @@ export function wrapUpAudioCheck(
       lines.push({
         seat: s.seat,
         kind: "issue",
-        text: `Seat ${s.seat}: ${gaps} chunk${gaps === 1 ? "" : "s"} missing from the stored audio.`,
+        text: `Seat ${s.seat}: ${plural(gaps, "chunk")} missing from the stored audio.`,
       });
     if (
       tracks !== null &&
@@ -294,7 +362,9 @@ export interface Span {
 
 export interface AudioSpans {
   /** Recording spans per seat (AudioTrackStarted → AudioTrackStopped). */
-  tracks: Array<Span & { seat: number; trackId: string; reason: string; stopReason: string | null }>;
+  tracks: Array<
+    Span & { seat: number; trackId: string; reason: AudioStartReason; stopReason: AudioStopReason | null }
+  >;
   /** Recording paused for everyone (RecordingPaused → RecordingResumed). */
   pauses: Array<Span & { reason: string | null }>;
   /** Calibration runs (CalibrationStarted → CalibrationCompleted / CalibrationSkipped). */
@@ -390,7 +460,7 @@ export function shortTrack(trackId: string): string {
   return trackId.slice(0, 8);
 }
 
-export const START_REASON_TEXT: Record<string, string> = {
+export const START_REASON_TEXT: Record<AudioStartReason, string> = {
   mic_check: "mic check",
   resume: "recording resumed",
   reconnect: "reconnect",
@@ -402,7 +472,7 @@ export const START_REASON_TEXT: Record<string, string> = {
   cleared: "unsent audio cleared",
 };
 
-export const STOP_REASON_TEXT: Record<string, string> = {
+export const STOP_REASON_TEXT: Record<AudioStopReason, string> = {
   paused: "recording paused",
   game_complete: "game complete",
   closed: "session closed",
@@ -421,9 +491,3 @@ export const STOP_REASON_TEXT: Record<string, string> = {
   track_ended: "microphone track ended",
   cleared: "unsent audio cleared",
 };
-
-/** `2:05` from a sample count at 16 kHz. */
-export function samplesText(samples: number): string {
-  const s = Math.round(samples / AUDIO_SAMPLE_RATE);
-  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
-}

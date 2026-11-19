@@ -98,8 +98,14 @@ export class FacilitatorConnection {
     return ack.data as T;
   }
 
-  /** REST call to /api (adds the admin token if one is configured). */
-  async api<T = unknown>(path: string, init: RequestInit = {}): Promise<T> {
+  /**
+   * REST call to /api (adds the admin token if one is configured). A failure shows as an error
+   * toast and rethrows; `quiet` skips the toast (e.g. for polls).
+   */
+  async api<T = unknown>(
+    path: string,
+    { quiet = false, ...init }: RequestInit & { quiet?: boolean } = {},
+  ): Promise<T> {
     const headers = new Headers(init.headers);
     if (this.token) headers.set("authorization", `Bearer ${this.token}`);
     if (init.body && !headers.has("content-type")) headers.set("content-type", "application/json");
@@ -111,7 +117,7 @@ export class FacilitatorConnection {
     } catch {}
     if (!res.ok) {
       const msg = (body as { error?: string })?.error ?? `${res.status} ${res.statusText}`;
-      this.toast(msg, "error");
+      if (!quiet) this.toast(msg, "error");
       throw new Error(msg);
     }
     return body as T;

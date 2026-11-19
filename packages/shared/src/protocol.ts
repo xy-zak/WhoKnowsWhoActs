@@ -5,7 +5,6 @@ import {
   AUDIO_SAMPLE_RATE,
   AudioCaptureSettingsSchema,
   AudioContextInfoSchema,
-  type AudioSettings,
   AudioStartReasonSchema,
   AudioStopReasonSchema,
   Dbfs,
@@ -19,7 +18,6 @@ import {
 import { FakePaceSchema, SessionConfigSchema } from "./config";
 import { EVENT_DEFS } from "./events";
 import { ActionKindSchema, KLabelSchema, SeatSchema } from "./labels";
-import type { AudioState } from "./state";
 import { TelemetryItemSchema } from "./telemetry";
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -114,11 +112,17 @@ export const MicCheckSubmit = EVENT_DEFS.MicCheckCompleted.payload
     durationMs: DurationMs,
     clientTs: ClientTs,
   })
-  .refine((m) => toAudioSettings(m.settings, m.contextSampleRate) !== null, NO_SAMPLE_RATE)
-  .transform(({ contextSampleRate, ...m }) => ({
-    ...m,
-    settings: toAudioSettings(m.settings, contextSampleRate) as AudioSettings,
-  }));
+  .transform(({ contextSampleRate, ...m }, ctx) => {
+    const settings = toAudioSettings(m.settings, contextSampleRate);
+    if (settings === null) {
+      ctx.addIssue({ code: "custom", ...NO_SAMPLE_RATE });
+      return z.NEVER;
+    }
+    return { ...m, settings };
+  });
+
+/** A mic check result as the server takes it (settings normalised). */
+export type MicCheckResult = z.output<typeof MicCheckSubmit>;
 
 /**
  * A new track (logged as AudioTrackStarted), plus the timing of its first sample. Accepts the
@@ -151,11 +155,14 @@ export const AudioStart = z
     settings: AudioCaptureSettingsSchema,
     context: AudioContextInfoSchema.optional(),
   })
-  .refine((m) => toAudioSettings(m.settings, m.context?.sampleRate) !== null, NO_SAMPLE_RATE)
-  .transform((m) => ({
-    ...m,
-    settings: toAudioSettings(m.settings, m.context?.sampleRate) as AudioSettings,
-  }));
+  .transform((m, ctx) => {
+    const settings = toAudioSettings(m.settings, m.context?.sampleRate);
+    if (settings === null) {
+      ctx.addIssue({ code: "custom", ...NO_SAMPLE_RATE });
+      return z.NEVER;
+    }
+    return { ...m, settings };
+  });
 
 export const AudioChunk = z
   .object({
@@ -740,6 +747,29 @@ export interface DashboardMsg {
   stats: Record<number, SeatLiveStats>;
   /** True when the dashboard is attached to a session that can still change. */
   live: boolean;
-  /** Audio recording and calibration (sessions that record audio; the same block as `state.audio`). */
-  audio?: AudioState;
+}
+
+/* ─────────────────────────── REST: GET /api/server-info ─────────────────────────── */
+
+/** How the server speaks HTTPS: its self-signed certificate, TLS_CERT + TLS_KEY, or not at all. */
+export type TlsMode = "auto" | "provided" | "off";
+
+/** What GET /api/server-info reports under `tls`. */
+export interface TlsInfo {
+  enabled: boolean;
+  mode: TlsMode;
+  /** SHA-256 fingerprint of the certificate, as browsers show it (`AB:CD:…`, 32 pairs). */
+  fingerprintSha256: string | null;
+  /** Names the certificate is valid for, e.g. `DNS:localhost`, `IP:192.168.1.10`. */
+  sans: string[];
+  /** Expiry of the certificate (ISO 8601). */
+  expires: string | null;
+}
+
+/** GET /api/server-info */
+export interface ServerInfo {
+  /** One URL per LAN interface (or the configured HOST), with the right scheme. */
+  playerUrls: Array<{ url: string; iface: string }>;
+  port: number;
+  tls: TlsInfo;
 }

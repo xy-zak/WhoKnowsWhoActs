@@ -1,6 +1,6 @@
+import { int16FromLeBytes } from "@wkwa/shared";
 import { describe, expect, it } from "vitest";
 import { MicRecorder, type MicRecorderOptions } from "../src/audio/MicRecorder";
-import { int16FromLittleEndian } from "../src/audio/pcm";
 import { resampledLength } from "../src/audio/resampler";
 import type {
   AudioChunk,
@@ -261,7 +261,7 @@ describe("MicRecorder", () => {
     const stop = sent.at(-1)!.m as AudioStopInfo;
     expect(stop).toMatchObject({ trackId: "track-1", reason: "done", chunks: 3, samples: 176000 });
     expect(stop.clientTs - chunks[0]!.clientTs).toBeCloseTo(11000, 3);
-    const pcm = int16FromLittleEndian(chunks[0]!.pcm);
+    const pcm = int16FromLeBytes(chunks[0]!.pcm);
     expect(Math.max(...pcm.subarray(0, 1000))).toBeGreaterThan(9000);
   });
 
