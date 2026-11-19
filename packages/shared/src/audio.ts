@@ -16,7 +16,7 @@ import type { AudioChunk } from "./protocol";
  *  - never send or store a microphone's deviceId, groupId or label; only the
  *    processing flags and the sample rate (`AudioSettingsSchema`);
  *  - only real participants who gave the separate audio consent item are
- *    recorded (see `shouldRecord` in state.ts); fake players, agents and
+ *    recorded (see `recordingVerdict` in recordingVerdict.ts); fake players, agents and
  *    simulated sessions never record;
  *  - speaker attribution detects speech on each seat's headset mic and compares
  *    loudness across the mics; it never identifies a speaker by their voice

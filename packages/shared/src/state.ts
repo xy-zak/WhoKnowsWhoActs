@@ -147,7 +147,7 @@ export interface CalibrationState {
   lastCancel: { reason: string; ts: number } | null;
 }
 
-/** Audio recording state of the session (see audio.ts and shouldRecord). */
+/** Audio recording state of the session (see audio.ts and recordingVerdict). */
 export interface AudioState {
   /** The session records audio (config.audio.enabled; never for simulated sessions). */
   enabled: boolean;
@@ -426,24 +426,6 @@ export function nextOnboardingStep(state: ReadonlyGameState, seat: ReadonlySeatS
 
 /** Phases in which audio is recorded: from onboarding (the mic check) until the game is complete. */
 export const RECORDING_PHASES: ReadonlySet<Phase> = new Set(["onboarding", "round_active", "round_complete"]);
-
-/**
- * Should this seat's microphone be recording now? True only when the session records audio,
- * the seat is held by a real participant (not a fake player or an agent) who gave consent
- * including the audio item, has not withdrawn, has reached the mic check (or is past it) and
- * whose mic check was not skipped, no other seat is still in consent (micCheckHoldSeats),
- * recording is not paused by the facilitator, and the phase is onboarding, round_active or
- * round_complete (breaks and game pauses are recorded too).
- */
-export function shouldRecord(state: ReadonlyGameState, seat: ReadonlySeatState): boolean {
-  if (state.audio.recordingPaused || !RECORDING_PHASES.has(state.phase)) return false;
-  if (!seat.bound || seat.withdrawn || !micCheckApplies(state, seat)) return false;
-  if (seat.consent !== "given" || seat.micCheck === "skipped") return false;
-  if (isMicCheckHeld(state)) return false;
-  // Recording starts at the mic check, so a session without that step never records. Consent is
-  // the only step before it: with consent given, the seat has reached the mic check or is past it.
-  return state.onboardingSteps.includes("mic_check");
-}
 
 /**
  * Audio gate for round 1: with audio and `requireCalibration` on, the calibration must be done

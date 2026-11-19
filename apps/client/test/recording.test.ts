@@ -1,4 +1,4 @@
-import type { PlayerView } from "@wkwa/shared";
+import type { NotRecordingReason, PlayerView } from "@wkwa/shared";
 import { describe, expect, it } from "vitest";
 import type { MicRecorderOptions, RecorderState, RecorderStatus } from "../src/audio";
 import {
@@ -14,21 +14,29 @@ import {
 
 /* ─── fixtures ─── */
 
-type AudioPatch = Partial<PlayerView["audio"]>;
-
+/**
+ * A player view whose audio follows the server's verdict: `why` is its reason for not recording
+ * (null = records), and the other audio fields agree with it.
+ */
 function view(
-  o: { phase?: PlayerView["phase"]; nextStep?: string | null; withdrawn?: boolean } & AudioPatch = {},
+  o: {
+    phase?: PlayerView["phase"];
+    nextStep?: string | null;
+    withdrawn?: boolean;
+    why?: NotRecordingReason | null;
+  } = {},
 ): PlayerView {
-  const { phase = "onboarding", nextStep = "mic_check", withdrawn = false, ...audio } = o;
+  const { phase = "onboarding", nextStep = "mic_check", withdrawn = false, why = null } = o;
   return {
     phase,
     me: { seat: 1, nextStep, withdrawn },
     audio: {
-      enabled: true,
-      record: true,
-      paused: false,
-      micCheck: "pending",
-      micCheckHeld: false,
+      enabled: why !== "audio_off",
+      record: why === null,
+      notRecording: why,
+      paused: why === "paused",
+      micCheck: why === "mic_check_skipped" ? "skipped" : "pending",
+      micCheckHeld: why === "mic_check_held",
       calibration: {
         status: "pending",
         turnSeat: null,
@@ -37,7 +45,6 @@ function view(
         turnEndsAt: null,
         order: [],
       },
-      ...audio,
     },
   } as unknown as PlayerView;
 }
@@ -150,13 +157,11 @@ const settle = async () => {
 /* ─── pure mapping ─── */
 
 describe("recording: reasons and states", () => {
-  it("maps why recording stops", () => {
+  it("stops with the stop reason of the server's verdict", () => {
     expect(stopReasonFor(null)).toBe("client_stop");
-    expect(stopReasonFor(view({ record: false, paused: true }))).toBe("paused");
-    expect(stopReasonFor(view({ record: false, phase: "game_complete" }))).toBe("game_complete");
-    expect(stopReasonFor(view({ record: false, phase: "aborted" }))).toBe("aborted");
-    expect(stopReasonFor(view({ record: false, withdrawn: true }))).toBe("withdrawn");
-    expect(stopReasonFor(view({ record: false, micCheck: "skipped" }))).toBe("skipped");
+    expect(stopReasonFor(view({ why: "paused" }))).toBe("paused");
+    expect(stopReasonFor(view({ phase: "aborted", why: "session_aborted" }))).toBe("aborted");
+    expect(stopReasonFor(view({ why: "mic_check_held" }))).toBe("client_stop");
   });
 
   it("starts with mic_check at the mic check and reload past it, unless a specific reason is due", () => {
@@ -176,17 +181,18 @@ describe("recording: reasons and states", () => {
 
   it("shows the facilitator's pause and a skipped mic check over the engine state", () => {
     const rec = { status: { ...IDLE, state: "recording" as const }, gesture: true };
-    expect(recStateFor(view({ enabled: false }), rec)).toBeNull();
-    expect(recStateFor(view({ micCheck: "skipped", record: false }), rec)).toBe("skipped");
-    expect(recStateFor(view({ record: false, paused: true }), rec)).toBe("paused");
-    expect(recStateFor(view({ record: false, phase: "game_complete" }), rec)).toBe("off");
+    expect(recStateFor(view({ why: "audio_off" }), rec)).toBeNull();
+    expect(recStateFor(view({ why: "mic_check_skipped" }), rec)).toBe("skipped");
+    expect(recStateFor(view({ why: "paused" }), rec)).toBe("paused");
+    expect(recStateFor(view({ phase: "game_complete", why: "game_complete" }), rec)).toBe("off");
+    expect(recStateFor(view({ why: "mic_check_held" }), rec)).toBe("off");
     expect(recStateFor(view(), rec)).toBe("recording");
     expect(recStateFor(view(), { status: { ...IDLE, state: "no_signal" }, gesture: true })).toBe("no_signal");
     expect(recStateFor(view(), { status: { ...IDLE, state: "denied" }, gesture: true })).toBe("denied");
     // idle at the mic check before the Start click: not recording yet
     expect(recStateFor(view(), { status: IDLE, gesture: false })).toBe("off");
     expect(recStateFor(view({ nextStep: "briefing" }), { status: IDLE, gesture: false })).toBe("requesting");
-    expect(wantsRecording(view({ micCheckHeld: true, record: false }))).toBe(false);
+    expect(wantsRecording(view({ why: "mic_check_held" }))).toBe(false);
   });
 });
 
@@ -213,9 +219,9 @@ describe("RecordingController", () => {
 
   it("never opens the microphone while the mic check is held or the session has no audio", async () => {
     const t = setup();
-    t.ctl.update(view({ enabled: false, record: false }));
+    t.ctl.update(view({ why: "audio_off" }));
     await settle();
-    t.ctl.update(view({ micCheckHeld: true, record: false }));
+    t.ctl.update(view({ why: "mic_check_held" }));
     await settle();
     t.ctl.startFromClick();
     await settle();
@@ -228,9 +234,9 @@ describe("RecordingController", () => {
     t.ctl.update(view(game));
     await settle();
     expect(t.rec().calls).toEqual(["start:reload"]);
-    t.ctl.update(view({ ...game, record: false, paused: true }));
+    t.ctl.update(view({ ...game, why: "paused" }));
     await settle();
-    t.ctl.update(view({ ...game, record: true, paused: false }));
+    t.ctl.update(view(game));
     await settle();
     expect(t.rec().calls).toEqual(["start:reload", "stop:paused", "start:resume"]);
   });
@@ -251,7 +257,7 @@ describe("RecordingController", () => {
     const t = setup();
     t.ctl.update(view({ phase: "round_active", nextStep: null }));
     await settle();
-    t.ctl.update(view({ phase: "game_complete", nextStep: null, record: false }));
+    t.ctl.update(view({ phase: "game_complete", nextStep: null, why: "game_complete" }));
     await settle();
     expect(t.rec().calls.at(-1)).toBe("stop:game_complete");
   });
@@ -389,7 +395,7 @@ describe("RecordingController", () => {
     const r = t.rec();
     r.pendingChunks = 3;
     r.pendingBytes = 480_000;
-    t.ctl.update(view({ ...game, record: false, phase: "game_complete" }));
+    t.ctl.update(view({ ...game, phase: "game_complete", why: "game_complete" }));
     await settle();
     expect(r.calls.at(-1)).toBe("stop:game_complete");
     // still uploading: the latest report shows the backlog, no "drained" report yet

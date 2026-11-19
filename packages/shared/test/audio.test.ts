@@ -19,6 +19,7 @@ import {
   isOnboardingComplete,
   MicCheckSubmit,
   micCheckHoldSeats,
+  type NotRecordingReason,
   nextOnboardingStep,
   normaliseForPlayers,
   type OnboardingContent,
@@ -26,12 +27,12 @@ import {
   onboardingStepsFor,
   parseSessionConfig,
   playerView,
+  recordingVerdict,
   reduceEvents,
   roundSpecFor,
   type SessionConfigInput,
   SessionConfigSchema,
   seatsInMicCheck,
-  shouldRecord,
 } from "../src";
 import { EventLog, readySession, TEST_MAP, testScenario } from "./helpers";
 
@@ -140,6 +141,11 @@ function afterConsent(log: EventLog, seat: number) {
 }
 
 const seat = (log: EventLog, n: number) => log.state.seats[n]!;
+/** Why the seat does not record now (null = it records). */
+const why = (log: EventLog, n: number): NotRecordingReason | null => {
+  const v = recordingVerdict(log.state, seat(log, n));
+  return v.record ? null : v.reason;
+};
 
 const content: OnboardingContent = {
   study: {
@@ -374,52 +380,55 @@ describe("onboarding steps with audio", () => {
   });
 });
 
-describe("shouldRecord", () => {
+describe("recording verdict through the event log", () => {
   it("records a consenting participant from the mic check until the game is complete", () => {
     const log = onboardingSession();
-    expect(shouldRecord(log.state, seat(log, 1))).toBe(false); // consent still pending
+    expect(why(log, 1)).toBe("consent_pending");
     consent(log, 1, fullConsent);
     // at the mic check, but held: the others are still reading the consent form
     expect(micCheckHoldSeats(log.state)).toEqual([2, 3, 4]);
-    expect(shouldRecord(log.state, seat(log, 1))).toBe(false);
+    expect(why(log, 1)).toBe("mic_check_held");
     for (const n of [2, 3, 4]) consent(log, n, fullConsent);
     expect(isMicCheckHeld(log.state)).toBe(false);
-    expect(shouldRecord(log.state, seat(log, 1))).toBe(true); // at the mic check
+    expect(why(log, 1)).toBeNull(); // at the mic check
     afterConsent(log, 1);
     for (const n of [2, 3, 4]) afterConsent(log, n);
-    expect(shouldRecord(log.state, seat(log, 1))).toBe(true); // ready, waiting for round 1
+    expect(why(log, 1)).toBeNull(); // ready, waiting for round 1
     log.push("CalibrationSkipped", { reason: "test" }, { actor: "facilitator" });
     log.push(
       "RoundStarted",
       { round: 1, spec: roundSpecFor(log.state.config, 1), startedBy: "facilitator" },
       { actor: "facilitator" },
     );
-    expect(shouldRecord(log.state, seat(log, 1))).toBe(true);
+    expect(why(log, 1)).toBeNull();
     log.push("GamePaused", { reason: "facilitator", seat: null }, { actor: "facilitator" });
-    expect(shouldRecord(log.state, seat(log, 1))).toBe(true); // game pauses are recorded
+    expect(why(log, 1)).toBeNull(); // game pauses are recorded
     log.push("GameResumed", { pausedMs: 10 }, { actor: "facilitator" });
     log.push(
       "RoundCompleted",
       { round: 1, reason: "facilitator", durationMs: 1, pausedMs: 0, actionCounts: {} },
       { actor: "facilitator" },
     );
-    expect(shouldRecord(log.state, seat(log, 1))).toBe(true); // breaks too
+    expect(why(log, 1)).toBeNull(); // breaks too
     log.push("GameCompleted", { roundsPlayed: 1, reason: "facilitator" }, { actor: "facilitator" });
-    expect(shouldRecord(log.state, seat(log, 1))).toBe(false);
+    expect(why(log, 1)).toBe("game_complete");
   });
 
   it("never records without audio, in the lobby, or without the audio consent item", () => {
     const off = onboardingSession({});
     consent(off, 1, fullConsent);
-    expect(shouldRecord(off.state, seat(off, 1))).toBe(false);
+    expect(why(off, 1)).toBe("audio_off");
     const log = onboardingSession();
     const lobbyState = reduceEvents(log.events.filter((e) => e.type !== "OnboardingStarted"));
     expect(lobbyState.phase).toBe("lobby");
-    expect(shouldRecord(lobbyState, lobbyState.seats[1]!)).toBe(false);
+    expect(recordingVerdict(lobbyState, lobbyState.seats[1]!)).toEqual({
+      record: false,
+      reason: "consent_pending",
+    });
     consent(log, 2, { participate: true, [AUDIO_CONSENT_ITEM]: false });
     consent(log, 3, fullConsent, false);
-    expect(shouldRecord(log.state, seat(log, 2))).toBe(false);
-    expect(shouldRecord(log.state, seat(log, 3))).toBe(false);
+    expect(why(log, 2)).toBe("no_audio_consent");
+    expect(why(log, 3)).toBe("consent_declined");
   });
 
   it("never records with consent skipped, nor fake players or agents", () => {
@@ -429,16 +438,16 @@ describe("shouldRecord", () => {
       { steps: ["mic_check"] },
     );
     expect(seat(skipped, 1).consent).toBe("skipped");
-    expect(shouldRecord(skipped.state, seat(skipped, 1))).toBe(false);
+    expect(why(skipped, 1)).toBe("no_audio_consent");
     const fake = onboardingSession(undefined, { fakeSeats: [4] });
     expect(seat(fake, 4).consent).toBe("skipped");
-    expect(shouldRecord(fake.state, seat(fake, 4))).toBe(false);
+    expect(why(fake, 4)).toBe("not_participant");
     // an agent seat, even with a (forged) given consent, is never recorded
     const agent = onboardingSession();
     agent.push("AgentBound", { seat: 2, policy: "random", policyVersion: "1", params: {}, seed: "x:2" });
     consent(agent, 2, fullConsent);
     expect(seat(agent, 2).agent).not.toBeNull();
-    expect(shouldRecord(agent.state, seat(agent, 2))).toBe(false);
+    expect(why(agent, 2)).toBe("not_participant");
   });
 
   it("stops for a withdrawn seat, a skipped mic check and while recording is paused", () => {
@@ -449,24 +458,24 @@ describe("shouldRecord", () => {
       { seat: 1, by: "facilitator", phase: "onboarding" },
       { seat: 1, code: code(1), actor: "facilitator" },
     );
-    expect(shouldRecord(log.state, seat(log, 1))).toBe(false);
+    expect(why(log, 1)).toBe("withdrawn");
     log.push(
       "MicCheckSkipped",
       { seat: 2, reason: "broken mic" },
       { seat: 2, code: code(2), actor: "facilitator" },
     );
-    expect(shouldRecord(log.state, seat(log, 2))).toBe(false);
-    expect(shouldRecord(log.state, seat(log, 3))).toBe(true);
+    expect(why(log, 2)).toBe("mic_check_skipped");
+    expect(why(log, 3)).toBeNull();
     const pause = log.push("RecordingPaused", { reason: "private conversation" }, { actor: "facilitator" });
     expect(log.state.audio).toMatchObject({
       recordingPaused: true,
       pausedTs: pause.serverTs,
       pauseReason: "private conversation",
     });
-    expect(shouldRecord(log.state, seat(log, 3))).toBe(false);
+    expect(why(log, 3)).toBe("paused");
     log.push("RecordingResumed", {}, { actor: "facilitator" });
     expect(log.state.audio).toMatchObject({ recordingPaused: false, pausedTs: null, pauseReason: null });
-    expect(shouldRecord(log.state, seat(log, 3))).toBe(true);
+    expect(why(log, 3)).toBeNull();
   });
 
   it("holds every mic check until each real seat has consented; a decliner holds until withdrawn", () => {
@@ -477,10 +486,11 @@ describe("shouldRecord", () => {
     expect(playerView(log.state, testScenario, 1, content, 0).audio).toMatchObject({
       micCheckHeld: true,
       record: false,
+      notRecording: "mic_check_held",
     });
     consent(log, 3, fullConsent, false); // declined
     expect(micCheckHoldSeats(log.state)).toEqual([3]);
-    expect(shouldRecord(log.state, seat(log, 1))).toBe(false);
+    expect(why(log, 1)).toBe("mic_check_held");
     log.push(
       "ParticipantWithdrawn",
       { seat: 3, by: "facilitator", phase: "onboarding" },
@@ -490,13 +500,14 @@ describe("shouldRecord", () => {
     expect(playerView(log.state, testScenario, 1, content, 0).audio).toMatchObject({
       micCheckHeld: false,
       record: true,
+      notRecording: null,
     });
   });
 
   it("does not record when the session started onboarding without a mic check step", () => {
     const log = onboardingSession(undefined, { steps: ["consent", "demographics", "briefing"] });
     consent(log, 1, fullConsent);
-    expect(shouldRecord(log.state, seat(log, 1))).toBe(false);
+    expect(why(log, 1)).toBe("no_mic_check_step");
   });
 });
 
@@ -711,6 +722,7 @@ describe("player view: audio", () => {
     expect(playerView(log.state, testScenario, 1, null, 0).audio).toEqual({
       enabled: false,
       record: false,
+      notRecording: "audio_off",
       paused: false,
       micCheck: "pending",
       micCheckHeld: false,
