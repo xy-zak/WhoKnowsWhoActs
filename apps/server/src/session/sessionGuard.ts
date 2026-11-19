@@ -84,9 +84,9 @@ const RULES: Record<Operation, readonly Step[]> = {
     ["exporting", `${EXPORT}: delete the session when it is done.`],
   ],
   "delete-audio": [
+    ["running", "This session is still running. Close or abort it first, then delete its audio."],
     ["attribution", () => `${JOB}: wait until it ends.`],
     ["exporting", `${EXPORT}: delete the audio when it is done.`],
-    ["running", "This session is still running. Close or abort it first, then delete its audio."],
     ["precondition"],
   ],
   "start-attribution": [

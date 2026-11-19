@@ -126,15 +126,11 @@ describe("SessionGuard: may this operation change the session now?", () => {
   });
 
   describe.each(RUNNING_PHASES.map((p) => [p]))("attached, %s (running)", (phase) => {
-    it.each(BUSY_TABLE)("%s while busy=%s", async (op, busy, reason, message) => {
+    it.each(BUSY_TABLE)("%s while busy=%s", async (op, busy) => {
       const { guard } = setup({ sessionId: S, phase, codes: [CODE] }, busy);
       const v = await run(guard, op);
-      // delete-audio checks the jobs before the running session; all others check running first
-      const expected =
-        op === "delete-audio" && reason !== null
-          ? { reason, message }
-          : { reason: "running", message: RUNNING[op] };
-      expect(v).toEqual({ ok: false, status: 409, sessionId: S, ...expected });
+      // every operation checks the running session first, before any job or export
+      expect(v).toEqual({ ok: false, status: 409, sessionId: S, reason: "running", message: RUNNING[op] });
     });
   });
 
