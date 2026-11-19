@@ -151,7 +151,7 @@ function target(id: ShotId): string | null {
   if (scenarioOf(def) !== running)
     throw new Error(`shot "${id}" is catalogued for scenario "${scenarioOf(def)}" but taken in "${running}"`);
   if (!wanted(id)) return null;
-  captured.push(id);
+  if (!captured.includes(id)) captured.push(id); // a retried capture is reported once
   return path.join(OUT, `${id}.png`);
 }
 
