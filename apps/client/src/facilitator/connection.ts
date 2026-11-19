@@ -104,6 +104,12 @@ export class FacilitatorConnection {
     payload: FacilitatorPayload<K>,
     okText?: string,
   ): Promise<FacilitatorResult<K>> {
+    if (!this.socket.connected) {
+      // Socket.IO would buffer it and run it on reconnect, after the UI reported a failure
+      const error = "Not connected to the server";
+      this.toast(error, "error");
+      throw new Error(error);
+    }
     const ack = await new Promise<FacilitatorAck<K>>((resolve) => {
       const t = setTimeout(() => resolve({ ok: false, error: "No response from server" }), 8000);
       emitFacilitator(this.socket, name, payload, (a) => {
