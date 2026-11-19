@@ -27,7 +27,7 @@ export class CalibrationCollector {
   private readonly tracks = new Map<string, { seat: number; chunks: CollectedChunk[] }>();
 
   constructor(
-    /** The calibration run this collector belongs to (SessionManager's run counter). */
+    /** The calibration run this collector belongs to (`state.audio.calibrationRuns`). */
     readonly run: number,
     readonly seats: readonly number[],
     readonly fromTs: number,

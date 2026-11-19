@@ -133,7 +133,6 @@ export interface SessionTimeline {
   /** Turns of the last completed calibration (none if it was skipped, cancelled or never run). */
   calibration: CalibrationTurn[];
   phaseChanges: PhaseChange[];
-  recordingPauses: Array<{ fromTs: number; toTs: number | null }>;
   /** Seats that permitted audio recording. */
   audioSeats: number[];
 }
@@ -141,7 +140,6 @@ export interface SessionTimeline {
 export function sessionTimeline(events: readonly StoredEvent[]): SessionTimeline {
   const state = initialState();
   const phaseChanges: PhaseChange[] = [];
-  const recordingPauses: SessionTimeline["recordingPauses"] = [];
   let calibration: CalibrationTurn[] = [];
   let prev = "";
   for (const e of events) {
@@ -149,11 +147,6 @@ export function sessionTimeline(events: readonly StoredEvent[]): SessionTimeline
     if (e.type === "CalibrationStarted") calibration = [];
     else if (e.type === "CalibrationCompleted")
       calibration = e.payload.turns.map((t) => ({ seat: t.seat, startTs: t.startTs, endTs: t.endTs }));
-    else if (e.type === "RecordingPaused") recordingPauses.push({ fromTs: e.serverTs, toTs: null });
-    else if (e.type === "RecordingResumed") {
-      const open = recordingPauses[recordingPauses.length - 1];
-      if (open && open.toTs === null) open.toTs = e.serverTs;
-    }
     const key = `${state.round}|${state.phase}|${state.paused}|${state.audio.recordingPaused}`;
     if (key !== prev) {
       phaseChanges.push({
@@ -169,7 +162,7 @@ export function sessionTimeline(events: readonly StoredEvent[]): SessionTimeline
   const audioSeats = Object.values(state.seats)
     .filter((s) => s.audioConsent)
     .map((s) => s.seat);
-  return { calibration, phaseChanges, recordingPauses, audioSeats };
+  return { calibration, phaseChanges, audioSeats };
 }
 
 /* ─────────── timing for rendering ─────────── */

@@ -9,8 +9,8 @@
  *     → (once the turns' audio has arrived, at most CALIBRATION_CHECK_WAIT_MS) → CalibrationChecked
  *
  * A redo, a skip, a recording pause or a restart ends a running calibration; a timer of an earlier
- * run then does nothing (each run has a number). The audio of the turns is collected by LiveAudio
- * (`beginCalibration`), which also stores it as usual.
+ * run then does nothing (each run has a number, counted by the reducer: `state.audio.calibrationRuns`).
+ * The audio of the turns is collected by LiveAudio (`beginCalibration`), which also stores it as usual.
  *
  * Owned by the SessionManager, like LiveAudio: every event goes through its `append`, inside a
  * command (`run`), and the manager checks the phase and that the session records audio first.
@@ -60,8 +60,6 @@ export interface CalibrationDeps {
 
 export class CalibrationRunner {
   private timer: NodeJS.Timeout | null = null;
-  /** Counts calibration runs; a timer of an earlier run (after a redo or skip) does nothing. */
-  private runs = 0;
 
   constructor(private readonly deps: CalibrationDeps) {}
 
@@ -71,11 +69,6 @@ export class CalibrationRunner {
 
   get running(): boolean {
     return this.state.audio.calibration.status === "running";
-  }
-
-  /** Keep the run counter in step while a session is rebuilt from its log. */
-  observe(ev: StoredEvent) {
-    if (ev.type === "CalibrationStarted") this.runs++;
   }
 
   /**
@@ -98,7 +91,8 @@ export class CalibrationRunner {
     const content = this.deps.content();
     if (!content) throw new CalibrationError("No calibration texts (config/audio.json)");
     this.clearTimer();
-    const run = ++this.runs;
+    // runs are numbered by the reducer (state.audio.calibrationRuns): this one is the next
+    const run = st.audio.calibrationRuns + 1;
     // a redo reads other sentences than the run before, where there are enough
     const offset = ((run - 1) * order.length) % content.sentences.length;
     const sentenceIds = order.map((_, i) => content.sentences[(offset + i) % content.sentences.length]!.id);
@@ -152,7 +146,8 @@ export class CalibrationRunner {
 
   /** Is run `run` still the one in `status`? (Timers of an earlier run then do nothing.) */
   private current(run: number, status: "running" | "done" = "running"): boolean {
-    return this.runs === run && this.state.audio.calibration.status === status && !this.deps.isFinal();
+    const a = this.state.audio;
+    return a.calibrationRuns === run && a.calibration.status === status && !this.deps.isFinal();
   }
 
   private after(ms: number, fn: () => void) {

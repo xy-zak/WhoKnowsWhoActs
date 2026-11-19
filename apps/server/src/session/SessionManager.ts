@@ -286,8 +286,6 @@ export class SessionManager {
     if (events.length === 0) throw new Error(`Session ${sessionId} has no events`);
     for (const ev of events) {
       applyEvent(m.game, ev);
-      m.audio.observe(ev, true);
-      m.calibration.observe(ev);
       if (ev.clientSeq !== null && ev.seat !== null) {
         m.lastClientSeq.set(ev.seat, Math.max(m.lastClientSeq.get(ev.seat) ?? 0, ev.clientSeq));
         // the answers to recent intents, so a browser's resend after a restart gets the same one
@@ -769,7 +767,7 @@ export class SessionManager {
   close() {
     this.run(() => {
       this.requirePhase("game_complete");
-      this.audio.closeAll("closed");
+      this.audio.beforeFinal("closed");
       this.append({ type: "SessionClosed", actorKind: "facilitator", payload: {} });
       this.dispose();
     });
@@ -778,7 +776,7 @@ export class SessionManager {
   abort(reason: string) {
     this.run(() => {
       if (this.isFinal) throw new CommandError("Session has already ended");
-      this.audio.closeAll("aborted");
+      this.audio.beforeFinal("aborted");
       this.append({ type: "SessionAborted", actorKind: "facilitator", payload: { reason } });
       this.dispose();
     });

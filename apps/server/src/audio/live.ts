@@ -111,10 +111,6 @@ function toBuffer(v: ArrayBuffer | ArrayBufferView): Buffer {
 }
 
 export class LiveAudio {
-  /** Recording pauses (server clock; `to` is Infinity while paused): nothing captured in them is stored. */
-  private pauses: Array<{ from: number; to: number }> = [];
-  /** When the game was complete (server clock): nothing captured from then on is stored. */
-  private gameCompleteTs: number | null = null;
   /** Requests being processed, so a resend that arrives meanwhile waits for the same result. */
   private inflight = new Map<string, Promise<AudioAck<unknown>>>();
   /** Server time of the last late chunk accepted per closed track (the grace period runs from it). */
@@ -133,37 +129,39 @@ export class LiveAudio {
   /* ═════════════════════════ events and recovery ═════════════════════════ */
 
   /**
-   * Keep the recording windows up to date with every event of the session (`replay` = rebuilding
-   * after a restart: no tracks are closed then), and close tracks the event ends.
+   * Close the tracks an event appended live ends (inside its command). The pauses and the end of
+   * the game that limit which audio is stored are derived from the log by the reducer
+   * (`state.audio.pauses`, `gameCompleteTs`); a session loaded from its log uses `recover()`.
    */
-  observe(ev: StoredEvent, replay = false) {
+  observe(ev: StoredEvent) {
     switch (ev.type) {
       case "RecordingPaused":
-        this.pauses.push({ from: ev.serverTs, to: Number.POSITIVE_INFINITY });
-        if (!replay) this.closeAll("paused");
+        this.closeAll("paused");
         break;
-      case "RecordingResumed": {
-        const open = this.pauses[this.pauses.length - 1];
-        if (open && open.to === Number.POSITIVE_INFINITY) open.to = ev.serverTs;
-        break;
-      }
       case "GameCompleted":
-        this.gameCompleteTs = ev.serverTs;
-        if (!replay) this.closeAll("game_complete");
+        this.closeAll("game_complete");
         break;
-      // SessionClosed / SessionAborted: SessionManager closes the tracks just before logging them
       case "ParticipantWithdrawn":
-        if (!replay) this.closeSeat(ev.payload.seat, "withdrawn");
+        this.closeSeat(ev.payload.seat, "withdrawn");
         break;
       case "MicCheckSkipped":
-        if (!replay) this.closeSeat(ev.payload.seat, "skipped");
+        this.closeSeat(ev.payload.seat, "skipped");
         break;
       case "PlayerDisconnected":
-        if (!replay) this.closeSeat(ev.payload.seat, "disconnect");
+        this.closeSeat(ev.payload.seat, "disconnect");
         break;
       default:
         break;
     }
+  }
+
+  /**
+   * The session is about to be closed or aborted (inside that command, before its final event is
+   * appended): close every open track now, so each AudioTrackStopped is logged before
+   * SessionClosed / SessionAborted. After the final event no event may be appended any more.
+   */
+  beforeFinal(reason: "closed" | "aborted") {
+    this.closeAll(reason);
   }
 
   /**
@@ -241,13 +239,14 @@ export class LiveAudio {
   private keepSamples(clientTs: number, sampleCount: number): number {
     const endTs = clientTs + samplesToMs(sampleCount);
     let keep = sampleCount;
-    const windows = [...this.pauses];
-    if (this.gameCompleteTs !== null)
-      windows.push({ from: this.gameCompleteTs, to: Number.POSITIVE_INFINITY });
+    const { pauses, gameCompleteTs } = this.state.audio;
+    const windows = [...pauses];
+    if (gameCompleteTs !== null) windows.push({ fromTs: gameCompleteTs, toTs: null });
     for (const w of windows) {
-      if (w.to <= clientTs || w.from >= endTs) continue;
-      if (w.from <= clientTs) return 0;
-      keep = Math.min(keep, Math.floor(((w.from - clientTs) * AUDIO_SAMPLE_RATE) / 1000));
+      const to = w.toTs ?? Number.POSITIVE_INFINITY;
+      if (to <= clientTs || w.fromTs >= endTs) continue;
+      if (w.fromTs <= clientTs) return 0;
+      keep = Math.min(keep, Math.floor(((w.fromTs - clientTs) * AUDIO_SAMPLE_RATE) / 1000));
     }
     return Math.max(0, keep);
   }
@@ -476,7 +475,7 @@ export class LiveAudio {
   }
 
   /** Close the open tracks of one seat (inside a command). */
-  closeSeat(seat: number, reason: AudioStopReason) {
+  private closeSeat(seat: number, reason: AudioStopReason) {
     for (const t of this.deps.store.listAudioTracks(this.deps.sessionId, { seat, status: "recording" }))
       this.closeTrack(t, reason, "system");
   }

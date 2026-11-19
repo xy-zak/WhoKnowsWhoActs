@@ -486,12 +486,71 @@ describe("chunk ingest", () => {
     expect(d.store.listAudioTracks(d.m.sessionId, { status: "recording" })).toEqual([]);
   });
 
-  it("abort closes open tracks before SessionAborted", async () => {
-    const t = await recording();
+  it("abort logs every open track's stop before SessionAborted", async () => {
+    const t1 = await recording();
+    const t2 = randomUUID();
+    expect(await d.m.audio.start(2, startMsg(t2, now))).toEqual({ ok: true });
     d.m.abort("test");
-    expect(d.store.getAudioTrack(t)).toMatchObject({ status: "closed", stopReason: "aborted" });
-    const tail = types(d.events).slice(-2);
-    expect(tail).toEqual(["AudioTrackStopped", "SessionAborted"]);
+    for (const t of [t1, t2])
+      expect(d.store.getAudioTrack(t)).toMatchObject({ status: "closed", stopReason: "aborted" });
+    expect(types(d.events).slice(-3)).toEqual(["AudioTrackStopped", "AudioTrackStopped", "SessionAborted"]);
+  });
+
+  it("close logs the stop of a track still open before SessionClosed", async () => {
+    await recording();
+    d.m.endGame();
+    // game complete closed every track; one the store still has open (a race) is closed by close()
+    const file = await d.files.createFile(d.m.sessionId);
+    const left = randomUUID();
+    d.store.insertAudioTrack({
+      trackId: left,
+      sessionId: d.m.sessionId,
+      seat: 2,
+      participantCode: d.m.state.seats[2]!.participantCode!,
+      fileName: file.fileName,
+      fileKey: file.key,
+      sampleRate: AUDIO_SAMPLE_RATE,
+      settings: SETTINGS,
+      reason: "mic_check",
+      startedServerTs: now,
+      startedClientTs: now,
+      clockOffsetMs: 0,
+    });
+    d.m.close();
+    expect(d.store.getAudioTrack(left)).toMatchObject({ status: "closed", stopReason: "closed" });
+    expect(d.events.slice(-2).map((e) => [e.type, e.seat])).toEqual([
+      ["AudioTrackStopped", 2],
+      ["SessionClosed", null],
+    ]);
+  });
+
+  it("recovery: after a reload, audio captured in a pause is still refused and the audio before it kept", async () => {
+    const t = await recording();
+    const N = 16_000; // 1 s chunks
+    const t0 = now;
+    now = t0 + 2500;
+    d.m.pauseRecording();
+    const reloaded = SessionManager.load(
+      {
+        store: d.store,
+        scenario: SCENARIOS.load("demo"),
+        onboarding: loadOnboardingContent(CONFIG_DIR, { audio: true }),
+        serverSecret: "test-secret",
+        log: pino({ level: "silent" }),
+        onEvents: () => {},
+        clock,
+      },
+      d.m.sessionId,
+    );
+    try {
+      expect(reloaded.state.audio.pauses).toEqual([{ fromTs: t0 + 2500, toTs: null }]);
+      expect((await reloaded.audio.chunk(1, chunkMsg(t, 0, N, t0))).ok).toBe(true);
+      expect((await reloaded.audio.chunk(1, chunkMsg(t, 2, N, t0 + 2000))).ok).toBe(true);
+      expect(d.store.listAudioChunks(t).map((r) => r.sampleCount)).toEqual([N, N / 2]);
+      expect(refused(await reloaded.audio.chunk(1, chunkMsg(t, 3, N, t0 + 3000)))).toBe(true);
+    } finally {
+      reloaded.dispose();
+    }
   });
 
   it("recovery: a reload closes tracks left open as interrupted; their resent chunks still count", async () => {

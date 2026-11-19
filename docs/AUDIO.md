@@ -362,7 +362,7 @@ stateDiagram-v2
 
 A track shows as `interrupted` in the facilitator's views, the REST summary and the CSV when it ended with `disconnect`, `interrupted`, `permission_lost`, `error` or `track_ended`, so the wrap-up check can tell the facilitator that audio may be missing. The wrap-up check also flags `context_interrupted` (the system interrupted the browser's audio engine), without counting it as interrupted.
 
-**Pause.** `recording:pause` is only for everyone at once; players have no mute. On a pause the server closes every open track at once (`paused`). Chunks that were in flight are kept up to the pause and nothing after it. `recording:resume` makes every recorded seat start a new track.
+**Pause.** `recording:pause` is only for everyone at once; players have no mute. On a pause the server closes every open track at once (`paused`). Chunks that were in flight are kept up to the pause and nothing after it. `recording:resume` makes every recorded seat start a new track. The pauses and the moment the game was complete are part of the game state (`state.audio.pauses`, `state.audio.gameCompleteTs`), folded from the event log by the reducer, so a late chunk is cut in the same place after a server restart.
 
 **Why pausing matters.** Every mic hears the room. If someone enters, or a withdrawn participant is still sitting there, pause recording and add a note (no names) so the time span can be left out of analysis.
 
