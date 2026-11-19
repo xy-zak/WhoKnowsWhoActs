@@ -17,6 +17,8 @@ const child = spawn("npx", ["tsx", "apps/server/src/index.ts"], {
     PORT: process.env.E2E_PORT ?? "3999",
     // plain HTTP: the browsers open http://127.0.0.1, which is a secure context (microphone allowed)
     WKWA_TLS: "off",
+    // the bots send synthetic, voice-less audio: detect speech by energy, not with the speech model
+    WKWA_SPEECH_MODEL: "off",
     TLS_CERT: "",
     TLS_KEY: "",
   },
