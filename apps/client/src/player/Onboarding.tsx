@@ -1,7 +1,18 @@
 import { consentSections, type PlayerView } from "@wkwa/shared";
 import { type ReactNode, useMemo, useRef, useState } from "react";
 import { Markdown } from "../common/Markdown";
-import { ActSwatch, Button, Callout, Check, type IconName, LabelTag, Panel, StatusTag } from "../ui";
+import {
+  ActSwatch,
+  Button,
+  Callout,
+  Check,
+  type IconName,
+  LabelTag,
+  Panel,
+  StatusTag,
+  stepGlyph,
+  stepNum,
+} from "../ui";
 import { Centered, OnboardingStepper } from "./chrome";
 import type { PlayerConnection } from "./connection";
 
@@ -208,8 +219,8 @@ export function ConsentScreen({ conn, view }: { conn: PlayerConnection; view: Pl
                   disabled={isOpen || !reachable}
                   onClick={() => setOpen(i)}
                 >
-                  <span className="glyph">{isOpen ? "▶" : done ? "✓" : "·"}</span>
-                  <span className="num">{String(i + 1).padStart(2, "0")}</span>
+                  <span className="glyph">{stepGlyph({ current: isOpen, done })}</span>
+                  <span className="num">{stepNum(i)}</span>
                   <span className="title">{sec.title}</span>
                   <span className="summary">
                     {isOpen ? "" : done ? (ticked ? "confirmed" : "not given (optional)") : ""}
@@ -317,7 +328,7 @@ export function DemographicsScreen({ conn, view }: { conn: PlayerConnection; vie
         {form.questions.map((q, qi) => (
           <fieldset key={q.id} style={{ border: "none", padding: 0, margin: 0 }}>
             <legend className="strong" style={{ marginBottom: "var(--s2)" }}>
-              <span className="faint">{String(qi + 1).padStart(2, "0")} </span>
+              <span className="faint">{stepNum(qi)} </span>
               {q.text}
             </legend>
             <div className="row" style={{ gap: "var(--s1) var(--s4)" }}>

@@ -1,6 +1,6 @@
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Button, Field } from "./components";
+import { Button, Field, stepNum } from "./components";
 import { Icon } from "./Icon";
 import type { IconName } from "./icons";
 
@@ -165,7 +165,7 @@ export function Popup({
           <span className="spacer" />
           {step && (
             <span className="popup-step">
-              STEP {String(step.index + 1).padStart(2, "0")}/{String(step.total).padStart(2, "0")}
+              STEP {stepNum(step.index)}/{stepNum(step.total - 1)}
             </span>
           )}
           {closable && onClose && (
