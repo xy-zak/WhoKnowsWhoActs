@@ -1,22 +1,14 @@
 import { AudioCaptureSettingsSchema, clampDb, type PlayerView } from "@wkwa/shared";
 import { useEffect, useRef, useState } from "react";
-import {
-  classifyMicError,
-  MicError,
-  micSupportProblem,
-  type SpeechCheckResult,
-  SpeechDetector,
-} from "../audio";
+import { classifyMicError, MicError, micSupportProblem } from "../audio";
+import { useStore } from "../net/store";
 import { AsciiProgress, Button, Callout, Icon, RecTag, StatusTag } from "../ui";
 import type { PlayerConnection } from "./connection";
-import { Page, useOpenedAt } from "./Onboarding";
+import { MicCheckAttempt, type MicCheckOutcome } from "./micCheckAttempt";
+import { Page } from "./Onboarding";
 import { MicFixSteps, MicLevelMeter, useRecording } from "./RecordingIndicator";
 import { recStateFor } from "./recording";
 
-/** A try that has heard this much audio without passing counts as failed (logged once; "Start again"). */
-const GIVE_UP_MS = 20_000;
-/** The "passed" confirmation stays this long before the next step. */
-const PASSED_HOLD_MS = 1200;
 /** Cells of the speech-heard bar. */
 const SPEECH_CELLS = 10;
 
@@ -36,6 +28,30 @@ function SpeechProgress({ ms, need }: { ms: number; need: number }) {
   );
 }
 
+/** Sends one mic check result (`mic:check`); false when it failed (shown as a toast). */
+async function submitMicCheck(conn: PlayerConnection, o: MicCheckOutcome): Promise<boolean> {
+  const r = o.result;
+  const contextSampleRate = conn.recording.store.get().contextSampleRate;
+  try {
+    await conn.request("mic:check", {
+      passed: o.passed,
+      attempts: o.attempts,
+      durationMs: o.durationMs,
+      // only the processing flags and the sample rate (the schema strips anything else)
+      settings: AudioCaptureSettingsSchema.safeParse(conn.recording.captureSettings).data ?? {},
+      ...(contextSampleRate ? { contextSampleRate } : {}),
+      noiseFloorDb: clampDb(r.noiseFloorDb),
+      speechDb: clampDb(r.speechDb),
+      speechMs: Math.max(0, r.speechMs),
+      clientTs: conn.clock.now(),
+    });
+    return true;
+  } catch (e) {
+    conn.showToast((e as Error).message);
+    return false;
+  }
+}
+
 /**
  * Onboarding step `mic_check` (sessions that record audio). Held while another seat is still in
  * consent (no microphone opens before everyone agreed). Then: what is recorded and for how long,
@@ -46,102 +62,35 @@ function SpeechProgress({ ms, need }: { ms: number; need: number }) {
 export function MicCheckScreen({ conn, view }: { conn: PlayerConnection; view: PlayerView }) {
   const a = view.audio;
   const snap = useRecording(conn);
-  const openedAt = useOpenedAt();
   const need = a.micCheckMinSpeechMs ?? 1000;
-  const [attempt, setAttempt] = useState(0);
-  const [result, setResult] = useState<SpeechCheckResult | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [passedShown, setPassedShown] = useState(false);
-  const submitted = useRef(false);
-  /** a passed result the server did not take (e.g. a timeout): sent again with "Continue" */
-  const [unsent, setUnsent] = useState<SpeechCheckResult | null>(null);
-  const passTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(
-    () => () => {
-      if (passTimer.current) clearTimeout(passTimer.current);
-    },
-    [],
+  const [check] = useState(
+    () =>
+      new MicCheckAttempt({
+        minSpeechMs: need,
+        submit: (o) => submitMicCheck(conn, o),
+      }),
   );
-  const failLogged = useRef(0);
+  const c = useStore(check.store);
+  useEffect(() => () => check.close(), [check]);
   const support = useRef(micSupportProblem()).current;
 
   const st = snap.status.state;
   const failed = st === "denied" || st === "error";
-  // the participant clicked Start in this page (a reload asks again)
-  const started = attempt > 0 && snap.gesture;
+  // the participant clicked Start (in this page: a reload asks again)
+  const started = c.attempts > 0 && snap.gesture;
+  const listening = c.attempts > 0;
+  // feed the recorder's 16 kHz blocks into the attempt's speech detector
+  useEffect(
+    () => (listening ? conn.recording.addTap((s) => check.push(s)) : undefined),
+    [listening, conn, check],
+  );
 
-  // feed the recorder's 16 kHz blocks into a fresh speech detector per attempt
-  useEffect(() => {
-    if (attempt === 0) return;
-    const det = new SpeechDetector({ minSpeechMs: need });
-    let last = 0;
-    setResult(null);
-    const off = conn.recording.addTap((s) => {
-      const r = det.push(s);
-      const t = performance.now();
-      if (r.passed || t - last > 150) {
-        last = t;
-        setResult(r);
-      }
-    });
-    return off;
-  }, [attempt, conn, need]);
-
-  const submit = async (r: SpeechCheckResult, passed: boolean) => {
-    setBusy(true);
-    try {
-      await conn.request("mic:check", {
-        passed,
-        attempts: Math.max(1, attempt),
-        durationMs: Math.round(performance.now() - openedAt),
-        // only the processing flags and the sample rate (the schema strips anything else)
-        settings: AudioCaptureSettingsSchema.safeParse(conn.recording.captureSettings).data ?? {},
-        ...(snap.contextSampleRate ? { contextSampleRate: snap.contextSampleRate } : {}),
-        noiseFloorDb: clampDb(r.noiseFloorDb),
-        speechDb: clampDb(r.speechDb),
-        speechMs: Math.max(0, r.speechMs),
-        clientTs: conn.clock.now(),
-      });
-      return true;
-    } catch (e) {
-      conn.showToast((e as Error).message);
-      return false;
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  // passed: show it briefly, then report it (the server moves this seat on to the next step)
-  const passed = result?.passed === true;
-  // biome-ignore lint/correctness/useExhaustiveDependencies: once per pass
-  useEffect(() => {
-    if (!passed || submitted.current || !result) return;
-    submitted.current = true;
-    setPassedShown(true);
-    const r = result;
-    passTimer.current = setTimeout(() => {
-      passTimer.current = null;
-      void submit(r, true).then((ok) => setUnsent(ok ? null : r));
-    }, PASSED_HOLD_MS);
-  }, [passed]);
-
-  // not passed after a while: log the failed try once (the facilitator sees the levels)
-  const gaveUp = !passed && started && (result?.analysedMs ?? 0) >= GIVE_UP_MS;
-  // biome-ignore lint/correctness/useExhaustiveDependencies: once per attempt
-  useEffect(() => {
-    if (gaveUp && result && failLogged.current !== attempt) {
-      failLogged.current = attempt;
-      void submit(result, false);
-    }
-  }, [gaveUp]);
+  const gaveUp = started && c.gaveUp;
 
   const start = () => {
     // inside the click: the browser only lets audio start from a user gesture
     conn.recording.startFromClick();
-    submitted.current = false;
-    setPassedShown(false);
-    setUnsent(null);
-    setAttempt((n) => n + 1);
+    check.start();
   };
 
   if (a.micCheckHeld) {
@@ -180,7 +129,7 @@ export function MicCheckScreen({ conn, view }: { conn: PlayerConnection; view: P
         variant="primary"
         size="lg"
         icon={failed ? "refresh" : "microphone"}
-        disabled={busy}
+        disabled={c.busy}
         onClick={start}
         tip="Your browser asks to use the microphone: choose Allow"
       >
@@ -199,14 +148,14 @@ export function MicCheckScreen({ conn, view }: { conn: PlayerConnection; view: P
         Resume
       </Button>
     );
-  } else if (unsent) {
+  } else if (c.unsent) {
     primary = (
       <Button
         variant="primary"
         size="lg"
         icon="next"
-        disabled={busy}
-        onClick={() => void submit(unsent, true).then((ok) => ok && setUnsent(null))}
+        disabled={c.busy}
+        onClick={() => check.resend()}
         tip="The mic check passed: send the result again and go on"
       >
         Continue
@@ -218,7 +167,7 @@ export function MicCheckScreen({ conn, view }: { conn: PlayerConnection; view: P
         variant="primary"
         size="lg"
         icon="refresh"
-        disabled={busy}
+        disabled={c.busy}
         onClick={start}
         tip="Listen again from the start"
       >
@@ -268,7 +217,7 @@ export function MicCheckScreen({ conn, view }: { conn: PlayerConnection; view: P
             <span className="small upper muted">Your microphone</span>
             <MicLevelMeter conn={conn} state={st} />
           </div>
-          {passedShown ? (
+          {c.passed ? (
             <Callout tone="live" icon="ok">
               <strong>Mic check passed.</strong> We can hear you clearly. Recording continues while you go on
             </Callout>
@@ -289,7 +238,7 @@ export function MicCheckScreen({ conn, view }: { conn: PlayerConnection; view: P
               </blockquote>
               <span className="row" style={{ gap: "var(--s2)" }}>
                 <span className="small upper muted">Speech heard</span>
-                <SpeechProgress ms={result?.speechMs ?? 0} need={need} />
+                <SpeechProgress ms={c.result?.speechMs ?? 0} need={need} />
               </span>
             </>
           )}
