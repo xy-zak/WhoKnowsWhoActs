@@ -209,7 +209,7 @@ export class Hub {
     const deps = this.sessionDeps(scenario, this.deps.stores.of(config.players), config);
     this.detach("A new session was created");
     // this.session is null while creating, so the SessionCreated batch is delivered by afterAttach()
-    const created = SessionManager.create(deps, config, notes);
+    const created = this.orNoSession(() => SessionManager.create(deps, config, notes));
     this.session = created;
     this.deps.log.info(
       { sessionId: created.sessionId, scenario: scenario.id, players: config.players },
@@ -225,7 +225,7 @@ export class Hub {
     const scenario = this.deps.scenarios.load(found.row.scenario_id);
     const deps = this.sessionDeps(scenario, found.store, found.row.config_json);
     this.detach("Switching session");
-    const m = SessionManager.load(deps, sessionId);
+    const m = this.orNoSession(() => SessionManager.load(deps, sessionId));
     this.session = m;
     this.deps.log.info({ sessionId }, "session resumed");
     this.afterAttach(m);
@@ -267,6 +267,27 @@ export class Hub {
       sock.data.seat = null;
     }
     this.seatSockets.clear();
+  }
+
+  /**
+   * Create or load the next session after the previous one was detached. When that fails, the
+   * facilitator pages show that no session is attached (not the one that left), then it throws.
+   */
+  private orNoSession(open: () => SessionManager): SessionManager {
+    try {
+      return open();
+    } catch (e) {
+      this.showNoSession();
+      throw e;
+    }
+  }
+
+  /** Tell the facilitator pages that no session is attached. */
+  private showNoSession() {
+    this.facilitator.emit("scenario", null);
+    this.facilitator.emit("events", { events: [], reset: true });
+    this.facilitator.emit("telemetry:live", { items: [], reset: true });
+    this.pushDashboard();
   }
 
   private afterAttach(m: SessionManager) {
@@ -377,6 +398,9 @@ export class Hub {
     const m = this.session;
     if (!m) return;
     for (const ev of events) {
+      // a seat whose hover is no longer collected (or whose browser left) shows none on the map
+      if (ev.type === "ParticipantWithdrawn" || ev.type === "SeatUnbound" || ev.type === "PlayerDisconnected")
+        this.facilitator.volatile.emit("presence:live", { seat: ev.payload.seat, regionId: null });
       if (ev.type === "SeatBound") {
         const entry = [...this.terminals.values()].find((t) => t.terminal === ev.payload.terminal);
         const sock = entry ? [...entry.sockets].at(-1) : undefined;
@@ -597,8 +621,8 @@ export class Hub {
       const seat = data.seat;
       const msg = PLAYER_SCHEMAS.presence.safeParse(raw);
       if (!m || !msg.success || !seat) return;
-      m.submitPresence(seat, msg.data.regionId);
-      this.facilitator.volatile.emit("presence:live", { seat, regionId: msg.data.regionId });
+      if (m.submitPresence(seat, msg.data.regionId))
+        this.facilitator.volatile.emit("presence:live", { seat, regionId: msg.data.regionId });
     });
 
     // volatile meter reading for LIVE: never stored, dropped for seats that are not recorded
@@ -717,10 +741,7 @@ export class Hub {
   release(sessionId: string) {
     if (this.session?.sessionId !== sessionId) return;
     this.detach("The session was deleted");
-    this.facilitator.emit("scenario", null);
-    this.facilitator.emit("events", { events: [], reset: true });
-    this.facilitator.emit("telemetry:live", { items: [], reset: true });
-    this.pushDashboard();
+    this.showNoSession();
   }
 
   /** Called after an erasure changed stored events of the attached session. */

@@ -110,7 +110,7 @@ describe("dashboard live figures (sockets)", () => {
     await fac.cmd("session:abort", { reason: "test" });
   }, 30_000);
 
-  it("unbinding a seat clears its live figures", async () => {
+  it("hover before consent is not shown; unbinding a seat leaves its figures empty", async () => {
     const fac = new FacilitatorClient(srv.url);
     facs.push(fac);
     await fac.connected();
@@ -119,8 +119,13 @@ describe("dashboard live figures (sockets)", () => {
     bots.push(b);
     await fac.cmd("seat:bind", { terminal: await b.waitForTerminal(), seat: 1 });
     await b.waitFor((v) => v.phase === "lobby");
+    const relayed: unknown[] = [];
+    fac.socket.on("presence:live", (m) => relayed.push(m));
+    // the lobby is before consent: the hover is neither kept nor relayed
     b.socket.emit("presence", { regionId: "A1-Ka" });
-    await vi.waitFor(() => expect(stats(1).hoverRegionId).toBe("A1-Ka"), { interval: 20 });
+    await new Promise((r) => setTimeout(r, 200));
+    expect(stats(1).hoverRegionId).toBeNull();
+    expect(relayed).toEqual([]);
     await fac.cmd("seat:unbind", { seat: 1, reason: "test" });
     expect(stats(1)).toMatchObject(EMPTY);
     await fac.cmd("session:abort", { reason: "test" });
@@ -153,6 +158,10 @@ describe("dashboard refresh timer", () => {
       const unknownRules = parseSessionConfig({ rules: "no-such-rules" });
       expect(() => hub.createSession("demo", unknownRules, "")).toThrow(/Unknown game rules/);
       expect(hub.session).toBeNull();
+      // the facilitator pages show that no session is attached, not the one that left
+      const dashboards = emit.mock.calls.filter(([name]) => name === "dashboard");
+      expect(dashboards.at(-1)?.[1]).toMatchObject({ state: null, stats: {}, live: false });
+      expect(emit.mock.calls.some(([name, v]) => name === "scenario" && v === null)).toBe(true);
       emit.mockClear();
       await new Promise((r) => setTimeout(r, 300));
       expect(emit.mock.calls.filter(([name]) => name === "dashboard")).toEqual([]);

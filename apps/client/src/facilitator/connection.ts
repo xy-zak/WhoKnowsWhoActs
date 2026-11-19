@@ -69,6 +69,8 @@ export class FacilitatorConnection {
       this.store.set((s) => ({
         ...s,
         events: (m.reset ? m.events : [...s.events, ...m.events]).slice(-20_000),
+        // another session (or none): no hover of the previous one stays on the map
+        presence: m.reset ? {} : s.presence,
       })),
     );
     this.socket.on("telemetry:live", (m) =>

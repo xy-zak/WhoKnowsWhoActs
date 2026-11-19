@@ -1139,13 +1139,8 @@ export class SessionManager {
     batch: { clockOffsetMs: number; items: readonly unknown[] },
   ): { stored: number; live: StoredTelemetry[] } {
     const none = { stored: 0, live: [] };
-    const s = this.state.seats[seat];
-    const code = s?.participantCode;
-    if (!s || !code || this.isFinal) return none;
-    // No interaction telemetry is stored before the participant has consented,
-    if (s.consent !== "given" && s.consent !== "skipped") return none;
-    // nor after they withdrew.
-    if (s.withdrawn) return none;
+    const code = this.collectsInteraction(seat);
+    if (!code) return none;
     const items: TelemetryItem[] = [];
     for (const raw of batch.items) {
       const it = parseTelemetryItem(raw);
@@ -1163,9 +1158,26 @@ export class SessionManager {
     return { stored: stored.length, live: this.monitor.telemetry(seat, items, stored, this.clock()) };
   }
 
-  /** The region a seat's player points at now (`presence`, volatile: never stored). */
-  submitPresence(seat: number, regionId: string | null) {
+  /**
+   * The region a seat's player points at now (`presence`, volatile: never stored). Kept and shown
+   * live under the same rule as telemetry. Returns whether it was kept (the hub relays it then).
+   */
+  submitPresence(seat: number, regionId: string | null): boolean {
+    if (!this.collectsInteraction(seat)) return false;
     this.monitor.hover(seat, regionId);
+    return true;
+  }
+
+  /**
+   * The participant code of a seat whose interaction (telemetry, hover) may be collected now, or
+   * null: only after consent was given or skipped, never after withdrawal, while the session runs.
+   */
+  private collectsInteraction(seat: number): string | null {
+    const s = this.state.seats[seat];
+    if (!s?.participantCode || this.isFinal) return null;
+    if (s.consent !== "given" && s.consent !== "skipped") return null;
+    if (s.withdrawn) return null;
+    return s.participantCode;
   }
 
   /* ═════════════════════════ intents ═════════════════════════ */

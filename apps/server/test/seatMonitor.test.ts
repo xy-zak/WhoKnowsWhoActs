@@ -56,13 +56,36 @@ describe("telemetry", () => {
   });
 });
 
+describe("presence (hover)", () => {
+  it("is kept only after consent, and not after withdrawal (which clears it)", () => {
+    d = direct({});
+    d.m.bindSeat(1, 1);
+    expect(d.m.submitPresence(1, "A1-Ka")).toBe(false); // lobby: no consent yet
+    d.m.bindSeat(2, 2);
+    d.m.randomiseLabels();
+    d.m.startOnboarding();
+    expect(d.m.submitPresence(1, "A1-Ka")).toBe(false);
+    expect(stats(1).hoverRegionId).toBeNull();
+    consent(d.m, 1);
+    expect(d.m.submitPresence(1, "A1-Ka")).toBe(true);
+    expect(stats(1).hoverRegionId).toBe("A1-Ka");
+    consent(d.m, 2, true, false); // declined
+    expect(d.m.submitPresence(2, "B1-Ka")).toBe(false);
+    d.m.withdraw(1);
+    expect(stats(1).hoverRegionId).toBeNull();
+    expect(d.m.submitPresence(1, "A1-Ka")).toBe(false);
+    expect(stats(1).hoverRegionId).toBeNull();
+  });
+});
+
 describe("seat monitor", () => {
   it("unbinding a seat clears that seat's figures", () => {
     d = direct({});
     d.m.bindSeat(1, 1);
     d.m.bindSeat(2, 2);
-    d.m.submitPresence(1, "A1-Ka");
-    d.m.submitPresence(2, "B1-Ka");
+    // in the lobby nothing is collected yet (no consent): feed the monitor directly
+    d.m.monitor.hover(1, "A1-Ka");
+    d.m.monitor.hover(2, "B1-Ka");
     d.m.unbindSeat(1, "test");
     expect(stats(1)).toMatchObject(EMPTY);
     expect(stats(2).hoverRegionId).toBe("B1-Ka");
