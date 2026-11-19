@@ -6,7 +6,7 @@ import { DEFAULT_GAME_RULES, GAME_RULES } from "./game/rules";
 import { CROCKFORD, normaliseParticipantCode } from "./ids";
 import { DISSOCIATED_PAIRINGS, K_LABELS, type LabelPairing, P_LABELS, pairedP, pairingPerm } from "./labels";
 import type { DataClass, RecordMeta } from "./meta";
-import { MESSAGES, type MessageDef } from "./protocol";
+import { FACILITATOR_SCHEMAS, type InboundDoc, MESSAGES, type OutboundDoc, PLAYER_SCHEMAS } from "./protocol";
 import { BUILT_IN_POLICIES } from "./simulation/policies";
 import {
   TELEMETRY_DEFS,
@@ -528,42 +528,33 @@ export function renderGameRules(): string {
 
 /* ─────────────────────────── Message catalogue ─────────────────────────── */
 
-function messagePayload(m: MessageDef): string {
-  if (typeof m.schema === "string") return m.schema;
-  return typeString(toJS(m.schema, "input"), true);
-}
-
 export function renderMessageCatalogue(): string {
   const out: string[] = [];
-  const groups: Array<[MessageDef["namespace"], MessageDef["direction"]]> = [
-    ["/player", "client→server"],
-    ["/player", "server→client"],
-    ["/facilitator", "client→server"],
-    ["/facilitator", "server→client"],
-  ];
-  for (const [ns, dir] of groups) {
-    const entries = Object.entries(MESSAGES).filter(([, m]) => m.namespace === ns && m.direction === dir);
-    out.push(`#### ${code(ns)} — ${dir}`, "");
-    const withAck = dir === "client→server";
-    out.push(
-      table(
-        withAck
-          ? ["Message", "Payload", "Ack (callback)", "Logged as", "Description"]
-          : ["Message", "Payload", "Logged as", "Description"],
-        entries.map(([name, m]) =>
+  for (const ns of ["/player", "/facilitator"] as const) {
+    const schemas: Record<string, z.ZodType> = ns === "/player" ? PLAYER_SCHEMAS : FACILITATOR_SCHEMAS;
+    for (const [dir, messages] of Object.entries<Record<string, InboundDoc | OutboundDoc>>(MESSAGES[ns])) {
+      out.push(`#### ${code(ns)} — ${dir}`, "");
+      const withAck = dir === "client→server";
+      out.push(
+        table(
           withAck
-            ? [
-                code(name),
-                code(messagePayload(m)),
-                m.ack ? code(m.ack) : "— (no ack)",
-                m.logged,
-                m.description,
-              ]
-            : [code(name), code(messagePayload(m)), m.logged, m.description],
+            ? ["Message", "Payload", "Ack (callback)", "Logged as", "Description"]
+            : ["Message", "Payload", "Logged as", "Description"],
+          Object.entries(messages).map(([name, m]) =>
+            "schema" in m
+              ? [code(name), code(m.schema), m.logged, m.description]
+              : [
+                  code(name),
+                  code(typeString(toJS(schemas[name] as z.ZodType, "input"), true)),
+                  m.ack ? code(m.ack) : "— (no ack)",
+                  m.logged,
+                  m.description,
+                ],
+          ),
         ),
-      ),
-      "",
-    );
+        "",
+      );
+    }
   }
   return out.join("\n").trimEnd();
 }

@@ -338,455 +338,312 @@ export const FACILITATOR_SCHEMAS = {
 
 /* ─────────────────────────── Catalogue (drives docs/NETWORKING.md) ─────────────────────────── */
 
-export interface MessageDef {
-  namespace: "/player" | "/facilitator";
-  direction: "client→server" | "server→client";
-  description: string;
-  /** zod schema (client→server) or TypeScript type name (server→client). */
-  schema: z.ZodType | string;
-  ack?: string;
-  logged: string;
-}
-
-/** A catalogue entry of a client→server message: its schema must be the one in the schema table. */
-type InboundDef<NS extends MessageDef["namespace"], S extends z.ZodType> = Omit<
-  MessageDef,
-  "namespace" | "direction" | "schema"
-> & { namespace: NS; direction: "client→server"; schema: S };
-type OutboundDef<NS extends MessageDef["namespace"]> = Omit<
-  MessageDef,
-  "namespace" | "direction" | "schema" | "ack"
-> & { namespace: NS; direction: "server→client"; schema: string; ack?: never };
+export type InboundDoc = { description: string; ack?: string; logged: string };
+/** `schema`: the TypeScript type of the payload. */
+export type OutboundDoc = { description: string; schema: string; logged: string };
 
 /**
- * Every message of the socket protocol, documented. The type makes the catalogue complete: a
- * message added to a schema table or an event map (socket.ts) without an entry here, an entry
- * for a message that does not exist, or one in the wrong namespace or direction, fails to compile.
+ * Every message of the socket protocol, documented by namespace and direction. The type makes the
+ * catalogue complete: a message added to a schema table or an event map (socket.ts) without an entry
+ * here, an entry for a message that does not exist, or one in the wrong namespace or direction, fails
+ * to compile. A client→server message is documented with the schema of its table (PLAYER_SCHEMAS or
+ * FACILITATOR_SCHEMAS), the one the server validates with.
  */
-type MessageCatalogue = {
-  [K in keyof typeof PLAYER_SCHEMAS]: InboundDef<"/player", (typeof PLAYER_SCHEMAS)[K]>;
-} & {
-  [K in keyof PlayerServerToClient]: OutboundDef<"/player">;
-} & {
-  [K in keyof typeof FACILITATOR_SCHEMAS]: InboundDef<"/facilitator", (typeof FACILITATOR_SCHEMAS)[K]>;
-} & {
-  [K in keyof FacilitatorServerToClient]: OutboundDef<"/facilitator">;
-};
-
-export const MESSAGES: MessageCatalogue = {
-  /* /player C→S */
-  hello: {
-    namespace: "/player",
-    direction: "client→server",
-    description:
-      "First message after connecting. Identifies the browser (client) and, if present, re-claims a seat.",
-    schema: PlayerHello,
-    ack: "{ terminal: number, seat: number | null }",
-    logged: "PlayerConnected (only if the seat token is valid)",
+export const MESSAGES: {
+  "/player": {
+    "client→server": Record<keyof typeof PLAYER_SCHEMAS, InboundDoc>;
+    "server→client": Record<keyof PlayerServerToClient, OutboundDoc>;
+  };
+  "/facilitator": {
+    "client→server": Record<keyof typeof FACILITATOR_SCHEMAS, InboundDoc>;
+    "server→client": Record<keyof FacilitatorServerToClient, OutboundDoc>;
+  };
+} = {
+  "/player": {
+    "client→server": {
+      hello: {
+        description:
+          "First message after connecting. Identifies the browser (client) and, if present, re-claims a seat.",
+        ack: "{ terminal: number, seat: number | null }",
+        logged: "PlayerConnected (only if the seat token is valid)",
+      },
+      "clock:ping": {
+        description: "Clock synchronisation sample (NTP-style). Sent 5× on connect and every 60 s.",
+        ack: "{ t0: number, serverTs: number }",
+        logged: "Result stored by the client as telemetry 'clock_sync'",
+      },
+      "consent:submit": {
+        description: "Answers of the consent form.",
+        ack: "Ack",
+        logged: "ConsentRecorded",
+      },
+      "demographics:submit": {
+        description: "Answers of the demographics questionnaire.",
+        ack: "Ack",
+        logged: "DemographicsSubmitted",
+      },
+      "mic:check": {
+        description:
+          "Result of the player's own mic check (sessions that record audio; the onboarding step after consent). Refused while PlayerView.audio.micCheckHeld (another seat is still in consent). Only processing flags and the sample rate are sent, never the device name or id.",
+        ack: "Ack",
+        logged: "MicCheckCompleted",
+      },
+      "briefing:ack": {
+        description: "Player confirms having read the briefing.",
+        ack: "Ack",
+        logged: "BriefingAcknowledged",
+      },
+      intent: {
+        description: "Request to propose or decide a region. Validated by the rules engine.",
+        ack: "{ ok: true, seq } | { ok: false, reason, detail }",
+        logged: "ProposalMade / DecisionMade, or IntentRejected",
+      },
+      telemetry: {
+        description: "Batch of UI telemetry items (every 2 s or 20 items).",
+        ack: "{ stored: number }",
+        logged: "telemetry table (one row per valid item)",
+      },
+      presence: {
+        description: "Volatile 'currently hovering' signal for the facilitator's live mirrors.",
+        logged:
+          "Not stored (ephemeral). The persisted record is telemetry 'region_hover'. Dropped, like telemetry, before consent, after a withdrawal and once the session ended.",
+      },
+      "audio:start": {
+        description:
+          "A new audio track starts (one continuous capture run). Accepted only while the seat should record (PlayerView.audio.record: audio consent given, every seat done with consent, mic check reached and not skipped, recording not paused, game not complete, not a fake player or agent). A refused start is permanent (retry false): the browser drops the track's chunks too.",
+        ack: "AudioAck (ok, or refused with retry true = send again later / false = drop)",
+        logged: "AudioTrackStarted (the track is opened in the encrypted audio store)",
+      },
+      "audio:chunk": {
+        description:
+          "About 5 s of audio of an open track (16 kHz mono s16le, binary). The browser keeps unacknowledged chunks in memory only and resends them in order after a reconnect; a resend with the same trackId and seq is stored once (ack ok, duplicate true). Late chunks of a closed track (the server closes it on a disconnect, restart, recording pause or at game complete) are accepted for 10 minutes after the close or the previous late chunk; audio captured while recording was paused or after the game was complete is never stored (a chunk that starts before such a moment is cut there, one that starts after it is refused).",
+        ack: "AudioAck<{ trackId, seq }>",
+        logged: "Encrypted audio store only (audio_chunks + the track's .wka file), never the event log",
+      },
+      "audio:stop": {
+        description:
+          "The browser stopped capturing a track (pause, game complete, unload, permission lost, error). Always accepted for the seat's own tracks, also after the server closed the track itself.",
+        ack: "AudioAck",
+        logged: "AudioTrackStopped",
+      },
+      "audio:level": {
+        description:
+          "Volatile microphone meter reading (about 4 Hz) for the facilitator's LIVE mic column; dropped when the network is busy.",
+        logged: "Not stored (ephemeral).",
+      },
+    },
+    "server→client": {
+      terminal: {
+        description: "Client number assigned to this browser (shown in large type while unassigned).",
+        schema: "{ terminal: number }",
+        logged: "—",
+      },
+      bound: {
+        description: "This browser was bound to a seat; carries the reconnect token.",
+        schema: "{ seat: number, sessionId: string, seatToken: string }",
+        logged: "— (SeatBound is logged when the facilitator binds)",
+      },
+      unbound: {
+        description:
+          "The seat binding was removed (the facilitator unbound it, or it was opened in another window); the client forgets its seat token and returns to the waiting screen.",
+        schema: "{ reason: string }",
+        logged: "—",
+      },
+      detached: {
+        description:
+          "The session was detached on the server (another session was resumed or created, it was reloaded after an erasure, or it was deleted). The client KEEPS its seat token and waits; when the session is attached again, `rehello` re-claims the seat.",
+        schema: "{ reason: string }",
+        logged: "—",
+      },
+      rehello: {
+        description:
+          "A session was (re)attached on the server; the client re-sends `hello` with its stored seat token so its seat is re-claimed.",
+        schema: "{}",
+        logged: "—",
+      },
+      state: {
+        description:
+          "Full projected state for this player (PlayerView): phase, round, own labels and quotas, the grid (board size, knowledge-type names), the scores of the OWN knowledge type only, the map score, which knowledge type the player acts on, and the marks (proposals and decisions).",
+        schema: "PlayerView",
+        logged: "Client acknowledges with telemetry 'state_received'",
+      },
+    },
   },
-  "clock:ping": {
-    namespace: "/player",
-    direction: "client→server",
-    description: "Clock synchronisation sample (NTP-style). Sent 5× on connect and every 60 s.",
-    schema: ClockPing,
-    ack: "{ t0: number, serverTs: number }",
-    logged: "Result stored by the client as telemetry 'clock_sync'",
-  },
-  "consent:submit": {
-    namespace: "/player",
-    direction: "client→server",
-    description: "Answers of the consent form.",
-    schema: ConsentSubmit,
-    ack: "Ack",
-    logged: "ConsentRecorded",
-  },
-  "demographics:submit": {
-    namespace: "/player",
-    direction: "client→server",
-    description: "Answers of the demographics questionnaire.",
-    schema: DemographicsSubmit,
-    ack: "Ack",
-    logged: "DemographicsSubmitted",
-  },
-  "mic:check": {
-    namespace: "/player",
-    direction: "client→server",
-    description:
-      "Result of the player's own mic check (sessions that record audio; the onboarding step after consent). Refused while PlayerView.audio.micCheckHeld (another seat is still in consent). Only processing flags and the sample rate are sent, never the device name or id.",
-    schema: MicCheckSubmit,
-    ack: "Ack",
-    logged: "MicCheckCompleted",
-  },
-  "briefing:ack": {
-    namespace: "/player",
-    direction: "client→server",
-    description: "Player confirms having read the briefing.",
-    schema: BriefingAck,
-    ack: "Ack",
-    logged: "BriefingAcknowledged",
-  },
-  intent: {
-    namespace: "/player",
-    direction: "client→server",
-    description: "Request to propose or decide a region. Validated by the rules engine.",
-    schema: IntentMsg,
-    ack: "{ ok: true, seq } | { ok: false, reason, detail }",
-    logged: "ProposalMade / DecisionMade, or IntentRejected",
-  },
-  telemetry: {
-    namespace: "/player",
-    direction: "client→server",
-    description: "Batch of UI telemetry items (every 2 s or 20 items).",
-    schema: TelemetryBatch,
-    ack: "{ stored: number }",
-    logged: "telemetry table (one row per valid item)",
-  },
-  presence: {
-    namespace: "/player",
-    direction: "client→server",
-    description: "Volatile 'currently hovering' signal for the facilitator's live mirrors.",
-    schema: Presence,
-    logged:
-      "Not stored (ephemeral). The persisted record is telemetry 'region_hover'. Dropped, like telemetry, before consent, after a withdrawal and once the session ended.",
-  },
-  "audio:start": {
-    namespace: "/player",
-    direction: "client→server",
-    description:
-      "A new audio track starts (one continuous capture run). Accepted only while the seat should record (PlayerView.audio.record: audio consent given, every seat done with consent, mic check reached and not skipped, recording not paused, game not complete, not a fake player or agent). A refused start is permanent (retry false): the browser drops the track's chunks too.",
-    schema: AudioStart,
-    ack: "AudioAck (ok, or refused with retry true = send again later / false = drop)",
-    logged: "AudioTrackStarted (the track is opened in the encrypted audio store)",
-  },
-  "audio:chunk": {
-    namespace: "/player",
-    direction: "client→server",
-    description:
-      "About 5 s of audio of an open track (16 kHz mono s16le, binary). The browser keeps unacknowledged chunks in memory only and resends them in order after a reconnect; a resend with the same trackId and seq is stored once (ack ok, duplicate true). Late chunks of a closed track (the server closes it on a disconnect, restart, recording pause or at game complete) are accepted for 10 minutes after the close or the previous late chunk; audio captured while recording was paused or after the game was complete is never stored (a chunk that starts before such a moment is cut there, one that starts after it is refused).",
-    schema: AudioChunk,
-    ack: "AudioAck<{ trackId, seq }>",
-    logged: "Encrypted audio store only (audio_chunks + the track's .wka file), never the event log",
-  },
-  "audio:stop": {
-    namespace: "/player",
-    direction: "client→server",
-    description:
-      "The browser stopped capturing a track (pause, game complete, unload, permission lost, error). Always accepted for the seat's own tracks, also after the server closed the track itself.",
-    schema: AudioStop,
-    ack: "AudioAck",
-    logged: "AudioTrackStopped",
-  },
-  "audio:level": {
-    namespace: "/player",
-    direction: "client→server",
-    description:
-      "Volatile microphone meter reading (about 4 Hz) for the facilitator's LIVE mic column; dropped when the network is busy.",
-    schema: AudioLevel,
-    logged: "Not stored (ephemeral).",
-  },
-  /* /player S→C */
-  terminal: {
-    namespace: "/player",
-    direction: "server→client",
-    description: "Client number assigned to this browser (shown in large type while unassigned).",
-    schema: "{ terminal: number }",
-    logged: "—",
-  },
-  bound: {
-    namespace: "/player",
-    direction: "server→client",
-    description: "This browser was bound to a seat; carries the reconnect token.",
-    schema: "{ seat: number, sessionId: string, seatToken: string }",
-    logged: "— (SeatBound is logged when the facilitator binds)",
-  },
-  unbound: {
-    namespace: "/player",
-    direction: "server→client",
-    description:
-      "The seat binding was removed (the facilitator unbound it, or it was opened in another window); the client forgets its seat token and returns to the waiting screen.",
-    schema: "{ reason: string }",
-    logged: "—",
-  },
-  detached: {
-    namespace: "/player",
-    direction: "server→client",
-    description:
-      "The session was detached on the server (another session was resumed or created, it was reloaded after an erasure, or it was deleted). The client KEEPS its seat token and waits; when the session is attached again, `rehello` re-claims the seat.",
-    schema: "{ reason: string }",
-    logged: "—",
-  },
-  rehello: {
-    namespace: "/player",
-    direction: "server→client",
-    description:
-      "A session was (re)attached on the server; the client re-sends `hello` with its stored seat token so its seat is re-claimed.",
-    schema: "{}",
-    logged: "—",
-  },
-  state: {
-    namespace: "/player",
-    direction: "server→client",
-    description:
-      "Full projected state for this player (PlayerView): phase, round, own labels and quotas, the grid (board size, knowledge-type names), the scores of the OWN knowledge type only, the map score, which knowledge type the player acts on, and the marks (proposals and decisions).",
-    schema: "PlayerView",
-    logged: "Client acknowledges with telemetry 'state_received'",
-  },
-  /* /facilitator C→S */
-  "session:create": {
-    namespace: "/facilitator",
-    direction: "client→server",
-    description:
-      "Create a new session from a scenario and config. With players = 'simulated' it goes into the simulation database and every seat gets an agent.",
-    schema: SessionCreate,
-    ack: "Ack<{ sessionId }>",
-    logged: "SessionCreated [+ AgentBound per seat when simulated]",
-  },
-  "session:resume": {
-    namespace: "/facilitator",
-    direction: "client→server",
-    description: "Re-open an unfinished session (e.g. after a server restart).",
-    schema: SessionResume,
-    ack: "Ack",
-    logged: "—",
-  },
-  "seat:bind": {
-    namespace: "/facilitator",
-    direction: "client→server",
-    description:
-      "Bind a connected client to a seat; generates the participant code (real sessions only: simulated seats are taken by agents).",
-    schema: SeatBind,
-    ack: "Ack<{ participantCode }>",
-    logged: "SeatBound, PlayerConnected",
-  },
-  "fake:add": {
-    namespace: "/facilitator",
-    direction: "client→server",
-    description:
-      "Real sessions, lobby only: the server starts fake players (test clients that connect over the network like a browser) and binds them to the given seats. They skip onboarding, get no participant code and propose/decide at random.",
-    schema: FakeAdd,
-    ack: "Ack<{ seats }>",
-    logged: "SeatBound (fake = true), PlayerConnected",
-  },
-  "seat:unbind": {
-    namespace: "/facilitator",
-    direction: "client→server",
-    description: "Remove a seat binding (lobby only).",
-    schema: SeatUnbind,
-    ack: "Ack",
-    logged: "SeatUnbound",
-  },
-  "labels:set": {
-    namespace: "/facilitator",
-    direction: "client→server",
-    description:
-      "Set the K label of every seat (and view when viewAssignment = manual) plus the K–P pairing (aligned or dissociated D1–D6); the server derives each P.",
-    schema: LabelsSet,
-    ack: "Ack",
-    logged: "LabelsAssigned (method = manual)",
-  },
-  "labels:randomise": {
-    namespace: "/facilitator",
-    direction: "client→server",
-    description:
-      "Shuffle which seat gets which K (optional) and apply a pairing; dissociated without a number picks D1–D6 at random.",
-    schema: LabelsRandomise,
-    ack: "Ack",
-    logged: "LabelsAssigned (method = random, with seed)",
-  },
-  "onboarding:start": {
-    namespace: "/facilitator",
-    direction: "client→server",
-    description: "Lock seats and send players to consent / demographics / briefing.",
-    schema: Empty,
-    ack: "Ack",
-    logged: "OnboardingStarted",
-  },
-  "simulation:start": {
-    namespace: "/facilitator",
-    direction: "client→server",
-    description:
-      "Simulated sessions only: start the game with the agents (no onboarding) and begin round 1; the agents then play by their policies.",
-    schema: Empty,
-    ack: "Ack",
-    logged: "OnboardingStarted (no steps), RoundStarted",
-  },
-  "calibration:start": {
-    namespace: "/facilitator",
-    direction: "client→server",
-    description:
-      "Sessions that record audio: start the calibration once every seat is ready. The server then times the turns (each seat reads a sentence aloud while the others stay quiet) and runs a quick quality check.",
-    schema: Empty,
-    ack: "Ack",
-    logged: "CalibrationStarted, then CalibrationTurn per seat, CalibrationCompleted and CalibrationChecked",
-  },
-  "calibration:redo": {
-    namespace: "/facilitator",
-    direction: "client→server",
-    description: "Run the calibration again (e.g. after a seat moved closer to its microphone).",
-    schema: Empty,
-    ack: "Ack",
-    logged: "CalibrationStarted, then as calibration:start",
-  },
-  "calibration:skip": {
-    namespace: "/facilitator",
-    direction: "client→server",
-    description: "Skip (or cancel) the calibration, after confirmation; round 1 may then start without it.",
-    schema: CalibrationSkip,
-    ack: "Ack",
-    logged: "CalibrationSkipped",
-  },
-  "mic:skip": {
-    namespace: "/facilitator",
-    direction: "client→server",
-    description:
-      "Skip a seat's mic check (e.g. no working microphone): the player continues onboarding and the seat is not recorded.",
-    schema: MicSkip,
-    ack: "Ack",
-    logged: "MicCheckSkipped",
-  },
-  "recording:pause": {
-    namespace: "/facilitator",
-    direction: "client→server",
-    description:
-      "Pause audio recording for every seat, after confirmation (players cannot mute themselves). The game goes on.",
-    schema: RecordingPause,
-    ack: "Ack",
-    logged: "RecordingPaused (+ AudioTrackStopped per recording seat)",
-  },
-  "recording:resume": {
-    namespace: "/facilitator",
-    direction: "client→server",
-    description: "Resume audio recording; every recorded seat starts a new track.",
-    schema: Empty,
-    ack: "Ack",
-    logged: "RecordingResumed (+ AudioTrackStarted per recording seat)",
-  },
-  "round:start": {
-    namespace: "/facilitator",
-    direction: "client→server",
-    description: "Start the next round.",
-    schema: Empty,
-    ack: "Ack",
-    logged: "RoundStarted",
-  },
-  "round:end": {
-    namespace: "/facilitator",
-    direction: "client→server",
-    description: "Force-end the current round.",
-    schema: Empty,
-    ack: "Ack",
-    logged: "RoundCompleted (reason = facilitator) [+ GameCompleted after the last round]",
-  },
-  "game:pause": {
-    namespace: "/facilitator",
-    direction: "client→server",
-    description: "Pause the active round.",
-    schema: Empty,
-    ack: "Ack",
-    logged: "GamePaused",
-  },
-  "game:resume": {
-    namespace: "/facilitator",
-    direction: "client→server",
-    description: "Resume after a pause.",
-    schema: Empty,
-    ack: "Ack",
-    logged: "GameResumed",
-  },
-  "action:revoke": {
-    namespace: "/facilitator",
-    direction: "client→server",
-    description: "Undo a proposal/decision of the current round.",
-    schema: ActionRevoke,
-    ack: "Ack",
-    logged: "ActionRevoked",
-  },
-  broadcast: {
-    namespace: "/facilitator",
-    direction: "client→server",
-    description: "Show a message on every player's screen.",
-    schema: BroadcastMsg,
-    ack: "Ack",
-    logged: "FacilitatorBroadcast",
-  },
-  note: {
-    namespace: "/facilitator",
-    direction: "client→server",
-    description: "Add a facilitator annotation to the log.",
-    schema: NoteMsg,
-    ack: "Ack",
-    logged: "SessionNote",
-  },
-  "participant:withdraw": {
-    namespace: "/facilitator",
-    direction: "client→server",
-    description: "Mark a participant as withdrawn during the session.",
-    schema: WithdrawMsg,
-    ack: "Ack",
-    logged: "ParticipantWithdrawn",
-  },
-  "game:end": {
-    namespace: "/facilitator",
-    direction: "client→server",
-    description: "End the game early.",
-    schema: Empty,
-    ack: "Ack",
-    logged: "[RoundCompleted] + GameCompleted (reason = facilitator)",
-  },
-  "session:close": {
-    namespace: "/facilitator",
-    direction: "client→server",
-    description: "Archive the session; players return to the waiting screen.",
-    schema: Empty,
-    ack: "Ack",
-    logged: "SessionClosed",
-  },
-  "session:abort": {
-    namespace: "/facilitator",
-    direction: "client→server",
-    description: "Abandon the session (data kept, marked aborted).",
-    schema: AbortMsg,
-    ack: "Ack",
-    logged: "SessionAborted",
-  },
-  /* /facilitator S→C */
-  dashboard: {
-    namespace: "/facilitator",
-    direction: "server→client",
-    description:
-      "Full session state (all seats incl. participant codes), connected clients and live per-seat statistics.",
-    schema: "DashboardMsg",
-    logged: "—",
-  },
-  scenario: {
-    namespace: "/facilitator",
-    direction: "server→client",
-    description: "The loaded scenario with ALL views (for the composite map). Sent when a session is loaded.",
-    schema: "Scenario | null",
-    logged: "—",
-  },
-  events: {
-    namespace: "/facilitator",
-    direction: "server→client",
-    description:
-      "New events for the live log (demographic answers redacted). The backlog is sent on connect.",
-    schema: "{ events: StoredEvent[], reset: boolean }",
-    logged: "—",
-  },
-  "telemetry:live": {
-    namespace: "/facilitator",
-    direction: "server→client",
-    description: "Newly stored telemetry rows (chatty types such as state_received are omitted).",
-    schema: "{ items: StoredTelemetry[] }",
-    logged: "—",
-  },
-  "presence:live": {
-    namespace: "/facilitator",
-    direction: "server→client",
-    description:
-      "Relayed hover presence of a seat for the live mirrors; null when the seat withdraws, is unbound or disconnects.",
-    schema: "{ seat: number, regionId: string | null }",
-    logged: "—",
+  "/facilitator": {
+    "client→server": {
+      "session:create": {
+        description:
+          "Create a new session from a scenario and config. With players = 'simulated' it goes into the simulation database and every seat gets an agent.",
+        ack: "Ack<{ sessionId }>",
+        logged: "SessionCreated [+ AgentBound per seat when simulated]",
+      },
+      "session:resume": {
+        description: "Re-open an unfinished session (e.g. after a server restart).",
+        ack: "Ack",
+        logged: "—",
+      },
+      "seat:bind": {
+        description:
+          "Bind a connected client to a seat; generates the participant code (real sessions only: simulated seats are taken by agents).",
+        ack: "Ack<{ participantCode }>",
+        logged: "SeatBound, PlayerConnected",
+      },
+      "fake:add": {
+        description:
+          "Real sessions, lobby only: the server starts fake players (test clients that connect over the network like a browser) and binds them to the given seats. They skip onboarding, get no participant code and propose/decide at random.",
+        ack: "Ack<{ seats }>",
+        logged: "SeatBound (fake = true), PlayerConnected",
+      },
+      "seat:unbind": {
+        description: "Remove a seat binding (lobby only).",
+        ack: "Ack",
+        logged: "SeatUnbound",
+      },
+      "labels:set": {
+        description:
+          "Set the K label of every seat (and view when viewAssignment = manual) plus the K–P pairing (aligned or dissociated D1–D6); the server derives each P.",
+        ack: "Ack",
+        logged: "LabelsAssigned (method = manual)",
+      },
+      "labels:randomise": {
+        description:
+          "Shuffle which seat gets which K (optional) and apply a pairing; dissociated without a number picks D1–D6 at random.",
+        ack: "Ack",
+        logged: "LabelsAssigned (method = random, with seed)",
+      },
+      "onboarding:start": {
+        description: "Lock seats and send players to consent / demographics / briefing.",
+        ack: "Ack",
+        logged: "OnboardingStarted",
+      },
+      "simulation:start": {
+        description:
+          "Simulated sessions only: start the game with the agents (no onboarding) and begin round 1; the agents then play by their policies.",
+        ack: "Ack",
+        logged: "OnboardingStarted (no steps), RoundStarted",
+      },
+      "calibration:start": {
+        description:
+          "Sessions that record audio: start the calibration once every seat is ready. The server then times the turns (each seat reads a sentence aloud while the others stay quiet) and runs a quick quality check.",
+        ack: "Ack",
+        logged:
+          "CalibrationStarted, then CalibrationTurn per seat, CalibrationCompleted and CalibrationChecked",
+      },
+      "calibration:redo": {
+        description: "Run the calibration again (e.g. after a seat moved closer to its microphone).",
+        ack: "Ack",
+        logged: "CalibrationStarted, then as calibration:start",
+      },
+      "calibration:skip": {
+        description:
+          "Skip (or cancel) the calibration, after confirmation; round 1 may then start without it.",
+        ack: "Ack",
+        logged: "CalibrationSkipped",
+      },
+      "mic:skip": {
+        description:
+          "Skip a seat's mic check (e.g. no working microphone): the player continues onboarding and the seat is not recorded.",
+        ack: "Ack",
+        logged: "MicCheckSkipped",
+      },
+      "recording:pause": {
+        description:
+          "Pause audio recording for every seat, after confirmation (players cannot mute themselves). The game goes on.",
+        ack: "Ack",
+        logged: "RecordingPaused (+ AudioTrackStopped per recording seat)",
+      },
+      "recording:resume": {
+        description: "Resume audio recording; every recorded seat starts a new track.",
+        ack: "Ack",
+        logged: "RecordingResumed (+ AudioTrackStarted per recording seat)",
+      },
+      "round:start": {
+        description: "Start the next round.",
+        ack: "Ack",
+        logged: "RoundStarted",
+      },
+      "round:end": {
+        description: "Force-end the current round.",
+        ack: "Ack",
+        logged: "RoundCompleted (reason = facilitator) [+ GameCompleted after the last round]",
+      },
+      "game:pause": {
+        description: "Pause the active round.",
+        ack: "Ack",
+        logged: "GamePaused",
+      },
+      "game:resume": {
+        description: "Resume after a pause.",
+        ack: "Ack",
+        logged: "GameResumed",
+      },
+      "action:revoke": {
+        description: "Undo a proposal/decision of the current round.",
+        ack: "Ack",
+        logged: "ActionRevoked",
+      },
+      broadcast: {
+        description: "Show a message on every player's screen.",
+        ack: "Ack",
+        logged: "FacilitatorBroadcast",
+      },
+      note: {
+        description: "Add a facilitator annotation to the log.",
+        ack: "Ack",
+        logged: "SessionNote",
+      },
+      "participant:withdraw": {
+        description: "Mark a participant as withdrawn during the session.",
+        ack: "Ack",
+        logged: "ParticipantWithdrawn",
+      },
+      "game:end": {
+        description: "End the game early.",
+        ack: "Ack",
+        logged: "[RoundCompleted] + GameCompleted (reason = facilitator)",
+      },
+      "session:close": {
+        description: "Archive the session; players return to the waiting screen.",
+        ack: "Ack",
+        logged: "SessionClosed",
+      },
+      "session:abort": {
+        description: "Abandon the session (data kept, marked aborted).",
+        ack: "Ack",
+        logged: "SessionAborted",
+      },
+    },
+    "server→client": {
+      dashboard: {
+        description:
+          "Full session state (all seats incl. participant codes), connected clients and live per-seat statistics.",
+        schema: "DashboardMsg",
+        logged: "—",
+      },
+      scenario: {
+        description:
+          "The loaded scenario with ALL views (for the composite map). Sent when a session is loaded.",
+        schema: "Scenario | null",
+        logged: "—",
+      },
+      events: {
+        description:
+          "New events for the live log (demographic answers redacted). The backlog is sent on connect.",
+        schema: "{ events: StoredEvent[], reset: boolean }",
+        logged: "—",
+      },
+      "telemetry:live": {
+        description: "Newly stored telemetry rows (chatty types such as state_received are omitted).",
+        schema: "{ items: StoredTelemetry[] }",
+        logged: "—",
+      },
+      "presence:live": {
+        description:
+          "Relayed hover presence of a seat for the live mirrors; null when the seat withdraws, is unbound or disconnects.",
+        schema: "{ seat: number, regionId: string | null }",
+        logged: "—",
+      },
+    },
   },
 };
 
