@@ -375,9 +375,7 @@ export function SetupStage({ conn }: { conn: FacilitatorConnection }) {
         icon: "stop",
       })
     ) {
-      void conn
-        .cmd("session:abort", { reason: "discarded during setup" }, "Session discarded")
-        .catch(() => {});
+      conn.run("session:abort", { reason: "discarded during setup" }, "Session discarded");
     }
   };
 

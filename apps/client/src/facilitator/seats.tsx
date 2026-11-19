@@ -153,13 +153,11 @@ export function BindEditor({ conn, dash }: { conn: FacilitatorConnection; dash: 
                       disabled={free.length === 0}
                       onChange={(e) =>
                         e.target.value &&
-                        void conn
-                          .cmd(
-                            "seat:bind",
-                            { terminal: Number(e.target.value), seat: s.seat },
-                            `Seat ${s.seat} bound`,
-                          )
-                          .catch(() => {})
+                        conn.run(
+                          "seat:bind",
+                          { terminal: Number(e.target.value), seat: s.seat },
+                          `Seat ${s.seat} bound`,
+                        )
                       }
                     >
                       <option value="">{free.length ? "bind client…" : "waiting for clients…"}</option>
@@ -196,9 +194,7 @@ export function BindEditor({ conn, dash }: { conn: FacilitatorConnection; dash: 
                     icon="withdraw"
                     tip="Free this seat so another client can be bound to it"
                     onClick={() =>
-                      void conn
-                        .cmd("seat:unbind", { seat: s.seat, reason: "facilitator" }, "Unbound")
-                        .catch(() => {})
+                      conn.run("seat:unbind", { seat: s.seat, reason: "facilitator" }, "Unbound")
                     }
                   >
                     Unbind
@@ -414,15 +410,13 @@ export function LabelsEditor({
       k: h.k,
       ...(manualView ? { view: nextViews[h.seat] } : {}),
     }));
-    void conn
-      .cmd(
-        "labels:set",
-        { assignments, pairing: next },
-        next.mode === "aligned"
-          ? "Pairing: aligned"
-          : `Pairing: ${next.id ? `D${next.id}` : "dissociated, drawn at random"}`,
-      )
-      .catch(() => {});
+    conn.run(
+      "labels:set",
+      { assignments, pairing: next },
+      next.mode === "aligned"
+        ? "Pairing: aligned"
+        : `Pairing: ${next.id ? `D${next.id}` : "dissociated, drawn at random"}`,
+    );
   };
   const setView = (seat: number, view: string) => {
     const next = { ...views, [seat]: view };
@@ -648,7 +642,7 @@ export function SeatsPanel({
         icon: "withdraw",
       })
     ) {
-      void conn.cmd("participant:withdraw", { seat }, `Seat ${seat} withdrawn`).catch(() => {});
+      conn.run("participant:withdraw", { seat }, `Seat ${seat} withdrawn`);
     }
   };
 

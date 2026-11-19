@@ -125,6 +125,11 @@ export class FacilitatorConnection {
     return ack.data;
   }
 
+  /** Fire-and-forget `cmd`: the error toast is the whole failure handling. */
+  run<K extends FacilitatorCommand>(name: K, payload: FacilitatorPayload<K>, okText?: string): void {
+    this.cmd(name, payload, okText).catch(() => {});
+  }
+
   /**
    * REST call to /api (adds the admin token if one is configured). A failure shows as an error
    * toast and rethrows; `quiet` skips the toast (e.g. for polls).

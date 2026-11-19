@@ -2,8 +2,6 @@ import {
   calibrationNotReadySeats,
   calibrationWaitingSeats,
   canStartFirstRound,
-  type FacilitatorCommand,
-  type FacilitatorPayload,
   fakeSeats,
   hasParticipants,
   isOnboardingComplete,
@@ -93,8 +91,6 @@ function NextPanel({
 }) {
   const now = useNow();
   const confirm = useConfirm();
-  const run = <K extends FacilitatorCommand>(name: K, payload: FacilitatorPayload<K>, ok?: string) =>
-    void conn.cmd(name, payload, ok).catch(() => {});
   const active = seatList(st).filter((s) => s.bound && !s.withdrawn);
 
   let prompt: React.ReactNode;
@@ -128,7 +124,7 @@ function NextPanel({
       prompt = "Everyone is ready. Resume recording, then run the calibration (or skip it).";
     } else if (waiting.length === 0) {
       prompt = "Everyone is ready.";
-      action = () => run("round:start", {}, "Round 1 started");
+      action = () => conn.run("round:start", {}, "Round 1 started");
       primary = (
         <Button
           variant="primary"
@@ -164,7 +160,7 @@ function NextPanel({
     prompt = st.paused
       ? `Round ${st.round} paused${st.pauseReason === "disconnect" ? " — a player disconnected" : ""}.`
       : `Round ${st.round} of ${st.config.roundCount} in progress · ${total}${max !== null ? `/${max}` : ""} actions · ${fmtDuration(roundActiveMs(st, now))}${left !== null ? ` · ${fmtDuration(left)} left` : ""}`;
-    action = () => run(st.paused ? "game:resume" : "game:pause", {}, st.paused ? "Resumed" : "Paused");
+    action = () => conn.run(st.paused ? "game:resume" : "game:pause", {}, st.paused ? "Resumed" : "Paused");
     primary = st.paused ? (
       <Button
         variant="primary"
@@ -201,7 +197,7 @@ function NextPanel({
               icon: "endRound",
             })
           )
-            run("round:end", {}, "Round ended");
+            conn.run("round:end", {}, "Round ended");
         }}
       >
         End round now
@@ -211,7 +207,7 @@ function NextPanel({
     prompt = `Round ${st.round} complete. Calibration running again: keep the room quiet.`;
   } else if (st.phase === "round_complete") {
     prompt = `Round ${st.round} complete.${st.config.roundAdvance === "auto" ? ` Round ${st.round + 1} starts automatically in ${st.config.autoAdvanceDelaySec} s.` : ""}`;
-    action = () => run("round:start", {}, `Round ${st.round + 1} started`);
+    action = () => conn.run("round:start", {}, `Round ${st.round + 1} started`);
     primary = (
       <Button
         variant="primary"
@@ -255,7 +251,7 @@ function NextPanel({
     {
       key: "p",
       label: "pause/resume",
-      run: () => run(st.paused ? "game:resume" : "game:pause", {}, st.paused ? "Resumed" : "Paused"),
+      run: () => action?.(),
       enabled: () => st.phase === "round_active",
     },
   ]);
@@ -290,8 +286,6 @@ function ToolsPanel({
   const [broadcast, setBroadcast] = useState("");
   const [note, setNote] = useState("");
   const [abortReason, setAbortReason] = useState("");
-  const run = <K extends FacilitatorCommand>(name: K, payload: FacilitatorPayload<K>, ok?: string) =>
-    conn.cmd(name, payload, ok).catch(() => {});
   const canLabels = st.phase === "onboarding" || st.phase === "round_complete";
   return (
     <Panel title="Tools" icon="setup">
@@ -301,7 +295,10 @@ function ToolsPanel({
           onSubmit={(e) => {
             e.preventDefault();
             if (broadcast.trim())
-              void run("broadcast", { text: broadcast.trim() }, "Message sent").then(() => setBroadcast(""));
+              void conn.cmd("broadcast", { text: broadcast.trim() }, "Message sent").then(
+                () => setBroadcast(""),
+                () => {},
+              );
           }}
         >
           <input
@@ -326,7 +323,11 @@ function ToolsPanel({
           className="row nowrap"
           onSubmit={(e) => {
             e.preventDefault();
-            if (note.trim()) void run("note", { text: note.trim() }, "Note added").then(() => setNote(""));
+            if (note.trim())
+              void conn.cmd("note", { text: note.trim() }, "Note added").then(
+                () => setNote(""),
+                () => {},
+              );
           }}
         >
           <input
@@ -374,7 +375,7 @@ function ToolsPanel({
                     icon: "stop",
                   })
                 )
-                  void run("game:end", {}, "Game ended");
+                  conn.run("game:end", {}, "Game ended");
               }}
             >
               End game early
@@ -408,7 +409,7 @@ function ToolsPanel({
                     icon: "stop",
                   })
                 )
-                  void run("session:abort", { reason: abortReason }, "Session aborted");
+                  conn.run("session:abort", { reason: abortReason }, "Session aborted");
               }}
             >
               Abort
@@ -619,9 +620,7 @@ export function LiveStage({ conn }: { conn: FacilitatorConnection }) {
           icon: "revoke",
         })
       )
-        void conn
-          .cmd("action:revoke", { seq, reason: "facilitator" }, `Action #${seq} revoked`)
-          .catch(() => {});
+        conn.run("action:revoke", { seq, reason: "facilitator" }, `Action #${seq} revoked`);
     },
     [st, confirm, conn, regionName],
   );

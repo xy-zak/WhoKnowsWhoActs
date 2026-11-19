@@ -3,8 +3,6 @@ import {
   calibrationSeats,
   calibrationWaitingSeats,
   calibrationWaitsIn,
-  type FacilitatorCommand,
-  type FacilitatorPayload,
   micCheckHoldSeats,
   type ReadonlyGameState,
   seatsInMicCheck,
@@ -40,8 +38,6 @@ export function CalibrationTag({ st, short = false }: { st: ReadonlyGameState; s
 /** The calibration and mic-check block of the NEXT panel. */
 export function AudioNext({ conn, st }: { conn: FacilitatorConnection; st: ReadonlyGameState }) {
   const promptReason = usePromptReason();
-  const run = <K extends FacilitatorCommand>(name: K, payload: FacilitatorPayload<K>, ok: string) =>
-    void conn.cmd(name, payload, ok).catch(() => {});
   const a = st.audio;
   const c = a.calibration;
   const canCalibrate = st.phase === "onboarding" || st.phase === "round_complete";
@@ -62,7 +58,7 @@ export function AudioNext({ conn, st }: { conn: FacilitatorConnection; st: Reado
         </>
       ),
     });
-    if (reason !== null) run("calibration:skip", { reason }, "Calibration skipped");
+    if (reason !== null) conn.run("calibration:skip", { reason }, "Calibration skipped");
   };
   const skipMicCheck = async (seat: number) => {
     const reason = await promptReason({
@@ -79,7 +75,7 @@ export function AudioNext({ conn, st }: { conn: FacilitatorConnection; st: Reado
         </>
       ),
     });
-    if (reason !== null) run("mic:skip", { seat, reason }, `Mic check of seat ${seat} skipped`);
+    if (reason !== null) conn.run("mic:skip", { seat, reason }, `Mic check of seat ${seat} skipped`);
   };
   const held = micCheckHoldSeats(st);
   const inCheck = seatsInMicCheck(st);
@@ -102,7 +98,7 @@ export function AudioNext({ conn, st }: { conn: FacilitatorConnection; st: Reado
         {canCalibrate && (c.status === "running" || c.status === "done" || c.status === "skipped") && (
           <Button
             icon="refresh"
-            onClick={() => run("calibration:redo", {}, "Calibration asked for again")}
+            onClick={() => conn.run("calibration:redo", {}, "Calibration asked for again")}
             tip="Run the calibration again (e.g. after a seat moved closer to its microphone): every seat says again that it is ready, then it starts by itself"
           >
             Redo
