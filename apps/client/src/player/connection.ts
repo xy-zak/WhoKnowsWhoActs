@@ -132,7 +132,8 @@ function watchMicrophone(fn: () => void): () => void {
  * a disconnect, `detached` or `unbound`; docs/NETWORKING.md) and every acknowledged message goes
  * through one SeatGate, each sender with its delivery policy (net/delivery.ts):
  *  - intent()        `resend`: never lost, never made twice (sent again after every re-seating);
- *  - request()       `attempt`: once seated, one emit, the answer within the deadline;
+ *  - request()       `retry`: once seated; sent again after a refusal with `retry` (a reconnect
+ *                    race), but not after a reconnect (consent and the like are not idempotent);
  *  - audio uploads   `attempt`: one try per call; the recorder's SendQueue backs off and retries;
  *  - telemetry       `whileSeated`: a batch goes out only while seated, else it waits;
  *  - clock:ping      `once`: no seat needed.
@@ -313,15 +314,17 @@ export class PlayerConnection {
   }
 
   /**
-   * Send a request once this socket is seated, and wait for the answer; rejects with the server's
-   * error message, or when there is no answer within `timeoutMs` (counted from the call).
+   * Send a request once this socket is seated, and wait for the answer. A refusal with `retry`
+   * (e.g. "Not seated": the seat was lost in a reconnect race) is sent again once seated again,
+   * within the same deadline. Rejects with the server's error message on a permanent refusal,
+   * when the seat is released, or when there is no answer within `timeoutMs` (counted from the call).
    */
   async request<K extends PlayerRequest>(
     event: K,
     payload: PlayerPayload<K>,
     timeoutMs = REQUEST_TIMEOUT_MS,
   ): Promise<PlayerAcks[K]> {
-    const d = await this.send(event, payload, "attempt", timeoutMs);
+    const d = await this.send(event, payload, "retry", timeoutMs);
     if (d.status === "released") throw new Error("Your seat was released");
     if (d.status !== "answered") {
       throw new Error(

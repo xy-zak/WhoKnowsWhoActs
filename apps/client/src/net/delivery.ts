@@ -36,6 +36,13 @@ const RULES: Record<DeliveryPolicy, Rules> = {
   resend: { seat: "wait", retry: true, resend: true },
 };
 
+/**
+ * After a refusal with `retry: true` while the socket is still seated (a server error, or a seat
+ * lost that this browser has not heard about yet), the message is sent again after this pause.
+ * Without a seat, it is sent again the moment the socket is seated again.
+ */
+export const RETRY_PAUSE_MS = 1000;
+
 /** How a delivery ended. */
 export type Delivery<A> =
   /** the server's (final) answer; a refusal with `retry: true` is final only for once/whileSeated/attempt */
@@ -67,6 +74,8 @@ interface Pending {
   rules: Rules;
   /** waiting to be emitted (for the seat, or to be sent again), or emitted and waiting for the answer */
   phase: "waiting" | "sent";
+  /** the pause before sending again after a refusal with `retry` while seated */
+  pause: ReturnType<typeof setTimeout> | null;
   transmit(): void;
   end(d: Delivery<never>): void;
 }
@@ -113,7 +122,11 @@ export class SeatGate {
     const was = this.seated;
     this.seated = seated;
     if (!seated || was) return;
-    for (const p of [...this.live]) if (p.phase === "waiting" || p.rules.resend) p.transmit();
+    for (const p of [...this.live]) {
+      if (p.pause !== null) clearTimeout(p.pause);
+      p.pause = null;
+      if (p.phase === "waiting" || p.rules.resend) p.transmit();
+    }
   }
 
   /**
@@ -140,6 +153,7 @@ export class SeatGate {
       const p: Pending = {
         rules,
         phase: "waiting",
+        pause: null,
         transmit: () => {
           p.phase = "sent";
           const attempt = ++attempts;
@@ -147,7 +161,7 @@ export class SeatGate {
             if (!this.live.has(p)) return; // answered, timed out or released meanwhile
             if (rules.retry && isRetryRefusal(ack)) {
               // only the latest attempt's refusal counts: an older one was already sent again
-              if (attempt === attempts) p.phase = "waiting"; // sent again at the next seating
+              if (attempt === attempts) this.again(p);
               return;
             }
             // the first final answer wins, from whichever attempt (a resend is answered the same)
@@ -159,6 +173,7 @@ export class SeatGate {
       const end = (d: Delivery<PlayerAcks[K]>) => {
         if (!this.live.delete(p)) return;
         clearTimeout(deadline);
+        if (p.pause !== null) clearTimeout(p.pause);
         signal?.removeEventListener("abort", onAbort);
         resolve(d);
       };
@@ -171,5 +186,15 @@ export class SeatGate {
       if (rules.seat === "wait" && !this.seated) return; // emitted by setSeated(true)
       p.transmit();
     });
+  }
+
+  /** After a refusal with `retry`: sent again at the next seating, or after a pause if still seated. */
+  private again(p: Pending) {
+    p.phase = "waiting";
+    if (!this.seated) return;
+    p.pause = setTimeout(() => {
+      p.pause = null;
+      if (this.seated && p.phase === "waiting" && this.live.has(p)) p.transmit();
+    }, RETRY_PAUSE_MS);
   }
 }

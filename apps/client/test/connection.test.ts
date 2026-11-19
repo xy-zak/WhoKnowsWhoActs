@@ -237,6 +237,18 @@ describe("PlayerConnection: intents", () => {
     await expect(p).resolves.toEqual({ ok: true, seq: 9 });
   });
 
+  it("sends an intent refused with retry while still seated (a server error) again after a pause", async () => {
+    const { socket, conn } = setup();
+    bind(socket);
+    const p = conn.intent("propose", "A1");
+    socket.answer("intent", { ok: false, error: "Server error", retry: true });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(intentPayloads(socket)).toHaveLength(2);
+    expect(intentPayloads(socket)[1]).toEqual(intentPayloads(socket)[0]);
+    socket.answer("intent", { ok: true, seq: 4 });
+    await expect(p).resolves.toEqual({ ok: true, seq: 4 });
+  });
+
   it("rejects on a permanent refusal", async () => {
     const { socket, conn } = setup();
     bind(socket);
@@ -314,6 +326,47 @@ describe("PlayerConnection: requests", () => {
     const c2 = conn.request("consent:submit", consent).catch((e: Error) => e.message);
     await vi.advanceTimersByTimeAsync(8000);
     expect(await c2).toMatch(/did not respond/);
+  });
+
+  it("a refusal with retry in a reconnect race is sent again once seated again, not shown as an error", async () => {
+    const { socket, conn } = setup();
+    bind(socket);
+    const p = conn.request("consent:submit", consent);
+    // the server lost this socket's seat before the client heard of it
+    socket.answer("consent:submit", { ok: false, error: "Not seated", retry: true });
+    socket.disconnect();
+    socket.connect();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(socket.sent("consent:submit")).toHaveLength(1); // not before hello's answer
+    socket.answer("hello", { ok: true, terminal: 1, seat: 2 });
+    expect(socket.sent("consent:submit").map((e) => e.payload)).toEqual([consent, consent]);
+    socket.answer("consent:submit", { ok: true });
+    await expect(p).resolves.toEqual({ ok: true });
+  });
+
+  it("a refusal with retry while still seated (a server error) is sent again after a pause", async () => {
+    const { socket, conn } = setup();
+    bind(socket);
+    const p = conn.request("mic:check", { passed: true } as never);
+    socket.answer("mic:check", { ok: false, error: "Server error", retry: true });
+    await vi.advanceTimersByTimeAsync(999);
+    expect(socket.sent("mic:check")).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(socket.sent("mic:check")).toHaveLength(2);
+    socket.answer("mic:check", { ok: true });
+    await expect(p).resolves.toEqual({ ok: true });
+  });
+
+  it("keeps retrying only until its deadline", async () => {
+    const { socket, conn } = setup();
+    bind(socket);
+    const caught = conn.request("consent:submit", consent, 3000).catch((e: Error) => e.message);
+    for (let i = 0; i < 3; i++) {
+      socket.answer("consent:submit", { ok: false, error: "Server error", retry: true });
+      await vi.advanceTimersByTimeAsync(1000);
+    }
+    expect(await caught).toMatch(/did not respond/);
+    expect(socket.sent("consent:submit")).toHaveLength(3);
   });
 
   it("does not send an unanswered request again after a reconnect (requests are not idempotent)", () => {
