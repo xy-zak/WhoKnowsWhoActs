@@ -13,8 +13,8 @@ import {
   isParticipant,
   isRecordedSeat,
   type MicCheckStatus,
-  micCheckApplies,
   micHasLevel,
+  NOT_RECORDING_REASON_DEFS,
   RECORDING_PHASES,
   type ReadonlyGameState,
   type ReadonlySeatState,
@@ -76,56 +76,16 @@ export function micCell(
   seat: ReadonlySeatState,
   mic: SeatMicStats | undefined,
 ): MicCell {
-  const off = (tip: string): MicCell => ({ state: "off", tip, db: null, peakDb: null });
   const v = recordingVerdict(st, seat);
   // why there is no reading to show (the seat is recorded now, or soon)
   let idleTip =
     "Not recording: no reading from this browser (disconnected, or the mic check has not opened the microphone yet)";
-  if (!v.record)
-    switch (v.reason) {
-      case "audio_off":
-        return off("This session does not record audio");
-      case "unbound":
-        return off("No client in this seat");
-      case "not_participant":
-        return off("Not recorded: fake player or agent");
-      case "withdrawn":
-        return off("Not recorded: the participant withdrew");
-      case "consent_declined":
-        return off("Not recorded: consent declined");
-      case "no_audio_consent":
-        return off("Not recorded: the participant did not permit audio recording (or was not asked)");
-      case "mic_check_skipped":
-        return {
-          state: "skipped",
-          tip: "Mic check skipped: this seat is not recorded",
-          db: null,
-          peakDb: null,
-        };
-      case "no_mic_check_step":
-        return off("Not recorded: this session's onboarding has no mic check");
-      case "game_complete":
-        return off("Not recording: the game is complete");
-      case "session_closed":
-        return off("Not recording: the session is closed");
-      case "session_aborted":
-        return off("Not recording: the session was aborted");
-      case "paused":
-        return {
-          state: "paused",
-          tip: "Recording paused for everyone by the facilitator",
-          db: null,
-          peakDb: null,
-        };
-      case "consent_pending":
-      case "not_started":
-        idleTip = "Not recording yet: recording starts at the mic check, after consent";
-        break;
-      case "mic_check_held":
-        idleTip = "Not recording yet: the mic checks wait until every seat has finished consent";
-        break;
-    }
-  if (!mic || mic.state === "idle") return off(idleTip);
+  if (!v.record) {
+    const d = NOT_RECORDING_REASON_DEFS[v.reason];
+    if (!d.notYet) return { state: d.state, tip: d.tip, db: null, peakDb: null };
+    idleTip = d.tip;
+  }
+  if (!mic || mic.state === "idle") return { state: "off", tip: idleTip, db: null, peakDb: null };
   const level = micHasLevel(mic.state);
   return {
     state: mic.state,
@@ -172,8 +132,8 @@ export function chunkAge(
  * apply (no audio, unbound, withdrawn, fake player or agent, no audio consent, consent not given).
  */
 export function micCheckStatus(st: ReadonlyGameState, seat: ReadonlySeatState): MicCheckStatus | null {
-  if (!seat.bound || seat.withdrawn || seat.consent !== "given" || !micCheckApplies(st, seat)) return null;
-  return seat.micCheck;
+  const v = recordingVerdict(st, seat);
+  return v.record || NOT_RECORDING_REASON_DEFS[v.reason].micCheck ? seat.micCheck : null;
 }
 
 /* ─────────────────────────── status bar: "mics 3/4" ─────────────────────────── */

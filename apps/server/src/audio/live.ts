@@ -44,15 +44,12 @@ import {
   type AudioStart,
   type AudioStop,
   type AudioStopReason,
-  isMicCheckHeld,
-  isParticipant,
-  micCheckApplies,
   type NewEvent,
-  RECORDING_PHASES,
+  NOT_RECORDING_REASON_DEFS,
   type ReadonlyGameState,
+  recordingVerdict,
   type StoredEvent,
   samplesToMs,
-  shouldRecord,
 } from "@wkwa/shared";
 import type { Logger } from "pino";
 import type { z } from "zod";
@@ -201,35 +198,20 @@ export class LiveAudio {
   /* ═════════════════════════ gates ═════════════════════════ */
 
   /**
-   * Why this seat may not be recorded at all (null = it may). Pauses are handled per chunk. The hub
-   * also drops the LIVE meter readings (`audio:level`) of a seat refused here.
+   * Why this seat may not upload audio now (null = it may): its recording verdict (a chunk of a
+   * track that already ran passes the reasons with `lateChunks`; its pauses are cut per chunk)
+   * and what only the server knows. The hub also drops the LIVE meter readings (`audio:level`)
+   * of a seat refused here. `start`: a new track, which needs the verdict to say record.
    */
-  refusal(seat: number): string | null {
-    const st = this.state;
-    if (!st.audio.enabled) return "This session does not record audio";
+  refusal(seat: number, start = false): string | null {
     if (!this.deps.store.audioFiles) return "This database does not record audio";
     if (this.deps.isFinal()) return "The session has ended";
-    const s = st.seats[seat];
-    if (!s?.bound || !isParticipant(s)) return "This seat is not recorded";
-    if (s.withdrawn) return "The participant has withdrawn";
-    if (!s.participantCode) return "This seat has no participant code";
-    if (!micCheckApplies(st, s) || s.consent !== "given") return "No audio consent for this seat";
-    if (s.micCheck === "skipped") return "The mic check of this seat was skipped";
-    // nobody's mic records while a seat is still in consent (not reachable after onboarding started:
-    // seats are bound in the lobby only; checked anyway)
-    if (isMicCheckHeld(st)) return "Waiting for every seat to finish the consent form";
-    return null;
-  }
-
-  /** Why this seat may not start a track now (null = it may). */
-  private startRefusal(seat: number): string | null {
-    const why = this.refusal(seat);
-    if (why) return why;
-    const st = this.state;
-    if (st.audio.recordingPaused) return "Recording is paused";
-    if (!RECORDING_PHASES.has(st.phase)) return `Nothing is recorded in phase '${st.phase}'`;
-    const s = st.seats[seat];
-    return s && shouldRecord(st, s) ? null : "This seat should not record now";
+    const s = this.state.seats[seat];
+    if (!s) return "This seat is not recorded";
+    const v = recordingVerdict(this.state, s);
+    const def = v.record ? null : NOT_RECORDING_REASON_DEFS[v.reason];
+    if (def && (start || !def.lateChunks)) return def.refusal;
+    return s.participantCode ? null : "This seat has no participant code";
   }
 
   /**
@@ -275,7 +257,7 @@ export class LiveAudio {
         return { ok: true, duplicate: true };
       return reject("This track id is already used");
     }
-    const why = this.startRefusal(seat);
+    const why = this.refusal(seat, true);
     if (why) return reject(why);
     const files = store.requireAudioFiles(); // refusal() refused already when there is none
     let file: { fileName: string; key: Buffer };
@@ -287,7 +269,7 @@ export class LiveAudio {
     }
     // the state may have changed while the file was created
     const late =
-      this.startRefusal(seat) ?? (store.getAudioTrack(msg.trackId) ? "Track id already used" : null);
+      this.refusal(seat, true) ?? (store.getAudioTrack(msg.trackId) ? "Track id already used" : null);
     const code = this.state.seats[seat]?.participantCode ?? null;
     if (late || !code) {
       files.deleteFile(sessionId, file.fileName);

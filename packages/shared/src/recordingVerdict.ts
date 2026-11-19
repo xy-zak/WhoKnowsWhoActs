@@ -20,6 +20,42 @@ import {
  * reads it from the state. Nobody rebuilds a reason from the raw fields.
  * ═══════════════════════════════════════════════════════════════════════════ */
 
+/** What one reason means where it is shown or acted on. */
+export interface NotRecordingReasonDef {
+  /** The recording indicator's state: the player's, and the facilitator's mic column. */
+  state: "off" | "skipped" | "paused";
+  /** Hover text of the facilitator's mic column. */
+  tip: string;
+  /** Not recording yet: the mic column shows the browser's own reading, and `tip` only while it has none. */
+  notYet: boolean;
+  /** The seat's mic check applies (bound participant, audio consent): the mic column shows its status. */
+  micCheck: boolean;
+  /** The server's refusal of a new track (`audio:start`), and of a chunk unless `lateChunks`. */
+  refusal: string;
+  /**
+   * The server still stores chunks of a track that already ran (resent after a reconnect, or in
+   * flight), cut at the pause or the game's end.
+   */
+  lateChunks: boolean;
+}
+
+const NO_CONSENT = "No audio consent for this seat";
+const BEFORE_MIC_CHECK = "Not recording yet: recording starts at the mic check, after consent";
+/** Shown `off`, the mic check does not apply, no audio is taken (the defaults the entries override). */
+const notRecorded = (tip: string, refusal: string): NotRecordingReasonDef => ({
+  state: "off",
+  tip,
+  notYet: false,
+  micCheck: false,
+  refusal,
+  lateChunks: false,
+});
+/** Shown `off`, the mic check applies, no audio is taken. */
+const notNow = (tip: string, refusal: string): NotRecordingReasonDef => ({
+  ...notRecorded(tip, refusal),
+  micCheck: true,
+});
+
 /**
  * Why a seat does not record, in precedence order: the verdict names the FIRST that applies.
  *
@@ -40,25 +76,62 @@ import {
  *  - `mic_check_held`: a seat has not finished the steps before the mic check yet (micCheckHoldSeats);
  *  - `paused`: the facilitator paused recording. Always last: a verdict says `paused` only when the
  *    pause is the one thing stopping the seat, so it answers "would it record if not paused?".
+ *
+ * Each entry is the one place for what the reason shows (the player's indicator, the facilitator's
+ * mic column) and which audio the server still takes from the seat (audio/live.ts `refusal`).
  */
-export const NOT_RECORDING_REASONS = [
-  "audio_off",
-  "unbound",
-  "not_participant",
-  "withdrawn",
-  "consent_declined",
-  "no_audio_consent",
-  "consent_pending",
-  "mic_check_skipped",
-  "no_mic_check_step",
-  "not_started",
-  "game_complete",
-  "session_closed",
-  "session_aborted",
-  "mic_check_held",
-  "paused",
-] as const;
-export type NotRecordingReason = (typeof NOT_RECORDING_REASONS)[number];
+export const NOT_RECORDING_REASON_DEFS = {
+  audio_off: notRecorded("This session does not record audio", "This session does not record audio"),
+  unbound: notRecorded("No client in this seat", "This seat is not recorded"),
+  not_participant: notRecorded("Not recorded: fake player or agent", "This seat is not recorded"),
+  withdrawn: notRecorded("Not recorded: the participant withdrew", "The participant has withdrawn"),
+  consent_declined: notRecorded("Not recorded: consent declined", NO_CONSENT),
+  no_audio_consent: notRecorded(
+    "Not recorded: the participant did not permit audio recording (or was not asked)",
+    NO_CONSENT,
+  ),
+  consent_pending: { ...notRecorded(BEFORE_MIC_CHECK, NO_CONSENT), notYet: true },
+  mic_check_skipped: {
+    state: "skipped",
+    tip: "Mic check skipped: this seat is not recorded",
+    notYet: false,
+    micCheck: true,
+    refusal: "The mic check of this seat was skipped",
+    lateChunks: false,
+  },
+  no_mic_check_step: {
+    ...notNow("Not recorded: this session's onboarding has no mic check", "This seat should not record now"),
+    lateChunks: true,
+  },
+  not_started: {
+    ...notNow(BEFORE_MIC_CHECK, "Nothing is recorded in phase 'lobby'"),
+    notYet: true,
+    lateChunks: true,
+  },
+  game_complete: {
+    ...notNow("Not recording: the game is complete", "Nothing is recorded in phase 'game_complete'"),
+    lateChunks: true,
+  },
+  session_closed: notNow("Not recording: the session is closed", "The session has ended"),
+  session_aborted: notNow("Not recording: the session was aborted", "The session has ended"),
+  mic_check_held: {
+    ...notNow(
+      "Not recording yet: the mic checks wait until every seat has finished consent",
+      "Waiting for every seat to finish the consent form",
+    ),
+    notYet: true,
+  },
+  paused: {
+    state: "paused",
+    tip: "Recording paused for everyone by the facilitator",
+    notYet: false,
+    micCheck: true,
+    refusal: "Recording is paused",
+    lateChunks: true,
+  },
+} as const satisfies Record<string, NotRecordingReasonDef>;
+export type NotRecordingReason = keyof typeof NOT_RECORDING_REASON_DEFS;
+export const NOT_RECORDING_REASONS = Object.keys(NOT_RECORDING_REASON_DEFS) as readonly NotRecordingReason[];
 
 /** Whether a seat records now, and if not, the single reason (see NOT_RECORDING_REASONS). */
 export type RecordingVerdict = { record: true } | { record: false; reason: NotRecordingReason };
