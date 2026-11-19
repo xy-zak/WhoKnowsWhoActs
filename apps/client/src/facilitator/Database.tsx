@@ -674,31 +674,46 @@ function CardsPopup({
       </p>
       {seats === null && <span className="muted cursor">Loading</span>}
       {seats?.length === 0 && <span className="faint">No seat has a participant code in this session.</span>}
-      <div className="col">
-        {seats?.map((seat) => (
-          <div key={seat} className="row">
-            <SeatDot seat={seat} />
-            <strong>SEAT {seat}</strong>
-            <span className="spacer" />
-            <Button
-              size="sm"
-              icon="export"
-              tip={`Download takedown-card-${sessionId}-seat${seat}.pdf`}
-              onClick={() =>
-                void conn
-                  .download(
-                    `/api/sessions/${sessionId}/cards/${seat}`,
-                    `takedown-card-${sessionId}-seat${seat}.pdf`,
-                  )
-                  .catch(() => {})
-              }
-            >
-              Card PDF
-            </Button>
-          </div>
-        ))}
-      </div>
+      {seats && <TakedownCardList conn={conn} sessionId={sessionId} seats={seats} />}
     </Popup>
+  );
+}
+
+/** One row per seat with the download of its takedown-card PDF (wrap-up and DATABASE). */
+export function TakedownCardList({
+  conn,
+  sessionId,
+  seats,
+}: {
+  conn: FacilitatorConnection;
+  sessionId: string;
+  seats: number[];
+}) {
+  return (
+    <div className="col">
+      {seats.map((seat) => (
+        <div key={seat} className="row">
+          <SeatDot seat={seat} />
+          <strong>SEAT {seat}</strong>
+          <span className="spacer" />
+          <Button
+            size="sm"
+            icon="export"
+            tip={`Download takedown-card-${sessionId}-seat${seat}.pdf (A6) to print`}
+            onClick={() =>
+              void conn
+                .download(
+                  `/api/sessions/${sessionId}/cards/${seat}`,
+                  `takedown-card-${sessionId}-seat${seat}.pdf`,
+                )
+                .catch(() => {})
+            }
+          >
+            Card PDF
+          </Button>
+        </div>
+      ))}
+    </div>
   );
 }
 

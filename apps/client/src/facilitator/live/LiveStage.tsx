@@ -25,7 +25,6 @@ import {
   Check,
   Panel,
   Popup,
-  SeatDot,
   StatusTag,
   type StepDef,
   Stepper,
@@ -34,6 +33,7 @@ import {
 } from "../../ui";
 import { CompositeMap, PlayerMirrors } from "../Composite";
 import type { FacilitatorConnection } from "../connection";
+import { TakedownCardList } from "../Database";
 import { EventLog, TelemetryFeed } from "../EventLog";
 import { LabelsEditor, SeatsPanel } from "../seats";
 import { paceText, policySummary } from "../simulation";
@@ -504,32 +504,13 @@ function WrapUp({
             Each player's screen now shows their participant code. Hand every participant the takedown card of
             their seat.
           </p>
-          <div className="col" style={{ gap: 4 }}>
-            {seatList(st)
+          <TakedownCardList
+            conn={conn}
+            sessionId={id}
+            seats={seatList(st)
               .filter((x) => x.participantCode)
-              .map((x) => (
-                <div key={x.seat} className="row">
-                  <SeatDot seat={x.seat} />
-                  <strong>SEAT {x.seat}</strong>
-                  <span className="spacer" />
-                  <Button
-                    size="sm"
-                    icon="export"
-                    tip={`Download takedown-card-${id}-seat${x.seat}.pdf (A6) to print`}
-                    onClick={() =>
-                      void conn
-                        .download(
-                          `/api/sessions/${id}/cards/${x.seat}`,
-                          `takedown-card-${id}-seat${x.seat}.pdf`,
-                        )
-                        .catch(() => {})
-                    }
-                  >
-                    Card PDF
-                  </Button>
-                </div>
-              ))}
-          </div>
+              .map((x) => x.seat)}
+          />
           <p className="hint">
             One PDF per participant; delete the downloaded files after printing (they contain the codes).
           </p>
