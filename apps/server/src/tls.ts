@@ -38,7 +38,6 @@ export interface TlsState {
 export const TLS_DIR = "tls";
 export const CERT_FILE = "self-signed-cert.pem";
 export const KEY_FILE = "self-signed-key.pem";
-export const META_FILE = "meta.json";
 /** Validity of a generated certificate (the maximum browsers accept for public certificates is 398). */
 export const VALIDITY_DAYS = 397;
 /** A certificate that expires sooner than this is made again at start-up. */
@@ -174,6 +173,12 @@ function certificateFacts(certPem: string | Buffer): {
   };
 }
 
+/** What the facilitator is shown about the certificate in use. */
+function tlsInfo(mode: "auto" | "provided", facts: ReturnType<typeof certificateFacts>): TlsInfo {
+  const { fingerprintSha256, sans } = facts;
+  return { enabled: true, mode, fingerprintSha256, sans, expires: facts.expires.toISOString() };
+}
+
 /**
  * A certificate and its private key (PEM): the certificate's facts, and whether the key belongs to
  * it (`unreadable`: the key cannot be parsed or checked). Throws if the certificate cannot be read.
@@ -190,13 +195,6 @@ function loadKeyPair(
   }
 }
 
-export interface SelfSignedMeta {
-  sans: string[];
-  created: string;
-  expires: string;
-  fingerprintSha256: string;
-}
-
 export type SelfSignedOutcome =
   | { action: "created" }
   | { action: "reused" }
@@ -208,7 +206,7 @@ export type SelfSignedOutcome =
 export interface SelfSigned {
   cert: string;
   key: string;
-  meta: SelfSignedMeta;
+  info: TlsInfo;
   outcome: SelfSignedOutcome;
   certFile: string;
   keyFile: string;
@@ -281,7 +279,6 @@ export async function ensureSelfSignedCert(
   const wanted = wantedSans(opts.host ?? currentHost());
   const certFile = path.join(dir, CERT_FILE);
   const keyFile = path.join(dir, KEY_FILE);
-  const metaFile = path.join(dir, META_FILE);
   mkdirSync(dir, { recursive: true, mode: 0o700 });
 
   const stored = readStored(certFile, keyFile);
@@ -304,37 +301,16 @@ export async function ensureSelfSignedCert(
       outcome = { action: "regenerated", reason: "names", missing };
       sans = [...new Set([...wanted, ...stored.facts.sans])];
     } else {
-      const meta: SelfSignedMeta = {
-        sans: stored.facts.sans,
-        created: new Date(validFrom.getTime() + BACKDATE_MS).toISOString(),
-        expires: expires.toISOString(),
-        fingerprintSha256: stored.facts.fingerprintSha256,
-      };
-      // keep meta.json in step with the certificate (e.g. if it was deleted)
-      let old: Partial<SelfSignedMeta> = {};
-      try {
-        old = JSON.parse(readFileSync(metaFile, "utf8")) ?? {};
-      } catch {}
-      if (old.fingerprintSha256 === meta.fingerprintSha256 && typeof old.created === "string")
-        meta.created = old.created;
-      else writeAtomic(metaFile, `${JSON.stringify(meta, null, 2)}\n`, 0o644);
-      return { cert: stored.cert, key: stored.key, meta, outcome: { action: "reused" }, certFile, keyFile };
+      const info = tlsInfo("auto", stored.facts);
+      return { cert: stored.cert, key: stored.key, info, outcome: { action: "reused" }, certFile, keyFile };
     }
   }
 
   const { cert, key } = await generateCertificate(sans, now);
-  const facts = certificateFacts(cert);
-  const meta: SelfSignedMeta = {
-    sans: facts.sans,
-    created: now.toISOString(),
-    expires: facts.expires.toISOString(),
-    fingerprintSha256: facts.fingerprintSha256,
-  };
   // key first: a crash between the two writes leaves a mismatched pair, which is detected and made again
   writeAtomic(keyFile, key, 0o600);
   writeAtomic(certFile, cert, 0o644);
-  writeAtomic(metaFile, `${JSON.stringify(meta, null, 2)}\n`, 0o644);
-  return { cert, key, meta, outcome, certFile, keyFile };
+  return { cert, key, info: tlsInfo("auto", certificateFacts(cert)), outcome, certFile, keyFile };
 }
 
 /**
@@ -357,13 +333,7 @@ export async function resolveTls(
       throw new Error(`TLS_KEY cannot be read (it must be an unencrypted PEM key): ${check.unreadable}`);
     if (check === "mismatch") throw new Error("TLS_KEY does not belong to the certificate in TLS_CERT.");
     return {
-      info: {
-        enabled: true,
-        mode: "provided",
-        fingerprintSha256: facts.fingerprintSha256,
-        sans: facts.sans,
-        expires: facts.expires.toISOString(),
-      },
+      info: tlsInfo("provided", facts),
       https: { cert, key },
       certFile: runtime.tlsCert,
       outcome: null,
@@ -372,13 +342,7 @@ export async function resolveTls(
   if (runtime.tlsMode === "off") return { info: TLS_OFF, https: null, certFile: null, outcome: null };
   const ss = await ensureSelfSignedCert(path.join(runtime.dataDir, TLS_DIR), opts);
   return {
-    info: {
-      enabled: true,
-      mode: "auto",
-      fingerprintSha256: ss.meta.fingerprintSha256,
-      sans: ss.meta.sans,
-      expires: ss.meta.expires,
-    },
+    info: ss.info,
     https: { cert: Buffer.from(ss.cert), key: Buffer.from(ss.key) },
     certFile: ss.certFile,
     outcome: ss.outcome,

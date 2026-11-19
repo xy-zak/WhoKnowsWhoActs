@@ -13,7 +13,6 @@ import {
   ensureSelfSignedCert,
   type HostFacts,
   KEY_FILE,
-  META_FILE,
   RENEW_WITHIN_DAYS,
   redirectLocation,
   resolveTls,
@@ -94,7 +93,7 @@ describe("self-signed certificate (WKWA_TLS=auto)", () => {
     expect(x.subjectAltName).toBe(
       "DNS:localhost, DNS:research-laptop, DNS:research-laptop.local, IP Address:127.0.0.1, IP Address:0:0:0:0:0:0:0:1, IP Address:192.168.1.10, IP Address:10.0.0.7",
     );
-    expect(first.meta.sans).toEqual(wantedSans(HOST));
+    expect(first.info.sans).toEqual(wantedSans(HOST));
   });
 
   it("is an ECDSA P-256 server certificate, not a CA, valid for 397 days", () => {
@@ -109,16 +108,16 @@ describe("self-signed certificate (WKWA_TLS=auto)", () => {
     expect(Date.parse(x.validFrom)).toBeLessThan(Date.now() - 12 * 3600_000); // a slow clock still accepts it
   });
 
-  it("stores the key (mode 0600), the certificate and meta.json with the SHA-256 fingerprint", () => {
+  it("stores the key (mode 0600) and the certificate, and reports its SHA-256 fingerprint", () => {
     const x = new X509Certificate(readFileSync(path.join(dir, CERT_FILE)));
     expect(x.fingerprint256).toMatch(/^([0-9A-F]{2}:){31}[0-9A-F]{2}$/);
-    expect(first.meta.fingerprintSha256).toBe(x.fingerprint256);
+    expect(first.info.fingerprintSha256).toBe(x.fingerprint256);
     expect(readFileSync(path.join(dir, KEY_FILE), "utf8")).toContain("BEGIN PRIVATE KEY");
     if (process.platform !== "win32") expect(statSync(path.join(dir, KEY_FILE)).mode & 0o777).toBe(0o600);
-    const meta = JSON.parse(readFileSync(path.join(dir, META_FILE), "utf8"));
-    expect(meta).toEqual({
+    expect(first.info).toEqual({
+      enabled: true,
+      mode: "auto",
       sans: wantedSans(HOST),
-      created: expect.any(String),
       expires: new Date(x.validTo).toISOString(),
       fingerprintSha256: x.fingerprint256,
     });
@@ -127,7 +126,7 @@ describe("self-signed certificate (WKWA_TLS=auto)", () => {
   it("is reused across restarts, so accepted browser exceptions stay valid", async () => {
     const again = await ensureSelfSignedCert(dir, { host: HOST });
     expect(again.outcome).toEqual({ action: "reused" });
-    expect(again.meta).toEqual(first.meta);
+    expect(again.info).toEqual(first.info);
     expect(again.cert).toBe(first.cert);
   });
 
@@ -135,17 +134,17 @@ describe("self-signed certificate (WKWA_TLS=auto)", () => {
     const offline = { ...HOST, interfaces: { lo: HOST.interfaces.lo, eth0: HOST.interfaces.eth0 } };
     const r = await ensureSelfSignedCert(dir, { host: offline });
     expect(r.outcome.action).toBe("reused");
-    expect(r.meta.fingerprintSha256).toBe(first.meta.fingerprintSha256);
+    expect(r.info.fingerprintSha256).toBe(first.info.fingerprintSha256);
   });
 
   it("is made again when a new LAN address appears, and then names it", async () => {
     const moved = { ...HOST, interfaces: { ...HOST.interfaces, eth1: [v4("172.20.5.3")] } };
     const r = await ensureSelfSignedCert(dir, { host: moved });
     expect(r.outcome).toEqual({ action: "regenerated", reason: "names", missing: ["IP:172.20.5.3"] });
-    expect(r.meta.fingerprintSha256).not.toBe(first.meta.fingerprintSha256);
-    expect(r.meta.sans).toContain("IP:172.20.5.3");
+    expect(r.info.fingerprintSha256).not.toBe(first.info.fingerprintSha256);
+    expect(r.info.sans).toContain("IP:172.20.5.3");
     expect(new X509Certificate(readFileSync(path.join(dir, CERT_FILE))).fingerprint256).toBe(
-      r.meta.fingerprintSha256,
+      r.info.fingerprintSha256,
     );
     // and that one is kept from now on
     expect((await ensureSelfSignedCert(dir, { host: moved })).outcome.action).toBe("reused");
@@ -159,7 +158,7 @@ describe("self-signed certificate (WKWA_TLS=auto)", () => {
       await ensureSelfSignedCert(d, { host: lab });
       const both = await ensureSelfSignedCert(d, { host: home });
       expect(both.outcome).toMatchObject({ reason: "names", missing: ["IP:192.168.0.5"] });
-      expect(both.meta.sans).toEqual(expect.arrayContaining(["IP:10.0.0.7", "IP:192.168.0.5"]));
+      expect(both.info.sans).toEqual(expect.arrayContaining(["IP:10.0.0.7", "IP:192.168.0.5"]));
       expect((await ensureSelfSignedCert(d, { host: lab })).outcome.action).toBe("reused");
       expect((await ensureSelfSignedCert(d, { host: home })).outcome.action).toBe("reused");
     } finally {
@@ -174,7 +173,7 @@ describe("self-signed certificate (WKWA_TLS=auto)", () => {
     };
     const r = await ensureSelfSignedCert(dir, { host: renamed });
     expect(r.outcome).toMatchObject({ action: "regenerated", reason: "names" });
-    expect(r.meta.sans).toEqual(
+    expect(r.info.sans).toEqual(
       expect.arrayContaining(["DNS:lab-pc.example.org", "DNS:lab-pc", "DNS:lab-pc.local"]),
     );
   });
@@ -183,19 +182,19 @@ describe("self-signed certificate (WKWA_TLS=auto)", () => {
     const d = tmp();
     try {
       const made = await ensureSelfSignedCert(d, { host: HOST });
-      const expires = Date.parse(made.meta.expires);
+      const expires = Date.parse(made.info.expires!);
       const early = new Date(expires - (RENEW_WITHIN_DAYS + 1) * DAY);
       expect((await ensureSelfSignedCert(d, { host: HOST, now: early })).outcome.action).toBe("reused");
       const late = new Date(expires - (RENEW_WITHIN_DAYS - 1) * DAY);
       const r = await ensureSelfSignedCert(d, { host: HOST, now: late });
-      expect(r.outcome).toEqual({ action: "regenerated", reason: "expiry", expires: made.meta.expires });
-      expect(Date.parse(r.meta.expires)).toBeGreaterThan(late.getTime() + (VALIDITY_DAYS - 2) * DAY);
+      expect(r.outcome).toEqual({ action: "regenerated", reason: "expiry", expires: made.info.expires });
+      expect(Date.parse(r.info.expires!)).toBeGreaterThan(late.getTime() + (VALIDITY_DAYS - 2) * DAY);
       // an expired one, too
-      const after = new Date(Date.parse(r.meta.expires) + DAY);
+      const after = new Date(Date.parse(r.info.expires!) + DAY);
       const expired = await ensureSelfSignedCert(d, { host: HOST, now: after });
       expect(expired.outcome).toMatchObject({ reason: "expiry" });
       // and one that is not valid yet (the clock was set back)
-      const before = new Date(Date.parse(expired.meta.created) - 3 * DAY);
+      const before = new Date(after.getTime() - 3 * DAY);
       expect((await ensureSelfSignedCert(d, { host: HOST, now: before })).outcome).toMatchObject({
         reason: "not-yet-valid",
       });
@@ -244,9 +243,9 @@ describe("resolveTls: provided, auto, off", () => {
       expect(t.info).toEqual({
         enabled: true,
         mode: "provided",
-        fingerprintSha256: own.meta.fingerprintSha256,
-        sans: own.meta.sans,
-        expires: own.meta.expires,
+        fingerprintSha256: own.info.fingerprintSha256,
+        sans: own.info.sans,
+        expires: own.info.expires,
       });
       expect(t.outcome).toBeNull();
     }
