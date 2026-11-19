@@ -21,6 +21,7 @@ import {
   type PlayerServerToClient,
   type PlayerView,
   randomPolicy,
+  STOP_REASON_FOR,
   type StoredEvent,
   type TelemetryItem,
 } from "@wkwa/shared";
@@ -417,15 +418,9 @@ export class Bot {
       this.wasPaused = false;
       this.startTrack(reason);
     } else if (!v.audio.record && this.audioTrack) {
-      const reason: AudioStopReason = v.audio.paused
-        ? "paused"
-        : v.phase === "game_complete"
-          ? "game_complete"
-          : v.me.withdrawn
-            ? "withdrawn"
-            : "client_stop";
       this.wasPaused = v.audio.paused;
-      this.stopTrack(reason);
+      // the real client's mapping (recordingMachine.ts stopReasonFor)
+      this.stopTrack(v.audio.notRecording ? STOP_REASON_FOR[v.audio.notRecording] : "client_stop");
     }
   }
 
