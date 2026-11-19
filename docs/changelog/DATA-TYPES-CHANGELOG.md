@@ -2,9 +2,7 @@
 
 History of [DATA-TYPES.md](../DATA-TYPES.md). Newest first. How entries are written: [README.md](README.md).
 
-## Unreleased
-
-### Not yet committed · documents `72c5778`
+### 2026-11-19 · `bee2f52` · Docs: recording controller states, mic-check attempt, session guard
 
 - **Type:** Risk mitigation
 - **Change:** The `audio_tracks` row for `dropped_chunks` says the count is of chunks dropped while the track was recording, which can include an older track's chunks, and links the known limit in AUDIO.md § 13.

@@ -4,7 +4,25 @@ History of [ARCHITECTURE.md](../ARCHITECTURE.md). Newest first. How entries are 
 
 ## Unreleased
 
-### Not yet committed · documents `b13d925`, `72c5778`, `07310cf` and `6b1614b`
+### Not yet committed · documents `ead1760`
+
+- **Type:** Risk mitigation
+- **Change:** § 7 adds that the live hover signal follows the telemetry consent rule, and the testing row for the live figures adds hover and a failed session switch, which now shows that no session is attached.
+- **Reason:** Hover was shown to the facilitator before consent and after a withdrawal (privacy); after a failed switch the dashboard kept showing the session that had left.
+
+### 2026-11-19 · `84c5b37` · Telemetry: none stored or sent from a withdrawn seat
+
+- **Type:** Risk mitigation
+- **Change:** The consent rules in § 7 say that UI telemetry also stops when a seat is withdrawn, not only that it starts after consent.
+- **Reason:** A withdrawn participant's browser kept sending telemetry and the server stored it; the rule now matches the consent promise (privacy).
+
+### 2026-11-19 · `11aefb4` · Session: SessionManager owns a session's live state; seat monitor
+
+- **Type:** Feature
+- **Change:** The glossary gains **Seat monitor** (the live per-seat figures of the facilitator's dashboard, never stored). The `SessionManager` component row, the projection and audio diagrams, the code layout and § 15 now show that everything a seat sends goes through the session manager, that the facilitator is sent the full game state with three derived audio fields, and that the unused `facilitatorView` is gone. The testing table adds a row for the live figures.
+- **Reason:** The live state of a session moved out of the network hub into the session that owns it, so the document must show where these rules now live and what clears the figures.
+
+### 2026-11-19 · `bee2f52` · Docs: recording controller states, mic-check attempt, session guard
 
 - **Type:** Risk mitigation
 - **Change:** The code layout names `player/recordingMachine.ts` and `player/micCheckAttempt.ts`. In § 15 the *Busy check* row becomes *Session guard*: the one module that decides when deletion, erasure, attribution and audio export are refused, checking the running session first. The testing table adds the guard, controller-transition and mic-check tests.

@@ -2,9 +2,19 @@
 
 History of [DATA-MANAGEMENT.md](../DATA-MANAGEMENT.md). Newest first. How entries are written: [README.md](README.md).
 
-## Unreleased
+### 2026-11-19 · `ead1760` · Hover follows the telemetry consent rule; no stale dashboard after a failed switch
 
-### Not yet committed · documents `b13d925` and `6b1614b`
+- **Type:** Risk mitigation
+- **Change:** § 7 adds that the live hover signal (where a player points on the map, never stored) is not shown to the facilitator before consent or after a withdrawal.
+- **Reason:** Hover was relayed live before consent and after withdrawal, the one live signal without the consent check (privacy).
+
+### 2026-11-19 · `84c5b37` · Telemetry: none stored or sent from a withdrawn seat
+
+- **Type:** Risk mitigation
+- **Change:** The data inventory, the withdrawal paragraph of § 7 and the list of what is not collected say that no telemetry is stored after a withdrawal: the browser stops and drops what it had not sent, and the server discards late batches.
+- **Reason:** Before, only consent was checked, so telemetry of a withdrawn participant was still stored (privacy).
+
+### 2026-11-19 · `bee2f52` · Docs: recording controller states, mic-check attempt, session guard
 
 - **Type:** Risk mitigation
 - **Change:** § 10 says one session guard decides when the manager refuses erasure and deletion, and when a session counts as running. Session and audio deletion now say that the command-line tool only warns about a session that has not ended, and audio deletion lists the attribution and export refusals.

@@ -2,9 +2,13 @@
 
 History of [NETWORKING.md](../NETWORKING.md). Newest first. How entries are written: [README.md](README.md).
 
-## Unreleased
+### 2026-11-19 · `ead1760` · Hover follows the telemetry consent rule; no stale dashboard after a failed switch
 
-### Not yet committed · documents `b13d925` and `6b1614b`
+- **Type:** Risk mitigation
+- **Change:** The message catalogue rows for `presence` and `presence:live` say that hover is dropped before consent, after a withdrawal and after the session ended, and that the facilitator is sent `null` when a seat withdraws, is unbound or disconnects.
+- **Reason:** The protocol description must match the new consent rule for hover, and the old hover marker of a seat that left stayed on the facilitator's map (privacy, with a display bug fixed).
+
+### 2026-11-19 · `bee2f52` · Docs: recording controller states, mic-check attempt, session guard
 
 - **Type:** Bug fix
 - **Change:** The REST table now gives every 409 refusal of the audio routes: starting an attribution is also refused while the session runs or an audio export is written, exporting audio while the session runs or an attribution is queued or running, and deleting audio while an attribution or export is in progress.

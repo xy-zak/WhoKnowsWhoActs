@@ -2,9 +2,13 @@
 
 History of [AUDIO.md](../AUDIO.md). Newest first. How entries are written: [README.md](README.md).
 
-## Unreleased
+### 2026-11-19 · `4e6927e` · Audio: recording windows and calibration runs come from the reducer
 
-### Not yet committed · documents `72c5778`, `07310cf`, `b940672`, `b13d925` and `6b1614b`
+- **Type:** Risk mitigation
+- **Change:** The **Pause** paragraph of § 8 adds that the recording pauses and the moment the game was complete are part of the game state, worked out from the event log, so a late chunk of audio is cut at the same place after a server restart.
+- **Reason:** The server used to keep its own copy of these moments next to the log; the text now names the one source the code uses, which protects against audio from a pause being stored after a restart (privacy and research validity).
+
+### 2026-11-19 · `bee2f52` · Docs: recording controller states, mic-check attempt, session guard
 
 - **Type:** Bug fix
 - **Change:** § 4 describes the recording controller as a state machine (idle, running, failed) and says a mic check in progress keeps listening when a detached session comes back. § 11 adds that audio deletion is also refused while an attribution runs, decided by one guard, and § 13 says per-track `dropped_chunks` is approximate.
