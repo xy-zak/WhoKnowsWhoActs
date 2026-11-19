@@ -174,6 +174,8 @@ scenario(
     await expect(fac.getByText(/done · (separation ok|weak separation)/)).toBeVisible({ timeout: 90_000 });
     await crop(fac, "server/audio-next-calibration-done", panel(fac, "Next"));
     await crop(fac, "server/audio-calibration-card", panel(fac, "Calibration").last());
+    // newest first: the calibration turns and its check, after the mic checks and track starts
+    await crop(fac, "server/audio-event-log", panel(fac, "Event log"));
     const start1 = fac.getByRole("button", { name: /Start round 1 of 2/ });
     await expect(start1).toBeEnabled();
     await start1.click();

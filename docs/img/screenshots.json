@@ -45,6 +45,14 @@
         "commit": "fc32ce7+",
         "caption": "Consent, questionnaire and briefing, each switched on or off.",
         "at": "2026-11-18T01:36:07Z"
+      },
+      {
+        "v": 2,
+        "file": "server/setup-04-onboarding-v2.png",
+        "date": "2026-11-19",
+        "at": "2026-11-19T00:49:01Z",
+        "commit": "125d503",
+        "caption": "Record audio option under the consent screen, with the warning shown on a plain-HTTP server."
       }
     ],
     "server/setup-05-tags": [
@@ -65,6 +73,14 @@
         "commit": "fc32ce7+",
         "caption": "Every setting in one table before *Create session* locks them.",
         "at": "2026-11-18T01:36:09Z"
+      },
+      {
+        "v": 2,
+        "file": "server/setup-06-review-v2.png",
+        "date": "2026-11-19",
+        "at": "2026-11-19T00:49:01Z",
+        "commit": "125d503",
+        "caption": "Review lists the mic check step and a new AUDIO row."
       }
     ],
     "server/setup-08-labels": [
@@ -115,6 +131,14 @@
         "commit": "fc32ce7+",
         "caption": "Four clients connected, no seat bound yet.",
         "at": "2026-11-18T01:36:11Z"
+      },
+      {
+        "v": 2,
+        "file": "server/setup-07-connect-v2.png",
+        "date": "2026-11-19",
+        "at": "2026-11-19T00:49:01Z",
+        "commit": "125d503",
+        "caption": "Connect notes that browsers on other PCs cannot use the microphone over plain HTTP."
       }
     ],
     "server/setup-07-connect-bound": [
@@ -145,6 +169,14 @@
         "commit": "fc32ce7+",
         "caption": "Information and consent (placeholder text); required statements are starred.",
         "at": "2026-11-18T01:36:15Z"
+      },
+      {
+        "v": 2,
+        "file": "client/03-consent-v2.png",
+        "date": "2026-11-19",
+        "at": "2026-11-19T00:49:01Z",
+        "commit": "125d503",
+        "caption": "Mic check step in the progress bar; the consent text gains an Audio recording section."
       }
     ],
     "client/04-about-you": [
@@ -155,6 +187,14 @@
         "commit": "fc32ce7+",
         "caption": "The short background questionnaire.",
         "at": "2026-11-18T01:36:17Z"
+      },
+      {
+        "v": 2,
+        "file": "client/04-about-you-v2.png",
+        "date": "2026-11-19",
+        "at": "2026-11-19T00:49:01Z",
+        "commit": "125d503",
+        "caption": "REC bar on top while the microphone records; the mic check step is done in the progress bar."
       }
     ],
     "client/05-briefing": [
@@ -175,6 +215,14 @@
         "commit": "fc32ce7+",
         "caption": "Waiting for the other players and for round 1.",
         "at": "2026-11-18T01:36:18Z"
+      },
+      {
+        "v": 2,
+        "file": "client/06-ready-v2.png",
+        "date": "2026-11-19",
+        "at": "2026-11-19T00:49:02Z",
+        "commit": "125d503",
+        "caption": "Ready with audio: REC bar on top, and a note that a short sound calibration comes next."
       }
     ],
     "server/live-01-onboarding": [
@@ -185,6 +233,14 @@
         "commit": "fc32ce7+",
         "caption": "Every seat at a different onboarding step.",
         "at": "2026-11-18T01:36:15Z"
+      },
+      {
+        "v": 2,
+        "file": "server/live-01-onboarding-v2.png",
+        "date": "2026-11-19",
+        "at": "2026-11-19T00:49:02Z",
+        "commit": "125d503",
+        "caption": "Onboarding with audio: calibration row in NEXT, Mic column, mic checks held until all consented."
       }
     ],
     "server/live-panel-seats-onboarding": [
@@ -195,6 +251,14 @@
         "commit": "fc32ce7+",
         "caption": "Each seat's onboarding step: consent, demographics, briefing or ready.",
         "at": "2026-11-18T01:36:16Z"
+      },
+      {
+        "v": 2,
+        "file": "server/live-panel-seats-onboarding-v2.png",
+        "date": "2026-11-19",
+        "at": "2026-11-19T00:49:02Z",
+        "commit": "125d503",
+        "caption": "New Mic column: each seat's recording state; mic checks pending until everyone has consented."
       }
     ],
     "server/live-panel-next-ready": [
@@ -205,6 +269,14 @@
         "commit": "fc32ce7+",
         "caption": "Once every seat is ready, NEXT offers *Start round 1 of 2*.",
         "at": "2026-11-18T01:36:18Z"
+      },
+      {
+        "v": 2,
+        "file": "server/live-panel-next-ready-v2.png",
+        "date": "2026-11-19",
+        "at": "2026-11-19T00:49:02Z",
+        "commit": "125d503",
+        "caption": "Everyone ready: with audio, NEXT asks for the calibration before round 1."
       }
     ],
     "client/07-game-round-start": [
@@ -235,6 +307,14 @@
         "commit": "fc32ce7+",
         "caption": "Round, seat, K/P labels, map score, quota bars and time left.",
         "at": "2026-11-18T01:36:32Z"
+      },
+      {
+        "v": 2,
+        "file": "client/part-status-line-v2.png",
+        "date": "2026-11-19",
+        "at": "2026-11-19T00:49:04Z",
+        "commit": "125d503",
+        "caption": "REC tag in the status line while the microphone records."
       }
     ],
     "client/part-map-detail": [
@@ -325,6 +405,14 @@
         "commit": "fc32ce7+",
         "caption": "NEXT and TOOLS, the seats, the composite map and every player's view.",
         "at": "2026-11-18T01:36:34Z"
+      },
+      {
+        "v": 2,
+        "file": "server/live-02-round-v2.png",
+        "date": "2026-11-19",
+        "at": "2026-11-19T00:49:02Z",
+        "commit": "125d503",
+        "caption": "Round with audio: calibration card, Mic column with live levels, mics n/m in the status bar."
       }
     ],
     "server/live-panel-session": [
@@ -355,6 +443,14 @@
         "commit": "fc32ce7+",
         "caption": "Each seat's client, code, K/P labels, map view, quota bars and last activity.",
         "at": "2026-11-18T01:36:36Z"
+      },
+      {
+        "v": 2,
+        "file": "server/live-panel-seats-v2.png",
+        "date": "2026-11-19",
+        "at": "2026-11-19T00:49:03Z",
+        "commit": "125d503",
+        "caption": "Mic column: REC state, live level, last chunk and recorded minutes per seat."
       }
     ],
     "server/live-panel-composite-map": [
@@ -395,6 +491,14 @@
         "commit": "fc32ce7+",
         "caption": "Both rounds: a lane per seat, the pause shaded, marks in K colours.",
         "at": "2026-11-18T01:51:55Z"
+      },
+      {
+        "v": 2,
+        "file": "server/live-panel-timeline-v2.png",
+        "date": "2026-11-19",
+        "at": "2026-11-19T00:49:03Z",
+        "commit": "125d503",
+        "caption": "Mic lanes under the seats: recording, recording paused (striped) and calibration turns."
       }
     ],
     "server/live-panel-timeline-tooltip": [
@@ -405,6 +509,14 @@
         "commit": "fc32ce7+",
         "caption": "A decision on the timeline and the score changes it caused.",
         "at": "2026-11-18T01:51:56Z"
+      },
+      {
+        "v": 2,
+        "file": "server/live-panel-timeline-tooltip-v2.png",
+        "date": "2026-11-19",
+        "at": "2026-11-19T00:49:03Z",
+        "commit": "125d503",
+        "caption": "Hover info on the timeline, now with the mic lanes below the seats."
       }
     ],
     "server/live-panel-event-log": [
@@ -435,6 +547,14 @@
         "commit": "fc32ce7+",
         "caption": "A broadcast and a log note typed in, next to Edit labels and End game early.",
         "at": "2026-11-18T01:36:39Z"
+      },
+      {
+        "v": 2,
+        "file": "server/live-panel-tools-v2.png",
+        "date": "2026-11-19",
+        "at": "2026-11-19T00:49:03Z",
+        "commit": "125d503",
+        "caption": "TOOLS gains Pause recording (for everyone: players cannot mute themselves)."
       }
     ],
     "client/part-other-players-and-messages": [
@@ -575,6 +695,14 @@
         "commit": "fc32ce7+",
         "caption": "Closing archives the session; lock the key sheet away.",
         "at": "2026-11-18T01:37:00Z"
+      },
+      {
+        "v": 2,
+        "file": "server/wrap-up-03-close-v2.png",
+        "date": "2026-11-19",
+        "at": "2026-11-19T00:49:03Z",
+        "commit": "125d503",
+        "caption": "Close checks the audio first: all uploaded, and any gaps in the stored audio per seat."
       }
     ],
     "server/database-01-participants": [
@@ -585,6 +713,14 @@
         "commit": "fc32ce7+",
         "caption": "Sessions, exports, deletions and the erasure register.",
         "at": "2026-11-18T01:37:01Z"
+      },
+      {
+        "v": 2,
+        "file": "server/database-01-participants-v2.png",
+        "date": "2026-11-19",
+        "at": "2026-11-19T00:49:04Z",
+        "commit": "125d503",
+        "caption": "Sessions list gains the Audio column (tracks and recorded time)."
       }
     ],
     "server/database-03-simulations": [
@@ -595,6 +731,14 @@
         "commit": "fc32ce7+",
         "caption": "A separate database with nothing to erase.",
         "at": "2026-11-18T01:37:20Z"
+      },
+      {
+        "v": 2,
+        "file": "server/database-03-simulations-v2.png",
+        "date": "2026-11-19",
+        "at": "2026-11-19T00:49:04Z",
+        "commit": "125d503",
+        "caption": "Audio column in the simulation list too: simulated sessions never record audio."
       }
     ],
     "server/replay-01-choose": [
@@ -615,6 +759,14 @@
         "commit": "fc32ce7+",
         "caption": "Step through it event by event, here at a pause in round 1.",
         "at": "2026-11-18T01:50:20Z"
+      },
+      {
+        "v": 2,
+        "file": "server/replay-02-session-v2.png",
+        "date": "2026-11-19",
+        "at": "2026-11-19T00:49:04Z",
+        "commit": "125d503",
+        "caption": "Replay shows audio events in the event line and mic lanes in the timeline."
       }
     ],
     "server/database-02-erasure-lookup": [
@@ -625,6 +777,254 @@
         "commit": "fc32ce7+",
         "caption": "A participant code looked up before erasure: the session, seat and exports that hold it.",
         "at": "2026-11-18T01:37:02Z"
+      },
+      {
+        "v": 2,
+        "file": "server/database-02-erasure-lookup-v2.png",
+        "date": "2026-11-19",
+        "at": "2026-11-19T00:49:04Z",
+        "commit": "125d503",
+        "caption": "Erasure lookup also counts the code's audio tracks and their recorded time."
+      }
+    ],
+    "client/audio-01-mic-check-held": [
+      {
+        "v": 1,
+        "file": "client/audio-01-mic-check-held.png",
+        "date": "2026-11-19",
+        "at": "2026-11-19T00:48:56Z",
+        "commit": "125d503",
+        "caption": "Mic check held: no microphone opens until every player in the room has finished the consent form."
+      }
+    ],
+    "client/audio-02-mic-check-ready": [
+      {
+        "v": 1,
+        "file": "client/audio-02-mic-check-ready.png",
+        "date": "2026-11-19",
+        "at": "2026-11-19T00:48:56Z",
+        "commit": "125d503",
+        "caption": "Mic check ready: recording starts here, there is no mute button; Start mic check asks for the mic."
+      }
+    ],
+    "client/audio-03-mic-check-listening": [
+      {
+        "v": 1,
+        "file": "client/audio-03-mic-check-listening.png",
+        "date": "2026-11-19",
+        "at": "2026-11-19T00:48:56Z",
+        "commit": "125d503",
+        "caption": "Mic check listening: live level meter, the sentence to read and how much speech was heard so far."
+      }
+    ],
+    "client/audio-04-mic-check-passed": [
+      {
+        "v": 1,
+        "file": "client/audio-04-mic-check-passed.png",
+        "date": "2026-11-19",
+        "at": "2026-11-19T00:48:56Z",
+        "commit": "125d503",
+        "caption": "Mic check passed: the voice was heard clearly; recording goes on through the rest of onboarding."
+      }
+    ],
+    "client/audio-05-mic-denied": [
+      {
+        "v": 1,
+        "file": "client/audio-05-mic-denied.png",
+        "date": "2026-11-19",
+        "at": "2026-11-19T00:48:57Z",
+        "commit": "125d503",
+        "caption": "Microphone blocked by the browser: the steps to allow it, and Try again."
+      }
+    ],
+    "client/audio-06-calibration-waiting": [
+      {
+        "v": 1,
+        "file": "client/audio-06-calibration-waiting.png",
+        "date": "2026-11-19",
+        "at": "2026-11-19T00:48:57Z",
+        "commit": "125d503",
+        "caption": "Calibration waiting: everyone is ready (4/4) and waits for the facilitator to start the calibration."
+      }
+    ],
+    "client/audio-07-calibration-turn": [
+      {
+        "v": 1,
+        "file": "client/audio-07-calibration-turn.png",
+        "date": "2026-11-19",
+        "at": "2026-11-19T00:48:57Z",
+        "commit": "125d503",
+        "caption": "Calibration, your turn: the sentence to read aloud, the seconds left and a live level meter."
+      }
+    ],
+    "client/audio-08-calibration-quiet": [
+      {
+        "v": 1,
+        "file": "client/audio-08-calibration-quiet.png",
+        "date": "2026-11-19",
+        "at": "2026-11-19T00:48:57Z",
+        "commit": "125d503",
+        "caption": "Calibration, another seat's turn: stay quiet while seat 1 reads."
+      }
+    ],
+    "client/audio-09-game-paused-recording": [
+      {
+        "v": 1,
+        "file": "client/audio-09-game-paused-recording.png",
+        "date": "2026-11-19",
+        "at": "2026-11-19T00:48:57Z",
+        "commit": "125d503",
+        "caption": "Game with recording paused by the facilitator: PAUSED tag in the status line; play goes on."
+      }
+    ],
+    "client/audio-10-game-mic-error": [
+      {
+        "v": 1,
+        "file": "client/audio-10-game-mic-error.png",
+        "date": "2026-11-19",
+        "at": "2026-11-19T00:48:58Z",
+        "commit": "125d503",
+        "caption": "Microphone stopped during the game: a banner with what to check and Try again; the game goes on."
+      }
+    ],
+    "server/audio-next-held": [
+      {
+        "v": 1,
+        "file": "server/audio-next-held.png",
+        "date": "2026-11-19",
+        "at": "2026-11-19T00:48:58Z",
+        "commit": "125d503",
+        "caption": "NEXT with audio: calibration not run yet; mic checks held until seats 1-3 finish the consent form."
+      }
+    ],
+    "server/audio-next-calibration-running": [
+      {
+        "v": 1,
+        "file": "server/audio-next-calibration-running.png",
+        "date": "2026-11-19",
+        "at": "2026-11-19T00:48:58Z",
+        "commit": "125d503",
+        "caption": "NEXT during the calibration: which seat is reading, Redo and Skip calibration."
+      }
+    ],
+    "server/audio-next-calibration-done": [
+      {
+        "v": 1,
+        "file": "server/audio-next-calibration-done.png",
+        "date": "2026-11-19",
+        "at": "2026-11-19T00:48:58Z",
+        "commit": "125d503",
+        "caption": "NEXT after the calibration: the result with each seat's margin, Start round 1 and Redo."
+      }
+    ],
+    "server/audio-calibration-card": [
+      {
+        "v": 1,
+        "file": "server/audio-calibration-card.png",
+        "date": "2026-11-19",
+        "at": "2026-11-19T00:48:58Z",
+        "commit": "125d503",
+        "caption": "Calibration quality: each seat's own voice against the loudest other mic, verdict and advice."
+      }
+    ],
+    "server/audio-status-bar": [
+      {
+        "v": 1,
+        "file": "server/audio-status-bar.png",
+        "date": "2026-11-19",
+        "at": "2026-11-19T00:48:59Z",
+        "commit": "125d503",
+        "caption": "Status bar with mics 4/4: how many seats are recording right now."
+      }
+    ],
+    "server/audio-popup-pause-recording": [
+      {
+        "v": 1,
+        "file": "server/audio-popup-pause-recording.png",
+        "date": "2026-11-19",
+        "at": "2026-11-19T00:48:59Z",
+        "commit": "125d503",
+        "caption": "Pause recording for everyone: confirmation with an optional reason, logged and exported."
+      }
+    ],
+    "server/audio-tools-paused": [
+      {
+        "v": 1,
+        "file": "server/audio-tools-paused.png",
+        "date": "2026-11-19",
+        "at": "2026-11-19T00:48:59Z",
+        "commit": "125d503",
+        "caption": "TOOLS while recording is paused: since when, the reason, and Resume recording."
+      }
+    ],
+    "server/audio-popup-skip-mic-check": [
+      {
+        "v": 1,
+        "file": "server/audio-popup-skip-mic-check.png",
+        "date": "2026-11-19",
+        "at": "2026-11-19T00:48:59Z",
+        "commit": "125d503",
+        "caption": "Skip a seat's mic check when its microphone cannot be made to work: logged reason, not recorded."
+      }
+    ],
+    "server/audio-live-mic-error": [
+      {
+        "v": 1,
+        "file": "server/audio-live-mic-error.png",
+        "date": "2026-11-19",
+        "at": "2026-11-19T00:48:59Z",
+        "commit": "125d503",
+        "caption": "LIVE with a microphone error on seat 1: ERROR in the Mic column, mics 0/1 in the status bar."
+      }
+    ],
+    "server/audio-db-01-list": [
+      {
+        "v": 1,
+        "file": "server/audio-db-01-list.png",
+        "date": "2026-11-19",
+        "at": "2026-11-19T00:49:00Z",
+        "commit": "125d503",
+        "caption": "DATABASE sessions with the Audio column: tracks and recorded time; click it to open the audio."
+      }
+    ],
+    "server/audio-db-02-popup": [
+      {
+        "v": 1,
+        "file": "server/audio-db-02-popup.png",
+        "date": "2026-11-19",
+        "at": "2026-11-19T00:49:00Z",
+        "commit": "125d503",
+        "caption": "Audio popup: per-seat tracks, gaps and missing audio, speaker attribution, export and delete."
+      }
+    ],
+    "server/audio-db-03-attribution": [
+      {
+        "v": 1,
+        "file": "server/audio-db-03-attribution.png",
+        "date": "2026-11-19",
+        "at": "2026-11-19T00:49:00Z",
+        "commit": "125d503",
+        "caption": "Speaker attribution of synthetic bot audio: grade, talk-time bars, margins and speech timeline."
+      }
+    ],
+    "server/audio-db-04-export": [
+      {
+        "v": 1,
+        "file": "server/audio-db-04-export.png",
+        "date": "2026-11-19",
+        "at": "2026-11-19T00:49:00Z",
+        "commit": "125d503",
+        "caption": "Audio export result: clean WAV of seat 1 with length, size and SHA-256, in the export register."
+      }
+    ],
+    "server/audio-db-05-delete": [
+      {
+        "v": 1,
+        "file": "server/audio-db-05-delete.png",
+        "date": "2026-11-19",
+        "at": "2026-11-19T00:49:00Z",
+        "commit": "125d503",
+        "caption": "Delete audio: raw or all audio, a warning about exports still on disk, type the session id."
       }
     ],
     "server/setup-07-connect-fake-players": [

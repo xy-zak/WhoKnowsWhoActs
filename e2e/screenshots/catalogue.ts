@@ -472,6 +472,14 @@ export const SHOTS = [
     size: "full",
   },
   {
+    id: "server/audio-event-log",
+    group: "audio",
+    subgroup: "Facilitator: LIVE",
+    title: "Event log: mic checks and calibration",
+    size: "half",
+    sources: [`${C}/facilitator/EventLog.tsx`, `${C}/facilitator/audioLive.ts`],
+  },
+  {
     id: "server/audio-status-bar",
     group: "audio",
     subgroup: "Facilitator: LIVE",
