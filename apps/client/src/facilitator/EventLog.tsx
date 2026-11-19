@@ -8,7 +8,7 @@ import {
   type StoredTelemetry,
   samplesToMs,
 } from "@wkwa/shared";
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, memo, useMemo, useState } from "react";
 import { fmtDuration, fmtSigned, plural } from "../common/format";
 import { Button, formatDb, Panel, SeatDot } from "../ui";
 import { shortTrack } from "./audioLive";
@@ -110,7 +110,8 @@ export function summarise(ev: StoredEvent, regionName: (id: string) => string): 
   }
 }
 
-export function EventLog({
+/** Memoised: the live stage re-renders every second, and that must not rescan up to 1,000 rows. */
+export const EventLog = memo(function EventLog({
   events,
   state,
   regionName,
@@ -136,12 +137,13 @@ export function EventLog({
         .reverse(),
     [events, type, seat],
   );
+  const revoked = new Set(state?.actions.filter((a) => a.revoked).map((a) => a.seq));
   const revocable = (e: StoredEvent) =>
     onRevoke &&
     state?.phase === "round_active" &&
     (e.type === "ProposalMade" || e.type === "DecisionMade") &&
     e.round === state.round &&
-    !state.actions.find((a) => a.seq === e.seq)?.revoked;
+    !revoked.has(e.seq);
 
   return (
     <Panel title={`Event log · ${events.length}`} icon="review">
@@ -230,7 +232,7 @@ export function EventLog({
       </div>
     </Panel>
   );
-}
+});
 
 export function TelemetryFeed({
   items,

@@ -17,7 +17,7 @@ import {
   roundRemainingMs,
   seatList,
 } from "@wkwa/shared";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { fmtDuration } from "../../common/format";
 import { useStore } from "../../net/store";
 import {
@@ -600,24 +600,31 @@ export function LiveStage({ conn }: { conn: FacilitatorConnection }) {
   const dash = fs.dashboard;
   const st = dash?.state;
   const scenario = fs.scenario;
+  // stable between the 1 s ticks, so the memoised event log does not re-render on each one
+  const regionName = useCallback(
+    (id: string) => scenario?.regions.find((r) => r.id === id)?.name ?? id,
+    [scenario],
+  );
+  const confirmRevoke = useCallback(
+    async (seq: number) => {
+      const a = st?.actions.find((x) => x.seq === seq);
+      if (
+        await confirm({
+          title: `Revoke action #${seq}?`,
+          message: a
+            ? `Seat ${a.seat}'s ${a.kind} on ${regionName(a.regionId)} disappears for everyone and the seat gets its quota back. The original event stays in the log.`
+            : "The action disappears for everyone; the original event stays in the log.",
+          confirmLabel: "Revoke",
+          icon: "revoke",
+        })
+      )
+        void conn
+          .cmd("action:revoke", { seq, reason: "facilitator" }, `Action #${seq} revoked`)
+          .catch(() => {});
+    },
+    [st, confirm, conn, regionName],
+  );
   if (!dash || !st) return null;
-  const regionName = (id: string) => scenario?.regions.find((r) => r.id === id)?.name ?? id;
-  const confirmRevoke = async (seq: number) => {
-    const a = st.actions.find((x) => x.seq === seq);
-    if (
-      await confirm({
-        title: `Revoke action #${seq}?`,
-        message: a
-          ? `Seat ${a.seat}'s ${a.kind} on ${regionName(a.regionId)} disappears for everyone and the seat gets its quota back. The original event stays in the log.`
-          : "The action disappears for everyone; the original event stays in the log.",
-        confirmLabel: "Revoke",
-        icon: "revoke",
-      })
-    )
-      void conn
-        .cmd("action:revoke", { seq, reason: "facilitator" }, `Action #${seq} revoked`)
-        .catch(() => {});
-  };
   const seats = seatList(st)
     .filter((s) => s.bound || s.withdrawn)
     .map((s) => s.seat);
