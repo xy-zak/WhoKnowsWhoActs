@@ -1,5 +1,6 @@
-import { memo, useCallback, useEffect, useId, useMemo, useReducer, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useId, useMemo, useReducer, useState } from "react";
 import { fmtBytes, fmtDuration, fmtShare, fmtSigned, PLACEHOLDER } from "../../common/format";
+import { useLatest } from "../../net/latest";
 import {
   AsciiProgress,
   Button,
@@ -96,30 +97,30 @@ export function AudioPopup({
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const kindName = useId();
   const base = `/api/sessions/${encodeURIComponent(sessionId)}/audio`;
-  /** Number of the latest load: an older, slower answer never overwrites a newer view. */
-  const loadSeq = useRef(0);
+  const latest = useLatest();
 
   const load = useCallback(
-    async (followJob = false) => {
-      const seq = ++loadSeq.current;
-      try {
-        const v = await conn.api<AudioSessionView>(base);
-        if (seq !== loadSeq.current) return;
-        setView(v);
-        setLoadError(null);
-        if (followJob) {
-          const j = initialJobState(v);
-          if (j.phase === "active" && v.jobs[0]) dispatch({ type: "job", job: v.jobs[0] });
-        }
-        if (v.seats.length > 0 || v.deletions.length > 0) {
-          const s = await conn.api<SegmentsView>(`${base}/segments`).catch(() => null);
-          if (seq === loadSeq.current) setSegments(s);
-        } else setSegments(null);
-      } catch (e) {
-        if (seq === loadSeq.current) setLoadError(errText(e));
-      }
+    (followJob = false) => {
+      const ifLatest = latest();
+      return conn.api<AudioSessionView>(base).then(
+        ifLatest((v) => {
+          setView(v);
+          setLoadError(null);
+          if (followJob) {
+            const j = initialJobState(v);
+            if (j.phase === "active" && v.jobs[0]) dispatch({ type: "job", job: v.jobs[0] });
+          }
+          if (v.seats.length > 0 || v.deletions.length > 0) {
+            conn.api<SegmentsView>(`${base}/segments`).then(
+              ifLatest(setSegments),
+              ifLatest(() => setSegments(null)),
+            );
+          } else setSegments(null);
+        }),
+        ifLatest((e) => setLoadError(errText(e))),
+      );
     },
-    [conn, base],
+    [conn, base, latest],
   );
   useEffect(() => {
     void load(true);
@@ -235,7 +236,7 @@ export function AudioPopup({
       setExportResult(null);
       conn.toast(
         `Audio deleted (${DELETE_SCOPES[r.scope].label.toLowerCase()}): ${r.counts.files} files`,
-        r.audioExportsOnDisk.length || r.audioFiles.failed.length ? "warn" : "ok",
+        deleteWarns(r) ? "warn" : "ok",
       );
       void load();
       onChanged();
@@ -256,22 +257,17 @@ export function AudioPopup({
       width={980}
       onClose={onClose}
       footer={
-        <>
-          <Button
-            icon="refresh"
-            tip="Reload this session's audio (e.g. while it is still recording)"
-            onClick={() => void load()}
-          >
-            Refresh
-          </Button>
-          <span className="spacer" />
-          <Button icon="close" kbd="Esc" onClick={onClose}>
-            Done
-          </Button>
-        </>
+        <Button
+          icon="refresh"
+          tip="Reload this session's audio (e.g. while it is still recording)"
+          onClick={() => void load()}
+        >
+          Refresh
+        </Button>
       }
+      done
     >
-      <div className="col" style={{ gap: "var(--s3)" }}>
+      <div className="col gap-3">
         {!view && !loadError && <span className="muted cursor">Loading</span>}
         <ErrorText text={loadError} />
         {view && (
@@ -307,14 +303,13 @@ export function AudioPopup({
                 <div className="row" style={{ alignItems: "flex-end", gap: "var(--s3)" }}>
                   <fieldset className="segmented">
                     <legend>Kind</legend>
-                    <div className="row" style={{ gap: "var(--s3)" }}>
+                    <div className="row gap-3">
                       {EXPORT_KINDS.map((k) => {
                         const off = k.id !== "raw" && !hasCleanTrack(view);
                         return (
                           <label
                             key={k.id}
-                            className="row nowrap small"
-                            style={{ gap: "var(--s1)" }}
+                            className="row nowrap small gap-1"
                             data-tip={
                               off ? `${k.tip}. No cleaned track yet: run the attribution first.` : k.tip
                             }
@@ -420,7 +415,7 @@ function SeatsPanel({
             return (
               <tr key={s.seat}>
                 <td>
-                  <span className="row nowrap" style={{ gap: "var(--s1)" }}>
+                  <span className="row nowrap gap-1">
                     <SeatDot seat={s.seat} />
                     <strong>SEAT {s.seat}</strong>
                   </span>
@@ -437,7 +432,7 @@ function SeatsPanel({
                   {fmtDuration(s.missingMs)}
                 </td>
                 <td>
-                  <span className="row nowrap" style={{ gap: "var(--s1)" }}>
+                  <span className="row nowrap gap-1">
                     {s.rawDeleted ? (
                       <StatusTag
                         icon="microphoneOff"
@@ -583,10 +578,10 @@ const AttributionResult = memo(function AttributionResult({
         </span>
       </div>
       <div className="grid-2" style={{ alignItems: "start" }}>
-        <div className="col" style={{ gap: "var(--s1)" }}>
+        <div className="col gap-1">
           <span className="label micro upper muted">Talk time</span>
           {bars.map((b) => (
-            <div key={b.seat} className="row nowrap small" style={{ gap: "var(--s2)" }}>
+            <div key={b.seat} className="row nowrap small">
               <SeatDot seat={b.seat} />
               <strong style={{ minWidth: "6ch" }}>SEAT {b.seat}</strong>
               <AsciiProgress
@@ -617,7 +612,7 @@ const AttributionResult = memo(function AttributionResult({
             {a.quality.perSeat.map((q) => (
               <tr key={q.seat}>
                 <td>
-                  <span className="row nowrap" style={{ gap: "var(--s1)" }}>
+                  <span className="row nowrap gap-1">
                     <SeatDot seat={q.seat} />
                     {q.seat}
                   </span>
@@ -666,12 +661,12 @@ const TimelinePanel = memo(function TimelinePanel({
   const at = (ts: number) => fmtDuration(ts - span.t0);
   return (
     <Panel title={`Speech timeline · ${segments.segments.length} segments`} icon="timeline" nested>
-      <div className="col" style={{ gap: "var(--s1)" }}>
+      <div className="col gap-1">
         <span className="hint">
           Who spoke when, from the latest attribution (times only, no audio). Hover a segment for its times.
         </span>
         {seats.map((seat) => (
-          <div key={seat} className="row nowrap small" style={{ gap: "var(--s2)" }}>
+          <div key={seat} className="row nowrap small">
             <SeatDot seat={seat} />
             <strong style={{ minWidth: "6ch" }}>SEAT {seat}</strong>
             <div
@@ -774,7 +769,7 @@ function PreviousExports({ view }: { view: AudioSessionView }) {
               <td>{x.seats.length ? x.seats.join(", ") : PLACEHOLDER}</td>
               <td>{x.files}</td>
               <td>
-                <span className="row nowrap" style={{ gap: "var(--s1)" }}>
+                <span className="row nowrap gap-1">
                   {x.onDisk ? (
                     <StatusTag tone="warn" icon="warning" tip="The WAV files are still in the exports folder">
                       on disk
@@ -854,8 +849,11 @@ function RetentionPanel({
   );
 }
 
+const deleteWarns = (r: AudioDeleteResult) =>
+  r.audioExportsOnDisk.length > 0 || r.audioFiles.failed.length > 0 || Boolean(r.audioFiles.compactionError);
+
 function DeleteResultView({ r }: { r: AudioDeleteResult }) {
-  const warn = r.audioExportsOnDisk.length > 0 || r.audioFiles.failed.length > 0;
+  const warn = deleteWarns(r);
   return (
     <Callout tone={warn ? "warn" : "live"} icon={warn ? "warning" : "ok"}>
       <strong>
@@ -872,6 +870,16 @@ function DeleteResultView({ r }: { r: AudioDeleteResult }) {
           <span className="t-danger">
             <Icon name="error" /> Could not remove (unreadable, keys gone; delete by hand):{" "}
             {r.audioFiles.failed.join(", ")}
+          </span>
+        </>
+      )}
+      {r.audioFiles.compactionError && (
+        <>
+          <br />
+          <span className="t-danger">
+            <Icon name="error" /> The database could not be compacted: the data is deleted, but its old pages
+            may stay in the file until the next erasure or deletion compacts it (
+            {r.audioFiles.compactionError}).
           </span>
         </>
       )}
@@ -909,7 +917,7 @@ function DeleteAudioForm({
       </p>
       <fieldset className="segmented">
         <legend>What to delete</legend>
-        <div className="col" style={{ gap: "var(--s2)" }}>
+        <div className="col">
           {(["raw", "all"] as const).map((s) => (
             <label key={s} className="check">
               <input

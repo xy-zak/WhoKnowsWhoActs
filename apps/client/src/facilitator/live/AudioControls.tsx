@@ -124,10 +124,10 @@ export function AudioNext({ conn, st }: { conn: FacilitatorConnection; st: Reado
         </Callout>
       )}
       {readers.length > 0 && (
-        <div className="row small" style={{ gap: "var(--s2)" }}>
+        <div className="row small">
           <span className="muted">Ready for the calibration:</span>
           {readers.map((seat) => (
-            <span key={seat} className="row nowrap" style={{ gap: 4 }}>
+            <span key={seat} className="row nowrap gap-1">
               <SeatDot seat={seat} /> {seat}{" "}
               {notReady.has(seat) ? (
                 <span className="faint">waiting</span>
@@ -149,7 +149,7 @@ export function AudioNext({ conn, st }: { conn: FacilitatorConnection; st: Reado
         </span>
       )}
       {inCheck.length > 0 && !held.length && (
-        <div className="col" style={{ gap: "var(--s1)" }}>
+        <div className="col gap-1">
           {inCheck.map((s) => (
             <div key={s.seat} className="row nowrap small">
               <SeatDot seat={s.seat} />

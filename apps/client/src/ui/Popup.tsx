@@ -1,6 +1,6 @@
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Button } from "./components";
+import { Button, Field, stepNum } from "./components";
 import { Icon } from "./Icon";
 import type { IconName } from "./icons";
 
@@ -35,6 +35,8 @@ export interface PopupProps {
   children: ReactNode;
   /** Footer content; by convention secondary actions left, primary action right. */
   footer?: ReactNode;
+  /** End the footer with a Done button that calls onClose. */
+  done?: boolean;
   onClose?: () => void;
   /** Called on Enter (not from textareas/buttons). Omit for destructive popups. */
   onPrimary?: () => void;
@@ -63,6 +65,7 @@ export function Popup({
   stepper,
   children,
   footer,
+  done = false,
   onClose,
   onPrimary,
   width = 760,
@@ -162,7 +165,7 @@ export function Popup({
           <span className="spacer" />
           {step && (
             <span className="popup-step">
-              STEP {String(step.index + 1).padStart(2, "0")}/{String(step.total).padStart(2, "0")}
+              STEP {stepNum(step.index)}/{stepNum(step.total - 1)}
             </span>
           )}
           {closable && onClose && (
@@ -171,7 +174,19 @@ export function Popup({
         </div>
         {stepper && <div className="popup-stepper">{stepper}</div>}
         <div className="popup-body">{children}</div>
-        {footer && <div className="popup-foot">{footer}</div>}
+        {(footer || done) && (
+          <div className="popup-foot">
+            {footer}
+            {done && (
+              <>
+                <span className="spacer" />
+                <Button icon="close" kbd="Esc" onClick={onClose}>
+                  Done
+                </Button>
+              </>
+            )}
+          </div>
+        )}
       </div>
     </div>,
     document.body,
@@ -280,8 +295,7 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
         >
           <div>{req.message}</div>
           {req.reason && (
-            <label className="field">
-              <span className="label">{req.reason.label}</span>
+            <Field label={req.reason.label}>
               <input
                 type="text"
                 value={reason}
@@ -290,20 +304,23 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
                 placeholder={req.reason.placeholder}
                 autoComplete="off"
               />
-            </label>
+            </Field>
           )}
           {req.requireText && (
-            <label className="field">
-              <span className="label">
-                Type <span className="mono strong">{req.requireText}</span> to confirm
-              </span>
+            <Field
+              label={
+                <>
+                  Type <span className="mono strong">{req.requireText}</span> to confirm
+                </>
+              }
+            >
               <input
                 type="text"
                 value={typed}
                 onChange={(e) => setTyped(e.target.value)}
                 autoComplete="off"
               />
-            </label>
+            </Field>
           )}
         </Popup>
       )}

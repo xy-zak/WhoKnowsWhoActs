@@ -291,21 +291,23 @@ export interface StepDef {
   label: string;
 }
 
-/**
- * Horizontal step list: ✓ done · ▶ current · · upcoming. Done steps are
- * clickable when `onSelect` is given and the step is not locked.
- */
+/** "07": the shown number of the step at 0-based index `i`. */
+export const stepNum = (i: number) => String(i + 1).padStart(2, "0");
+
+/** A step's glyph: ▶ current · ■ locked · – skipped (done) · ✓ done · · upcoming. */
+export const stepGlyph = (s: { current: boolean; done: boolean; locked?: boolean; skipped?: boolean }) =>
+  s.current ? "▶" : s.locked ? "■" : s.skipped && s.done ? "–" : s.done ? "✓" : "·";
+
+/** Horizontal step list. Done steps are clickable when `onSelect` is given. */
 export function Stepper({
   steps,
   current,
   completed,
-  locked,
   onSelect,
 }: {
   steps: StepDef[];
   current: number;
   completed: (index: number) => boolean;
-  locked?: (index: number) => boolean;
   onSelect?: (index: number) => void;
 }) {
   return (
@@ -313,9 +315,7 @@ export function Stepper({
       {steps.map((s, i) => {
         const isCurrent = i === current;
         const isDone = !isCurrent && completed(i);
-        const isLocked = locked?.(i) ?? false;
-        const clickable = Boolean(onSelect) && isDone && !isLocked;
-        const glyph = isCurrent ? "▶" : isDone ? (isLocked ? "■" : "✓") : "·";
+        const clickable = Boolean(onSelect) && isDone;
         return (
           <li
             key={s.key}
@@ -326,10 +326,9 @@ export function Stepper({
               disabled={!clickable}
               onClick={() => clickable && onSelect?.(i)}
               aria-current={isCurrent ? "step" : undefined}
-              title={isLocked ? "Locked: the session has been created" : undefined}
             >
-              <span className="glyph">{glyph}</span>
-              {String(i + 1).padStart(2, "0")} {s.label}
+              <span className="glyph">{stepGlyph({ current: isCurrent, done: isDone })}</span>
+              {stepNum(i)} {s.label}
             </button>
           </li>
         );
@@ -339,7 +338,15 @@ export function Stepper({
 }
 
 /** A labelled form field. */
-export function Field({ label, hint, children }: { label: string; hint?: ReactNode; children: ReactNode }) {
+export function Field({
+  label,
+  hint,
+  children,
+}: {
+  label: ReactNode;
+  hint?: ReactNode;
+  children: ReactNode;
+}) {
   return (
     // biome-ignore lint/a11y/noLabelWithoutControl: the control is passed as children
     <label className="field">

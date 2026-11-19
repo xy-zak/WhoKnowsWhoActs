@@ -180,7 +180,7 @@ export const EventLog = memo(function EventLog({
                 <td>{e.type}</td>
                 <td>
                   {e.seat && (
-                    <span className="row nowrap" style={{ gap: 4 }}>
+                    <span className="row nowrap gap-1">
                       <SeatDot seat={e.seat} /> {e.seat}
                     </span>
                   )}
@@ -245,7 +245,7 @@ export function TelemetryFeed({
               <tr key={t.id}>
                 <td className="mono small">{ms(t.clientTs)}</td>
                 <td>
-                  <span className="row nowrap" style={{ gap: 4 }}>
+                  <span className="row nowrap gap-1">
                     <SeatDot seat={t.seat} /> {t.seat}
                   </span>
                 </td>

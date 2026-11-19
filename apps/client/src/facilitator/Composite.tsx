@@ -305,7 +305,7 @@ export function PlayerMirrors({
           } catch {}
           const hover = presence[s.seat];
           return (
-            <div key={s.seat} className="col" style={{ gap: 4 }}>
+            <div key={s.seat} className="col gap-1">
               <div className="row nowrap small">
                 <SeatDot seat={s.seat} />
                 <strong>SEAT {s.seat}</strong>

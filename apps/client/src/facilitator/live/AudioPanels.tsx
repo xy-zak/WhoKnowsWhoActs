@@ -290,7 +290,7 @@ export function AudioCheckView({ check }: { check: AudioCheck }) {
   const uploads = check.lines.filter((l) => l.kind === "upload");
   const issues = check.lines.filter((l) => l.kind === "issue");
   return (
-    <div className="col" style={{ gap: "var(--s2)" }}>
+    <div className="col">
       {uploads.length > 0 ? (
         <Callout tone="warn" icon="upload">
           <strong>Audio still uploading: keep the players' browsers open.</strong>

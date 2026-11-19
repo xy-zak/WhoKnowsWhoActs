@@ -1,7 +1,7 @@
 import type { PlayerView } from "@wkwa/shared";
 import { useEffect, useRef, useState } from "react";
 import { Button, Callout, Icon, SeatDot, StatusTag, type StepDef, Stepper } from "../ui";
-import { Centered, OnboardingStepper, ReadyScreen } from "./chrome";
+import { Centered, OnboardingStepper, ReadyScreen, useSubmit } from "./chrome";
 import type { PlayerConnection } from "./connection";
 import { MicLevelMeter, useRecording } from "./RecordingIndicator";
 
@@ -52,7 +52,7 @@ function TurnStepper({ view, last }: { view: PlayerView; last: number }) {
 export function CalibrationPendingScreen({ conn, view }: { conn: PlayerConnection; view: PlayerView }) {
   const c = view.audio.calibration;
   const snap = useRecording(conn);
-  const [busy, setBusy] = useState(false);
+  const [busy, run] = useSubmit(conn);
   const others = c.waitingFor.filter((s) => s !== view.me.seat);
   if (!c.canSayReady && !c.ready) {
     return (
@@ -64,16 +64,7 @@ export function CalibrationPendingScreen({ conn, view }: { conn: PlayerConnectio
       </ReadyScreen>
     );
   }
-  const sayReady = async () => {
-    setBusy(true);
-    try {
-      await conn.request("calibration:ready", { clientTs: conn.clock.now() });
-    } catch (e) {
-      conn.showToast((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  };
+  const sayReady = () => run(() => conn.request("calibration:ready", { clientTs: conn.clock.now() }));
   return (
     <Centered title="Mic check & calibration" icon="voice" width={760}>
       {view.phase === "onboarding" && <OnboardingStepper v={view} current="mic_check" />}
@@ -85,7 +76,7 @@ export function CalibrationPendingScreen({ conn, view }: { conn: PlayerConnectio
         Each player in turn reads <strong>one sentence aloud</strong> from their screen (about 6 seconds),
         while everyone else stays quiet. This measures how loud each voice is on each microphone.
       </p>
-      <div className="row" style={{ gap: "var(--s3)" }}>
+      <div className="row gap-3">
         <span className="small upper muted">Your microphone</span>
         <MicLevelMeter conn={conn} state={snap.status.state} />
       </div>

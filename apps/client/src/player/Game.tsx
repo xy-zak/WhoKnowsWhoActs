@@ -24,6 +24,7 @@ import {
   StatusTag,
   useNow,
 } from "../ui";
+import { useSubmit } from "./chrome";
 import type { PlayerConnection } from "./connection";
 import { RecordingProblem, RecordingTag } from "./RecordingIndicator";
 
@@ -43,7 +44,7 @@ export function Game({ conn, view }: { conn: PlayerConnection; view: PlayerView 
   const [tool, setToolState] = useState<ActionKind | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [draft, setDraft] = useState<{ kind: ActionKind; regionId: string } | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [busy, run] = useSubmit(conn);
   const inspectOpenedAt = useRef<number | null>(null);
   const hoverStart = useRef<{ id: string; t: number } | null>(null);
 
@@ -78,17 +79,12 @@ export function Game({ conn, view }: { conn: PlayerConnection; view: PlayerView 
     if (!draft || busy) return;
     const d = draft;
     conn.track("action_draft", { ...d, outcome: "confirmed" });
-    setBusy(true);
-    try {
+    await run(async () => {
       const ack = await conn.intent(d.kind, d.regionId);
       // a resend the server had already stored ("duplicate" without its first answer) is no error
       if (!ack.ok && ack.reason !== "duplicate") conn.showToast(ack.detail || "Action not possible");
-    } catch (e) {
-      conn.showToast((e as Error).message);
-    } finally {
-      setBusy(false);
-      setDraft(null);
-    }
+    });
+    setDraft(null);
   };
 
   // keyboard: P / D tools, Enter confirms, Esc cancels
@@ -393,12 +389,12 @@ function SquarePanel({
                 </td>
                 <td className="small">
                   {d.length > 0 && (
-                    <span className="row nowrap" style={{ gap: 4 }}>
+                    <span className="row nowrap gap-1">
                       <ActSwatch kind="decide" k={k} /> decided{showActors ? ` · ${actorsText(d)}` : ""}
                     </span>
                   )}
                   {p.length > 0 && (
-                    <span className="row nowrap" style={{ gap: 4 }}>
+                    <span className="row nowrap gap-1">
                       <ActSwatch kind="propose" k={k} /> proposed{showActors ? ` · ${actorsText(p)}` : ""}
                     </span>
                   )}
@@ -486,7 +482,7 @@ function StatusLine({
         Round {view.round}/{view.roundCount}
       </strong>
       <span className="faint">│</span>
-      <span className="row nowrap" style={{ gap: 4 }}>
+      <span className="row nowrap gap-1">
         <SeatDot seat={view.me.seat} /> <strong>SEAT {view.me.seat}</strong>
       </span>
       <RecordingTag conn={conn} view={view} />
@@ -541,7 +537,7 @@ function OthersPanel({ view }: { view: PlayerView }) {
   if (view.others.length === 0) return null;
   return (
     <Panel title="Other players" icon="seats">
-      <div className="col" style={{ gap: 4 }}>
+      <div className="col gap-1">
         {view.others.map((o) => (
           <div key={o.seat} className="row nowrap small">
             <SeatDot seat={o.seat} />
@@ -556,11 +552,7 @@ function OthersPanel({ view }: { view: PlayerView }) {
                 offline
               </StatusTag>
             ) : o.progress ? (
-              <span
-                className="muted row nowrap"
-                style={{ gap: 4 }}
-                data-tip={`Seat ${o.seat}'s quota used this round`}
-              >
+              <span className="muted row nowrap gap-1" data-tip={`Seat ${o.seat}'s quota used this round`}>
                 <ActSwatch kind="propose" /> {quotaText(o.progress.propose)} · <ActSwatch kind="decide" />{" "}
                 {quotaText(o.progress.decide)}
               </span>

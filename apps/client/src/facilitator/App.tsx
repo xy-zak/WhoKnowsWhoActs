@@ -102,7 +102,7 @@ export function App({ conn }: { conn: FacilitatorConnection }) {
   const mics = st ? micsSummary(st, micStatsOf(fs.dashboard?.stats)) : null;
 
   return (
-    <div className="app-shell col" style={{ gap: "var(--s2)" }}>
+    <div className="app-shell col">
       <header className="topbar">
         <span className="brand">Who Knows, Who Acts?</span>
         <span className="faint">│</span>
@@ -135,36 +135,25 @@ export function App({ conn }: { conn: FacilitatorConnection }) {
         )}
         <span className="spacer" />
         <nav className="tabs" aria-label="Sections">
-          <button
-            type="button"
-            className={`tab${tab === "main" ? " active" : ""}`}
-            onClick={() => setTab("main")}
-            data-tip={isLive ? "Run the live session (1)" : "Set up a new session (1)"}
-          >
-            <kbd>1</kbd>
-            <Icon name={isLive ? "live" : "setup"} />
-            {isLive ? "LIVE" : "SETUP"}
-          </button>
-          <button
-            type="button"
-            className={`tab${tab === "replay" ? " active" : ""}`}
-            onClick={() => setTab("replay")}
-            data-tip="Step through a recorded session event by event (2)"
-          >
-            <kbd>2</kbd>
-            <Icon name="replay" />
-            REPLAY
-          </button>
-          <button
-            type="button"
-            className={`tab${tab === "database" ? " active" : ""}`}
-            onClick={() => setTab("database")}
-            data-tip="Stored sessions, exports and erasure requests (3)"
-          >
-            <kbd>3</kbd>
-            <Icon name="database" />
-            DATABASE
-          </button>
+          {(
+            [
+              ["main", isLive ? "live" : "setup", isLive ? "Run the live session" : "Set up a new session"],
+              ["replay", "replay", "Step through a recorded session event by event"],
+              ["database", "database", "Stored sessions, exports and erasure requests"],
+            ] as const
+          ).map(([id, icon, tip], i) => (
+            <button
+              key={id}
+              type="button"
+              className={`tab${tab === id ? " active" : ""}`}
+              onClick={() => setTab(id)}
+              data-tip={`${tip} (${i + 1})`}
+            >
+              <kbd>{i + 1}</kbd>
+              <Icon name={icon} />
+              {icon.toUpperCase()}
+            </button>
+          ))}
         </nav>
       </header>
 

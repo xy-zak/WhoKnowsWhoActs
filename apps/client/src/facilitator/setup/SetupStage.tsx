@@ -29,6 +29,8 @@ import {
   type IconName,
   StatusTag,
   type StepDef,
+  stepGlyph,
+  stepNum,
   useConfirm,
   useShortcuts,
 } from "../../ui";
@@ -130,8 +132,6 @@ const LABELS = stepIndex("labels");
 const KEYSHEET = stepIndex("keysheet");
 const START = stepIndex("start");
 const STEP_COUNT = SETUP_STEPS.length;
-/** "07": a step's number as shown. */
-const num = (i: number) => String(i + 1).padStart(2, "0");
 
 /** How the lobby steps read when the players are simulated (agents); keys are 0-based step indexes. */
 const SIMULATED_STEPS: Record<number, Partial<SetupStepDef>> = {
@@ -270,7 +270,7 @@ export function SetupStage({ conn }: { conn: FacilitatorConnection }) {
       (!lobby && i <= (draft?.reached ?? 0)) ||
       (lobby && i >= CONNECT && i <= firstOpenLobbyStep));
   const glyphOf = (i: number) =>
-    i === step ? "▶" : locked(i) ? "■" : skipped(i) && done(i) ? "–" : done(i) ? "✓" : "·";
+    stepGlyph({ current: i === step, done: done(i), locked: locked(i), skipped: skipped(i) });
   // when a session appears (created or resumed) jump to the lobby steps
   // biome-ignore lint/correctness/useExhaustiveDependencies: only when the attached lobby session changes
   useEffect(() => {
@@ -418,7 +418,7 @@ export function SetupStage({ conn }: { conn: FacilitatorConnection }) {
         return tags.length ? `tags: ${tags.join(", ")}` : "no tags";
       }
       case CREATE:
-        return lobby ? `created · ${sessionId}` : `creates the session and locks steps 01–${num(CREATE)}`;
+        return lobby ? `created · ${sessionId}` : `creates the session and locks steps 01–${stepNum(CREATE)}`;
       case CONNECT:
         return lobby
           ? `${seatList(ls).filter((s) => s.bound).length}/${cfg.seatCount} seats bound${fakes.length ? ` (${fakes.length} fake)` : ""}`
@@ -480,7 +480,7 @@ export function SetupStage({ conn }: { conn: FacilitatorConnection }) {
       case TAGS:
         return <TagsStep d={d} upd={upd} />;
       case CREATE:
-        return <CreateStep lastStep={num(CREATE)} error={"error" in final ? final.error : null} />;
+        return <CreateStep lastStep={stepNum(CREATE)} error={"error" in final ? final.error : null} />;
       case CONNECT:
         return dash && lobby ? (
           <div className="col">
@@ -601,7 +601,7 @@ export function SetupStage({ conn }: { conn: FacilitatorConnection }) {
           <div className="col">
             <Callout icon="agent">
               Every seat is taken by an <strong>agent</strong>: no player PCs, client binding or participant
-              codes. The agents act once the simulation starts (step {num(START)}).
+              codes. The agents act once the simulation starts (step {stepNum(START)}).
             </Callout>
             <AgentsTable st={ls} />
           </div>
@@ -647,7 +647,7 @@ export function SetupStage({ conn }: { conn: FacilitatorConnection }) {
       ? {
           label: "Create session",
           icon: "create",
-          tip: `Create the session with these settings; steps 01–${num(CREATE)} are then locked`,
+          tip: `Create the session with these settings; steps 01–${stepNum(CREATE)} are then locked`,
         }
       : i === START
         ? simulated
@@ -671,12 +671,12 @@ export function SetupStage({ conn }: { conn: FacilitatorConnection }) {
           <Icon name="setup" />
           <span className="strong upper">Session setup</span>
           <span className="strong">
-            ▶ STEP {num(step)}/{STEP_COUNT} · {steps[step]!.title.toUpperCase()}
+            ▶ STEP {stepNum(step)}/{STEP_COUNT} · {steps[step]!.title.toUpperCase()}
           </span>
           {simulated && <StatusTag icon="simulation">simulated players</StatusTag>}
           <span className="spacer" />
           <span className="hint">
-            01–{num(CREATE)} configure · {num(CONNECT)}–{num(START)}{" "}
+            01–{stepNum(CREATE)} configure · {stepNum(CONNECT)}–{stepNum(START)}{" "}
             {simulated ? "prepare the agents" : "prepare the room"} · <kbd>Enter</kbd> next · <kbd>N</kbd>{" "}
             current step
           </span>
@@ -710,9 +710,9 @@ export function SetupStage({ conn }: { conn: FacilitatorConnection }) {
                 aria-current={i === step ? "step" : undefined}
                 disabled={i === step || !reachable(i)}
                 onClick={() => goTo(i)}
-                title={`${num(i)} ${def.title}${locked(i) ? " (locked)" : skipped(i) ? " (skipped)" : ""}`}
+                title={`${stepNum(i)} ${def.title}${locked(i) ? " (locked)" : skipped(i) ? " (skipped)" : ""}`}
               >
-                {glyphOf(i)} {num(i)} {def.label}
+                {glyphOf(i)} {stepNum(i)} {def.label}
               </button>
             );
           })}
@@ -751,7 +751,7 @@ export function SetupStage({ conn }: { conn: FacilitatorConnection }) {
                 title={isLocked ? "Locked: the session has been created" : undefined}
               >
                 <span className="glyph">{glyph}</span>
-                <span className="num">{num(i)}</span>
+                <span className="num">{stepNum(i)}</span>
                 <Icon name={isLocked ? "lock" : def.icon} />
                 <span className="title">{def.title}</span>
                 <span className="summary">{isCurrent ? "" : summary(i)}</span>

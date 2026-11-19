@@ -49,7 +49,7 @@ export function MicFixSteps({ error }: { error: MicErrorInfo }) {
 function problem(conn: PlayerConnection, view: PlayerView, snap: RecordingSnapshot): ReactNode | null {
   if (needsClick(view, snap)) {
     return (
-      <span className="row" style={{ gap: "var(--s2)" }}>
+      <span className="row">
         <span>Recording is waiting for you: your browser needs a click to use the microphone again.</span>
         <Button
           size="sm"
@@ -66,8 +66,8 @@ function problem(conn: PlayerConnection, view: PlayerView, snap: RecordingSnapsh
   if ((st === "denied" || st === "error") && view.audio.record) {
     const e = snap.status.error;
     return (
-      <span className="col" style={{ gap: "var(--s1)" }}>
-        <span className="row" style={{ gap: "var(--s2)" }}>
+      <span className="col gap-1">
+        <span className="row">
           <strong>{e?.title ?? "The microphone stopped working"}.</strong>
           <span>The game goes on; please fix it when you can, or ask the facilitator.</span>
           <Button
