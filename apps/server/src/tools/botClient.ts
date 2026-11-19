@@ -1,6 +1,5 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import {
-  type Ack,
   AUDIO_CONSENT_ITEM,
   AUDIO_MAX_CHUNK_SAMPLES,
   AUDIO_SAMPLE_RATE,
@@ -9,12 +8,36 @@ import {
   audioSendResult,
   clampDb,
   type DashboardMsg,
+  type FacilitatorAck,
+  type FacilitatorClientToServer,
+  type FacilitatorCommand,
+  type FacilitatorPayload,
+  type FacilitatorResult,
+  type FacilitatorServerToClient,
+  type PlayerAcks,
+  type PlayerClientToServer,
+  type PlayerPayload,
+  type PlayerRequest,
+  type PlayerServerToClient,
   type PlayerView,
   randomPolicy,
   type StoredEvent,
   type TelemetryItem,
 } from "@wkwa/shared";
 import { io, type Socket } from "socket.io-client";
+
+/** The test clients' sockets, typed with the shared event maps like the browsers' (@wkwa/shared socket.ts). */
+type PlayerSocket = Socket<PlayerServerToClient, PlayerClientToServer>;
+type FacilitatorSocket = Socket<FacilitatorServerToClient, FacilitatorClientToServer>;
+
+/**
+ * Socket.IO's emit for a message name that is a generic type parameter (its emit types resolve
+ * the arguments for a concrete name only). The callers' signatures tie name, payload and ack together.
+ */
+type UntypedEmit = (name: string, payload: unknown, ack: (a: never) => void) => unknown;
+function emitUntyped(emitter: { emit: unknown }, name: string, payload: unknown, ack: (a: never) => void) {
+  (emitter.emit as UntypedEmit).call(emitter, name, payload, ack);
+}
 
 /**
  * Simulated player. Used by `npm run bots` (to fill empty seats during
@@ -107,7 +130,7 @@ const BOT_SETTINGS = {
 };
 
 export class Bot {
-  readonly socket: Socket;
+  readonly socket: PlayerSocket;
   readonly terminalKey: string;
   seatToken: string | null = null;
   terminal: number | null = null;
@@ -146,10 +169,10 @@ export class Bot {
       this.hello();
     });
     this.socket.on("rehello", () => this.hello());
-    this.socket.on("terminal", (m: { terminal: number }) => {
+    this.socket.on("terminal", (m) => {
       this.terminal = m.terminal;
     });
-    this.socket.on("bound", (m: { seat: number; seatToken: string }) => {
+    this.socket.on("bound", (m) => {
       this.seat = m.seat;
       this.seatToken = m.seatToken;
       this.log(`bound to seat ${m.seat}`);
@@ -158,7 +181,7 @@ export class Bot {
       this.seat = null;
       this.seatToken = null;
     });
-    this.socket.on("state", (v: PlayerView) => {
+    this.socket.on("state", (v) => {
       this.view = v;
       if (opts.record !== false) this.states.push(v);
       opts.onState?.(v);
@@ -173,14 +196,11 @@ export class Bot {
   }
 
   private hello() {
-    this.socket.emit(
-      "hello",
-      { terminalKey: this.terminalKey, seatToken: this.seatToken },
-      (a: { terminal: number; seat: number | null }) => {
-        this.terminal = a.terminal;
-        if (a.seat) this.seat = a.seat;
-      },
-    );
+    this.socket.emit("hello", { terminalKey: this.terminalKey, seatToken: this.seatToken }, (a) => {
+      if (!a.ok) return;
+      this.terminal = a.terminal;
+      if (a.seat) this.seat = a.seat;
+    });
   }
 
   waitFor(pred: (v: PlayerView) => boolean, timeoutMs = 10_000): Promise<PlayerView> {
@@ -211,15 +231,23 @@ export class Bot {
   }
 
   /** Emit and wait for the ack; with `timeoutMs`, resolves null when no ack came in time. */
-  emit<T = unknown>(event: string, payload: unknown): Promise<T>;
-  emit<T = unknown>(event: string, payload: unknown, timeoutMs: number): Promise<T | null>;
-  emit<T = unknown>(event: string, payload: unknown, timeoutMs?: number): Promise<T | null> {
+  emit<K extends PlayerRequest>(event: K, payload: PlayerPayload<K>): Promise<PlayerAcks[K]>;
+  emit<K extends PlayerRequest>(
+    event: K,
+    payload: PlayerPayload<K>,
+    timeoutMs: number,
+  ): Promise<PlayerAcks[K] | null>;
+  emit<K extends PlayerRequest>(
+    event: K,
+    payload: PlayerPayload<K>,
+    timeoutMs?: number,
+  ): Promise<PlayerAcks[K] | null> {
     return new Promise((resolve) => {
-      if (timeoutMs === undefined) this.socket.emit(event, payload, (ack: T) => resolve(ack));
-      else
-        this.socket
-          .timeout(timeoutMs)
-          .emit(event, payload, (err: unknown, ack: T) => resolve(err ? null : ack));
+      const t = timeoutMs === undefined ? null : setTimeout(() => resolve(null), timeoutMs);
+      emitUntyped(this.socket, event, payload, (ack: PlayerAcks[K]) => {
+        if (t) clearTimeout(t);
+        resolve(ack);
+      });
     });
   }
 
@@ -535,7 +563,10 @@ export class Bot {
   }
 
   /** Send an audio message in order, retrying transient refusals and timeouts (not "rejected" ones). */
-  private sendAudio(event: string, payload: unknown) {
+  private sendAudio<K extends "audio:start" | "audio:chunk" | "audio:stop">(
+    event: K,
+    payload: PlayerPayload<K>,
+  ) {
     const deliver = async () => {
       for (let attempt = 0; attempt < 30 && !this.stopped; attempt++) {
         const ack = await this.emit(event, payload, 10_000);
@@ -576,7 +607,7 @@ export class Bot {
 
 /** Minimal facilitator client (tests and automation). */
 export class FacilitatorClient {
-  readonly socket: Socket;
+  readonly socket: FacilitatorSocket;
   dashboard: DashboardMsg | null = null;
   events: StoredEvent[] = [];
 
@@ -587,10 +618,10 @@ export class FacilitatorClient {
       auth: token ? { token } : {},
       ...tlsClientOpts(url, { insecure: opts.insecureTls }),
     });
-    this.socket.on("dashboard", (d: DashboardMsg) => {
+    this.socket.on("dashboard", (d) => {
       this.dashboard = d;
     });
-    this.socket.on("events", (m: { events: StoredEvent[]; reset: boolean }) => {
+    this.socket.on("events", (m) => {
       if (m.reset) this.events = [];
       this.events.push(...m.events);
     });
@@ -604,10 +635,17 @@ export class FacilitatorClient {
     });
   }
 
-  async cmd<T = unknown>(name: string, payload: unknown = {}): Promise<T> {
-    const ack = await new Promise<Ack<T>>((resolve) => this.socket.emit(name, payload, resolve));
+  async cmd<K extends FacilitatorCommand>(
+    name: K,
+    ...[payload]: Record<string, never> extends FacilitatorPayload<K>
+      ? [FacilitatorPayload<K>?]
+      : [FacilitatorPayload<K>]
+  ): Promise<FacilitatorResult<K>> {
+    const ack = await new Promise<FacilitatorAck<K>>((resolve) =>
+      emitUntyped(this.socket, name, payload ?? {}, resolve),
+    );
     if (!ack.ok) throw new Error(`${name}: ${ack.error}`);
-    return ack.data as T;
+    return ack.data;
   }
 
   waitForDashboard(pred: (d: DashboardMsg) => boolean, timeoutMs = 10_000): Promise<DashboardMsg> {

@@ -4,6 +4,12 @@ History of [AUDIO.md](../AUDIO.md). Newest first. How entries are written: [READ
 
 ## Unreleased
 
+### Not yet committed · calibration moved to CalibrationRunner
+
+- **Type:** Risk mitigation
+- **Change:** The code map names `session/CalibrationRunner.ts` for the timed turns and the quick check.
+- **Reason:** The calibration moved out of SessionManager into its own module; behaviour is unchanged.
+
 ### Not yet committed · documents `simplify/audio-cleanup` (#16)
 
 - **Type:** Correction

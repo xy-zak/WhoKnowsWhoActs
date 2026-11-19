@@ -137,7 +137,7 @@ flowchart LR
 | Facilitator dashboard | React + Vite (same app, second page) | Session setup, seat binding, labels, composite map, live mirrors, controls, replay, data management. |
 | `net` | Socket.IO 4 on Fastify 5, over HTTPS (self-signed certificate by default) | Namespaces `/player` and `/facilitator`. Validates every incoming payload with zod. |
 | `api` | Fastify REST | Session listing, exports, printables (key sheet page, takedown-card PDFs), erasure, session deletion. |
-| `SessionManager` | TypeScript | Owns the live `GameState`. Turns intents and commands into events, appends them, then pushes projections. |
+| `SessionManager` | TypeScript | Owns the live `GameState`. Turns intents and commands into events, appends them, then pushes projections. Audio ingest (`LiveAudio`) and the calibration (`CalibrationRunner`) are parts it owns; their events go through its `append`. |
 | Rules engine | `packages/shared` (pure TS) | Validators, round rules, reducer, projections. The server, the client (replay) and the tests share the same code. |
 | `db` | better-sqlite3-multiple-ciphers | Encrypted SQLite (SQLCipher). Append-only `events`, `telemetry`, plus `sessions`, `erasures`, `exports`, `meta`. Two files with the same schema and passphrase: the participant database and the simulation database (`SessionStores` knows which session is where). |
 | `FakePlayers` | TypeScript + socket.io-client | Starts and stops the fake players of a real session: network clients of this same server whose terminal keys the server registers before they connect, so their seats are marked fake. |
@@ -178,19 +178,20 @@ flowchart TB
 | `packages/shared/src/scenario.ts` | Scenario, region (sub-square) and view schemas |
 | `packages/shared/src/events.ts` | All game event types with payload schemas and documentation metadata |
 | `packages/shared/src/telemetry.ts` | All telemetry types |
-| `packages/shared/src/protocol.ts` | Socket message schemas and catalogue |
+| `packages/shared/src/protocol.ts` | Socket message schemas, the schema table of each namespace (`PLAYER_SCHEMAS`, `FACILITATOR_SCHEMAS`) and the catalogue |
+| `packages/shared/src/socket.ts` | Typed Socket.IO event maps derived from the schema tables (payloads, acknowledgements, server→client messages); used by every socket ([NETWORKING.md § 9](NETWORKING.md#9-message-catalogue)) |
 | `packages/shared/src/state.ts` | `GameState` and derived helpers |
 | `packages/shared/src/rules/` | `reducer.ts`, `validators.ts`, `roundRules.ts` |
 | `packages/shared/src/projections.ts` | `playerView`, `facilitatorView` |
 | `packages/shared/src/simulation/` | `policy.ts` (the `PlayerPolicy` interface, registry, helpers for writing policies), `policies.ts` (built-in policies `random` and `idle`) |
 | `packages/shared/src/audio.ts` | Audio constants, start/stop reasons, settings, ack and REST schemas; `state.ts` holds `shouldRecord`, the consent hold and the calibration gate |
 | `packages/shared/src/docgen.ts`, `exportColumns.ts` | Documentation and codebook generation; export file contract |
-| `apps/server/src/` | `index.ts` (boot), `cli.ts`, `app.ts`, `content.ts` (scenario/config loading), `db/` (SQLCipher, store, `stores.ts`: participant and simulation database), `session/SessionManager.ts`, `simulation/SimulationRunner.ts` (agents), `fake/FakePlayers.ts` (fake players), `net/hub.ts` (Socket.IO), `api/` (REST; `audioRoutes.ts`), `audio/` (live ingest, encrypted `.wka` store, attribution, jobs), `gdpr/` (exporter, erasure, audio deletion, print pages), `tls.ts` (self-signed certificate), `tools/` (bots) |
+| `apps/server/src/` | `index.ts` (boot), `cli.ts`, `app.ts`, `content.ts` (scenario/config loading), `db/` (SQLCipher, store, `stores.ts`: participant and simulation database), `session/SessionManager.ts`, `session/CalibrationRunner.ts` (the timed calibration turns and the quick check), `simulation/SimulationRunner.ts` (agents), `fake/FakePlayers.ts` (fake players), `net/hub.ts` (Socket.IO), `api/` (REST; `audioRoutes.ts`), `audio/` (live ingest, encrypted `.wka` store, attribution, jobs), `gdpr/` (exporter, erasure, audio deletion, print pages), `tls.ts` (self-signed certificate), `tools/` (bots) |
 | `apps/client/src/ui/` | Design system: `tokens.ts` (Catppuccin Latte/Mocha → semantic colour tokens, contrast-tested), `theme.css` (TUI base styles), `crt.css` (subtle CRT layer), components (`Panel`, `Button`, `Popup`, `useConfirm`, `Stepper`, `StatusTag`, `AsciiProgress`, …), `Icon.tsx` + `icons.ts` (semantic Iconoir icons), `prefs.ts` + `DisplaySettings.tsx` (per-browser display settings: colours, font, text size, animations). Rules: [AESTHETIC-RULES.md](AESTHETIC-RULES.md) |
 | `apps/client/src/facilitator/` | Manager shell (`App.tsx`: top bar, LIVE indicator, tabs, status bar, shortcuts), `setup/` (10-step wizard), `live/` (lifecycle, NEXT, tools, wrap-up), `seats.tsx`, `Composite.tsx`, `EventLog.tsx`, `Timeline.tsx`, `Replay.tsx`, `Database.tsx` |
 | `apps/client/src/player/` | Player screens (waiting, onboarding with stepper, game, end) and the DISPLAY panel; display settings are per browser (`ui/prefs.ts`), never from or to the server |
 | `apps/client/src/audio/` | Browser capture engine (`MicRecorder`, AudioWorklet, resampler, chunker, send queue, speech detector); no socket or UI code. `player/recording.ts` connects it to the socket |
-| `apps/client/src/` (other) | `map/` (grid map in SVG: squares, sub-squares, hatches, scores, legend, map score; themed via CSS variables), `net/` (socket, clock sync, telemetry) |
+| `apps/client/src/` (other) | `map/` (grid map in SVG: squares, sub-squares, hatches, scores, legend, map score; themed via CSS variables), `net/` (typed sockets, clock sync, telemetry), `player/intents.ts` (the player's actions until answered: resent after a reconnect) |
 | `config/` | `study.json`, `consent.json` + `consent.md` (audio item and section only in audio sessions), `demographics.json`, `briefing.md`, `audio.json` (mic-check phrase, calibration sentences), `session.default.json` |
 | `scenarios/<id>/` | `scenario.json` (board, views), `scores.json` (starting scores) |
 | `scripts/demo-scores.mjs` | Regenerates the fixed-seed starting scores of the demo scenarios |
@@ -237,7 +238,7 @@ Properties that follow from this design:
 
 - **Complete audit trail.** Nothing is ever updated or deleted in normal operation. Undo is a new event (`ActionRevoked`) that marks the original as revoked.
 - **Deterministic replay.** The reducer is pure: no clock, no randomness. Replaying the log reproduces every intermediate state exactly. The facilitator's replay view and the tests rely on this.
-- **Idempotency.** Each intent carries a per-seat `clientSeq`. A resend after a reconnect returns the original acknowledgement and appends nothing.
+- **Idempotency.** Each intent carries a per-seat `clientSeq`. The browser resends an unanswered intent, unchanged, after every reconnect; the resend returns the original acknowledgement and appends nothing, also after a server restart (the answers are rebuilt from the log). See [NETWORKING.md § 7](NETWORKING.md#7-disconnects-and-reconnects).
 - **Facilitator commands are events too** (`SeatBound`, `LabelsAssigned`, `RoundStarted`, `GamePaused`, …), so the log also documents how the session was run.
 
 ## 6. Session lifecycle
@@ -458,6 +459,14 @@ Labels are available in the state (`state.seats[seat].k` / `.p`), so rules like 
 2. Emit it from the client (`apps/client/src/net/` telemetry batcher).
 3. Run `npm run docs:generate`. Weigh the addition against the data minimisation principle ([DATA-MANAGEMENT.md](DATA-MANAGEMENT.md#8-data-minimisation-decisions)).
 
+### Add a socket message
+
+1. Write its zod schema in `packages/shared/src/protocol.ts` (`.describe()` the fields) and add it to the namespace's schema table (`PLAYER_SCHEMAS` or `FACILITATOR_SCHEMAS`).
+2. If it has an acknowledgement, add its type to `PlayerAcks` (or a result to `FacilitatorResults`) in `socket.ts`. A server→client message goes in `PlayerServerToClient` / `FacilitatorServerToClient`.
+3. Add its entry to `MESSAGES`. Until steps 1–3 agree, the shared package does not compile.
+4. Handle it in `net/hub.ts` (`seatCmd`, `audioCmd`, `cmd` or `act`: the schema is looked up from the table) and send it from the client; the compiler checks the name, the payload and the acknowledgement at both ends.
+5. Run `npm run docs:generate` (the message catalogue in NETWORKING.md).
+
 ### Add a scenario / map
 
 ```
@@ -490,7 +499,8 @@ scenarios/<id>/
 | Rules | Vitest (`packages/shared/test`) | Quotas, round completion, pause, revoke, overrides, custom validators, deterministic replay, projection asymmetry, participant-code checksums |
 | Game rules | Vitest (`packages/shared/test/gameRules.test.ts`) | Board ids and starting-score matrices, targeting by power type (also in a dissociated pairing), +4 / −1 with the 0–10 limits, map score, the reducer replaying recorded score changes, revoke replay, a second rule set plugging in |
 | Documentation | Vitest + `npm run docs:check` | Generated blocks are up to date; every event, telemetry type and message is documented |
-| Server integration | Vitest + `socket.io-client` bots | A full 3-round game with 4 bots on a temporary encrypted DB: event counts, rejections, reconnect + auto-pause, intent deduplication, revoke, resume from the log, **no cross-view data leakage**, no codes in payloads, IP-free logs |
+| Server integration | Vitest + `socket.io-client` bots | A full 3-round game with 4 bots on a temporary encrypted DB: event counts, rejections, reconnect + auto-pause, intent deduplication (also across a server restart), the transient "Not seated" refusal, revoke, resume from the log, **no cross-view data leakage**, no codes in payloads, IP-free logs |
+| Protocol | Vitest (`packages/shared/test/protocol.test.ts`, `apps/client/test/intents.test.ts`) and the compiler | The catalogue documents exactly the schema tables' messages with the same schemas; the typed event maps check every emit and listener; the browser's action queue sends only while seated, resends unchanged after a reconnect, takes the first answer, gives up after its deadline |
 | GDPR | Vitest | Wrong passphrase fails; no plaintext codes in the DB file; export files match `EXPORT_FILES` column by column; anonymised exports contain no codes; erasure removes every row, adds the register entry and never reuses seq numbers; backups are encrypted; rekey works; data folders are git-ignored |
 | Fake players | Vitest (`apps/server/test/fake.test.ts`) | Fake players in a real session: seats logged as fake without codes, no consent or demographics recorded for them, they play a full round over the network, `fake_player` / `fakeSeats` in exports, FAKE PLAYER on the key sheet and no takedown card, refused outside the lobby and in simulated sessions, a browser can never count as fake, restored after a server restart with their pace |
 | Simulated players | Vitest (`packages/shared/test/simulation.test.ts`, `apps/server/test/simulation.test.ts`) | Policy registry and parameters, the random policy's quotas and seed, agents see only their own view; a full simulated game in the simulation database only, no participant codes or consent, a run repeats exactly from its seed, per-seat policies, a failing policy is stopped and noted, simulation exports, resume after a restart |
@@ -644,7 +654,7 @@ flowchart LR
   end
   subgraph Server["Server"]
     HUB["net/hub.ts<br/>audio:start, chunk, stop, level"]
-    SM["SessionManager<br/>consent hold, calibration, pause"]
+    SM["SessionManager<br/>consent hold, pause<br/>(CalibrationRunner: calibration)"]
     LIVE["audio/live.ts<br/>gates, dedupe, acks"]
     FS["audio/fileStore.ts<br/>encrypted .wka files"]
     DB[("SQLCipher<br/>tracks, chunks, keys")]
@@ -665,7 +675,7 @@ flowchart LR
 | State | `GameState.audio` holds whether audio is on, whether calibration is required, whether recording is paused, and the calibration (status, order, turns, quality). `shouldRecord(state, seat)` is the single rule for when a seat's mic may be open. It is pure and shared, so the browser, the server and the facilitator views agree. |
 | Events | Audio adds events to the same log: `MicCheckCompleted`, `MicCheckSkipped`, `AudioTrackStarted`, `AudioTrackStopped`, `Calibration*`, `RecordingPaused`, `RecordingResumed` (generated list: [DATA-TYPES.md](DATA-TYPES.md)). **The audio itself is never an event.** It goes to the encrypted store, so the event log stays free of voice and its replay stays small. |
 | Projection | A player's `PlayerView.audio` says whether to record, whether the mic check is held, whether recording is paused and, during calibration, only that player's own sentence and only in their turn. |
-| Timers | Calibration turns run on **server** timers and are logged, so they survive a slow browser and can be analysed afterwards. A restart cancels a running calibration (`CalibrationSkipped`, `cancelled: true`). |
+| Timers | Calibration turns run on **server** timers (`session/CalibrationRunner.ts`) and are logged, so they survive a slow browser and can be analysed afterwards. A restart cancels a running calibration (`CalibrationSkipped`, `cancelled: true`). |
 | Processing | Attribution is a job in a `worker_thread`, started from the DATABASE tab after the session. It reads the encrypted tracks, writes derived results and cleaned tracks, and never touches the raw audio. |
 | Who never records | Simulated sessions (audio is forced off), fake players and agents. A seat without the audio consent item is never recorded either, and `skipped` consent never counts as audio consent. |
 | Recovery | Tracks still open after a restart are closed with `interrupted`. Browsers resend unacknowledged chunks for up to 10 minutes after a track closed. |

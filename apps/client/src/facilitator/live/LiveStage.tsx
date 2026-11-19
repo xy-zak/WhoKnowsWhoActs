@@ -1,6 +1,8 @@
 import {
   calibrationWaitingSeats,
   canStartFirstRound,
+  type FacilitatorCommand,
+  type FacilitatorPayload,
   fakeSeats,
   type GameState,
   hasParticipants,
@@ -86,7 +88,7 @@ function NextPanel({
 }) {
   const now = useNow();
   const confirm = useConfirm();
-  const run = (name: string, payload: unknown = {}, ok?: string) =>
+  const run = <K extends FacilitatorCommand>(name: K, payload: FacilitatorPayload<K>, ok?: string) =>
     void conn.cmd(name, payload, ok).catch(() => {});
   const active = seatList(st).filter((s) => s.bound && !s.withdrawn);
 
@@ -283,7 +285,7 @@ function ToolsPanel({
   const [broadcast, setBroadcast] = useState("");
   const [note, setNote] = useState("");
   const [abortReason, setAbortReason] = useState("");
-  const run = (name: string, payload: unknown = {}, ok?: string) =>
+  const run = <K extends FacilitatorCommand>(name: K, payload: FacilitatorPayload<K>, ok?: string) =>
     conn.cmd(name, payload, ok).catch(() => {});
   const canLabels = st.phase === "onboarding" || st.phase === "round_complete";
   return (

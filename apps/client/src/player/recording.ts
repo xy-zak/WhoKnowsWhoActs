@@ -6,6 +6,8 @@ import {
   type AudioStopReason,
   audioSendResult,
   clampDb,
+  type PlayerAcks,
+  type PlayerPayload,
   type PlayerView,
   type TelemetryPayloadOf,
 } from "@wkwa/shared";
@@ -70,7 +72,7 @@ export type AudioUploadEvent = "audio:start" | "audio:chunk" | "audio:stop";
 
 export interface RecordingDeps {
   /** Emit with an acknowledgement; resolves with the ack, or undefined after a timeout. */
-  send(event: AudioUploadEvent, payload: unknown): Promise<unknown>;
+  send<K extends AudioUploadEvent>(event: K, payload: PlayerPayload<K>): Promise<PlayerAcks[K] | undefined>;
   /** Volatile `audio:level` (dropped when the network is busy). */
   level(payload: AudioLevelPayload): void;
   /** Server-epoch time (ClockSync.now()). */

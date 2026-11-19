@@ -68,14 +68,14 @@ export async function setupSession(
   // a test server with TLS on uses a self-signed certificate: over loopback, it is not checked
   const fac = new FacilitatorClient(url);
   await fac.connected();
-  const { sessionId } = await fac.cmd<{ sessionId: string }>("session:create", {
+  const { sessionId } = await fac.cmd("session:create", {
     scenarioId: "demo",
     config: { seatCount: n, ...config },
     notes: "integration test",
   });
   const bots = Array.from({ length: n }, (_, i) => new Bot({ url, name: `bot${i + 1}`, ...botOpts }));
   const terminals = await Promise.all(bots.map((b) => b.waitForTerminal()));
-  for (let i = 0; i < n; i++) await fac.cmd("seat:bind", { terminal: terminals[i], seat: i + 1 });
+  for (let i = 0; i < n; i++) await fac.cmd("seat:bind", { terminal: terminals[i]!, seat: i + 1 });
   await Promise.all(bots.map((b) => b.waitFor((v) => v.phase === "lobby")));
   await fac.cmd("labels:randomise");
   await fac.cmd("onboarding:start");

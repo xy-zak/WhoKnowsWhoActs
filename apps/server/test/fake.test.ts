@@ -6,7 +6,7 @@ import { createApp } from "../src/app";
 import { Bot, FacilitatorClient } from "../src/tools/botClient";
 import { cleanup, PASSPHRASE, startTestServer, type TestServer } from "./harness";
 
-const ROUND = { rule: "quota", quota: { propose: 2, decide: 1 }, timeLimitSec: null };
+const ROUND = { rule: "quota" as const, quota: { propose: 2, decide: 1 }, timeLimitSec: null };
 
 describe("fake players (real sessions)", () => {
   let srv: TestServer;
@@ -19,7 +19,7 @@ describe("fake players (real sessions)", () => {
     srv = await startTestServer();
     fac = new FacilitatorClient(srv.url);
     await fac.connected();
-    ({ sessionId } = await fac.cmd<{ sessionId: string }>("session:create", {
+    ({ sessionId } = await fac.cmd("session:create", {
       scenarioId: "demo",
       config: { roundCount: 1, defaultRound: ROUND },
       notes: "fake player test",
@@ -28,7 +28,7 @@ describe("fake players (real sessions)", () => {
     human = new Bot({ url: srv.url, name: "human", minDelayMs: 5, maxDelayMs: 20 });
     const terminal = await human.waitForTerminal();
     await fac.cmd("seat:bind", { terminal, seat: 4 });
-    const r = await fac.cmd<{ seats: number[] }>("fake:add", { pace: "fast" });
+    const r = await fac.cmd("fake:add", { pace: "fast" });
     expect(r.seats).toEqual([1, 2, 3]);
     await fac.cmd("labels:randomise");
     await fac.cmd("onboarding:start");
@@ -129,7 +129,7 @@ describe("fake players (real sessions)", () => {
   });
 
   it("only server-created clients count as fake; a fake seat ends with its unbinding", async () => {
-    const { sessionId: id } = await fac.cmd<{ sessionId: string }>("session:create", {
+    const { sessionId: id } = await fac.cmd("session:create", {
       scenarioId: "demo",
       config: { seatCount: 2 },
     });
@@ -148,7 +148,7 @@ describe("fake players (real sessions)", () => {
   });
 
   it("restores fake players after a server restart; they re-claim their seats", async () => {
-    const { sessionId: id } = await fac.cmd<{ sessionId: string }>("session:create", {
+    const { sessionId: id } = await fac.cmd("session:create", {
       scenarioId: "demo",
       config: { seatCount: 2, roundCount: 1, defaultRound: { ...ROUND, quota: { propose: 50, decide: 50 } } },
     });

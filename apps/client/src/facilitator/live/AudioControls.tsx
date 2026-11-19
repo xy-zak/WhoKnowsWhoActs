@@ -1,4 +1,11 @@
-import { calibrationWaitingSeats, type GameState, micCheckHoldSeats, seatsInMicCheck } from "@wkwa/shared";
+import {
+  calibrationWaitingSeats,
+  type FacilitatorCommand,
+  type FacilitatorPayload,
+  type GameState,
+  micCheckHoldSeats,
+  seatsInMicCheck,
+} from "@wkwa/shared";
 import { Button, Callout, Icon, SeatDot, StatusTag, usePromptReason } from "../../ui";
 import { calibrationSummary } from "../audioLive";
 import type { FacilitatorConnection } from "../connection";
@@ -40,7 +47,7 @@ export function AudioNext({
   primary: boolean;
 }) {
   const promptReason = usePromptReason();
-  const run = (name: string, payload: unknown, ok: string) =>
+  const run = <K extends FacilitatorCommand>(name: K, payload: FacilitatorPayload<K>, ok: string) =>
     void conn.cmd(name, payload, ok).catch(() => {});
   const a = st.audio;
   const c = a.calibration;

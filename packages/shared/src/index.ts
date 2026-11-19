@@ -15,5 +15,6 @@ export * from "./rules/roundRules";
 export * from "./rules/validators";
 export * from "./scenario";
 export * from "./simulation";
+export * from "./socket";
 export * from "./state";
 export * from "./telemetry";

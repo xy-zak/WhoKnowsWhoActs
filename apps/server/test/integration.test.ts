@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import type { IntentAck } from "../src/session/SessionManager";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { Bot } from "../src/tools/botClient";
 import { cleanup, setupSession, startTestServer, type TestServer } from "./harness";
 
 describe("full game with 4 bot players (default rules: 3 rounds × 5 propose + 5 decide)", () => {
@@ -84,7 +84,7 @@ describe("full game with 4 bot players (default rules: 3 rounds × 5 propose + 5
 
   it("rejects and logs intents after the game ended", async () => {
     const bot = result.bots[0]!;
-    const ack = await bot.emit<IntentAck>("intent", {
+    const ack = await bot.emit("intent", {
       clientSeq: 10_000,
       kind: "propose",
       regionId: "A1-Ka",
@@ -127,9 +127,9 @@ describe("robustness", () => {
     const b = bots[1]!;
     await b.waitFor((v) => v.phase === "round_active");
     const target = b.states.at(-1)!.me.actsOn.propose!;
-    const msg = { clientSeq: 1, kind: "propose", regionId: `C1-${target}`, clientTs: Date.now() };
-    const a1 = await b.emit<IntentAck>("intent", msg);
-    const a2 = await b.emit<IntentAck>("intent", msg);
+    const msg = { clientSeq: 1, kind: "propose" as const, regionId: `C1-${target}`, clientTs: Date.now() };
+    const a1 = await b.emit("intent", msg);
+    const a2 = await b.emit("intent", msg);
     expect(a1).toMatchObject({ ok: true });
     expect(a2).toMatchObject({ ok: true, duplicate: true });
     expect(srv.ctx.store.listEvents(sessionId).filter((e) => e.type === "ProposalMade")).toHaveLength(1);
@@ -153,6 +153,60 @@ describe("robustness", () => {
     const v = await b.waitFor((x) => x.me.quota.propose.used === 0);
     expect(v.highlights.find((h) => h.seq === seq)).toBeUndefined();
 
+    for (const x of bots) x.stop();
+    fac.close();
+  });
+
+  it("answers a resend after a restart with the original answer (ack cache rebuilt from the log)", async () => {
+    // a server of its own: it is restarted on the same data folder
+    const own = await startTestServer();
+    let srv2: TestServer | null = null;
+    try {
+      const { fac, bots, sessionId } = await setupSession(own.url, {}, 4, { autoPlay: false });
+      await fac.cmd("round:start");
+      const b = bots[2]!;
+      await b.waitFor((v) => v.phase === "round_active");
+      const target = b.states.at(-1)!.me.actsOn.propose!;
+      const ok = { clientSeq: 1, kind: "propose" as const, regionId: `C2-${target}`, clientTs: Date.now() };
+      const bad = { clientSeq: 2, kind: "propose" as const, regionId: "Z99-Ka", clientTs: Date.now() };
+      const first = await b.emit("intent", ok);
+      const rejected = await b.emit("intent", bad);
+      expect(first).toMatchObject({ ok: true });
+      expect(rejected).toMatchObject({ ok: false, reason: "unknown_region" });
+      const { seat, seatToken } = b;
+      for (const x of bots) x.stop();
+      fac.close();
+
+      // restart: the session is rebuilt from its log; the browser comes back with its seat token
+      await own.close();
+      srv2 = await startTestServer({}, own.dir);
+      expect(srv2.ctx.hub.session?.sessionId).toBe(sessionId);
+      const back = new Bot({ url: srv2.url, autoPlay: false, seatToken, terminalKey: b.terminalKey });
+      await vi.waitFor(() => expect(back.seat).toBe(seat), { timeout: 5000 });
+      expect(await back.emit("intent", ok)).toEqual({ ...first, duplicate: true });
+      expect(await back.emit("intent", bad)).toEqual({ ...rejected, duplicate: true });
+      const events = srv2.ctx.store.listEvents(sessionId);
+      expect(events.filter((e) => e.type === "ProposalMade")).toHaveLength(1);
+      expect(events.filter((e) => e.type === "IntentRejected")).toHaveLength(1);
+      back.stop();
+    } finally {
+      await srv2?.close();
+      cleanup(own.dir);
+    }
+  });
+
+  it("refuses a request from a socket that holds no seat as transient (retry), so it is sent again", async () => {
+    const { fac, bots } = await setupSession(srv.url, {}, 4, { autoPlay: false });
+    const stranger = new Bot({ url: srv.url, autoPlay: false });
+    await stranger.waitForTerminal();
+    const ack = await stranger.emit("intent", {
+      clientSeq: 1,
+      kind: "propose",
+      regionId: "A1-Ka",
+      clientTs: 0,
+    });
+    expect(ack).toEqual({ ok: false, error: "Not seated", retry: true });
+    stranger.stop();
     for (const x of bots) x.stop();
     fac.close();
   });
@@ -193,11 +247,11 @@ describe("label pairings", () => {
     await fac.cmd("session:create", { scenarioId: "demo", config: {}, notes: "" });
     const bots = Array.from({ length: 4 }, () => new Bot({ url: srv.url, autoPlay: false }));
     const terminals = await Promise.all(bots.map((b) => b.waitForTerminal()));
-    for (let i = 0; i < 4; i++) await fac.cmd("seat:bind", { terminal: terminals[i], seat: i + 1 });
+    for (let i = 0; i < 4; i++) await fac.cmd("seat:bind", { terminal: terminals[i]!, seat: i + 1 });
     const seats = () => Object.values(srv.ctx.hub.session!.state.seats).map((s) => `${s.k}${s.p}`);
 
     await fac.cmd("labels:set", {
-      assignments: [1, 2, 3, 4].map((seat) => ({ seat, k: `K${"abcd"[seat - 1]}` })),
+      assignments: [1, 2, 3, 4].map((seat) => ({ seat, k: (["Ka", "Kb", "Kc", "Kd"] as const)[seat - 1]! })),
       pairing: { mode: "dissociated", id: 6 },
     });
     expect(seats()).toEqual(["KaPd", "KbPc", "KcPa", "KdPb"]);

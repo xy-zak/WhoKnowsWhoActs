@@ -1,4 +1,10 @@
-import { currentCalibrationTurn, type GameState, RECORDING_PHASES } from "@wkwa/shared";
+import {
+  currentCalibrationTurn,
+  type FacilitatorCommand,
+  type FacilitatorPayload,
+  type GameState,
+  RECORDING_PHASES,
+} from "@wkwa/shared";
 import { useEffect, useMemo, useState } from "react";
 import { fmtSigned, fmtTime, formatDb, PLACEHOLDER } from "../../common/format";
 import { useStore } from "../../net/store";
@@ -160,7 +166,7 @@ export function RecordingControl({ conn, st }: { conn: FacilitatorConnection; st
   if (!st.audio.enabled) return null;
   const can = RECORDING_PHASES.has(st.phase);
   const a = st.audio;
-  const send = (name: string, payload: unknown, ok: string) => {
+  const send = <K extends FacilitatorCommand>(name: K, payload: FacilitatorPayload<K>, ok: string) => {
     setBusy(true);
     void conn
       .cmd(name, payload, ok)

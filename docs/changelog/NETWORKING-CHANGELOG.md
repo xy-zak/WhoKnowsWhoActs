@@ -4,6 +4,12 @@ History of [NETWORKING.md](../NETWORKING.md). Newest first. How entries are writ
 
 ## Unreleased
 
+### Not yet committed · typed socket protocol, intent resend after reconnect
+
+- **Type:** Bug fix
+- **Change:** § 7 now says how the browser keeps an action until it is answered: it sends only while its socket is seated, resends unanswered actions unchanged after every reconnect, and gives up after 45 s; the server answers a resend with its first answer, also after a restart. It explains the transient "Not seated" refusal (`retry: true`) and why onboarding requests wait for `hello`'s answer. The reconnect diagram marks the moment the socket is seated again. § 9 describes the schema tables and the typed Socket.IO event maps derived from them.
+- **Reason:** § 7 described a resend that the browser did not do: an action made during a drop was flushed by Socket.IO before `hello`, refused as "Not seated" and lost. The browser now does what the document said, and the protocol types are now checked at both ends.
+
 ### Not yet committed · documents `0f6971a`…`abcacbe` (microphone audio)
 
 - **Type:** Feature

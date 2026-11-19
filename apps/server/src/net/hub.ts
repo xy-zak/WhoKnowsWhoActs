@@ -1,54 +1,39 @@
 import { timingSafeEqual } from "node:crypto";
 import {
-  AbortMsg,
-  type Ack,
-  ActionRevoke,
   AUDIO_SILENCE_DB,
-  type AudioAck,
-  AudioChunk,
-  AudioLevel,
-  AudioStart,
-  AudioStop,
+  type AudioLevel,
   audioEnabled,
-  BriefingAck,
-  BroadcastMsg,
-  CalibrationSkip,
-  ClockPing,
-  ConsentSubmit,
   type DashboardMsg,
-  DemographicsSubmit,
-  Empty,
-  FakeAdd,
+  FACILITATOR_SCHEMAS,
+  type FacilitatorAck,
+  type FacilitatorClientToServer,
+  type FacilitatorCommand,
+  type FacilitatorMessage,
+  type FacilitatorResult,
+  type FacilitatorResults,
+  type FacilitatorServerToClient,
   type FakePlayerPace,
-  IntentMsg,
-  LabelsRandomise,
-  LabelsSet,
   LIVE_TELEMETRY_TYPES,
-  MicCheckSubmit,
-  MicSkip,
-  NoteMsg,
-  PlayerHello,
-  Presence,
+  PLAYER_SCHEMAS,
+  type PlayerAcks,
+  type PlayerClientToServer,
+  type PlayerMessage,
+  type PlayerRequest,
+  type PlayerServerToClient,
   parseSessionConfig,
   parseTelemetryItem,
   playerView,
   REDACTED_EVENT_TYPES,
-  RecordingPause,
   type Scenario,
-  SeatBind,
   type SeatLiveStats,
   type SeatMicStats,
-  SeatUnbind,
+  type ServerSide,
   type SessionConfig,
-  SessionCreate,
-  SessionResume,
   type StoredEvent,
   type StoredTelemetry,
   seatList,
-  TelemetryBatch,
   type TelemetryItem,
   type TerminalInfo,
-  WithdrawMsg,
 } from "@wkwa/shared";
 import type { Logger } from "pino";
 import type { Namespace, Server, Socket } from "socket.io";
@@ -64,13 +49,55 @@ import { SimulationRunner } from "../simulation/SimulationRunner";
 
 interface TerminalEntry {
   terminal: number;
-  sockets: Set<Socket>;
+  sockets: Set<PlayerSocket>;
 }
 
 interface PlayerSocketData {
   terminalKey?: string;
   terminal?: number;
   seat?: number | null;
+}
+
+/**
+ * The two namespaces, typed with the shared event maps (socket.ts): every emit and every
+ * listener is checked by the compiler, and incoming payloads stay `unknown` until validated.
+ */
+type NoServerSideEvents = Record<string, never>;
+type PlayerNamespace = Namespace<
+  ServerSide<PlayerClientToServer>,
+  PlayerServerToClient,
+  NoServerSideEvents,
+  PlayerSocketData
+>;
+type PlayerSocket = Socket<
+  ServerSide<PlayerClientToServer>,
+  PlayerServerToClient,
+  NoServerSideEvents,
+  PlayerSocketData
+>;
+type FacilitatorNamespace = Namespace<
+  ServerSide<FacilitatorClientToServer>,
+  FacilitatorServerToClient,
+  NoServerSideEvents,
+  Record<string, never>
+>;
+type FacilitatorSocket = Socket<
+  ServerSide<FacilitatorClientToServer>,
+  FacilitatorServerToClient,
+  NoServerSideEvents,
+  Record<string, never>
+>;
+
+/**
+ * The schema of a message, typed by its name. TypeScript cannot narrow an index into the schema
+ * table by a generic key, so this is the one place that states the link (the table itself is
+ * checked against the catalogue and the event maps in @wkwa/shared).
+ */
+function playerSchema<K extends PlayerRequest>(name: K): ZodType<PlayerMessage<K>> {
+  return PLAYER_SCHEMAS[name] as unknown as ZodType<PlayerMessage<K>>;
+}
+function facilitatorSchema<K extends FacilitatorCommand>(name: K): ZodType<FacilitatorMessage<K>> {
+  return FACILITATOR_SCHEMAS[name] as unknown as ZodType<FacilitatorMessage<K>>;
 }
 
 /** Latest `audio:level` of a seat (volatile: never stored). */
@@ -135,13 +162,13 @@ export class Hub {
   private readonly fakes: FakePlayers;
   private terminals = new Map<string, TerminalEntry>();
   private nextTerminal = 1;
-  private seatSockets = new Map<number, Socket>();
+  private seatSockets = new Map<number, PlayerSocket>();
   private stats = new Map<number, SeatLiveStats>();
   private micLevels = new Map<number, MicLevelReading>();
   private liveTelemetry: StoredTelemetry[] = [];
   private statsTimer: NodeJS.Timeout | null = null;
-  readonly player: Namespace;
-  readonly facilitator: Namespace;
+  readonly player: PlayerNamespace;
+  readonly facilitator: FacilitatorNamespace;
   private readonly secret: string;
 
   constructor(private readonly deps: HubDeps) {
@@ -149,8 +176,9 @@ export class Hub {
     this.secret = getMeta(deps.stores.real.db, "server_secret") ?? "";
     if (!this.secret) throw new Error("Database has no server secret");
     this.fakes = new FakePlayers({ selfUrl: deps.selfUrl, log: deps.log });
-    this.player = deps.io.of("/player");
-    this.facilitator = deps.io.of("/facilitator");
+    // the server is created untyped (two namespaces, two event maps); each namespace gets its map here
+    this.player = deps.io.of("/player") as unknown as PlayerNamespace;
+    this.facilitator = deps.io.of("/facilitator") as unknown as FacilitatorNamespace;
     this.facilitator.use((socket, next) => {
       if (
         isLoopback(socket.handshake.address) ||
@@ -250,7 +278,7 @@ export class Hub {
     this.session = null;
     for (const [, sock] of this.seatSockets) {
       sock.emit("unbound", { reason });
-      (sock.data as PlayerSocketData).seat = null;
+      sock.data.seat = null;
     }
     this.seatSockets.clear();
     this.stats.clear();
@@ -375,7 +403,7 @@ export class Hub {
     const [key, entry] =
       [...this.terminals].find(([, t]) => t.terminal === terminal && t.sockets.size > 0) ?? [];
     if (!key || !entry) throw new CommandError(`Client ${terminal} is not connected`);
-    const seated = [...entry.sockets].map((x) => (x.data as PlayerSocketData).seat).find((x) => x);
+    const seated = [...entry.sockets].map((x) => x.data.seat).find((x) => x);
     if (seated && seated !== seat) throw new CommandError(`Client ${terminal} is already seat ${seated}`);
     return m.bindSeat(terminal, seat, { fake: this.fakes.isFake(key), fakePace });
   }
@@ -396,16 +424,17 @@ export class Hub {
         this.micLevels.delete(ev.payload.seat);
       if (ev.type === "SeatUnbound") {
         const sock = this.seatSockets.get(ev.payload.seat);
-        const key = sock ? (sock.data as PlayerSocketData).terminalKey : undefined;
+        const key = sock ? sock.data.terminalKey : undefined;
         if (sock && key && this.fakes.isFake(key)) {
           // a fake player only exists for its seat: unbinding it ends it
           this.seatSockets.delete(ev.payload.seat);
           this.dropFake(key);
         } else if (sock) {
           sock.emit("unbound", { reason: ev.payload.reason });
-          (sock.data as PlayerSocketData).seat = null;
+          sock.data.seat = null;
           this.seatSockets.delete(ev.payload.seat);
-          sock.emit("terminal", { terminal: (sock.data as PlayerSocketData).terminal });
+          // a seated socket has sent hello, so it has a client number
+          if (sock.data.terminal !== undefined) sock.emit("terminal", { terminal: sock.data.terminal });
         }
       }
     }
@@ -443,7 +472,7 @@ export class Hub {
     const m = this.session;
     const terminals: TerminalInfo[] = [...this.terminals]
       .map(([key, t]) => {
-        const seated = [...t.sockets].map((x) => (x.data as PlayerSocketData).seat).find((x) => x);
+        const seated = [...t.sockets].map((x) => x.data.seat).find((x) => x);
         return {
           terminal: t.terminal,
           connected: t.sockets.size > 0,
@@ -497,30 +526,32 @@ export class Hub {
 
   /* ═════════════════════════ players ═════════════════════════ */
 
-  private claimSeat(sock: Socket, seat: number) {
+  private claimSeat(sock: PlayerSocket, seat: number) {
     const m = this.session;
-    if (!m || !sock.connected) return;
+    const seatToken = m?.seatToken(seat);
+    // no token: the seat is not bound (any more), so there is nothing to claim
+    if (!m || !seatToken || !sock.connected) return;
     const prev = this.seatSockets.get(seat);
     if (prev && prev !== sock) {
       prev.emit("unbound", { reason: "This seat was opened in another window" });
-      (prev.data as PlayerSocketData).seat = null;
+      prev.data.seat = null;
     }
     this.seatSockets.set(seat, sock);
-    (sock.data as PlayerSocketData).seat = seat;
-    sock.emit("bound", { seat, sessionId: m.sessionId, seatToken: m.seatToken(seat) });
+    sock.data.seat = seat;
+    sock.emit("bound", { seat, sessionId: m.sessionId, seatToken });
     const before = m.state.lastSeq;
     m.playerConnected(seat);
     if (m.state.lastSeq === before) this.pushAll(); // no event was appended → push manually
   }
 
-  private onPlayer(sock: Socket) {
-    const data = sock.data as PlayerSocketData;
+  private onPlayer(sock: PlayerSocket) {
+    const data = sock.data;
     const helloTimeout = setTimeout(() => {
       if (data.terminal === undefined) sock.disconnect(true);
     }, 15_000);
 
-    sock.on("hello", (raw, ack?: (a: unknown) => void) => {
-      const msg = PlayerHello.safeParse(raw);
+    sock.on("hello", (raw, ack) => {
+      const msg = PLAYER_SCHEMAS.hello.safeParse(raw);
       if (!msg.success) return ack?.({ ok: false, error: "bad hello" });
       clearTimeout(helloTimeout);
       let entry = this.terminals.get(msg.data.terminalKey);
@@ -541,22 +572,23 @@ export class Hub {
       }
     });
 
-    sock.on("clock:ping", (raw, ack?: (a: unknown) => void) => {
-      const msg = ClockPing.safeParse(raw);
+    sock.on("clock:ping", (raw, ack) => {
+      const msg = PLAYER_SCHEMAS["clock:ping"].safeParse(raw);
       if (msg.success) ack?.({ t0: msg.data.t0, serverTs: nowTs() });
     });
 
     /**
-     * A seated player's command: refused when the socket holds no seat or the payload is invalid;
-     * `fn` may be async. `refuse` builds the refusal ack (`retry`: the player may send it again).
+     * A seated player's request: refused when the socket holds no seat or the payload is invalid
+     * (validated with the message's schema from PLAYER_SCHEMAS); `fn` may be async. `refuse` builds
+     * the refusal ack (`retry`: the player may send it again).
      */
-    const seatHandler = <T, R>(
-      name: string,
-      schema: ZodType<T>,
-      fn: (m: SessionManager, seat: number, msg: T) => R | Promise<R>,
-      { refuse }: { refuse: (error: string, retry: boolean) => unknown },
+    const seatHandler = <K extends PlayerRequest>(
+      name: K,
+      fn: (m: SessionManager, seat: number, msg: PlayerMessage<K>) => PlayerAcks[K] | Promise<PlayerAcks[K]>,
+      refuse: (error: string, retry: boolean) => PlayerAcks[K],
     ) => {
-      sock.on(name, async (raw, ack?: (a: unknown) => void) => {
+      const schema = playerSchema(name);
+      const handler = async (raw: unknown, ack?: (a: PlayerAcks[K]) => void) => {
         const m = this.session;
         const seat = data.seat;
         if (!m || seat === null || seat === undefined) return ack?.(refuse("Not seated", true));
@@ -570,47 +602,63 @@ export class Hub {
           this.deps.log.error({ err: e, msg: name }, "player command failed");
           ack?.(refuse("Server error", true));
         }
-      });
+      };
+      // Socket.IO's listener type cannot follow a generic name. `handler` has the shape that
+      // ServerSide<PlayerClientToServer> gives K (both come from PlayerAcks), so `never` only stands in for that.
+      sock.on(name, handler as never);
     };
 
-    /** A command whose refusals are plain acks (`Ack`). */
-    const seatCmd = <T>(
-      name: string,
-      schema: ZodType<T>,
-      fn: (m: SessionManager, seat: number, msg: T) => unknown,
+    /** A request whose refusals are `Refusal`s; a command returning nothing acks `{ ok: true }`. */
+    const seatCmd = <K extends PlayerRequest>(
+      name: K,
+      fn: (m: SessionManager, seat: number, msg: PlayerMessage<K>) => PlayerAcks[K] | undefined,
     ) =>
-      seatHandler(name, schema, (m, seat, msg) => fn(m, seat, msg) ?? { ok: true }, {
-        refuse: (error) => ({ ok: false, error }),
-      });
+      seatHandler(
+        name,
+        (m, seat, msg) => fn(m, seat, msg) ?? ({ ok: true } as PlayerAcks[K]),
+        (error, retry) => ({ ok: false, error, retry }) as PlayerAcks[K],
+      );
 
     /**
      * Audio uploads: every refusal says whether to retry (AudioAck). Not seated (e.g. right after a
      * reconnect, before hello) is transient; a bad payload is permanent.
      */
-    const audioCmd = <T>(
-      name: string,
-      schema: ZodType<T>,
-      fn: (m: SessionManager, seat: number, msg: T) => AudioAck<unknown> | Promise<AudioAck<unknown>>,
-    ) => seatHandler(name, schema, fn, { refuse: (error, retry) => ({ ok: false, error, retry }) });
+    const audioCmd = <K extends "audio:start" | "audio:chunk" | "audio:stop">(
+      name: K,
+      fn: (m: SessionManager, seat: number, msg: PlayerMessage<K>) => PlayerAcks[K] | Promise<PlayerAcks[K]>,
+    ) => seatHandler(name, fn, (error, retry) => ({ ok: false, error, retry }));
 
-    seatCmd("consent:submit", ConsentSubmit, (m, seat, msg) => m.submitConsent(seat, msg));
-    seatCmd("mic:check", MicCheckSubmit, (m, seat, msg) => m.submitMicCheck(seat, msg));
-    audioCmd("audio:start", AudioStart, (m, seat, msg) => m.audio.start(seat, msg));
-    audioCmd("audio:chunk", AudioChunk, async (m, seat, msg) => {
+    const done = undefined; // a command that returns nothing: acked { ok: true }
+    seatCmd("consent:submit", (m, seat, msg) => {
+      m.submitConsent(seat, msg);
+      return done;
+    });
+    seatCmd("mic:check", (m, seat, msg) => {
+      m.submitMicCheck(seat, msg);
+      return done;
+    });
+    audioCmd("audio:start", (m, seat, msg) => m.audio.start(seat, msg));
+    audioCmd("audio:chunk", async (m, seat, msg) => {
       const a = await m.audio.chunk(seat, msg);
       // a stored chunk changes the LIVE mic column (throttled); start and stop push through their events
       if (a.ok && !a.duplicate && this.session === m) this.schedulePush();
       return a;
     });
-    audioCmd("audio:stop", AudioStop, (m, seat, msg) => m.audio.stop(seat, msg));
-    seatCmd("demographics:submit", DemographicsSubmit, (m, seat, msg) => m.submitDemographics(seat, msg));
-    seatCmd("briefing:ack", BriefingAck, (m, seat, msg) => m.acknowledgeBriefing(seat, msg));
-    seatCmd("intent", IntentMsg, (m, seat, msg) => m.intent(seat, msg));
-    seatCmd("telemetry", TelemetryBatch, (m, seat, msg) => ({ stored: this.ingestTelemetry(m, seat, msg) }));
+    audioCmd("audio:stop", (m, seat, msg) => m.audio.stop(seat, msg));
+    seatCmd("demographics:submit", (m, seat, msg) => {
+      m.submitDemographics(seat, msg);
+      return done;
+    });
+    seatCmd("briefing:ack", (m, seat, msg) => {
+      m.acknowledgeBriefing(seat, msg);
+      return done;
+    });
+    seatCmd("intent", (m, seat, msg) => m.intent(seat, msg));
+    seatCmd("telemetry", (m, seat, msg) => ({ stored: this.ingestTelemetry(m, seat, msg) }));
 
     sock.on("presence", (raw) => {
       const seat = data.seat;
-      const msg = Presence.safeParse(raw);
+      const msg = PLAYER_SCHEMAS.presence.safeParse(raw);
       if (!msg.success || !seat) return;
       const st = this.stats.get(seat);
       if (st) st.hoverRegionId = msg.data.regionId;
@@ -622,7 +670,7 @@ export class Hub {
       const m = this.session;
       const seat = data.seat;
       if (!m || !seat || m.audio.refusal(seat) !== null) return;
-      const msg = AudioLevel.safeParse(raw);
+      const msg = PLAYER_SCHEMAS["audio:level"].safeParse(raw);
       if (!msg.success) return;
       this.micLevels.set(seat, msg.data);
       this.schedulePush();
@@ -692,7 +740,7 @@ export class Hub {
 
   /* ═════════════════════════ facilitator ═════════════════════════ */
 
-  private onFacilitator(sock: Socket) {
+  private onFacilitator(sock: FacilitatorSocket) {
     const m = this.session;
     sock.emit("scenario", m?.scenario ?? null);
     sock.emit("events", {
@@ -702,8 +750,17 @@ export class Hub {
     sock.emit("telemetry:live", { items: this.liveTelemetry, reset: true });
     sock.emit("dashboard", this.dashboard());
 
-    const cmd = <T>(name: string, schema: ZodType<T>, fn: (msg: T) => unknown, needsSession = true) => {
-      sock.on(name, (raw, ack?: (a: Ack) => void) => {
+    /**
+     * A facilitator command: the payload is validated with the command's schema from
+     * FACILITATOR_SCHEMAS, then `fn` runs (it may be async: fake:add waits for network clients).
+     */
+    const cmd = <K extends FacilitatorCommand>(
+      name: K,
+      fn: (msg: FacilitatorMessage<K>) => FacilitatorResult<K> | Promise<FacilitatorResult<K>>,
+      needsSession = true,
+    ) => {
+      const schema = facilitatorSchema(name);
+      const handler = (raw: unknown, ack?: (a: FacilitatorAck<K>) => void) => {
         const msg = schema.safeParse(raw ?? {});
         if (!msg.success)
           return ack?.({ ok: false, error: `Invalid message: ${msg.error.issues[0]?.message ?? ""}` });
@@ -715,52 +772,57 @@ export class Hub {
         };
         try {
           const data = fn(msg.data);
-          // some commands (fake:add) wait for network clients
           if (data instanceof Promise) data.then((d) => ack?.({ ok: true, data: d }), fail);
           else ack?.({ ok: true, data });
         } catch (e) {
           fail(e);
         }
-      });
+      };
+      // Socket.IO's listener type cannot follow a generic name (see seatHandler in onPlayer)
+      sock.on(name, handler as never);
     };
     const s = () => this.session!;
+    /** A command that answers with no data (whatever the session's method returns is not sent). */
+    const act = <K extends Exclude<FacilitatorCommand, keyof FacilitatorResults>>(
+      name: K,
+      fn: (msg: FacilitatorMessage<K>) => unknown,
+    ) =>
+      cmd(name, (msg) => {
+        fn(msg);
+        // FacilitatorResult<K> is `undefined` for every K without a result; TypeScript cannot resolve it for a generic K
+        return undefined as FacilitatorResult<K>;
+      });
 
     cmd(
       "session:create",
-      SessionCreate,
       (msg) => ({ sessionId: this.createSession(msg.scenarioId, msg.config, msg.notes).sessionId }),
       false,
     );
-    cmd(
-      "session:resume",
-      SessionResume,
-      (msg) => ({ sessionId: this.resumeSession(msg.sessionId).sessionId }),
-      false,
-    );
-    cmd("seat:bind", SeatBind, (msg) => this.bindTerminal(msg.terminal, msg.seat));
-    cmd("fake:add", FakeAdd, (msg) => this.addFakePlayers(msg.seats, msg.pace));
-    cmd("seat:unbind", SeatUnbind, (msg) => s().unbindSeat(msg.seat, msg.reason));
-    cmd("labels:set", LabelsSet, (msg) => s().setLabels(msg.assignments, msg.pairing));
-    cmd("labels:randomise", LabelsRandomise, (msg) => s().randomiseLabels(msg.pairing, msg.shuffleK));
-    cmd("onboarding:start", Empty, () => s().startOnboarding());
-    cmd("simulation:start", Empty, () => s().startSimulation());
-    cmd("round:start", Empty, () => s().startRound("facilitator"));
-    cmd("round:end", Empty, () => s().endRound());
-    cmd("game:pause", Empty, () => s().pause());
-    cmd("game:resume", Empty, () => s().resume());
-    cmd("action:revoke", ActionRevoke, (msg) => s().revoke(msg.seq, msg.reason));
-    cmd("broadcast", BroadcastMsg, (msg) => s().broadcast(msg.text));
-    cmd("note", NoteMsg, (msg) => s().note(msg.text));
-    cmd("participant:withdraw", WithdrawMsg, (msg) => s().withdraw(msg.seat));
-    cmd("game:end", Empty, () => s().endGame());
-    cmd("session:close", Empty, () => s().close());
-    cmd("session:abort", AbortMsg, (msg) => s().abort(msg.reason));
-    cmd("mic:skip", MicSkip, (msg) => s().skipMicCheck(msg.seat, msg.reason));
-    cmd("calibration:start", Empty, () => s().startCalibration(false));
-    cmd("calibration:redo", Empty, () => s().startCalibration(true));
-    cmd("calibration:skip", CalibrationSkip, (msg) => s().skipCalibration(msg.reason));
-    cmd("recording:pause", RecordingPause, (msg) => s().pauseRecording(msg.reason));
-    cmd("recording:resume", Empty, () => s().resumeRecording());
+    cmd("session:resume", (msg) => ({ sessionId: this.resumeSession(msg.sessionId).sessionId }), false);
+    cmd("seat:bind", (msg) => this.bindTerminal(msg.terminal, msg.seat));
+    cmd("fake:add", (msg) => this.addFakePlayers(msg.seats, msg.pace));
+    act("seat:unbind", (msg) => s().unbindSeat(msg.seat, msg.reason));
+    act("labels:set", (msg) => s().setLabels(msg.assignments, msg.pairing));
+    act("labels:randomise", (msg) => s().randomiseLabels(msg.pairing, msg.shuffleK));
+    act("onboarding:start", () => s().startOnboarding());
+    act("simulation:start", () => s().startSimulation());
+    act("round:start", () => s().startRound("facilitator"));
+    act("round:end", () => s().endRound());
+    act("game:pause", () => s().pause());
+    act("game:resume", () => s().resume());
+    act("action:revoke", (msg) => s().revoke(msg.seq, msg.reason));
+    act("broadcast", (msg) => s().broadcast(msg.text));
+    act("note", (msg) => s().note(msg.text));
+    act("participant:withdraw", (msg) => s().withdraw(msg.seat));
+    act("game:end", () => s().endGame());
+    act("session:close", () => s().close());
+    act("session:abort", (msg) => s().abort(msg.reason));
+    act("mic:skip", (msg) => s().skipMicCheck(msg.seat, msg.reason));
+    act("calibration:start", () => s().startCalibration(false));
+    act("calibration:redo", () => s().startCalibration(true));
+    act("calibration:skip", (msg) => s().skipCalibration(msg.reason));
+    act("recording:pause", (msg) => s().pauseRecording(msg.reason));
+    act("recording:resume", () => s().resumeRecording());
   }
 
   /** Detach a session (e.g. before deleting it); connected players return to the waiting screen. */

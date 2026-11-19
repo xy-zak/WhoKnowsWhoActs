@@ -18,6 +18,7 @@ import {
 import { FakePaceSchema, SessionConfigSchema } from "./config";
 import { EVENT_DEFS } from "./events";
 import { ActionKindSchema, KLabelSchema, SeatSchema } from "./labels";
+import type { FacilitatorServerToClient, PlayerServerToClient } from "./socket";
 import { TelemetryItemSchema } from "./telemetry";
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -280,6 +281,59 @@ export const RecordingPause = z.object({
 
 export type Ack<T = unknown> = { ok: true; data?: T } | { ok: false; error: string };
 
+/* ─────────────────────────── Schema of every client→server message ─────────────────────────── */
+
+/**
+ * The ONE place that says which schema validates which message. The server's handlers look the
+ * schema up here by message name (so a handler cannot use the wrong one), the typed Socket.IO
+ * event maps (socket.ts) derive the payload types from it, and MESSAGES below must document
+ * exactly these names.
+ */
+export const PLAYER_SCHEMAS = {
+  hello: PlayerHello,
+  "clock:ping": ClockPing,
+  "consent:submit": ConsentSubmit,
+  "demographics:submit": DemographicsSubmit,
+  "mic:check": MicCheckSubmit,
+  "briefing:ack": BriefingAck,
+  intent: IntentMsg,
+  telemetry: TelemetryBatch,
+  presence: Presence,
+  "audio:start": AudioStart,
+  "audio:chunk": AudioChunk,
+  "audio:stop": AudioStop,
+  "audio:level": AudioLevel,
+} as const;
+
+export const FACILITATOR_SCHEMAS = {
+  "session:create": SessionCreate,
+  "session:resume": SessionResume,
+  "seat:bind": SeatBind,
+  "fake:add": FakeAdd,
+  "seat:unbind": SeatUnbind,
+  "labels:set": LabelsSet,
+  "labels:randomise": LabelsRandomise,
+  "onboarding:start": Empty,
+  "simulation:start": Empty,
+  "calibration:start": Empty,
+  "calibration:redo": Empty,
+  "calibration:skip": CalibrationSkip,
+  "mic:skip": MicSkip,
+  "recording:pause": RecordingPause,
+  "recording:resume": Empty,
+  "round:start": Empty,
+  "round:end": Empty,
+  "game:pause": Empty,
+  "game:resume": Empty,
+  "action:revoke": ActionRevoke,
+  broadcast: BroadcastMsg,
+  note: NoteMsg,
+  "participant:withdraw": WithdrawMsg,
+  "game:end": Empty,
+  "session:close": Empty,
+  "session:abort": AbortMsg,
+} as const;
+
 /* ─────────────────────────── Catalogue (drives docs/NETWORKING.md) ─────────────────────────── */
 
 export interface MessageDef {
@@ -292,7 +346,32 @@ export interface MessageDef {
   logged: string;
 }
 
-export const MESSAGES: Record<string, MessageDef> = {
+/** A catalogue entry of a client→server message: its schema must be the one in the schema table. */
+type InboundDef<NS extends MessageDef["namespace"], S extends z.ZodType> = Omit<
+  MessageDef,
+  "namespace" | "direction" | "schema"
+> & { namespace: NS; direction: "client→server"; schema: S };
+type OutboundDef<NS extends MessageDef["namespace"]> = Omit<
+  MessageDef,
+  "namespace" | "direction" | "schema" | "ack"
+> & { namespace: NS; direction: "server→client"; schema: string; ack?: never };
+
+/**
+ * Every message of the socket protocol, documented. The type makes the catalogue complete: a
+ * message added to a schema table or an event map (socket.ts) without an entry here, an entry
+ * for a message that does not exist, or one in the wrong namespace or direction, fails to compile.
+ */
+type MessageCatalogue = {
+  [K in keyof typeof PLAYER_SCHEMAS]: InboundDef<"/player", (typeof PLAYER_SCHEMAS)[K]>;
+} & {
+  [K in keyof PlayerServerToClient]: OutboundDef<"/player">;
+} & {
+  [K in keyof typeof FACILITATOR_SCHEMAS]: InboundDef<"/facilitator", (typeof FACILITATOR_SCHEMAS)[K]>;
+} & {
+  [K in keyof FacilitatorServerToClient]: OutboundDef<"/facilitator">;
+};
+
+export const MESSAGES: MessageCatalogue = {
   /* /player C→S */
   hello: {
     namespace: "/player",

@@ -1,4 +1,4 @@
-import type { Socket } from "socket.io-client";
+import type { PlayerSocket } from "./socket";
 
 /**
  * NTP-style clock synchronisation with the server.
@@ -16,7 +16,7 @@ export class ClockSync {
   private timer: ReturnType<typeof setInterval> | null = null;
 
   constructor(
-    private readonly socket: Socket,
+    private readonly socket: PlayerSocket,
     private readonly onSync?: (r: { offsetMs: number; rttMs: number; samples: number }) => void,
   ) {}
 
@@ -28,7 +28,7 @@ export class ClockSync {
     return new Promise((resolve) => {
       const t0 = performance.now();
       const timeout = setTimeout(() => resolve(null), 3000);
-      this.socket.emit("clock:ping", { t0 }, (ack: { t0: number; serverTs: number }) => {
+      this.socket.emit("clock:ping", { t0 }, (ack) => {
         clearTimeout(timeout);
         const t1 = performance.now();
         resolve({ offset: ack.serverTs - (performance.timeOrigin + (t0 + t1) / 2), rtt: t1 - t0 });

@@ -1,6 +1,6 @@
 import type { TelemetryItem, TelemetryPayloadOf, TelemetryType } from "@wkwa/shared";
-import type { Socket } from "socket.io-client";
 import type { ClockSync } from "./clock";
+import type { PlayerSocket } from "./socket";
 
 const STORAGE_KEY = "wkwa.telemetry.pending";
 
@@ -16,7 +16,7 @@ export class Telemetry {
   enabled = false;
 
   constructor(
-    private readonly socket: Socket,
+    private readonly socket: PlayerSocket,
     private readonly clock: ClockSync,
   ) {
     try {
@@ -45,14 +45,10 @@ export class Telemetry {
     this.inFlight = true;
     const ok = await new Promise<boolean>((resolve) => {
       const t = setTimeout(() => resolve(false), 5000);
-      this.socket.emit(
-        "telemetry",
-        { clockOffsetMs: this.clock.offsetMs, items },
-        (ack: { stored?: number }) => {
-          clearTimeout(t);
-          resolve(typeof ack?.stored === "number");
-        },
-      );
+      this.socket.emit("telemetry", { clockOffsetMs: this.clock.offsetMs, items }, (ack) => {
+        clearTimeout(t);
+        resolve("stored" in ack);
+      });
     });
     this.inFlight = false;
     if (!ok) this.buffer.unshift(...items);

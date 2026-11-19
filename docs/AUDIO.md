@@ -566,7 +566,7 @@ The stored `audio_tracks.status` is only `recording`, `closed` or `deleted`. The
 | Shared contracts (config, events, messages, state, projections, REST types, `shouldRecord`) | `packages/shared/src/audio.ts`, `state.ts`, `events.ts`, `protocol.ts`, `projections.ts`, `config.ts` |
 | Browser capture engine | `apps/client/src/audio/` (`MicRecorder`, worklet, resampler, chunker, queue, speech detector, timing, errors) |
 | Browser recording flow and screens | `apps/client/src/player/recording.ts`, `MicCheckScreen.tsx`, `CalibrationScreen.tsx`, `RecordingIndicator.tsx` |
-| Live ingest, consent hold, calibration, pause | `apps/server/src/audio/live.ts`, `calibration.ts`, `session/SessionManager.ts` |
+| Live ingest, consent hold, calibration, pause | `apps/server/src/audio/live.ts`, `calibration.ts`, `session/CalibrationRunner.ts` (timed turns, quick check), `session/SessionManager.ts` |
 | Encrypted store | `apps/server/src/audio/crypto.ts`, `fileStore.ts`, `verify.ts`, `db/database.ts` (migrations 6 and 7) |
 | Attribution | `apps/server/src/audio/attribution/` (algorithm documented in the header of `index.ts`), `service.ts`, `jobs.ts`, `jobWorker.ts`, `wav.ts` |
 | REST routes | `apps/server/src/api/audioRoutes.ts` (`GET /api/sessions/:id/audio`, `POST …/audio/attribution`, `GET /api/audio/jobs/:jobId`, `GET …/audio/segments`, `POST …/audio/export`, `POST …/audio/delete`) |

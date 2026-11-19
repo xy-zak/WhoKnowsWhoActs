@@ -4,6 +4,12 @@ History of [ARCHITECTURE.md](../ARCHITECTURE.md). Newest first. How entries are 
 
 ## Unreleased
 
+### Not yet committed · typed socket protocol, intent resend, CalibrationRunner
+
+- **Type:** Risk mitigation
+- **Change:** The code layout adds `packages/shared/src/socket.ts` (typed event maps), the schema tables in `protocol.ts`, `session/CalibrationRunner.ts` and `player/intents.ts`. The component table says what `SessionManager` delegates. The idempotency bullet covers the browser's resend and restarts. The extension guide gets *Add a socket message*. The testing table adds the protocol and intent-queue tests and the restart deduplication test.
+- **Reason:** The socket protocol was typed by message name strings only, so a payload drift was not caught by the compiler, and the calibration's timers made SessionManager the largest file. The document must say where those parts now live and how to extend the protocol.
+
 ### Not yet committed · documents `0f6971a`…`abcacbe` (microphone audio)
 
 - **Type:** Feature

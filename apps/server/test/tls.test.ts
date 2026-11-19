@@ -351,7 +351,7 @@ describe("server with TLS on", () => {
     const fac = new FacilitatorClient(srv.url);
     try {
       await fac.connected();
-      const { sessionId } = await fac.cmd<{ sessionId: string }>("session:create", {
+      const { sessionId } = await fac.cmd("session:create", {
         scenarioId: "demo",
         config: {
           seatCount: 2,
@@ -359,7 +359,7 @@ describe("server with TLS on", () => {
           defaultRound: { rule: "quota", quota: { propose: 2, decide: 1 }, timeLimitSec: null },
         },
       });
-      expect((await fac.cmd<{ seats: number[] }>("fake:add", { pace: "fast" })).seats).toEqual([1, 2]);
+      expect((await fac.cmd("fake:add", { pace: "fast" })).seats).toEqual([1, 2]);
       await fac.cmd("labels:randomise");
       await fac.cmd("onboarding:start");
       await fac.cmd("round:start");

@@ -79,6 +79,8 @@ For real sessions, follow the **[session runbook](docs/SESSION-RUNBOOK.md)**.
 | `npm run screenshots -- <command>` | Versioned documentation screenshots: `plan` (what changed since the last review), `capture` (Playwright plays the sessions needed, on a temporary database), `publish` (new version `name-v2.png` … in `docs/img/`, gallery regenerated), `check`, `mark`. Not part of `test:e2e`; the `/screenshot-app` skill runs the whole workflow |
 | `npm run lint` / `npm run typecheck` | Biome / TypeScript |
 
+CI (`.github/workflows/ci.yml`) runs `typecheck`, `lint`, `docs:check` and `npm test` on every push to `main` and every pull request, then the Playwright suite.
+
 ## Documentation
 
 | Document | Contents |

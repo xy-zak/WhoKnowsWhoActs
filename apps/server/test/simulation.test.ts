@@ -22,7 +22,7 @@ async function runSimulation(
   simulation: Record<string, unknown> = {},
   config: Record<string, unknown> = {},
 ): Promise<string> {
-  const { sessionId } = await fac.cmd<{ sessionId: string }>("session:create", {
+  const { sessionId } = await fac.cmd("session:create", {
     scenarioId: "demo",
     config: {
       players: "simulated",
@@ -35,7 +35,7 @@ async function runSimulation(
   });
   await fac.waitForDashboard((d) => d.state?.sessionId === sessionId);
   await fac.cmd("labels:set", {
-    assignments: [1, 2, 3, 4].map((seat, i) => ({ seat, k: ["Ka", "Kb", "Kc", "Kd"][i] })),
+    assignments: [1, 2, 3, 4].map((seat, i) => ({ seat, k: (["Ka", "Kb", "Kc", "Kd"] as const)[i]! })),
     pairing: { mode: "aligned", id: null },
   });
   await fac.cmd("simulation:start");
@@ -114,7 +114,7 @@ describe("simulated players", () => {
   it("refuses to bind a browser to a simulated seat", async () => {
     const bot = new Bot({ url: srv.url, autoPlay: false });
     const terminal = await bot.waitForTerminal();
-    const fresh = await fac.cmd<{ sessionId: string }>("session:create", {
+    const fresh = await fac.cmd("session:create", {
       scenarioId: "demo",
       config: { players: "simulated", simulation: FAST },
     });
@@ -140,7 +140,7 @@ describe("simulated players", () => {
   }, 30_000);
 
   it("uses per-seat policies; idle seats never act and the facilitator ends the round", async () => {
-    const { sessionId: id } = await fac.cmd<{ sessionId: string }>("session:create", {
+    const { sessionId: id } = await fac.cmd("session:create", {
       scenarioId: "demo",
       config: {
         players: "simulated",
@@ -194,7 +194,7 @@ describe("simulated players", () => {
         }),
       );
     }
-    const { sessionId: id } = await fac.cmd<{ sessionId: string }>("session:create", {
+    const { sessionId: id } = await fac.cmd("session:create", {
       scenarioId: "demo",
       config: { players: "simulated", seatCount: 1, simulation: { ...FAST, policy: "test-broken" } },
     });
@@ -274,7 +274,7 @@ describe("simulated players", () => {
   });
 
   it("resumes a simulated session after a restart and the agents carry on", async () => {
-    const { sessionId: id } = await fac.cmd<{ sessionId: string }>("session:create", {
+    const { sessionId: id } = await fac.cmd("session:create", {
       scenarioId: "demo",
       config: { players: "simulated", simulation: { minDelayMs: 40, maxDelayMs: 60 } },
     });

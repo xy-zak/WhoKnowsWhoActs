@@ -6,7 +6,7 @@
  * (`AudioChunk` and `SendResult` are derived from there); the engine itself has
  * no socket or UI dependency (all I/O is injected into MicRecorder).
  */
-import type { AudioChunkInput, audioSendResult, MicLevelState } from "@wkwa/shared";
+import type { AUDIO_SAMPLE_RATE, AudioChunkInput, audioSendResult, MicLevelState } from "@wkwa/shared";
 
 /** Default cap of unacknowledged audio kept in memory (30 min ≈ 57.6 MB). */
 export const DEFAULT_MAX_PENDING_SECONDS = 1800;
@@ -81,7 +81,7 @@ export interface AudioStartInfo {
   /** why the track started: the reason given to start(), or "context_resumed" / "clock_jump" / "discontinuity" */
   reason: string;
   /** rate of the PCM in the chunks: always 16 000 */
-  sampleRate: number;
+  sampleRate: typeof AUDIO_SAMPLE_RATE;
   /** samples in a full chunk (chunkSeconds × 16 000); the last chunk of a track may be shorter */
   chunkSamples: number;
   /** server-epoch ms estimate of when the track's first sample was captured */

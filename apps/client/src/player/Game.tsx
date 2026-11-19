@@ -69,13 +69,9 @@ export function Game({ conn, view }: { conn: PlayerConnection; view: PlayerView 
     conn.track("action_draft", { ...d, outcome: "confirmed" });
     setBusy(true);
     try {
-      const ack = await conn.request<{ ok: boolean; detail?: string }>("intent", {
-        clientSeq: conn.nextClientSeq(),
-        kind: d.kind,
-        regionId: d.regionId,
-        clientTs: conn.clock.now(),
-      });
-      if (!ack.ok) conn.showToast(ack.detail ?? "Action not possible");
+      const ack = await conn.intent(d.kind, d.regionId);
+      // a resend the server had already stored ("duplicate" without its first answer) is no error
+      if (!ack.ok && ack.reason !== "duplicate") conn.showToast(ack.detail || "Action not possible");
     } catch (e) {
       conn.showToast((e as Error).message);
     } finally {

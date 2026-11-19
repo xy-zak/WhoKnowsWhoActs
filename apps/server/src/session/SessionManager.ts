@@ -5,7 +5,6 @@ import {
   activeSeats,
   agentSeed,
   applyEvent,
-  calibrationWaitingSeats,
   canStartFirstRound,
   checkSimulationConfig,
   DEFAULT_VALIDATORS,
@@ -16,6 +15,7 @@ import {
   generateSessionId,
   getGameRules,
   getPolicy,
+  type IntentAck,
   initialState,
   isMicCheckHeld,
   isOnboardingComplete,
@@ -51,22 +51,22 @@ import {
   seatList,
   seatPolicyId,
   seededRandom,
-  shouldRecord,
   type Validator,
   validateIntent,
 } from "@wkwa/shared";
 import type { Logger } from "pino";
-import { calibrationCheckedPayload } from "../audio/calibration";
 import { LiveAudio } from "../audio/live";
 import type { Store } from "../db/store";
 import { harnessVersion, nowTs, wall } from "../runtime";
+import { CalibrationError, CalibrationRunner } from "./CalibrationRunner";
+
+export { CALIBRATION_CHECK_WAIT_MS } from "./CalibrationRunner";
 
 /** Thrown for invalid facilitator commands / player submissions; the message is shown to the user. */
 export class CommandError extends Error {}
 
-export type IntentAck =
-  | { ok: true; seq: number; duplicate?: boolean }
-  | { ok: false; reason: string; detail: string; duplicate?: boolean };
+/** Ack of an intent (shared with the clients: see @wkwa/shared socket.ts). */
+export type { IntentAck } from "@wkwa/shared";
 
 export interface SessionDeps {
   store: Store;
@@ -84,14 +84,19 @@ type LabelAssignment = { seat: number; k: KLabel; view?: string };
 
 const FINAL_PHASES = new Set(["closed", "aborted"]);
 
-/** How often the calibration check looks whether the last turn's audio has arrived (ms). */
-const CALIBRATION_CHECK_POLL_MS = 500;
 /**
- * Longest wait for the calibration audio after the last turn (ms): a 5 s chunk is uploaded once it
- * is complete, so the last turn's audio arrives up to about 5 s later. The check then runs with
- * what arrived; a seat without audio is reported as such.
+ * Answers to recent intents kept per seat. A browser resends only the intents it has no answer
+ * for, so a handful would do; the cache is rebuilt from the event log when a session is loaded.
  */
-export const CALIBRATION_CHECK_WAIT_MS = 15_000;
+const ACK_CACHE_SIZE = 50;
+
+/** The answer an intent got, read back from its event (null for events that are not intents). */
+function intentAckOf(ev: StoredEvent): IntentAck | null {
+  if (ev.type === "ProposalMade" || ev.type === "DecisionMade") return { ok: true, seq: ev.seq };
+  if (ev.type === "IntentRejected")
+    return { ok: false, reason: ev.payload.reason, detail: ev.payload.detail };
+  return null;
+}
 
 /**
  * Owns ONE session: validates commands and intents, appends events to the
@@ -104,15 +109,14 @@ export class SessionManager {
   private depth = 0;
   private roundTimer: NodeJS.Timeout | null = null;
   private advanceTimer: NodeJS.Timeout | null = null;
-  private calibrationTimer: NodeJS.Timeout | null = null;
-  /** Counts calibration runs; a timer of an earlier run (after a redo or skip) does nothing. */
-  private calibrationRun = 0;
   private lastClientSeq = new Map<number, number>();
   private ackCache = new Map<number, Map<number, IntentAck>>();
   private readonly clock: () => number;
   private readonly validators: Validator[];
   /** Live audio ingest: tracks, chunks and the calibration audio of this session (see audio/live.ts). */
   readonly audio: LiveAudio;
+  /** The facilitator-led calibration of an audio session (see CalibrationRunner.ts). */
+  private readonly calibration: CalibrationRunner;
 
   private constructor(
     readonly sessionId: string,
@@ -129,6 +133,17 @@ export class SessionManager {
       append: (ev) => this.append(ev),
       run: (fn) => this.run(fn),
       isFinal: () => this.isFinal,
+    });
+    this.calibration = new CalibrationRunner({
+      sessionId,
+      clock: this.clock,
+      log: deps.log,
+      state: () => this.state,
+      append: (ev) => this.append(ev),
+      run: (fn) => this.run(fn),
+      isFinal: () => this.isFinal,
+      audio: this.audio,
+      content: () => this.onboarding.audio?.calibration,
     });
   }
 
@@ -266,9 +281,12 @@ export class SessionManager {
     for (const ev of events) {
       applyEvent(m.state, ev);
       m.audio.observe(ev, true);
-      if (ev.type === "CalibrationStarted") m.calibrationRun++;
+      m.calibration.observe(ev);
       if (ev.clientSeq !== null && ev.seat !== null) {
         m.lastClientSeq.set(ev.seat, Math.max(m.lastClientSeq.get(ev.seat) ?? 0, ev.clientSeq));
+        // the answers to recent intents, so a browser's resend after a restart gets the same one
+        const ack = intentAckOf(ev);
+        if (ack) m.rememberAck(ev.seat, ev.clientSeq, ack);
       }
     }
     if (m.state.scenario && m.state.scenario.hash !== deps.scenario.hash) {
@@ -291,13 +309,7 @@ export class SessionManager {
     m.run(() => {
       m.audio.recover();
       // the calibration's timers did not survive the restart: end that run (the facilitator can redo it)
-      if (m.state.audio.calibration.status === "running" && !m.isFinal) {
-        m.append({
-          type: "CalibrationSkipped",
-          actorKind: "system",
-          payload: { reason: "The server restarted during the calibration (run it again)", cancelled: true },
-        });
-      }
+      m.calibration.cancel("The server restarted during the calibration (run it again)");
     });
     m.armTimers();
     return m;
@@ -309,8 +321,7 @@ export class SessionManager {
     if (this.advanceTimer) clearTimeout(this.advanceTimer);
     this.roundTimer = null;
     this.advanceTimer = null;
-    this.clearCalibrationTimer();
-    this.audio.endCalibration();
+    this.calibration.dispose();
   }
 
   /** Close every open audio track (e.g. `interrupted` when the hub switches to another session). */
@@ -975,15 +986,7 @@ export class SessionManager {
         actorKind: "facilitator",
         payload: reason ? { reason } : {},
       });
-      if (this.state.audio.calibration.status === "running") {
-        this.clearCalibrationTimer();
-        this.audio.endCalibration();
-        this.append({
-          type: "CalibrationSkipped",
-          actorKind: "system",
-          payload: { reason: "Recording was paused during the calibration (run it again)", cancelled: true },
-        });
-      }
+      this.calibration.cancel("Recording was paused during the calibration (run it again)");
     });
   }
 
@@ -1000,44 +1003,14 @@ export class SessionManager {
   /* ═════════════════════════ audio: calibration ═════════════════════════ */
 
   /**
-   * Facilitator: start the calibration (or run it again with `redo`). Possible once every real
-   * seat is past its mic check. Each recorded seat in seat order gets a turn of `turnMs` to read
-   * its sentence, then `gapMs` of silence; the server times the turns (CalibrationTurn), logs
-   * CalibrationCompleted after the last one and then the quick leakage check (CalibrationChecked)
-   * once the turns' audio has arrived. A redo cancels a running calibration and starts afresh.
+   * Facilitator: start the calibration (or run it again with `redo`), in the onboarding or between
+   * rounds. The turns, their timing and the quick check: see CalibrationRunner.
    */
   startCalibration(redo = false) {
     this.run(() => {
       this.requireAudio();
       this.requirePhase("onboarding", "round_complete");
-      const st = this.state;
-      const c = st.audio.calibration;
-      if (!redo && c.status === "running") throw new CommandError("The calibration is already running");
-      if (!redo && c.status !== "pending")
-        throw new CommandError(`The calibration was already ${c.status}: use 'redo' to run it again`);
-      if (st.audio.recordingPaused) throw new CommandError("Recording is paused: resume recording first");
-      const waiting = calibrationWaitingSeats(st).map((s) => s.seat);
-      if (waiting.length) throw new CommandError(`Waiting for the mic check of seat ${waiting.join(", ")}`);
-      const order = activeSeats(st)
-        .filter((s) => shouldRecord(st, s))
-        .map((s) => s.seat);
-      if (order.length === 0) throw new CommandError("No seat is recorded: skip the calibration instead");
-      const content = this.onboarding.audio?.calibration;
-      if (!content) throw new CommandError("No calibration texts (config/audio.json)");
-      this.clearCalibrationTimer();
-      const run = ++this.calibrationRun;
-      // a redo reads other sentences than the run before, where there are enough
-      const offset = ((run - 1) * order.length) % content.sentences.length;
-      const sentenceIds = order.map((_, i) => content.sentences[(offset + i) % content.sentences.length]!.id);
-      const { turnMs, gapMs } = content;
-      this.append({
-        type: "CalibrationStarted",
-        actorKind: "facilitator",
-        payload: { order, sentenceIds, turnMs, gapMs },
-      });
-      const start = this.clock();
-      this.audio.beginCalibration(run, order, start);
-      this.calibrationTurn(run, 0);
+      this.calibrationCommand(() => this.calibration.start(redo));
     });
   }
 
@@ -1046,93 +1019,18 @@ export class SessionManager {
     this.run(() => {
       this.requireAudio();
       if (this.isFinal) throw new CommandError("Session has ended");
-      const status = this.state.audio.calibration.status;
-      if (status === "done" || status === "skipped")
-        throw new CommandError(`The calibration was already ${status}`);
-      this.clearCalibrationTimer();
-      this.audio.endCalibration();
-      this.append({ type: "CalibrationSkipped", actorKind: "facilitator", payload: { reason } });
+      this.calibrationCommand(() => this.calibration.skip(reason));
     });
   }
 
-  private clearCalibrationTimer() {
-    if (this.calibrationTimer) clearTimeout(this.calibrationTimer);
-    this.calibrationTimer = null;
-  }
-
-  /** Is calibration run `run` still the one running? (Timers of an earlier run then do nothing.) */
-  private calibrationCurrent(run: number, status: "running" | "done" = "running"): boolean {
-    return this.calibrationRun === run && this.state.audio.calibration.status === status && !this.isFinal;
-  }
-
-  private calibrationTimeout(fn: () => void, ms: number) {
-    this.clearCalibrationTimer();
-    this.calibrationTimer = setTimeout(() => {
-      this.calibrationTimer = null;
-      try {
-        this.run(fn);
-      } catch (e) {
-        this.deps.log.error({ err: e, sessionId: this.sessionId }, "calibration timer failed");
-      }
-    }, ms);
-  }
-
-  /** Log turn `index` of run `run` and time the next step (inside a command). */
-  private calibrationTurn(run: number, index: number) {
-    const c = this.state.audio.calibration;
-    const seat = c.order[index]!;
-    this.append({
-      type: "CalibrationTurn",
-      actorKind: "system",
-      seat,
-      participantCode: this.codeOf(seat),
-      payload: { index, seat, sentenceId: c.sentenceIds[index]! },
-    });
-    const turnMs = c.turnMs ?? 0;
-    const last = index >= c.order.length - 1;
-    this.calibrationTimeout(
-      () => {
-        if (!this.calibrationCurrent(run)) return;
-        if (last) this.completeCalibration(run);
-        else this.calibrationTurn(run, index + 1);
-      },
-      last ? turnMs : turnMs + (c.gapMs ?? 0),
-    );
-  }
-
-  /** The last turn is over: log CalibrationCompleted, then wait for the audio and check it (inside a command). */
-  private completeCalibration(run: number) {
-    const c = this.state.audio.calibration;
-    const turnMs = c.turnMs ?? 0;
-    const turns = c.turns.map((t) => ({
-      seat: t.seat,
-      sentenceId: t.sentenceId,
-      startTs: t.startTs,
-      endTs: t.endTs ?? t.startTs + turnMs,
-    }));
-    this.append({ type: "CalibrationCompleted", actorKind: "system", payload: { turns } });
-    const lastEnd = Math.max(...turns.map((t) => t.endTs));
-    const deadline = this.clock() + CALIBRATION_CHECK_WAIT_MS;
-    const poll = () => {
-      if (!this.calibrationCurrent(run, "done")) return;
-      const collector = this.audio.calibration(run);
-      if (!collector) return;
-      if (!collector.complete(lastEnd) && this.clock() < deadline) {
-        this.calibrationTimeout(poll, CALIBRATION_CHECK_POLL_MS);
-        return;
-      }
-      try {
-        const report = collector.check(turns);
-        this.append({
-          type: "CalibrationChecked",
-          actorKind: "system",
-          payload: calibrationCheckedPayload(report, c.order),
-        });
-      } finally {
-        this.audio.endCalibration(run);
-      }
-    };
-    this.calibrationTimeout(poll, CALIBRATION_CHECK_POLL_MS);
+  /** A calibration refusal is a command refusal (shown to the facilitator). */
+  private calibrationCommand(fn: () => void) {
+    try {
+      fn();
+    } catch (e) {
+      if (e instanceof CalibrationError) throw new CommandError(e.message);
+      throw e;
+    }
   }
 
   /* ═════════════════════════ intents ═════════════════════════ */
@@ -1156,15 +1054,20 @@ export class SessionManager {
       }
       this.lastClientSeq.set(seat, msg.clientSeq);
       const ack = this.processIntent(seat, msg);
-      let cache = this.ackCache.get(seat);
-      if (!cache) {
-        cache = new Map();
-        this.ackCache.set(seat, cache);
-      }
-      cache.set(msg.clientSeq, ack);
-      if (cache.size > 50) cache.delete(cache.keys().next().value!);
+      this.rememberAck(seat, msg.clientSeq, ack);
       return ack;
     });
+  }
+
+  /** Keep the answer to an intent for resends (the last ACK_CACHE_SIZE per seat). */
+  private rememberAck(seat: number, clientSeq: number, ack: IntentAck) {
+    let cache = this.ackCache.get(seat);
+    if (!cache) {
+      cache = new Map();
+      this.ackCache.set(seat, cache);
+    }
+    cache.set(clientSeq, ack);
+    if (cache.size > ACK_CACHE_SIZE) cache.delete(cache.keys().next().value!);
   }
 
   private processIntent(

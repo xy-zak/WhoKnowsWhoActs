@@ -1,5 +1,15 @@
-import type { Ack, DashboardMsg, Scenario, StoredEvent, StoredTelemetry } from "@wkwa/shared";
-import { io, type Socket } from "socket.io-client";
+import type {
+  DashboardMsg,
+  FacilitatorAck,
+  FacilitatorCommand,
+  FacilitatorPayload,
+  FacilitatorResult,
+  Scenario,
+  StoredEvent,
+  StoredTelemetry,
+} from "@wkwa/shared";
+import { io } from "socket.io-client";
+import { emitFacilitator, type FacilitatorSocket } from "../net/socket";
 import { Store } from "../net/store";
 import type { ToastMsg } from "../ui/Toast";
 
@@ -34,7 +44,7 @@ function adminToken(): string | null {
 }
 
 export class FacilitatorConnection {
-  readonly socket: Socket;
+  readonly socket: FacilitatorSocket;
   readonly token = adminToken();
   readonly store = new Store<FacState>({
     connected: false,
@@ -53,21 +63,21 @@ export class FacilitatorConnection {
     this.socket.on("connect", () => this.store.set((s) => ({ ...s, connected: true, authError: null })));
     this.socket.on("disconnect", () => this.store.set((s) => ({ ...s, connected: false })));
     this.socket.on("connect_error", (e) => this.store.set((s) => ({ ...s, authError: e.message })));
-    this.socket.on("dashboard", (d: DashboardMsg) => this.store.set((s) => ({ ...s, dashboard: d })));
-    this.socket.on("scenario", (sc: Scenario | null) => this.store.set((s) => ({ ...s, scenario: sc })));
-    this.socket.on("events", (m: { events: StoredEvent[]; reset: boolean }) =>
+    this.socket.on("dashboard", (d) => this.store.set((s) => ({ ...s, dashboard: d })));
+    this.socket.on("scenario", (sc) => this.store.set((s) => ({ ...s, scenario: sc })));
+    this.socket.on("events", (m) =>
       this.store.set((s) => ({
         ...s,
         events: (m.reset ? m.events : [...s.events, ...m.events]).slice(-20_000),
       })),
     );
-    this.socket.on("telemetry:live", (m: { items: StoredTelemetry[]; reset?: boolean }) =>
+    this.socket.on("telemetry:live", (m) =>
       this.store.set((s) => ({
         ...s,
         telemetry: (m.reset ? m.items : [...s.telemetry, ...m.items]).slice(-500),
       })),
     );
-    this.socket.on("presence:live", (m: { seat: number; regionId: string | null }) =>
+    this.socket.on("presence:live", (m) =>
       this.store.set((s) => ({ ...s, presence: { ...s.presence, [m.seat]: m.regionId } })),
     );
   }
@@ -82,10 +92,14 @@ export class FacilitatorConnection {
   }
 
   /** Send a facilitator command; shows the server's error as a toast and rethrows. */
-  async cmd<T = unknown>(name: string, payload: unknown = {}, okText?: string): Promise<T> {
-    const ack = await new Promise<Ack<T>>((resolve) => {
+  async cmd<K extends FacilitatorCommand>(
+    name: K,
+    payload: FacilitatorPayload<K>,
+    okText?: string,
+  ): Promise<FacilitatorResult<K>> {
+    const ack = await new Promise<FacilitatorAck<K>>((resolve) => {
       const t = setTimeout(() => resolve({ ok: false, error: "No response from server" }), 8000);
-      this.socket.emit(name, payload, (a: Ack<T>) => {
+      emitFacilitator(this.socket, name, payload, (a) => {
         clearTimeout(t);
         resolve(a);
       });
@@ -95,7 +109,7 @@ export class FacilitatorConnection {
       throw new Error(ack.error);
     }
     if (okText) this.toast(okText);
-    return ack.data as T;
+    return ack.data;
   }
 
   /**

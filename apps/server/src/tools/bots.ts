@@ -108,7 +108,7 @@ async function autoFacilitate() {
       const st = d.state;
       if (!st || ["closed", "aborted"].includes(st.phase)) {
         if (!st) {
-          const r = await fac.cmd<{ sessionId: string }>("session:create", {
+          const r = await fac.cmd("session:create", {
             scenarioId: "demo",
             config: { seatCount, ...(values.audio ? { audio: { enabled: true } } : {}) },
             notes: "auto-facilitated test session (bots)",
@@ -122,7 +122,7 @@ async function autoFacilitate() {
         const free = seats.filter((s) => !s.bound).map((s) => s.seat);
         const unseated = d.terminals.filter((t) => t.connected && t.seat === null);
         if (free.length > 0 && unseated.length > 0) {
-          await fac.cmd("seat:bind", { terminal: unseated[0]!.terminal, seat: free[0] });
+          await fac.cmd("seat:bind", { terminal: unseated[0]!.terminal, seat: free[0]! });
           log(`bound client ${unseated[0]!.terminal} → seat ${free[0]}`);
         } else if (free.length === 0) {
           if (seats.some((s) => !s.k)) await fac.cmd("labels:randomise");

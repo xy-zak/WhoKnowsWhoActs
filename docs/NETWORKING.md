@@ -194,14 +194,17 @@ sequenceDiagram
   S->>S: verify token against HMAC of the current binding
   S->>S: append PlayerConnected (reconnect true)
   S-->>B: ack (terminal, seat 2)
+  Note over B: seated again: unanswered actions may be sent
   S-->>B: state (fresh full snapshot)
-  B->>S: resend unacknowledged intent (same clientSeq)
+  B->>S: resend unanswered intent (same clientSeq, same click time)
   S-->>B: original ack, nothing appended (deduplicated)
   B->>S: telemetry (items buffered while offline)
   Note over O,S: facilitator presses Resume, GameResumed is appended
 ```
 
 - Socket.IO reconnects automatically with back-off. The player sees a "Reconnecting…" overlay.
+- **Actions are never lost and never made twice.** The browser keeps every action (`intent`) until the server has answered it (`apps/client/src/player/intents.ts`). It sends an action only while its socket is *seated* (the server has answered `hello` with the seat, or sent `bound`), and sends every unanswered one again, unchanged (same `clientSeq` and click time), each time the socket is seated again. The server stores an action once and answers a resend with its first answer (`duplicate: true`); it keeps the answers of each seat's last 50 actions and rebuilds them from the event log after a restart, so a resend gets the exact answer then too. An action still unanswered after 45 s is given up: the player is told to check the map, and it is never sent again.
+- **Why the browser waits for `hello`'s answer.** On a reconnect, Socket.IO sends what was emitted while offline *before* the `connect` handler runs, so before `hello`: the server's new socket holds no seat yet and refuses it. Requests from a socket without a seat are refused as transient (`{ ok: false, error: "Not seated", retry: true }`), and the browser's onboarding requests (consent, mic check, demographics, briefing) also wait until the socket is seated before they are sent.
 - Telemetry produced while offline is buffered in the browser and sent after reconnecting. Its `clientTs` keeps the original timing.
 - A reload, or even closing and reopening the tab, keeps the seat, because the token is in `localStorage` (`wkwa.seat`). Clearing the browser's site data, or using a different browser profile, loses it.
 
@@ -331,6 +334,8 @@ Every client→server payload is validated with the zod schema listed here. Inva
 <!-- END GENERATED: message-catalogue -->
 
 Server→client payload types are TypeScript interfaces in `packages/shared/src/projections.ts` (`PlayerView`) and `protocol.ts` (`DashboardMsg`, `TerminalInfo`, `SeatLiveStats`). Stored event and telemetry rows are described in [DATA-TYPES.md](DATA-TYPES.md).
+
+**One source for the protocol, checked by the compiler.** `protocol.ts` holds one table per namespace that says which zod schema validates which message (`PLAYER_SCHEMAS`, `FACILITATOR_SCHEMAS`). The typed Socket.IO event maps in `packages/shared/src/socket.ts` are derived from them (payload = the schema's input type, plus each message's acknowledgement and every server→client payload), and every socket uses them: `Socket<PlayerServerToClient, PlayerClientToServer>` in the browsers and test clients, and on the server `Namespace<ServerSide<…>, …>`, where an incoming payload stays `unknown` until the handler has validated it with the schema from the table. The catalogue above (`MESSAGES`) is typed so that it must document exactly the messages in the tables and maps, with the same schema; a message added in one place and not the others does not compile.
 
 ## 10. REST API
 

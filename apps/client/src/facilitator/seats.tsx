@@ -100,7 +100,7 @@ export function BindEditor({ conn, dash }: { conn: FacilitatorConnection; dash: 
   const addFakes = (seatsToFill: number[] | null) => {
     setBusy(true);
     void conn
-      .cmd<{ seats: number[] }>("fake:add", { seats: seatsToFill, pace })
+      .cmd("fake:add", { seats: seatsToFill, pace })
       .then(
         (r) => conn.toast(`Fake player${r.seats.length === 1 ? "" : "s"} in seat ${r.seats.join(", ")}`),
         () => {},
@@ -389,11 +389,12 @@ export function LabelsEditor({
     onSaved?.();
   };
   const save = () => {
-    const assignments = seats.map((s) => ({
-      seat: s.seat,
-      k: draft[s.seat]!.k,
-      ...(manualView ? { view: draft[s.seat]!.view } : {}),
-    }));
+    if (!valid) return;
+    // every seat has a K once `valid`; a seat without one is never sent as ""
+    const assignments = seats.flatMap((s) => {
+      const d = draft[s.seat];
+      return d?.k ? [{ seat: s.seat, k: d.k, ...(manualView ? { view: d.view } : {}) }] : [];
+    });
     conn.cmd("labels:set", { assignments, pairing }, "Labels saved").then(done, () => {});
   };
   const shuffle = () =>
