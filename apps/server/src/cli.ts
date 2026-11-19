@@ -40,6 +40,7 @@ import { dbFile as dbFileOf, exportsDirFor } from "./db/stores";
 import { exportSession } from "./gdpr/exporter";
 import { obtainPassphrase, promptHidden } from "./passphrase";
 import { runtimeFromEnv } from "./runtime";
+import { sessionHasEnded } from "./session/sessionGuard";
 
 const USAGE = `Usage: npm run cli -- <sessions|lookup|export|anonymise|erase|erasures|delete-session|deletions|delete-audio|audio-deletions|backup|rekey|verify> [options]
   lookup --code C          export --session S       anonymise --session S
@@ -283,11 +284,10 @@ async function main() {
             ? "Deletes the raw recordings and the cleaned/aligned tracks (files and keys). Track timing, chunk levels, speech segments and transcripts stay."
             : "Deletes ALL audio of this session: tracks, chunks, derived results, jobs and the audio folder.",
         );
-        // the CLI cannot see the server's attached session (the server's own deletion refuses a running one)
-        if (
-          !["game_complete", "closed", "aborted"].includes(row.status) ||
-          stored.some((t) => t.status === "recording")
-        )
+        // A warning, not the server's refusal: the CLI sees only the database, not the hub's attached
+        // session or its jobs and exports (SessionGuard refuses those in the server). The session
+        // row's status is its phase, so "ended" is the same predicate the guard uses.
+        if (!sessionHasEnded(row.status) || stored.some((t) => t.status === "recording"))
           console.log(
             `⚠  The session is '${row.status}'${stored.some((t) => t.status === "recording") ? " and has tracks still marked recording" : ""}. ` +
               "If the server is running with this session attached, end the session (or stop the server) first.",
