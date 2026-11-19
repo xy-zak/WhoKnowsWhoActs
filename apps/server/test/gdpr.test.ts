@@ -84,6 +84,26 @@ describe("GDPR tooling", () => {
     expect(() => openDatabase(file, "wrong passphrase!!")).toThrow(WrongPassphraseError);
   });
 
+  it("a failed export leaves no folder behind", () => {
+    const sessionDir = path.join(srv.runtime.exportsDir, sessionId);
+    const folders = () => (existsSync(sessionDir) ? readdirSync(sessionDir).sort() : []);
+    const before = folders();
+    const registered = srv.ctx.store.listExports().length;
+    // the files are written, then the last step fails (e.g. the disk is full)
+    const store = Object.create(srv.ctx.store, {
+      registerExport: {
+        value: () => {
+          throw new Error("disk full");
+        },
+      },
+    });
+    expect(() =>
+      exportSession({ store, scenarios: srv.ctx.scenarios, exportsDir: srv.runtime.exportsDir }, sessionId),
+    ).toThrow("disk full");
+    expect(folders()).toEqual(before);
+    expect(srv.ctx.store.listExports()).toHaveLength(registered);
+  });
+
   it("writes a standard export that matches the documented columns exactly", () => {
     const r = exportSession(
       { store: srv.ctx.store, scenarios: srv.ctx.scenarios, exportsDir: srv.runtime.exportsDir },
