@@ -1200,7 +1200,15 @@ export class SessionManager {
           : { ok: false, reason: "duplicate", detail: "Already processed", duplicate: true };
       }
       this.lastClientSeq.set(seat, msg.clientSeq);
-      const ack = this.processIntent(seat, msg);
+      const stored = this.pending.length;
+      let ack: IntentAck;
+      try {
+        ack = this.processIntent(seat, msg);
+      } catch (e) {
+        // nothing logged for it (e.g. SQLITE_BUSY): the browser's resend must be processed, not refused as a duplicate
+        if (this.pending.length === stored) this.lastClientSeq.set(seat, last);
+        throw e;
+      }
       this.rememberAck(seat, msg.clientSeq, ack);
       return ack;
     });

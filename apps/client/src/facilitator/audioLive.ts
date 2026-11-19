@@ -321,8 +321,9 @@ const BROKEN_STOPS: Partial<Record<AudioStopReason, string>> = Object.fromEntrie
 );
 
 /**
- * Before closing: is every real seat's audio on the server? Uses the live upload backlog and the
- * stored tracks (null while not loaded yet). Interrupted tracks and missing chunks are listed too.
+ * Before closing: is every real seat's audio on the server? Uses the live upload backlog, the seats'
+ * connection and the stored tracks (null while not loaded yet). Interrupted tracks and missing
+ * chunks are listed too.
  */
 export function wrapUpAudioCheck(
   st: ReadonlyGameState,
@@ -337,7 +338,15 @@ export function wrapUpAudioCheck(
     const mine = tracks?.filter((t) => t.seat === s.seat) ?? [];
     const pending = mics[s.seat]?.pendingChunks ?? 0;
     const open = mine.filter((t) => t.status === "open").length;
-    if (pending > 0)
+    // the server forgets an offline seat's backlog and closes its track, but the browser still holds the audio
+    const recorded = isRecordedSeat(recordingVerdict(st, s));
+    if (recorded && !s.connected)
+      lines.push({
+        seat: s.seat,
+        kind: "upload",
+        text: `Seat ${s.seat} offline: audio it still holds arrives when it reconnects.`,
+      });
+    else if (pending > 0)
       lines.push({
         seat: s.seat,
         kind: "upload",
@@ -370,7 +379,7 @@ export function wrapUpAudioCheck(
         kind: "issue",
         text: `Seat ${s.seat}: ${plural(gaps, "chunk")} missing from the stored audio.`,
       });
-    if (tracks !== null && mine.length === 0 && isRecordedSeat(recordingVerdict(st, s)))
+    if (tracks !== null && mine.length === 0 && recorded)
       lines.push({ seat: s.seat, kind: "issue", text: `Seat ${s.seat}: no audio recorded.` });
   }
   return { uploaded: tracks !== null && !lines.some((l) => l.kind === "upload"), lines };

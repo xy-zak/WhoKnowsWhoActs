@@ -134,6 +134,18 @@ describe("robustness", () => {
     expect(a2).toMatchObject({ ok: true, duplicate: true });
     expect(srv.ctx.store.listEvents(sessionId).filter((e) => e.type === "ProposalMade")).toHaveLength(1);
 
+    // a server error before anything was logged: the resend is processed, not refused as a duplicate
+    const busy = vi.spyOn(srv.ctx.store, "appendEvent").mockImplementationOnce(() => {
+      throw new Error("SQLITE_BUSY");
+    });
+    const msg2 = { ...msg, clientSeq: 2, kind: "decide" as const, clientTs: Date.now() };
+    expect(await b.emit("intent", msg2)).toMatchObject({ ok: false, retry: true });
+    busy.mockRestore();
+    expect(await b.emit("intent", msg2)).not.toMatchObject({ reason: "duplicate" });
+    expect(
+      srv.ctx.store.listEvents(sessionId).filter((e) => e.clientSeq === 2 && e.seat === b.seat),
+    ).toHaveLength(1);
+
     const seat = b.seat;
     b.socket.disconnect();
     await fac.waitForDashboard((d) => d.state!.paused && d.state!.pauseReason === "disconnect");

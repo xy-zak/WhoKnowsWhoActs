@@ -337,8 +337,9 @@ describe("chunk ingest", () => {
     d.m.playerDisconnected(1, "transport close");
     expect(d.store.getAudioTrack(t)).toMatchObject({ status: "closed", stopReason: "disconnect" });
     expect(trackStatusOf(d.store.getAudioTrack(t)!)).toBe("interrupted");
-    now += 60_000;
-    expect((await d.m.submitAudioChunk(1, chunkMsg(t, 0, N, now - 59_000))).ok).toBe(true);
+    // a 12-minute outage: its oldest chunk still arrives
+    now += 12 * 60_000;
+    expect((await d.m.submitAudioChunk(1, chunkMsg(t, 0, N, now - 719_000))).ok).toBe(true);
     // the grace period runs from the last late chunk
     now += AUDIO_LATE_CHUNK_GRACE_MS - 1000;
     expect((await d.m.submitAudioChunk(1, chunkMsg(t, 1, N, now - 1000))).ok).toBe(true);

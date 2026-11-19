@@ -194,9 +194,20 @@ describe("audio: store, GDPR hooks and CLI", () => {
     expect(
       orphans.problems.some((p) => p.startsWith(`file name ${sessionId}/${codes[3]}.wav contains`)),
     ).toBe(true);
+    expect(orphans.problems.some((p) => p.startsWith(`orphan file ${sessionId}/${"f".repeat(32)}.wka`))).toBe(
+      true,
+    );
     rmSync(orphan);
     rmSync(named);
     expect((await verifyAudio(store, audioFiles)).problems).toEqual([]);
+
+    // a crash between creating a track's file and storing its row leaves a header-only file: a warning
+    const empty = await audioFiles.createFile(sessionId);
+    const crashed = await verifyAudio(store, audioFiles);
+    expect(crashed.problems).toEqual([]);
+    expect(crashed.orphans.map((o) => o.fileName)).toEqual([empty.fileName]);
+    expect(crashed.warnings.some((w) => w.includes(`${empty.fileName} holds no audio`))).toBe(true);
+    audioFiles.deleteFile(sessionId, empty.fileName);
   });
 
   it("CLI: backup copies the audio folder, verify checks the audio", () => {

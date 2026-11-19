@@ -183,7 +183,7 @@ sequenceDiagram
   Note over B,S: network drop: the server closes the track (disconnect).<br/>The browser keeps unacknowledged chunks in memory.
   B->>S: reconnect, hello
   B->>S: audio:chunk (seq n, resent, oldest first)
-  S->>S: closed less than 10 minutes ago, so a late chunk is accepted
+  S->>S: closed less than 35 minutes ago, so a late chunk is accepted
   S->>D: already stored? then ack ok, duplicate true
   S-->>B: ack ok
   B->>S: audio:start (reason reconnect, new trackId)
@@ -194,7 +194,7 @@ sequenceDiagram
 
 **Acknowledgements.** Every ack is `{ ok: true }` (also for a duplicate) or `{ ok: false, error, retry }`. `retry: false` is a permanent refusal (for example a withdrawn seat): the browser drops the item and counts it. `retry: true` is a transient fault (a storage error): the browser sends it again with back-off. A missing or malformed ack counts as "send again". This is why the same `(trackId, seq)` can arrive twice and is still stored once.
 
-**Late chunks.** The server closes a seat's track when its browser disconnects, when recording is paused, at game complete, and after a restart. A closed track still accepts chunks for 10 minutes after the close, or after the previous late chunk. Audio captured during a recording pause or after the game was complete is never stored, even late: a chunk that starts in such a stretch is refused, and one that runs into it is cut where it begins.
+**Late chunks.** The server closes a seat's track when its browser disconnects, when recording is paused, at game complete, and after a restart. A closed track still accepts chunks for 35 minutes after the close, or after the previous late chunk. Audio captured during a recording pause or after the game was complete is never stored, even late: a chunk that starts in such a stretch is refused, and one that runs into it is cut where it begins.
 
 **HTTPS.** A browser exposes the microphone only on a secure page. Players open the laptop by its LAN address, so the server uses HTTPS with a self-signed certificate it makes itself. The certificate warning, the fingerprint check and what to do when the warning returns are in [NETWORKING.md § 11](NETWORKING.md#11-security-on-the-lan) and [SESSION-RUNBOOK.md § 10](SESSION-RUNBOOK.md#10-https-and-the-certificate-warning). Setup step 04 warns when the server runs on plain HTTP.
 
@@ -584,7 +584,7 @@ The stored `audio_tracks.status` is only `recording`, `closed` or `deleted`. The
 - **Absolute time** comes from the client timestamps (about ±20 ms, plus each device's input latency of typically 10 to 40 ms). This is below the smoothing and does not change who spoke, but word-level timing across mics is only good to a few tens of milliseconds. Short sessions also give rough absolute drift (about ±25 ppm over five minutes).
 - **Bots and demos send voice-less synthetic audio**, which the speech model does not take for speech. Run the server with `WKWA_SPEECH_MODEL=off` for them ([NETWORKING.md § 4](NETWORKING.md#4-ports-interfaces-and-configuration)); the e2e test server does this already.
 - **`dropped_chunks` is counted per recording time, not per track.** The browser credits a chunk it had to drop to the track that was recording when the drop happened. Drops only happen after more than 30 minutes of unsent audio, and if that backlog spans a track boundary, chunks of an older track are counted on the newer one (capped at the newer track's own chunk count). Treat per-track drop counts as approximate.
-- **The wrap-up audio check** relies on the browser's final `audio:level` with `pendingChunks` 0. A browser that is closed before it sends it leaves the last reported backlog on screen.
+- **The wrap-up audio check** relies on the browser's final `audio:level` with `pendingChunks` 0 and on the seat being connected. A recorded seat that is offline is listed as still uploading, even if its browser sent everything before it closed.
 - **Quality figures are from synthetic mixes.** A pilot with real participants is needed before results are relied on.
 - **Retention and consent wording are placeholders.** `[placeholder: …]` entries in [DATA-MANAGEMENT.md](DATA-MANAGEMENT.md) and the audio section of `config/consent.md` wait for decisions by the researcher, the ethics committee and the data protection officer.
 

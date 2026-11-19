@@ -67,6 +67,7 @@ function audioSession(opts: { consented?: number[]; checked?: number[]; fake?: n
       { seat, terminal: seat, bindingId: `b${seat}`, fake },
       { seat, code: fake ? null : code(seat), actor: "facilitator" },
     );
+    log.push("PlayerConnected", { seat, reconnect: false }, { seat, actor: "system" });
   }
   log.push(
     "OnboardingStarted",
@@ -341,6 +342,20 @@ describe("wrap-up audio check", () => {
       "Seat 4: track interrupted (disconnected).",
       "Seat 4: 2 chunks missing from the stored audio.",
     ]);
+  });
+
+  it("is not uploaded while a recorded seat is offline: its browser still holds audio", () => {
+    const log = audioSession({ checked: [1, 2, 3, 4] });
+    log.push("PlayerDisconnected", { seat: 4, reason: "transport close" }, { seat: 4, actor: "system" });
+    const tracks = [1, 2, 3].map((s) => track(s));
+    tracks.push(track(4, { status: "interrupted" as never, stopReason: "disconnect" }));
+    const r = wrapUpAudioCheck(log.state, {}, tracks as Parameters<typeof wrapUpAudioCheck>[2]);
+    expect(r.uploaded).toBe(false);
+    expect(r.lines[0]).toEqual({
+      seat: 4,
+      kind: "upload",
+      text: "Seat 4 offline: audio it still holds arrives when it reconnects.",
+    });
   });
 
   it("does not expect audio from a seat that withdrew", () => {

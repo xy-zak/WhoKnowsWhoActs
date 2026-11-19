@@ -17,7 +17,7 @@
  *  2. it is not stored yet: a resend of a stored (trackId, seq) is acknowledged again, unchanged;
  *  3. the seat may be recorded at all: audio session, real participant with audio consent, not
  *     withdrawn, mic check not skipped, session not closed or aborted;
- *  4. its track is open, or was closed less than AUDIO_LATE_CHUNK_GRACE_MS (10 min) ago, counted
+ *  4. its track is open, or was closed less than AUDIO_LATE_CHUNK_GRACE_MS (35 min) ago, counted
  *     from the close or from the previous late chunk of that track. This is the reconnect rule:
  *     the server closes a seat's track when its browser disconnects (and on a pause, at game end,
  *     after a restart); the browser keeps unacknowledged chunks in memory and resends them, oldest
