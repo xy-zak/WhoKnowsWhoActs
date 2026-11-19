@@ -1,4 +1,11 @@
-import { isSimulatedSessionId, normaliseParticipantCode, type PlayerMode } from "@wkwa/shared";
+import {
+  type AudioFilesRemoved,
+  type ErasureRows,
+  isSimulatedSessionId,
+  normaliseParticipantCode,
+  type PlayerMode,
+  type SessionDeletionResult,
+} from "@wkwa/shared";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Button,
@@ -86,30 +93,12 @@ interface Erasure {
   rows: { events: number; telemetry: number; audioTracks?: number; audioFiles?: number };
   note: string;
 }
-/** Audio rows and files removed by an erasure (the server adds these to the result). */
+/** Rows and audio files removed by an erasure. */
 interface ErasureAudio {
-  rows: {
-    events: number;
-    telemetry: number;
-    audioTracks?: number;
-    audioChunks?: number;
-    audioDerivatives?: number;
-  };
-  audioFiles?: { removed: number; failed: string[] };
+  rows: ErasureRows;
+  audioFiles: AudioFilesRemoved;
 }
-interface SessionDeleteResult {
-  rows: {
-    events: number;
-    telemetry: number;
-    audioTracks?: number;
-    audioChunks?: number;
-    audioDerivatives?: number;
-    audioJobs?: number;
-  };
-  exportPaths: string[];
-  exportsDeleted: boolean;
-  audio?: { dirRemoved: boolean; files: number; error?: string };
-}
+type SessionDeleteResult = SessionDeletionResult;
 
 const STATUS_TONE: Record<string, "live" | "warn" | "danger" | "neutral" | "primary"> = {
   lobby: "primary",
