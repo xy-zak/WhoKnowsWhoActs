@@ -1,11 +1,11 @@
 import {
   AUDIO_START_REASONS,
   AUDIO_STOP_REASONS,
+  type AudioLevel,
   type AudioStartReason,
   type AudioStopReason,
   audioSendResult,
   clampDb,
-  type MicLevelState,
   type PlayerView,
   type TelemetryPayloadOf,
 } from "@wkwa/shared";
@@ -63,13 +63,8 @@ export interface RecorderLike {
   whenSent(): Promise<void>;
 }
 
-export interface AudioLevelPayload {
-  state: MicLevelState;
-  rmsDb: number;
-  peakDb: number;
-  pendingChunks: number;
-  pendingBytes: number;
-}
+/** The `audio:level` message (the shared AudioLevel schema; it has no defaults or transforms). */
+export type AudioLevelPayload = ReturnType<(typeof AudioLevel)["parse"]>;
 
 export type AudioUploadEvent = "audio:start" | "audio:chunk" | "audio:stop";
 
@@ -93,8 +88,6 @@ export interface RecordingDeps {
 
 export interface RecordingSnapshot {
   status: RecorderStatus;
-  /** Latest ~250 ms level while capturing (null when not capturing). */
-  level: MicLevel | null;
   /** The participant clicked Start in the mic check (this page). */
   gesture: boolean;
   /** Capture failed (denied / error) and waits for "Try again" (or a device change). */
@@ -172,23 +165,10 @@ export function recStateFor(
   const a = v.audio;
   if (a.micCheck === "skipped") return "skipped";
   if (!a.record) return a.paused ? "paused" : "off";
-  switch (s.status.state) {
-    case "recording":
-      return "recording";
-    case "paused":
-      return "paused";
-    case "no_signal":
-      return "no_signal";
-    case "denied":
-      return "denied";
-    case "error":
-      return "error";
-    case "requesting":
-      return "requesting";
-    default:
-      // idle: waiting for the mic check's Start click, or about to start
-      return atMicCheck(v) && !s.gesture ? "off" : "requesting";
-  }
+  const st = s.status.state;
+  // idle: waiting for the mic check's Start click, or about to start
+  if (st === "idle") return atMicCheck(v) && !s.gesture ? "off" : "requesting";
+  return st;
 }
 
 /** The engine waits for a click (after a reload, or the system suspended audio). */
@@ -223,13 +203,17 @@ const round1 = (db: number) => Math.round(clampDb(db) * 10) / 10;
 export class RecordingController {
   readonly store = new Store<RecordingSnapshot>({
     status: IDLE_STATUS,
-    level: null,
     gesture: false,
     failed: false,
     contextSampleRate: null,
     pendingChunks: 0,
     droppedChunks: 0,
   });
+  /**
+   * Latest ~250 ms level while capturing (null when not capturing). A store of its own: it changes
+   * about 4 times a second, and only the level meters read it.
+   */
+  readonly levelStore = new Store<MicLevel | null>(null);
   private rec: RecorderLike | null = null;
   private unwatch: (() => void) | null = null;
   private view: PlayerView | null = null;
@@ -472,12 +456,12 @@ export class RecordingController {
   }
 
   private onLevel(level: MicLevel) {
-    this.store.set((s) => ({
-      ...s,
-      level,
-      pendingChunks: this.rec?.pendingChunks ?? 0,
-      droppedChunks: this.rec?.droppedChunks ?? 0,
-    }));
+    this.levelStore.set(level);
+    const pendingChunks = this.rec?.pendingChunks ?? 0;
+    const droppedChunks = this.rec?.droppedChunks ?? 0;
+    const s = this.store.get();
+    if (s.pendingChunks !== pendingChunks || s.droppedChunks !== droppedChunks)
+      this.store.set({ ...s, pendingChunks, droppedChunks });
     this.sendLevel(level);
   }
 
@@ -514,10 +498,10 @@ export class RecordingController {
     const rec = this.rec;
     const st = status ?? rec?.status ?? IDLE_STATUS;
     const capturing = st.state === "recording" || st.state === "no_signal" || st.state === "paused";
+    if (!capturing && this.levelStore.get() !== null) this.levelStore.set(null);
     this.store.set((s) => ({
       ...s,
       status: st,
-      level: capturing ? s.level : null,
       gesture: this.gesture,
       failed: this.failed,
       pendingChunks: rec?.pendingChunks ?? 0,

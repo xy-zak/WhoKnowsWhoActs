@@ -11,8 +11,8 @@ import {
   useDisplayPrefs,
   useSignalClass,
 } from "../ui";
-import { CalibrationScreen, isCalibrating } from "./CalibrationScreen";
-import { Centered, OnboardingStepper } from "./chrome";
+import { CalibrationPendingScreen, CalibrationScreen, isCalibrating } from "./CalibrationScreen";
+import { Centered, ReadyScreen } from "./chrome";
 import type { PlayerConnection } from "./connection";
 import { DisplayMenu } from "./DisplayMenu";
 import { Game } from "./Game";
@@ -113,22 +113,13 @@ export function App({ conn }: { conn: PlayerConnection }) {
         return <BriefingScreen conn={conn} view={v!} />;
       case "calibration":
         return <CalibrationScreen conn={conn} view={v!} />;
-      case "ready": {
+      case "ready":
         // audio sessions: the waiting state of the calibration, until the facilitator runs or skips it
-        if (v?.audio.enabled && v.audio.calibration.status === "pending")
-          return <CalibrationScreen conn={conn} view={v} />;
-        const ready = (v?.others ?? []).filter((o) => o.ready).length + 1;
-        const total = (v?.others.length ?? 0) + 1;
-        return (
-          <Centered title="Ready" icon="ok">
-            <OnboardingStepper v={v!} current="ready" />
-            <h1>You're all set</h1>
-            <p className="muted cursor">
-              Waiting for the other players ({ready}/{total} ready) and for round 1
-            </p>
-          </Centered>
+        return v!.audio.enabled && v!.audio.calibration.status === "pending" ? (
+          <CalibrationPendingScreen view={v!} />
+        ) : (
+          <ReadyScreen view={v!} waitingFor="round 1" />
         );
-      }
       case "game":
       case "paused":
       case "round_break":

@@ -1,14 +1,8 @@
-import type { PlayerView } from "@wkwa/shared";
+import { type PlayerView, STEP_LABEL } from "@wkwa/shared";
 import type { ReactNode } from "react";
 import { type IconName, Panel, type StepDef, Stepper } from "../ui";
 
 /** Onboarding wayfinding: the steps this session uses, plus READY. */
-const STEP_LABEL = {
-  consent: "Consent",
-  mic_check: "Mic check",
-  demographics: "About you",
-  briefing: "Briefing",
-} as const;
 export function onboardingSteps(v: PlayerView): StepDef[] {
   return [
     ...v.onboardingSteps.map((k) => ({ key: k, label: STEP_LABEL[k] })),
@@ -23,6 +17,35 @@ export function OnboardingStepper({ v, current }: { v: PlayerView; current: stri
     steps.findIndex((s) => s.key === current),
   );
   return <Stepper steps={steps} current={idx} completed={(i) => i < idx} />;
+}
+
+/**
+ * READY: onboarding done, waiting for the other players and for `waitingFor` (round 1, or the
+ * facilitator's calibration). `children` (e.g. what comes next) goes under the heading.
+ */
+export function ReadyScreen({
+  view,
+  waitingFor,
+  width,
+  children,
+}: {
+  view: PlayerView;
+  waitingFor: string;
+  width?: number;
+  children?: ReactNode;
+}) {
+  const ready = view.others.filter((o) => o.ready).length + 1;
+  const total = view.others.length + 1;
+  return (
+    <Centered title="Ready" icon="ok" width={width}>
+      <OnboardingStepper v={view} current="ready" />
+      <h1>You're all set</h1>
+      {children}
+      <p className="muted cursor">
+        Waiting for the other players ({ready}/{total} ready) and for {waitingFor}
+      </p>
+    </Centered>
+  );
 }
 
 export function Centered({

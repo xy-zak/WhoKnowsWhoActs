@@ -1,4 +1,4 @@
-import { type AudioCaptureSettings, clampDb, type PlayerView } from "@wkwa/shared";
+import { AudioCaptureSettingsSchema, clampDb, type PlayerView } from "@wkwa/shared";
 import { useEffect, useRef, useState } from "react";
 import {
   classifyMicError,
@@ -7,48 +7,32 @@ import {
   type SpeechCheckResult,
   SpeechDetector,
 } from "../audio";
-import { Button, Callout, Icon, LevelMeter, RecTag, StatusTag } from "../ui";
+import { AsciiProgress, Button, Callout, Icon, RecTag, StatusTag } from "../ui";
 import type { PlayerConnection } from "./connection";
 import { Page, useOpenedAt } from "./Onboarding";
-import { MicFixSteps, useRecording } from "./RecordingIndicator";
+import { MicFixSteps, MicLevelMeter, useRecording } from "./RecordingIndicator";
 import { recStateFor } from "./recording";
 
 /** A try that has heard this much audio without passing counts as failed (logged once; "Start again"). */
 const GIVE_UP_MS = 20_000;
 /** The "passed" confirmation stays this long before the next step. */
 const PASSED_HOLD_MS = 1200;
-
-/** Only the processing flags and the sample rate: never a device id, group id or label. */
-function micSettings(raw: object): AudioCaptureSettings {
-  const s = raw as Record<string, unknown>;
-  const out: AudioCaptureSettings = {};
-  if (typeof s.sampleRate === "number" && Number.isInteger(s.sampleRate)) out.sampleRate = s.sampleRate;
-  if (typeof s.echoCancellation === "boolean" || typeof s.echoCancellation === "string")
-    out.echoCancellation = s.echoCancellation;
-  if (typeof s.noiseSuppression === "boolean") out.noiseSuppression = s.noiseSuppression;
-  if (typeof s.autoGainControl === "boolean") out.autoGainControl = s.autoGainControl;
-  if (typeof s.channelCount === "number" && Number.isInteger(s.channelCount))
-    out.channelCount = s.channelCount;
-  return out;
-}
+/** Cells of the speech-heard bar. */
+const SPEECH_CELLS = 10;
 
 /** `▰▰▰▱▱ 0.6/1.0 s`: speech heard so far, out of what the check needs. */
 function SpeechProgress({ ms, need }: { ms: number; need: number }) {
-  const n = 10;
-  const filled = Math.min(n, Math.floor((Math.min(ms, need) / need) * n));
+  const heard = Math.min(ms, need);
   return (
-    <span
-      className={`ascii-progress${ms >= need ? " full" : ""}`}
-      role="progressbar"
-      aria-label="Speech heard"
-      aria-valuemin={0}
-      aria-valuemax={need}
-      aria-valuenow={Math.min(ms, need)}
-    >
-      <span className="on">{"▰".repeat(filled)}</span>
-      <span className="off">{"▱".repeat(n - filled)}</span> {(Math.min(ms, need) / 1000).toFixed(1)}/
-      {(need / 1000).toFixed(1)} s
-    </span>
+    <AsciiProgress
+      used={heard}
+      limit={need}
+      width={SPEECH_CELLS}
+      // whole cells only: the bar is full only once the check passed
+      filled={Math.floor((heard / need) * SPEECH_CELLS)}
+      label="Speech heard"
+      text={`${(heard / 1000).toFixed(1)}/${(need / 1000).toFixed(1)} s`}
+    />
   );
 }
 
@@ -111,7 +95,8 @@ export function MicCheckScreen({ conn, view }: { conn: PlayerConnection; view: P
         passed,
         attempts: Math.max(1, attempt),
         durationMs: Math.round(performance.now() - openedAt),
-        settings: micSettings(conn.recording.captureSettings),
+        // only the processing flags and the sample rate (the schema strips anything else)
+        settings: AudioCaptureSettingsSchema.safeParse(conn.recording.captureSettings).data ?? {},
         ...(snap.contextSampleRate ? { contextSampleRate: snap.contextSampleRate } : {}),
         noiseFloorDb: clampDb(r.noiseFloorDb),
         speechDb: clampDb(r.speechDb),
@@ -282,10 +267,7 @@ export function MicCheckScreen({ conn, view }: { conn: PlayerConnection; view: P
         <div className="col" style={{ gap: "var(--s3)" }}>
           <div className="row" style={{ gap: "var(--s3)" }}>
             <span className="small upper muted">Your microphone</span>
-            <LevelMeter
-              db={capturing ? (snap.level?.rmsDb ?? null) : null}
-              peakDb={snap.level?.peakDb ?? null}
-            />
+            <MicLevelMeter conn={conn} capturing={capturing} />
           </div>
           {passedShown ? (
             <Callout tone="live" icon="ok">
