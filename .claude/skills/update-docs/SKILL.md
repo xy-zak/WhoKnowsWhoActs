@@ -23,6 +23,8 @@ The change logs are evidence for the master's thesis evaluation. Assessors read 
 | `docs/SESSION-RUNBOOK.md` | `docs/changelog/SESSION-RUNBOOK-CHANGELOG.md` |
 | `docs/AESTHETIC-RULES.md` | `docs/changelog/AESTHETIC-RULES-CHANGELOG.md` |
 | `docs/GAME-RULES.md` | `docs/changelog/GAME-RULES-CHANGELOG.md` |
+| `docs/AUDIO.md` | `docs/changelog/AUDIO-CHANGELOG.md` |
+| `docs/AUDIO-TRANSCRIPTION.md` | `docs/changelog/AUDIO-TRANSCRIPTION-CHANGELOG.md` |
 
 A new `docs/X.md` gets a new `docs/changelog/X-CHANGELOG.md` (same template), a row in the table above, a row in `docs/changelog/README.md`, and the "Change log" link line under its title.
 
@@ -67,6 +69,7 @@ Where code changes usually land:
 | `apps/client/src/facilitator/` | SESSION-RUNBOOK (tabs, setup steps, LIVE, shortcuts), ARCHITECTURE (module layout) |
 | `apps/client/src/player/` | SESSION-RUNBOOK, AESTHETIC-RULES, ARCHITECTURE (module layout) |
 | `apps/client/src/ui/` (tokens, icons, components, CSS) | AESTHETIC-RULES (partly generated) |
+| `apps/server/src/audio/`, `apps/client/src/audio/`, `apps/client/src/player/recording.ts`, `config/audio.json`, `tls.ts` | AUDIO (design), NETWORKING (audio messages, HTTPS, REST), DATA-MANAGEMENT (consent, retention, erasure, exports), DATA-TYPES (audio tables, events), SESSION-RUNBOOK (§ 11), ARCHITECTURE (§ 15), AESTHETIC-RULES (§ 8.1) |
 | `apps/server/src/tools/` (bots) | ARCHITECTURE § testing (bot flags), SESSION-RUNBOOK (dry run) |
 | `config/`, `scenarios/` formats | SESSION-RUNBOOK (preparation), ARCHITECTURE (extension guide), DATA-TYPES |
 | Project name, terminology | Every document |

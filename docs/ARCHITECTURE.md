@@ -4,7 +4,7 @@
 
 This document describes how the ***Who Knows, Who Acts?* harness** is built: the parts of the system, how a player's click becomes research data, how game state is derived, and how to extend the harness when the actual game design is ready. It is written as a standalone design reference that can be cited or adapted for a thesis methods chapter.
 
-Related documents: [NETWORKING.md](NETWORKING.md) (network and protocol), [DATA-MANAGEMENT.md](DATA-MANAGEMENT.md) (GDPR and research data management), [DATA-TYPES.md](DATA-TYPES.md) (field-level catalogue of everything logged).
+Related documents: [AUDIO.md](AUDIO.md) (microphone recording and speaker attribution), [NETWORKING.md](NETWORKING.md) (network and protocol), [DATA-MANAGEMENT.md](DATA-MANAGEMENT.md) (GDPR and research data management), [DATA-TYPES.md](DATA-TYPES.md) (field-level catalogue of everything logged).
 
 ## Contents
 
@@ -22,6 +22,7 @@ Related documents: [NETWORKING.md](NETWORKING.md) (network and protocol), [DATA-
 12. [Extension guide](#12-extension-guide)
 13. [Testing strategy and bots](#13-testing-strategy-and-bots)
 14. [Simulated players](#14-simulated-players)
+15. [Microphone audio](#15-microphone-audio)
 
 ---
 
@@ -40,6 +41,7 @@ The harness is the **infrastructure** for a 4-player, turn-based, map-interactio
 | Facilitator dashboard, composite view, replay | Game-specific dashboard widgets |
 | Complete event + telemetry logging, exports, codebook | Analysis scripts |
 | GDPR tooling: consent, pseudonymisation, encryption, erasure | Ethics approval, consent text, retention policy |
+| Optional microphone recording of every participant, encrypted storage, who-spoke-when attribution ([AUDIO.md](AUDIO.md)) | Transcription (researched only: [AUDIO-TRANSCRIPTION.md](AUDIO-TRANSCRIPTION.md)), what to analyse in the talk |
 | Simulated players: pluggable agent policies, a runner, a separate simulation database | The rules the agents follow (their policies) |
 
 Design principles:
@@ -47,7 +49,7 @@ Design principles:
 - **Server-authoritative.** Clients only send *intents*. The server decides what happens and is the single source of truth.
 - **Event-sourced.** Every state change is an immutable event in an append-only log. Game state is always *derived* from the log and never stored separately.
 - **Asymmetry enforced on the server.** A player's browser never receives another player's view data.
-- **Privacy by design.** No names, IP addresses or device data are recorded. Participant codes live in one indexed column, so erasure is a single delete.
+- **Privacy by design.** No names, IP addresses or device data (microphone names and ids included) are recorded. Participant codes live in one indexed column, so erasure is a single delete.
 - **One source of truth for documentation.** Schemas carry their own descriptions. The tables in DATA-TYPES.md, NETWORKING.md and the per-export codebook are generated from them.
 
 ## 2. Glossary
@@ -99,9 +101,11 @@ flowchart LR
       RULES["rules engine (shared)<br/>validators, round rules,<br/>reducer, projections"]
       STORE["db<br/>eventStore, telemetryStore"]
       GDPR["export and gdpr<br/>CSV/JSON, codebook,<br/>erase, anonymise, print"]
+      AUD["audio<br/>live ingest, encrypted files,<br/>attribution worker, export"]
     end
     DB[("data/wkwa.db<br/>participants<br/>SQLCipher-encrypted")]
     SDB[("data/wkwa-sim.db<br/>simulations<br/>SQLCipher-encrypted")]
+    AFILES[("data/audio/<br/>encrypted .wka files<br/>one key per file")]
     EXP(["exports/ folder"])
   end
   P1 <-->|WebSocket| NET
@@ -116,6 +120,11 @@ flowchart LR
   SM <--> RULES
   SM --> STORE
   API --> GDPR
+  API --> AUD
+  SM -->|"audio chunks, only if the session records"| AUD
+  AUD --> AFILES
+  AUD -->|"keys and metadata"| STORE
+  GDPR -->|"erase: keys first, then files"| AFILES
   API --> STORE
   STORE --> DB
   STORE -->|"simulated sessions"| SDB
@@ -126,13 +135,14 @@ flowchart LR
 | --- | --- | --- |
 | Player client | React + Vite, SVG map | Shows the player's own view, sends intents, collects telemetry, syncs its clock. |
 | Facilitator dashboard | React + Vite (same app, second page) | Session setup, seat binding, labels, composite map, live mirrors, controls, replay, data management. |
-| `net` | Socket.IO 4 on Fastify 5 | Namespaces `/player` and `/facilitator`. Validates every incoming payload with zod. |
+| `net` | Socket.IO 4 on Fastify 5, over HTTPS (self-signed certificate by default) | Namespaces `/player` and `/facilitator`. Validates every incoming payload with zod. |
 | `api` | Fastify REST | Session listing, exports, printables (key sheet page, takedown-card PDFs), erasure, session deletion. |
 | `SessionManager` | TypeScript | Owns the live `GameState`. Turns intents and commands into events, appends them, then pushes projections. |
 | Rules engine | `packages/shared` (pure TS) | Validators, round rules, reducer, projections. The server, the client (replay) and the tests share the same code. |
 | `db` | better-sqlite3-multiple-ciphers | Encrypted SQLite (SQLCipher). Append-only `events`, `telemetry`, plus `sessions`, `erasures`, `exports`, `meta`. Two files with the same schema and passphrase: the participant database and the simulation database (`SessionStores` knows which session is where). |
 | `FakePlayers` | TypeScript + socket.io-client | Starts and stops the fake players of a real session: network clients of this same server whose terminal keys the server registers before they connect, so their seats are marked fake. |
 | `SimulationRunner` | TypeScript | Plays the agents of an attached simulated session: gives each agent a turn, asks its policy for an action and passes it to `SessionManager.intent` (§ 14). |
+| `audio` | TypeScript (server), Web Audio (browser) | Browser capture engine, live ingest with consent hold, calibration and pause, encrypted file store, offline speaker attribution in a worker thread, *Export audio* ([AUDIO.md](AUDIO.md)). |
 | `export` / `gdpr` | TypeScript | CSV/JSON exports with a generated codebook, anonymisation, erasure, backups, printable key sheet and cards. |
 
 ## 4. Code layout
@@ -173,13 +183,15 @@ flowchart TB
 | `packages/shared/src/rules/` | `reducer.ts`, `validators.ts`, `roundRules.ts` |
 | `packages/shared/src/projections.ts` | `playerView`, `facilitatorView` |
 | `packages/shared/src/simulation/` | `policy.ts` (the `PlayerPolicy` interface, registry, helpers for writing policies), `policies.ts` (built-in policies `random` and `idle`) |
+| `packages/shared/src/audio.ts` | Audio constants, start/stop reasons, settings, ack and REST schemas; `state.ts` holds `shouldRecord`, the consent hold and the calibration gate |
 | `packages/shared/src/docgen.ts`, `exportColumns.ts` | Documentation and codebook generation; export file contract |
-| `apps/server/src/` | `index.ts` (boot), `cli.ts`, `app.ts`, `content.ts` (scenario/config loading), `db/` (SQLCipher, store, `stores.ts`: participant and simulation database), `session/SessionManager.ts`, `simulation/SimulationRunner.ts` (agents), `fake/FakePlayers.ts` (fake players), `net/hub.ts` (Socket.IO), `api/` (REST), `gdpr/` (exporter, erasure, print pages), `tools/` (bots) |
+| `apps/server/src/` | `index.ts` (boot), `cli.ts`, `app.ts`, `content.ts` (scenario/config loading), `db/` (SQLCipher, store, `stores.ts`: participant and simulation database), `session/SessionManager.ts`, `simulation/SimulationRunner.ts` (agents), `fake/FakePlayers.ts` (fake players), `net/hub.ts` (Socket.IO), `api/` (REST; `audioRoutes.ts`), `audio/` (live ingest, encrypted `.wka` store, attribution, jobs), `gdpr/` (exporter, erasure, audio deletion, print pages), `tls.ts` (self-signed certificate), `tools/` (bots) |
 | `apps/client/src/ui/` | Design system: `tokens.ts` (Catppuccin Latte/Mocha → semantic colour tokens, contrast-tested), `theme.css` (TUI base styles), `crt.css` (subtle CRT layer), components (`Panel`, `Button`, `Popup`, `useConfirm`, `Stepper`, `StatusTag`, `AsciiProgress`, …), `Icon.tsx` + `icons.ts` (semantic Iconoir icons), `prefs.ts` + `DisplaySettings.tsx` (per-browser display settings: colours, font, text size, animations). Rules: [AESTHETIC-RULES.md](AESTHETIC-RULES.md) |
 | `apps/client/src/facilitator/` | Manager shell (`App.tsx`: top bar, LIVE indicator, tabs, status bar, shortcuts), `setup/` (10-step wizard), `live/` (lifecycle, NEXT, tools, wrap-up), `seats.tsx`, `Composite.tsx`, `EventLog.tsx`, `Timeline.tsx`, `Replay.tsx`, `Database.tsx` |
 | `apps/client/src/player/` | Player screens (waiting, onboarding with stepper, game, end) and the DISPLAY panel; display settings are per browser (`ui/prefs.ts`), never from or to the server |
+| `apps/client/src/audio/` | Browser capture engine (`MicRecorder`, AudioWorklet, resampler, chunker, send queue, speech detector); no socket or UI code. `player/recording.ts` connects it to the socket |
 | `apps/client/src/` (other) | `map/` (grid map in SVG: squares, sub-squares, hatches, scores, legend, map score; themed via CSS variables), `net/` (socket, clock sync, telemetry) |
-| `config/` | `study.json`, `consent.json` + `consent.md`, `demographics.json`, `briefing.md`, `session.default.json` |
+| `config/` | `study.json`, `consent.json` + `consent.md` (audio item and section only in audio sessions), `demographics.json`, `briefing.md`, `audio.json` (mic-check phrase, calibration sentences), `session.default.json` |
 | `scenarios/<id>/` | `scenario.json` (board, views), `scores.json` (starting scores) |
 | `scripts/demo-scores.mjs` | Regenerates the fixed-seed starting scores of the demo scenarios |
 
@@ -256,7 +268,7 @@ stateDiagram-v2
 | Phase | What happens | Who moves it on |
 | --- | --- | --- |
 | `lobby` | Clients connect and are bound to seats. K/P labels (and views) are assigned. | Facilitator: *Start onboarding* (all seats bound and labelled) |
-| `onboarding` | Each player completes consent → demographics → briefing. Steps can be disabled in config. | Facilitator: *Start round 1* (only once every seat is ready) |
+| `onboarding` | Each player completes consent → (mic check, in sessions that record audio) → demographics → briefing. Steps can be disabled in config. In an audio session the facilitator also runs the calibration. | Facilitator: *Start round 1* (only once every seat is ready, and the calibration is done or skipped) |
 | `round_active` | Players propose and decide within their quotas. Can be **paused** (by the facilitator, or automatically on disconnect). | Round rule (quotas met), time limit, or facilitator *End round* |
 | `round_complete` | Break between rounds. | Facilitator *Start round* (or auto-advance after `autoAdvanceDelaySec`) |
 | `game_complete` | End screen. Each player sees their participant code (takedown card). | Facilitator *Close session* |
@@ -279,12 +291,15 @@ stateDiagram-v2
   bound --> unbound: SeatUnbound (lobby only)
   bound --> consent: OnboardingStarted
   consent --> declined: ConsentRecorded, not consented
-  consent --> demographics: ConsentRecorded, consented
+  consent --> micCheck: ConsentRecorded, consented, audio session, no seat still in consent
+  consent --> demographics: ConsentRecorded, consented, no audio
+  micCheck --> demographics: MicCheckCompleted or MicCheckSkipped
   demographics --> briefing: DemographicsSubmitted
   briefing --> ready: BriefingAcknowledged
   ready --> playing: RoundStarted
   playing --> finished: GameCompleted
   consent --> withdrawn: ParticipantWithdrawn
+  micCheck --> withdrawn: ParticipantWithdrawn
   demographics --> withdrawn: ParticipantWithdrawn
   briefing --> withdrawn: ParticipantWithdrawn
   ready --> withdrawn: ParticipantWithdrawn
@@ -294,6 +309,7 @@ stateDiagram-v2
   finished --> [*]
 ```
 
+- **Mic check (audio sessions only).** The step follows consent. It applies only to real participants who ticked the audio item. **No seat may start it, and so no microphone opens, until every real seat has given consent** (the consent hold, [AUDIO.md § 8](AUDIO.md#8-recording-lifecycle)); a decliner keeps the hold until the facilitator withdraws that seat. The facilitator can skip one seat's mic check (`MicCheckSkipped`), and that seat is then not recorded. Fake players and agents have no mic check.
 - A disabled onboarding step is skipped (consent then shows status `skipped`). **Keep consent enabled for real sessions.**
 - **No telemetry before consent.** UI telemetry for a seat starts only once its consent is `given` (or `skipped`). Until then only operational events are recorded.
 - If a player **declines** consent, the seat is blocked and the facilitator is alerted. Round 1 cannot start until every active seat is ready. The decliner's remaining records can be erased afterwards (see [DATA-MANAGEMENT.md § 7](DATA-MANAGEMENT.md#7-consent-design)).
@@ -479,6 +495,7 @@ scenarios/<id>/
 | Fake players | Vitest (`apps/server/test/fake.test.ts`) | Fake players in a real session: seats logged as fake without codes, no consent or demographics recorded for them, they play a full round over the network, `fake_player` / `fakeSeats` in exports, FAKE PLAYER on the key sheet and no takedown card, refused outside the lobby and in simulated sessions, a browser can never count as fake, restored after a server restart with their pace |
 | Simulated players | Vitest (`packages/shared/test/simulation.test.ts`, `apps/server/test/simulation.test.ts`) | Policy registry and parameters, the random policy's quotas and seed, agents see only their own view; a full simulated game in the simulation database only, no participant codes or consent, a run repeats exactly from its seed, per-seat policies, a failing policy is stopped and noted, simulation exports, resume after a restart |
 | Browser | Playwright (`npm run test:e2e`) | Facilitator page + 4 real player browsers through binding → consent → demographics → briefing → a round of propose/decide → end screen with code → export → replay (fresh temporary DB per run); a simulated session through setup (no binding or key sheet) → LIVE → export → DATABASE › Simulations; a real session with one browser and three fake players → round → wrap-up (one takedown card) → marked in DATABASE; every Mermaid diagram in the docs parses and renders |
+| Audio | Vitest (`apps/server/test/liveAudio.test.ts`, `audioProcessing.test.ts`, `audioRoutes.test.ts`, `tls.test.ts`, attribution and file-store suites; `apps/client/test/audio-*.test.ts`), Playwright (`e2e/app-audio.spec.ts`) | The encrypted store (round trip, tampering, truncation, no plaintext on disk), every ingest gate, the consent hold, calibration timers, pause and resume, track lifecycle, attribution against synthetic mixes with known truth, exports and erasure; a real Chromium with a fake microphone that plays a synthetic voice goes through mic check, calibration, a round, pause and game complete |
 | Screenshots | Playwright (`npm run screenshots -- capture`, own project, not run by `test:e2e`) | Not a test: three scenarios (a full session with 4 player browsers, a 5 × 5 session with fake players, a simulation) take the shots listed in `e2e/screenshots/catalogue.ts` at 1920 × 1080 and compare them with the published versions. `publish` files a real change as a new version (`name-v2.png`, …) in `docs/img/server/` (facilitator) or `docs/img/client/` (players), so old versions stay; the gallery [docs/img/SCREENSHOTS.md](img/SCREENSHOTS.md) is generated from the version history `docs/img/screenshots.json`. Workflow: the `/screenshot-app` skill |
 
 Three kinds of non-human players exist, for different purposes:
@@ -505,6 +522,7 @@ Prefer fake players over bots for rehearsals: their data is marked, and no conse
 | `--count` | `3` | Number of simulated players |
 | `--delay` | `1500-5000` | Random pause between a bot's actions (ms, `min-max`) |
 | `--auto` | off | Also act as facilitator: create a session if none is attached, bind every client (bots **and** humans) to the next free seat, randomise labels, start onboarding and each round. **Never use during a real session.** |
+| `--audio` | off | Test microphone recording: tick the audio consent item, pass the mic check and upload synthetic 16 kHz audio (a noise floor with speech-like bursts, louder in the bot's own calibration turn, with 22 dB of crosstalk). With `--auto` it also creates an audio session and starts the calibration. Without it, a bot in an audio session declines the audio item and waits. |
 | `--seats` | `4` | Seat count of the session `--auto` creates |
 | `--round-pause` | `3000` | Pause (ms) `--auto` waits between rounds |
 | `--admin-token` | – | `ADMIN_TOKEN` when the server is on another machine |
@@ -612,3 +630,42 @@ See [§ 12 Add an agent policy](#add-an-agent-policy-simulated-players) for wher
 **`idle` parameters** (`simulation.params.idle`): none.
 
 <!-- END GENERATED: simulation-policies -->
+
+## 15. Microphone audio
+
+In a session with audio on (setup step 04), each participant's browser records its own microphone from the mic check until the game is complete, and uploads it to the server. The full design is in [AUDIO.md](AUDIO.md); this section shows where it fits.
+
+```mermaid
+flowchart LR
+  subgraph Browser["Player browser"]
+    REC["RecordingController<br/>starts and stops from PlayerView.audio"]
+    ENG["MicRecorder<br/>worklet, 16 kHz, 5 s chunks"]
+    REC --> ENG
+  end
+  subgraph Server["Server"]
+    HUB["net/hub.ts<br/>audio:start, chunk, stop, level"]
+    SM["SessionManager<br/>consent hold, calibration, pause"]
+    LIVE["audio/live.ts<br/>gates, dedupe, acks"]
+    FS["audio/fileStore.ts<br/>encrypted .wka files"]
+    DB[("SQLCipher<br/>tracks, chunks, keys")]
+    JOB["audio/jobs.ts<br/>attribution worker"]
+  end
+  ENG -->|"chunks, acked"| HUB
+  HUB --> LIVE
+  LIVE <--> SM
+  LIVE --> FS
+  LIVE --> DB
+  FS --> JOB
+  JOB --> DB
+  SM -->|"AudioTrackStarted, RecordingPaused, Calibration…"| LOG[("Event log")]
+```
+
+| Topic | How it works |
+| --- | --- |
+| State | `GameState.audio` holds whether audio is on, whether calibration is required, whether recording is paused, and the calibration (status, order, turns, quality). `shouldRecord(state, seat)` is the single rule for when a seat's mic may be open. It is pure and shared, so the browser, the server and the facilitator views agree. |
+| Events | Audio adds events to the same log: `MicCheckCompleted`, `MicCheckSkipped`, `AudioTrackStarted`, `AudioTrackStopped`, `Calibration*`, `RecordingPaused`, `RecordingResumed` (generated list: [DATA-TYPES.md](DATA-TYPES.md)). **The audio itself is never an event.** It goes to the encrypted store, so the event log stays free of voice and its replay stays small. |
+| Projection | A player's `PlayerView.audio` says whether to record, whether the mic check is held, whether recording is paused and, during calibration, only that player's own sentence and only in their turn. |
+| Timers | Calibration turns run on **server** timers and are logged, so they survive a slow browser and can be analysed afterwards. A restart cancels a running calibration (`CalibrationSkipped`, `cancelled: true`). |
+| Processing | Attribution is a job in a `worker_thread`, started from the DATABASE tab after the session. It reads the encrypted tracks, writes derived results and cleaned tracks, and never touches the raw audio. |
+| Who never records | Simulated sessions (audio is forced off), fake players and agents. A seat without the audio consent item is never recorded either, and `skipped` consent never counts as audio consent. |
+| Recovery | Tracks still open after a restart are closed with `interrupted`. Browsers resend unacknowledged chunks for up to 10 minutes after a track closed. |

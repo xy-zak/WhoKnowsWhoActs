@@ -21,6 +21,7 @@ Related documents: [ARCHITECTURE.md](ARCHITECTURE.md), [DATA-MANAGEMENT.md](DATA
 11. [Security on the LAN](#11-security-on-the-lan)
 12. [Session-day network checklist](#12-session-day-network-checklist)
 13. [Troubleshooting](#13-troubleshooting)
+14. [Microphone audio on the network](#14-microphone-audio-on-the-network)
 
 ---
 
@@ -249,6 +250,8 @@ $$\text{offset} = t_{server} - \frac{t_0 + t_1}{2}, \qquad \text{error} \le \fra
 
 On a wired LAN the RTT is typically 1–5 ms, so corrected client timestamps are accurate to a few milliseconds. The offset used is stored with every telemetry row (`client_offset_ms`), and each re-sync is logged as `clock_sync`, so corrections can be audited or redone later.
 
+Audio chunks use the same clock: `clientTs` of every chunk is the capture time on the server's clock, built from this offset ([AUDIO.md § 6](AUDIO.md#6-timing-model)). The offset in use is stored with each chunk.
+
 ## 9. Message catalogue
 
 Every client→server payload is validated with the zod schema listed here. Invalid messages are dropped with an error acknowledgement, and no client input is trusted. The tables are generated from `packages/shared/src/protocol.ts`. `Ack` means `{ ok: true, data? } | { ok: false, error }`.
@@ -355,7 +358,13 @@ Used by the dashboard's data pages and by scripts. **Localhost-only** unless `AD
 | `GET` | `/api/participants/:code` | Look up a participant code (typos tolerated): sessions and row counts, exports containing it, earlier erasures |
 | `POST` | `/api/participants/:code/erase` | Erase all data of a code. Body `{ "confirm": "<code>", "note"?: "…" }` must repeat the code. Refused (409) while the participant is in a session that is still running. |
 | `GET` | `/api/erasures` | Erasure register |
-| `GET` | `/api/exports` | Export registers of both databases (`players` per entry) |
+| `GET` | `/api/exports` | Export registers of both databases (`players` per entry; audio exports have `kind` `audio`) |
+| `GET` | `/api/sessions/:id/audio` | Everything about a session's audio: tracks (no keys, no file names), cleaned tracks, jobs, deletion register, audio exports, per-seat totals, the attribution summary. A simulated session returns an empty summary. |
+| `POST` | `/api/sessions/:id/audio/attribution` | Queue a speaker attribution (`202` and the job). One queued or running job per session (409 otherwise); refused (409) once the raw audio is deleted. |
+| `GET` | `/api/audio/jobs/:jobId` | Job status: progress, the attribution summary when done, the error when failed |
+| `GET` | `/api/sessions/:id/audio/segments` | Who spoke when (JSON, timing only); empty until an attribution has run |
+| `POST` | `/api/sessions/:id/audio/export` | **Export audio**, the only way sound leaves the encrypted store. Body: `kind` (`raw`, `clean` or `both`), optional `seats`, optional `note`. Writes WAV files and a manifest to `exports/<sessionId>/audio-AU-…/` and registers the export; no browser download. |
+| `POST` | `/api/sessions/:id/audio/delete` | Delete raw audio (`scope` `raw`) or all audio (`all`). The body must repeat the session id. Refused (409) while the session runs. |
 
 ## 11. Security on the LAN
 
@@ -422,6 +431,7 @@ Each participant accepts the warning **once per browser**, talked through it by 
 - [ ] `npm start` → passphrase entered → server prints the `https://` player URL and the certificate fingerprint (and *reusing* the certificate, if the laptop's address has not changed)
 - [ ] Facilitator dashboard opens at `https://localhost:3000/facilitator` (certificate warning accepted once)
 - [ ] Each player PC opens the player URL, accepts the certificate warning ([SESSION-RUNBOOK.md § 10](SESSION-RUNBOOK.md#10-https-and-the-certificate-warning)) and shows **Client N**, and all 4 clients appear on the dashboard
+- [ ] Sessions with audio: the player URL is `https://`, and every player PC has accepted the warning (otherwise it has no microphone)
 - [ ] Optional: run `npm run bots -- --count 4` *before* participants arrive, for a full rehearsal on the real network
 - [ ] Player browsers in full-screen, notifications and screen savers off, power-saving sleep disabled
 
@@ -434,6 +444,8 @@ Each participant accepts the warning **once per browser**, talked through it by 
 | Client never appears on the dashboard | Page loaded from a cached or old URL; JavaScript blocked | Hard-reload (Ctrl+Shift+R); check the browser console |
 | Two PCs show the same client number | Same browser profile synced or copied (identical `localStorage`) | Clear site data on one PC and reload |
 | Repeated "Reconnecting…" | Wi-Fi power saving, weak signal | Use cables; disable power saving on the network adapter |
+| Player's browser says the microphone is blocked, or never asks for it | The page is not a secure context (typed `http://`, or the server runs with `WKWA_TLS=off`), or the permission was refused earlier | Open the `https://` URL and accept the certificate warning; then follow the fix steps on the player's screen (Chrome, Edge, Firefox, Safari and macOS, Windows, Linux each have their own) |
+| LIVE shows a Mic column of `[NO SIGNAL]`, a growing upload backlog `↑ n`, or *mics 3/4* | A muted or unplugged microphone, or a weak or interrupted connection (chunks wait in the browser and are resent) | Ask the participant to check the mic and the connection; the backlog drains after a reconnect. A track that ended with `disconnect` shows in the wrap-up audio check. |
 | Large `rttMs` / clock offset jumps on the dashboard | Congested Wi-Fi, PC under load | Move closer to the router or use cables; close other apps |
 | Facilitator page says "forbidden" | Opened from another machine without `ADMIN_TOKEN` | Open it on the laptop via `https://localhost:3000/facilitator`, or set `ADMIN_TOKEN` |
 | "Your connection is not private" (Chrome, Edge), "Warning: Potential Security Risk Ahead" (Firefox), "This Connection Is Not Private" (Safari) | Expected: the server's certificate is self-signed | Accept it once per browser: [SESSION-RUNBOOK.md § 10](SESSION-RUNBOOK.md#10-https-and-the-certificate-warning). Compare the fingerprint with setup step 07 if in doubt. |
@@ -446,3 +458,20 @@ Each participant accepts the warning **once per browser**, talked through it by 
 | Server stops at start with "Set both TLS_CERT and TLS_KEY" or "TLS_KEY does not belong…" | Only one of the two is set, or they are not a pair | Set both to a matching pair, or unset both to use the self-signed certificate |
 | Server stops at start with "WKWA_TLS must be…" or "HTTP_REDIRECT_PORT must be…" | A typo in the environment | Use `auto` or `off`, and a port number (the data CLI, `npm run cli`, still works meanwhile) |
 | A new certificate at every start, although the laptop stays on the same network | A virtual adapter (VPN, Docker, WSL, Hyper-V) gets a new address each time | Switch that adapter off before starting the server for sessions. The start-up banner names the address that was missing. |
+
+## 14. Microphone audio on the network
+
+Audio uses the existing `/player` socket and the HTTPS port, so it needs no extra port. Design and storage: [AUDIO.md](AUDIO.md). The message tables are in [§ 9](#9-message-catalogue).
+
+| Topic | Detail |
+| --- | --- |
+| Secure context | Browsers expose the microphone only on HTTPS pages (or `localhost`), so a session with audio needs the default `WKWA_TLS=auto` ([§ 11](#11-security-on-the-lan)). Setup step 04 warns when the server runs plain HTTP. |
+| Messages | Players send `mic:check`, `audio:start`, `audio:chunk`, `audio:stop` and `audio:level`. The facilitator sends `calibration:start`, `calibration:redo`, `calibration:skip`, `mic:skip`, `recording:pause` and `recording:resume`. |
+| Chunk size | A chunk is 5 s of 16 kHz mono 16-bit PCM, about 160 KB, sent as a binary attachment (not base64). The server accepts 1 to 96 000 samples (up to 6 s); the Socket.IO limit is 1 MB per message. |
+| Data rate | About 32 kB/s per seat, so about 130 kB/s for four players: far below a LAN's capacity, but more than the rest of the game together. Use cables where you can. |
+| Acknowledgements | `audio:start`, `audio:chunk` and `audio:stop` carry an acknowledgement `{ ok: true }` (also for a repeat) or `{ ok: false, error, retry }`. `retry: false` is permanent and the browser drops the item; `retry: true` is transient and it sends again with back-off. `audio:level` has none. |
+| Retries | The browser keeps unacknowledged chunks in memory (up to 30 minutes), sends them in order, one at a time, and resends at once after a reconnect. A chunk with the same `trackId` and `seq` is stored once. |
+| Late chunks | The server closes a seat's track when its socket drops. The track accepts chunks for 10 minutes after the close, then refuses them. Audio captured during a recording pause or after the game was complete is never stored. |
+| Volatile levels | `audio:level` is about 4 per second and may be dropped when the network is busy. It is never stored and only feeds the LIVE mic column. |
+| Reconnect | After a drop the browser reconnects with its seat token ([§ 7](#7-disconnects-and-reconnects)), resends what is pending, and starts a new track with reason `reconnect`. A game auto-pause does not stop recording; only the facilitator's *Pause recording* does. |
+| Certificates | The certificate is for the laptop's addresses only. Participants accept the browser warning and **compare the fingerprint** with setup step 07 instead of installing any certificate: nobody should install a root certificate on their own laptop for this study ([§ 11](#11-security-on-the-lan)). |

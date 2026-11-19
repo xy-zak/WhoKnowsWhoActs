@@ -36,7 +36,7 @@ Field-level detail of every logged record is in [DATA-TYPES.md](DATA-TYPES.md).
 - **What:** in-game actions and their timing, fine-grained interface behaviour, a few bracketed demographic answers, consent records and, in sessions that record audio, **each participant's microphone audio**. All of it is linked to a **random participant code**, never to a name.
 - **Audio:** players may talk during play (in English), and what they say is research data.
   - When a session records audio (off by default; setup step 04), each participant's browser records their own microphone. Recording runs from their mic check, right after consent, until the game is complete: the background questions, briefing, calibration, rounds, breaks and game pauses.
-  - It needs a separate, **required** consent item. Declining it means not taking part in that session (§ 7).
+  - It needs a separate, **required** consent item. Declining it means not taking part in that session (§ 7). **No microphone opens anywhere until every real seat has consented** (the consent hold).
   - The four players sit in one room, so every mic also hears the others. An offline step on the facilitator laptop works out **who spoke when** by comparing loudness across the four mics. It never uses voiceprints and never tries to recognise whose voice it is (§ 2).
   - A voice can identify a person, so audio is never part of an anonymised export (§ 11).
   - Transcription is planned, on the laptop only, and not built yet ([AUDIO-TRANSCRIPTION.md](AUDIO-TRANSCRIPTION.md)).
@@ -87,9 +87,9 @@ Field-level detail of every logged record is in [DATA-TYPES.md](DATA-TYPES.md).
 | Track and chunk metadata: start and stop of each recording run and why it stopped (reload, pause, lost permission, end); per 5 s chunk the sample position, client and server time, clock offset, round, phase, level (RMS and peak dB) and clipped samples | Player's browser, server | Place every chunk on the session clock; data quality | Pseudonymous | `audio_tracks`, `audio_chunks`; `AudioTrackStarted`, `AudioTrackStopped` in `events` | Research period |
 | Audio settings per track: the browser's processing flags (echo cancellation, noise suppression, automatic gain control, channels) and the capture sample rate; **never** the microphone's name or ids | Player's browser | Explain level and quality differences between seats | Pseudonymous | `audio_tracks.settings_json` | Research period |
 | Mic check result: passed, or skipped by the facilitator (the check itself is the start of the recording) | Player, facilitator | Data quality: which seats had a working mic | Pseudonymous | `events` (`MicCheckCompleted`, `MicCheckSkipped`) | Research period |
-| Calibration: when each seat read the fixed sentence aloud, and the quality check (how loud each voice is on each mic, a 4 × 4 leakage pattern) | Server (timed turns), computed from the audio | Calibrate the attribution; warn about weak mics during the session | Pseudonymous | `events` (`CalibrationStarted`, `CalibrationTurn`, `CalibrationCompleted`, `CalibrationSkipped`); the speech itself is in the raw audio | Research period |
-| **Speech segments**: per seat, start and end on the server clock, round, phase, whether the game was paused, mean level, confidence, overlap; talk time per seat; a quality report | Speaker attribution, run offline on the facilitator laptop | **Research data**: who spoke when, turn-taking, overlap | Pseudonymous (behavioural; no voice content) | Encrypted derivatives (`audio_derivatives`, files in `data/audio/<sessionId>/`); run parameters in `audio_jobs`; `speech_segments.csv` in exports | Research period; kept when the session's audio is deleted (`delete-audio`, either scope) |
-| Cleaned per-seat tracks: each seat's audio aligned to the session clock, with frames where this seat is not speaking turned down by 30 dB (quieter, not removed); while two people speak at once, both stay at full level | Speaker attribution | Listening and (planned) transcription with less crosstalk; raw audio is never modified | **Voice** | Encrypted derivatives (`audio_derivatives`, files in `data/audio/<sessionId>/`) | `[placeholder: derived-audio retention]` |
+| Calibration: when each seat read the fixed sentence aloud, and the quality check (how loud each voice is on each mic, a 4 × 4 leakage pattern) | Server (timed turns), computed from the audio | Calibrate the attribution; warn about weak mics during the session | Pseudonymous | `events` (`CalibrationStarted`, `CalibrationTurn`, `CalibrationCompleted`, `CalibrationChecked`, `CalibrationSkipped`); the speech itself is in the raw audio | Research period |
+| **Speech segments**: per seat, start and end on the server clock, round, phase, whether the game was paused, mean level, confidence, overlap; talk time per seat; a quality report | Speaker attribution, run offline on the facilitator laptop | **Research data**: who spoke when, turn-taking, overlap | Pseudonymous (behavioural; no voice content) | Derived results in the encrypted database (`audio_derivatives`, as JSON: speech segments, talk time, quality report, leakage matrix); run parameters in `audio_jobs`; `speech_segments.csv` in exports | Research period; kept when only the raw audio is deleted (`delete-audio --scope raw`). **Removed by `--scope all`**, by an erasure of that seat, and by session deletion (§ 10) |
+| Cleaned per-seat tracks: each seat's audio aligned to the session clock, with frames where this seat is not speaking turned down by 30 dB (quieter, not removed); while two people speak at once, both stay at full level | Speaker attribution | Listening and (planned) transcription with less crosstalk; raw audio is never modified | **Voice** | Encrypted derivatives (`audio_derivatives`, files in `data/audio/<sessionId>/`) | `[placeholder: derived-audio retention]`; removed together with the raw audio by `delete-audio` (either scope) |
 | Transcripts (**planned, not built**): what each participant said, with timestamps | Local transcription of the cleaned tracks ([AUDIO-TRANSCRIPTION.md](AUDIO-TRANSCRIPTION.md)) | Content analysis | Pseudonymous · may contain names and special-category content said aloud | `[placeholder: not built]` | `[placeholder: transcript retention]` |
 | Connection events, clock sync | Server/client | Data-quality checks | Pseudonymous / non-personal | `events`, `telemetry` | Research period |
 | Facilitator actions and notes, broadcasts, recording pauses | Facilitator | Audit trail, context | Non-personal (**must not contain names**) | `events` (incl. `RecordingPaused`, `RecordingResumed`) | Research period |
@@ -223,7 +223,7 @@ stateDiagram-v2
   deleted --> [*]
 ```
 
-**Audio** of one seat has its own lifecycle inside the encrypted store. Chunks are encrypted as they arrive, and raw audio is never modified. Derived audio is written as new files.
+**Audio** of one seat has its own lifecycle inside the encrypted store. Chunks are encrypted as they arrive, and raw audio is never modified. Derived audio is written as new files. *Results without sound* are the speech segments, talk time, quality report and leakage matrix, which survive `delete-audio --scope raw`.
 
 ```mermaid
 stateDiagram-v2
@@ -231,14 +231,16 @@ stateDiagram-v2
   state "recording paused" as paused
   state "raw audio" as raw
   state "raw and derived audio" as derived
-  state "derived only" as derivedOnly
+  state "results without sound" as derivedOnly
   [*] --> recording: mic check, after audio consent
   recording --> paused: facilitator pauses for everyone (logged)
   paused --> recording: facilitator resumes
   recording --> raw: game complete, seat withdrawn, close or abort
   paused --> raw: game complete, seat withdrawn, close or abort
   raw --> derived: speaker attribution, offline
-  derived --> derivedOnly: delete raw audio, keep derived (register)
+  derived --> derivedOnly: delete raw audio, cleaned tracks go too (register)
+  derived --> deleted: delete all audio (register)
+  raw --> deleted: delete all audio (register)
   raw --> erased: takedown or session deletion
   derived --> erased: takedown or session deletion
   derivedOnly --> erased: takedown or session deletion
@@ -260,11 +262,11 @@ stateDiagram-v2
   - The text shown is composed per session, so the version and hash in `ConsentRecorded` prove exactly which text each participant agreed to, audio section included. Like the rest, it is versioned and hashed.
   - The answer is stored as `answers.audio_recording`.
 - **Nothing behavioural before consent.** The client only switches on telemetry once consent is given, and the server *also* drops any telemetry batch from a seat whose consent status is not `given` (or `skipped`, if the consent step is disabled). Before consent, only operational events exist for a seat: `SeatBound`, `PlayerConnected` / `PlayerDisconnected`, plus the session-level `LabelsAssigned` and `OnboardingStarted`.
-- **No audio before consent either.** The browser opens the mic only at the mic check, the step after consent, and only if the audio item was ticked. The server also refuses audio from any seat without audio consent. A `skipped` consent (consent step off, or a fake seat) **never** counts as audio consent. Each seat starts at its own pace, though, so the mics of seats that are already at their mic check hear the room while others are still reading the consent form. Keep the room quiet during consent.
-- **Declining.** If any required item is unticked, the player sees a thank-you screen and cannot continue. The seat is flagged on the dashboard and round 1 cannot start. What remains for that code is the operational events above plus `ConsentRecorded` with `consented: false`. **Recommended:** after the session, erase the decliner's code (manager *DATABASE → 3 · Takedown / erasure*, or `npm run cli -- erase --code …`) unless your ethics committee wants decline records kept; then replace the participant or run the session with fewer seats. Declining the audio item is declining a required item: the person does not take part in that session, and their own mic is never opened. Seats that had already started their mic check may still have picked up their voice. `[placeholder: policy for a decliner's voice on the other seats' recordings, e.g. delete that session's audio, or start the mic checks only once every seat has consented]`.
+- **No audio before consent either, anywhere in the room: the consent hold.** The browser opens the mic only at the mic check, the step after consent, and only if the audio item was ticked. The server also refuses audio from any seat without audio consent. A `skipped` consent (consent step off, or a fake seat) **never** counts as audio consent. On top of that, **no seat may start its mic check until every real seat has given consent**: the players who finish early see *waiting for the other seats*, and no microphone is open while anyone is still reading the consent form. Fake players, agents and withdrawn seats do not count. The server enforces the hold in the audio ingest as well.
+- **Declining.** If any required item is unticked, the player sees a thank-you screen and cannot continue. The seat is flagged on the dashboard and round 1 cannot start. What remains for that code is the operational events above plus `ConsentRecorded` with `consented: false`. **Recommended:** after the session, erase the decliner's code (manager *DATABASE → 3 · Takedown / erasure*, or `npm run cli -- erase --code …`) unless your ethics committee wants decline records kept; then replace the participant or run the session with fewer seats. Declining the audio item is declining a required item: the person does not take part in that session, and their own mic is never opened. Because of the consent hold, no other mic is open either, so a decliner's voice is not recorded on the other seats during consent. The hold stays on until the facilitator **withdraws the decliner's seat**, so nobody else starts recording while the decliner sits there.
 - **Withdrawal during the session.** The facilitator marks the seat as withdrawn (`ParticipantWithdrawn`). From then on, the seat's intents are rejected and it is excluded from round completion. Whether data collected *before* withdrawal is kept or erased follows the consent text. To erase it, run the erasure procedure.
   - **Their own recording stops at once.** The server ends the seat's recording and refuses further audio from it, and the browser releases the mic.
-  - **The other mics still hear them** while they stay in the room. Ask them to leave quietly, or pause recording while they leave.
+  - **The other mics still hear them** while they stay in the room. Ask them to leave quietly, or pause recording while they leave (**Pause recording** in TOOLS, with a logged reason).
   - If the person also withdraws their consent, and consent is the only legal basis, data processed on that basis normally has to be erased (Art. 7(3), Art. 17(1)(b)), unless an exception such as Art. 17(3)(d) applies. That holds for game data and audio alike; audio is just the most identifying part. Erasure always includes audio (§ 10). Confirm the policy with your DPO and state it in the consent text.
 - **No individual mute.** Talk is part of the data, so a player cannot mute themselves. The facilitator can pause recording for everyone (`RecordingPaused`, `RecordingResumed`), for example when someone else enters the room.
 - **What the audio section must explain:**
@@ -305,7 +307,7 @@ Facilitator notes and broadcasts are free text written by the researcher: **neve
 | --- | --- |
 | Algorithm | SQLCipher 4 format (AES-256, PBKDF2-HMAC-SHA512 key derivation), via `better-sqlite3-multiple-ciphers` (`cipher=sqlcipher`, `legacy=4`) |
 | Scope | The whole database file, including the WAL journal. Telemetry, events, codes, audio keys and the server secret are all inside. The simulation database (`data/wkwa-sim.db`) is encrypted the same way. |
-| Audio files | One file per recording run (track) in `data/audio/<sessionId>/`, with a random name and no code. Encrypted with **AES-256-GCM** under a random 32-byte key per file. Each 5 s chunk is a separate record with its own 12-byte nonce and authentication tag, so a damaged or altered chunk is detected. Derived audio results (cleaned tracks, speech segments) are encrypted the same way. |
+| Audio files | One file per recording run (track) in `data/audio/<sessionId>/`, with a random name and no code. Encrypted with **AES-256-GCM** under a random 32-byte key per file. Each 5 s chunk is a separate record with its own 12-byte nonce and authentication tag, so a damaged or altered chunk is detected. A cleaned track is a derived file encrypted the same way. Speech segments and the other small results are stored as JSON inside the encrypted database. |
 | Audio keys | Stored in the encrypted database, never next to the files. Without the database and its passphrase the audio folder cannot be read. `rekey` has nothing to change in the audio files. |
 | Passphrase entry | Typed at a hidden prompt on `npm start`. Never written to disk, logs or config. `WKWA_DB_PASSPHRASE` exists **only for development and automated tests**. One passphrase opens both databases: the participant database and the simulation database. |
 | Deleted data | `PRAGMA secure_delete=ON` overwrites deleted content. Erasure also runs a WAL checkpoint and `VACUUM`. Audio is **crypto-shredded**: the key rows are deleted first, then the files. A leftover copy of a file (in free disk space, on an SSD) can then no longer be decrypted. A database *backup* still holds the keys, so backups need the procedure in § 10. |
@@ -359,8 +361,7 @@ sequenceDiagram
 3. **Look up** what exists: `lookup` lists the sessions, the number of event and telemetry rows, and the audio tracks.
 4. **Erase:** `npm run cli -- erase --code WK-… ` (asks for confirmation; `--yes` skips it), or use *DATABASE → 3 · Takedown / erasure* in the facilitator manager: look up the code, then confirm in a popup by typing the code again (refused while that participant's session is still running: end the session first).
    - All `events` and `telemetry` rows with that code are deleted: actions, consent, demographics, connections, telemetry.
-   - All audio of that code is deleted: first the rows in the audio tables, with the per-file keys, then the files in `data/audio/` (crypto-shredding, § 9). This covers the raw tracks, the cleaned track and the speech segments of that seat.
-   - Attribution results for the whole session, such as the talk-time summary and the quality report, are kept per seat, not per code, so the code does not find them. Delete or re-run that session's attribution after an erasure. `[placeholder: check once attribution is built]`.
+   - All audio of that code is deleted: first the rows in the audio tables, with the per-file keys, then the files in `data/audio/` (crypto-shredding, § 9). This covers the raw tracks and the speech segments of that seat, and **every result that was computed from their tracks**: the session's talk-time summary, quality report and leakage matrix, and **every seat's cleaned track** (a cleaned track is built from all four mics, so it still contains the erased voice). The other seats' raw tracks and their speech segments stay. Re-run the attribution afterwards if you still need it; the erased seat then no longer exists in it. In later exports the erased seat is also dropped from the other seats' `overlap_with`.
    - Each affected session gets a `ParticipantWithdrawn` event (`by: "erasure"`) **without** the code, so replays and exports show a withdrawn seat instead of silently missing data.
    - An entry is added to the `erasures` register: SHA-256 of the code, date, sessions, row counts.
    - The database is checkpointed and vacuumed; secure-delete overwrites the freed pages.
@@ -378,10 +379,11 @@ sequenceDiagram
 
 **Deleting a session's raw audio.** Use this once attribution is done and the retention decision allows it (§ 12). Use *DATABASE* (typed confirmation) or `npm run cli -- delete-audio <sessionId> --scope raw --confirm <sessionId>`.
 
-- `--scope raw` deletes the session's raw recordings (keys first, then files) and keeps the derived results: speech segments and cleaned tracks.
-- `--scope all` deletes the cleaned tracks too, so no voice recording of that session remains. The speech segments (no voice content) and the game data stay.
+- `--scope raw` deletes the session's raw recordings (keys first, then files) **and every cleaned track**, so no sound of that session remains in the store. It keeps the track rows (marked deleted, with their timing), the chunk rows (times and levels) and the results without sound: speech segments, talk time, quality report and leakage matrix. Attribution cannot be run again afterwards.
+- `--scope all` deletes every audio row of the session (tracks, chunks, all derived results including the speech segments, jobs) and its audio folder. Only the register entry stays, and the game data.
+- Exported WAV files are **not** deleted by either scope. DATABASE and the command list the audio exports still on disk; delete them by hand on every copy.
 - Running sessions are refused: close or abort first.
-- An entry in `audio_deletions` records the session, scope, date and counts, so the deletion can be re-applied after restoring a backup.
+- An entry in `audio_deletions` records the session, scope, date and counts (tracks, recorded time, chunks, derived results, jobs, files, bytes, seats as a bit mask), so the deletion can be re-applied after restoring a backup.
 
 **After restoring a backup.** A backup can predate an erasure or a deletion. After any restore, re-apply the registers:
 
@@ -398,9 +400,9 @@ Register entries hold only hashes, so keep the takedown correspondence (or a lis
 
 - **Anonymised exports** that were already published cannot be traced back to a person. That is what makes them anonymous, so erasure no longer applies to them. Say so in the consent text.
 - **Aggregated results** already published (thesis tables, figures) are not retracted.
-- **Crosstalk.** Every mic hears the room, so a participant's voice is also on the other seats' recordings of the same session. Erasure removes the participant's own tracks and derived results, but not the other seats' recordings. Those recordings are the requester's personal data too, and also the other participants' data, so deleting them affects people who did not ask for it. This needs a balanced decision. If a request covers their voice everywhere, there are two options:
-  - Delete the session's raw audio (`delete-audio … --scope raw`). In the cleaned tracks that remain, the requester's speech is 30 dB quieter, which reduces it but does not remove it. Where they spoke at the same time as the seat's owner, it stays at full level.
-  - Delete all audio of that session (`--scope all`). This also removes the other participants' audio.
+- **Crosstalk.** Every mic hears the room, so a participant's voice is also on the other seats' recordings of the same session. Erasure removes the participant's own tracks and every result computed from them (including all cleaned tracks), but not the other seats' raw recordings. Those recordings are the requester's personal data too, and also the other participants' data, so deleting them affects people who did not ask for it. This needs a balanced decision. If a request covers their voice everywhere, there are two options:
+  - Delete the session's raw audio (`delete-audio … --scope raw`). This removes all four raw recordings and the cleaned tracks, and keeps the timing results. It also removes the other participants' sound.
+  - Delete all audio of that session (`--scope all`). The same, and the derived results go too.
 
   `[placeholder: crosstalk policy agreed with your DPO, and stated in the information letter]`.
 - **Audio exports** (WAV) are copies outside the store. Delete them by hand on every copy, like other exports.
@@ -413,7 +415,7 @@ Register entries hold only hashes, so keep the takedown correspondence (or a lis
 | Standard | `npm run cli -- export --session S-…` or *Export* button | `exports/<sessionId>/<exportId>/` | participant codes | Analysis by the research team |
 | Anonymised | `npm run cli -- anonymise --session S-…` | `exports/<sessionId>/anon-<id>/` | random `A-XXXXXX`, **mapping discarded** | Archiving / open data / sharing |
 | Simulation | `npm run cli -- export --sim --session SIM-…` or *Export* (DATABASE → Simulations) | `exports/simulations/<sessionId>/<exportId>/` | none (agents have no code; `players.csv` names the agent policy) | Testing rules and analysis scripts |
-| Audio | *Export audio* in DATABASE: a separate, explicit action, listed in the export register | its own folder under `exports/<sessionId>/` | participant codes; the voice identifies the person anyway | Listening, manual coding and transcription by the research team |
+| Audio | *Export audio* in DATABASE (the **WAV** button of a seat, or the form for raw, clean or both): a separate, explicit action, listed in the export register | `exports/<sessionId>/audio-AU-…/`: one 16 kHz mono WAV per seat and kind, named `<sessionId>_seat<N>_<raw or clean>.wav`, and `manifest.json` (no participant codes in names or manifest) | participant codes in the register only (as hashes); the voice identifies the person anyway | Listening, manual coding and transcription by the research team |
 
 Each export folder contains `session.json`, `players.csv`, `actions.csv`, `events.csv`, `telemetry.csv`, `consent.csv`, `demographics.csv`, `manifest.json` and a generated **`codebook.md`** that describes every file and column (see [DATA-TYPES.md § Export files](DATA-TYPES.md#export-files)). `events.csv` never contains demographic answers; those are only in `demographics.csv`, so the event log can be shared without them.
 
@@ -422,7 +424,10 @@ Each export folder contains `session.json`, `players.csv`, `actions.csv`, `event
 - The standard and anonymised exports also contain `audio_tracks.csv` and `speech_segments.csv`.
   - `audio_tracks.csv` is an index of the recordings: seat, times, duration, sample rate and processing flags, no audio.
   - `speech_segments.csv` says who spoke when, with no voice content. Speech segments are pseudonymous behavioural data, like the actions.
-- **WAV files never leave the encrypted store with these exports.** Only the separate *Export audio* action writes them, and every audio export is listed in the export register.
+- **WAV files never leave the encrypted store with these exports.** Only the separate *Export audio* action writes them. The UI shows the folder on the laptop and offers no browser download.
+  - Every audio export is listed in the export register (`kind` audio): who asked, the note, the seats and the kind (`details_json`), and the SHA-256 hash of every participant code of the session, so a takedown look-up finds it. The folder is written completely or not at all, so no unregistered audio stays on disk.
+  - Files are not deleted by *delete audio* or by an erasure. Delete the folder by hand on every copy.
+  - Both audio CSV files are also written for sessions without audio (header only).
 - **The anonymised export never contains audio.** A voice cannot be anonymised by replacing a code.
 
 **Anonymisation procedure for publication (FAIR):**
@@ -440,8 +445,8 @@ Each export folder contains `session.json`, `players.csv`, `actions.csv`, `event
 | --- | --- | --- |
 | Encrypted DB + audio folder + backups | Until the end of the research period (e.g. thesis graded + `[N]` months) | Delete the files, the audio folder and every backup, after the anonymised export is archived |
 | Raw audio | `[placeholder: until attribution (and transcription) are checked, or the whole research period]` | `delete-audio <sessionId> --scope raw` or DATABASE, recorded in `audio_deletions`; otherwise with the DB |
-| Cleaned tracks (derived audio) | `[placeholder: derived-audio retention]` | `delete-audio <sessionId> --scope all`, or with the DB |
-| Speech segments | Research period, like the other pseudonymised data | With the DB; in exports, as for those |
+| Cleaned tracks (derived audio) | `[placeholder: derived-audio retention]` | `delete-audio <sessionId>` with either scope (`--scope raw` removes them with the raw audio), an erasure of any participant of the session, or with the DB |
+| Speech segments and other results without sound | Research period, like the other pseudonymised data | With the DB; `--scope all`; an erasure removes that seat's segments; in exports, as for those |
 | Audio exports (WAV) | `[placeholder: audio-export retention]`; institutional storage only, never left on the laptop | Delete the folders on every copy |
 | Transcripts (planned) | `[placeholder: transcript retention]` | `[placeholder: not built]` |
 | Standard exports | Research period, on institutional storage only | Delete the folders |
@@ -455,9 +460,9 @@ Each export folder contains `session.json`, `players.csv`, `actions.csv`, `event
 **Raw audio: delete or keep?** Not decided yet, so the harness supports both:
 
 - **Keep** raw audio for the whole retention period, so attribution or transcription can be re-run later.
-- **Delete** it per session once attribution is checked, and keep the speech segments and cleaned tracks (`delete-audio --scope raw`, with a register entry).
+- **Delete** it per session once attribution is checked, and keep the speech segments, talk time and quality report (`delete-audio --scope raw`, with a register entry). This removes the cleaned tracks too, because they are voice recordings as well. Attribution cannot be run again afterwards.
 
-Cleaned tracks are still voice recordings. Record the decision here, in `config/consent.md` and in the DMP.
+Record the decision here, in `config/consent.md` and in the DMP.
 
 ## 13. Personal-data classes per record type
 
@@ -501,10 +506,10 @@ Likelihood (L) and impact (I): low / medium / high, after mitigation.
 | 16 | A participant ends up in a simulated session (no consent shown) | L | M | Simulated seats are filled by agents at creation, so no client can be bound; the setup screen and LIVE show **SIMULATION**; `verify --sim` reports any participant code in the simulation database |
 | 17 | Fake-player test data analysed as participant data (research validity) | L | H | Every fake seat is flagged in the log (`SeatBound.fake`), in `players.csv` (`fake_player`) and `session.json` (`fakeSeats`); fake seats have no participant code; DATABASE, LIVE and the CLI show the sessions and seats with fake players. Filter on `fake_player = 0`, or delete test sessions |
 | 18 | Consent skipped for a real person by marking them fake | L | H | Only clients the server started itself count as fake (keys registered server-side); the flag can never come from a browser |
-| 19 | Every mic also records the other three players (crosstalk), so each participant's voice is on the others' recordings | H | M | Every seat must give the required audio consent; the room is kept quiet during consent, because seats that are already recording hear the others (§ 7); a withdrawn participant is asked to leave; the information letter explains crosstalk; headsets recommended; cleaned tracks turn other voices down (by 30 dB, not removed, and not during overlap); the limits of erasure are stated (§ 10) |
+| 19 | Every mic also records the other three players (crosstalk), so each participant's voice is on the others' recordings | H | M | Every seat must give the required audio consent; no mic opens anywhere until every real seat has consented, and a decliner's seat must be withdrawn before anyone records (the consent hold, § 7); a withdrawn participant is asked to leave; the information letter explains crosstalk; headsets recommended; cleaned tracks turn other voices down (by 30 dB, not removed, and not during overlap); the limits of erasure are stated (§ 10) |
 | 20 | Bystanders or the facilitator recorded (someone enters the room; the facilitator speaks during briefing and calibration) | M | L | Closed room and a "recording" sign on the door; the facilitator pauses recording for everyone when someone else enters (logged); add a note (no names) so the time span can be left out of analysis and transcription; the facilitator is recorded knowingly |
 | 21 | Participants click through a self-signed certificate warning, so an impostor on the LAN could present their own certificate (man-in-the-middle) and capture audio and game data | L | H | Isolated LAN (no uplink; WPA2/3 password known only to the team, or cables); compare the certificate fingerprint shown by the server with the browser's before accepting (NETWORKING.md § 11); never ask participants to install a root certificate on their own device; tell them the warning is expected for this address only |
-| 22 | Participants' own mics differ (laptop mics, Bluetooth headsets, browsers that ignore the processing settings), so attribution makes errors (research validity) | M | M | Headsets recommended; each player's own mic check; facilitator-led calibration with a quality check in LIVE; processing flags recorded per track; quality report and per-segment confidence; raw audio kept until attribution is checked; check a pilot sample by hand `[placeholder: validation sample]` |
+| 22 | Participants' own mics differ (laptop mics, Bluetooth headsets, browsers that ignore the processing settings), so attribution makes errors (research validity) | M | M | Headsets recommended; each player's own mic check; facilitator-led calibration with a quality check in LIVE; processing flags recorded per track; quality report and per-segment confidence; raw audio kept until attribution is checked; the attribution engine was measured only on synthetic mixes, so check a pilot sample by hand `[placeholder: validation sample]` |
 | 23 | Participant's own browser: an extension with access to every page could read the game or the audio; the mic permission and the certificate exception stay in the browser afterwards | L | M | Suggest a private or guest window, where extensions are usually off and exceptions are forgotten on close `[placeholder: recommend or require]`; no third-party scripts on the page; the browser records only when the server starts recording for a seat with audio consent; show participants how to remove the permission afterwards |
 | 24 | A voice is recognisable to anyone who knows the person: audio cannot be anonymised by replacing codes | L | H | Audio is never in anonymised exports; WAV only via the explicit, registered *Export audio*, kept on institutional storage; quotes reported as text without names, never as audio clips; access limited to the research team `[placeholder: who may listen]`; `speech_segments.csv` holds timing only |
 | 25 | Audio reveals special-category information incidentally (health from a cough or a speech impairment, ethnic origin from an accent, anything participants mention) | M | M | The task is game-focused, and the information letter says that everything said is recorded; voices are never analysed for such traits; restricted access; erasure on request; ask the DPO whether explicit consent (Art. 9(2)(a)) is needed (§ 2) |
@@ -512,7 +517,7 @@ Likelihood (L) and impact (I): low / medium / high, after mitigation.
 | 27 | Automatic transcription (planned) makes more errors for non-native accents and less fluent speakers, which biases what is analysed | M | M | Not built yet; local tools only; measure the word error rate per speaker on a pilot sample; correct transcripts by hand before analysis; who spoke when does not depend on transcription ([AUDIO-TRANSCRIPTION.md](AUDIO-TRANSCRIPTION.md)) |
 | 28 | Laptop lost or stolen with audio on it | L | H | Audio encrypted per file, with the keys only inside the encrypted DB; full-disk encryption; audio exports (plaintext WAV) moved to institutional storage at once and deleted locally; report a loss to your DPO at once: the 72-hour breach notification of Art. 33 may apply, and encryption may spare informing participants (Art. 34(3)(a)) |
 | 29 | Audio still recorded or accepted after a withdrawal, a recording pause or the end of the game | L | M | The server ends the seat's track on withdrawal, game complete, close or abort, and refuses audio from withdrawn, paused, finished, non-consented, fake and agent seats; the browser releases the mic (its indicator goes off); integration tests; chunks carry server timestamps, so any audio from the seat's own mic after a withdrawal would be visible, and erasure removes it. The other mics still hear a withdrawn person who stays in the room: ask them to leave, or pause recording (#19) |
-| 30 | Audio is large: about 115 MB per seat per hour raw, so roughly 0.5 GB per hour of session for four seats, twice that with cleaned tracks. Risks: a full disk during a session, or backups that copy the DB and the audio folder at different moments | M | M | Check free disk space before every session `[placeholder: minimum free space]`; `backup` copies the DB and the audio folder together; `verify` reports audio files without a key; delete raw audio after attribution if the retention decision allows; size institutional storage for audio |
+| 30 | Audio is large: about 115 MB per seat per hour raw, so roughly 0.5 GB per hour of session for four seats, twice that with cleaned tracks. Risks: a full disk during a session, or backups that copy the DB and the audio folder at different moments | M | M | Check free disk space before every session `[placeholder: minimum free space]`; `backup` copies the DB and the audio folder together; `verify` reports audio files that no database row refers to; delete raw audio after attribution if the retention decision allows; size institutional storage for audio |
 
 ## 15. Checklist for the ethics committee / privacy officer
 
@@ -539,8 +544,22 @@ Likelihood (L) and impact (I): low / medium / high, after mitigation.
 - [ ] The **information letter** explains crosstalk (every mic hears the room, and what that means for erasure) and the calibration (each player reads a sentence aloud in turn), plus the other points in § 7.
 - [ ] **Audio consent:** is a required audio item acceptable, where declining means not taking part? Should it be worded as explicit consent under Art. 9(2)(a), for incidental special-category content (§ 2)?
 - [ ] **Audio retention:** keep raw audio for the whole retention period, or delete it after attribution and keep the derived results (§ 12)?
-- [ ] **Crosstalk and erasure:** after an erasure, or when someone declines once other seats are already recording, are the other seats' recordings of that session kept, or is the session's raw or all audio deleted (§ 7, § 10)?
+- [ ] **Crosstalk and erasure:** after an erasure, are the other seats' recordings of that session kept, or is the session's raw or all audio deleted (§ 10)? (A decliner's voice is not recorded during consent, because of the consent hold.)
 - [ ] **Who may listen** to audio and audio exports (supervisor, second coder)?
+
+**Open `[placeholder: …]` decisions** (each one is marked where it is used):
+
+| Placeholder | Where | Decides |
+| --- | --- | --- |
+| Approved audio consent wording | § 7, `config/consent.json`, `config/consent.md` | The text of the required audio item and information-letter section (version `PLACEHOLDER-v1+audio`) |
+| Audio retention (raw, derived, exports, transcripts) | § 3, § 8, § 12, `config/consent.md` | How long each kind of audio is kept, and who deletes it |
+| Crosstalk policy | § 10 | What happens to other seats' recordings after an erasure |
+| Sharing audio outside the research team | § 11 | Second coder, repository |
+| Who may listen | § 14 #24 | Access to recordings and exports |
+| Validation sample | § 14 #22 | Hand-checking attribution on real recordings |
+| Private or guest window | § 14 #23 | Whether participants are asked to use one |
+| Minimum free disk space | § 14 #30 | The check before every session |
+| Transcripts | § 3, § 12 | Not built; retention and deletion once they exist |
 
 ## 16. Command reference
 
@@ -556,10 +575,11 @@ All commands prompt for the database passphrase. Add `--sim` to work on the simu
 | `npm run cli -- erasures` | Show the erasure register |
 | `npm run cli -- delete-session --session S [--yes] [--delete-exports]` | Delete an entire session, audio included (typed confirmation unless `--yes`) |
 | `npm run cli -- deletions` | Show the session-deletion register |
-| `npm run cli -- delete-audio <sessionId> --scope raw\|all --confirm <id>` | Delete a session's raw audio and keep the derived results (`raw`), or delete all its voice recordings, raw and cleaned (`all`); speech segments stay. `--confirm` takes the session id again. Refused while the session runs. Recorded in the audio-deletion register |
+| `npm run cli -- delete-audio <sessionId> --scope raw\|all --confirm <id> [--note TEXT]` | Delete a session's raw audio and cleaned tracks and keep the results without sound (`raw`), or delete every audio row, result and file of the session (`all`). `--confirm` takes the session id again. Refused while the session runs. Recorded in the audio-deletion register |
+| `npm run cli -- audio-deletions` | Show the audio-deletion register |
 | `npm run cli -- backup --out FILE` | Encrypted backup copy of the DB, plus a copy of the audio folder (files stay encrypted) |
 | `npm run cli -- rekey` | Change the passphrase of both databases (audio keys live inside the DB, so the files need no change) |
-| `npm run cli -- verify [--sim]` | Integrity check, including every audio chunk's authentication tag and audio files without a key (with `--sim`: also checks that no participant code is in the simulation database) |
+| `npm run cli -- verify [--sim]` | Integrity check, including every audio chunk's authentication tag, orphan audio files, deleted audio that still has a key or file, and file names that contain a participant code (with `--sim`: also checks that no participant code is in the simulation database) |
 
 ## 17. Simulated sessions and the simulation database
 

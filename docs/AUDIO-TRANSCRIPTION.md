@@ -1,10 +1,12 @@
 # Audio transcription (research)
 
+*Change log: [AUDIO-TRANSCRIPTION-CHANGELOG.md](changelog/AUDIO-TRANSCRIPTION-CHANGELOG.md)*
+
 > **Research only. Nothing in this document is implemented.** It compares local transcription engines and proposes how transcripts could later be produced from the audio the harness records. It is a basis for a decision, not a description of the software. Facts about the engines were checked on 2026-11-18; see [§ 12 Sources](#12-sources).
 
 The game is played by four people in one room, and talk during play is research data (methodology v3). Each participant's browser records their microphone, and the server works out who spoke when. This document asks the next question: **what did they say, and how does that line up with what they proposed and decided?** It proposes one transcript document per participant, with their proposals and decisions embedded at the moment they happened, and one composite document of the whole group. Transcription runs **after the session, on the facilitator laptop (or a university machine), never in the cloud**, and is started from the DATABASE tab.
 
-Related documents: [ARCHITECTURE.md](ARCHITECTURE.md) (event sourcing, timing model) · [DATA-TYPES.md](DATA-TYPES.md) (`actions.csv`, events) · [DATA-MANAGEMENT.md](DATA-MANAGEMENT.md) (GDPR) · [GAME-RULES.md](GAME-RULES.md) (squares, proposals, decisions) · [AESTHETIC-RULES.md](AESTHETIC-RULES.md) (UI rules for the DATABASE mock-up).
+Related documents: [AUDIO.md](AUDIO.md) (how the audio is recorded and attributed, built) · [ARCHITECTURE.md](ARCHITECTURE.md) (event sourcing, timing model) · [DATA-TYPES.md](DATA-TYPES.md) (`actions.csv`, events) · [DATA-MANAGEMENT.md](DATA-MANAGEMENT.md) (GDPR) · [GAME-RULES.md](GAME-RULES.md) (squares, proposals, decisions) · [AESTHETIC-RULES.md](AESTHETIC-RULES.md) (UI rules for the DATABASE mock-up).
 
 ## Contents
 
