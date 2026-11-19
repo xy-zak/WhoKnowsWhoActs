@@ -475,7 +475,7 @@ Labels are available in the state (`state.seats[seat].k` / `.p`), so rules like 
 1. Write its zod schema in `packages/shared/src/protocol.ts` (`.describe()` the fields) and add it to the namespace's schema table (`PLAYER_SCHEMAS` or `FACILITATOR_SCHEMAS`).
 2. If it has an acknowledgement, add its type to `PlayerAcks` (or a result to `FacilitatorResults`) in `socket.ts`. A server→client message goes in `PlayerServerToClient` / `FacilitatorServerToClient`.
 3. Add its entry to `MESSAGES`. Until steps 1–3 agree, the shared package does not compile.
-4. Handle it in `net/hub.ts` (`seatCmd`, `audioCmd`, `cmd` or `act`: the schema is looked up from the table) and send it from the client; the compiler checks the name, the payload and the acknowledgement at both ends.
+4. Handle it in `net/hub.ts` (`seatCmd`, `cmd` or `act`: the schema is looked up from the table) and send it from the client; the compiler checks the name, the payload and the acknowledgement at both ends.
 5. Run `npm run docs:generate` (the message catalogue in NETWORKING.md).
 
 ### Add a scenario / map
