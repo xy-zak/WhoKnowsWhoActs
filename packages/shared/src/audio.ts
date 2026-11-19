@@ -597,6 +597,11 @@ export interface AudioFilesRemoved {
    * are gone with the rows, so they are unreadable; delete them by hand.
    */
   failed: string[];
+  /**
+   * Why compacting the database (checkpoint + VACUUM) after the committed deletion failed: the
+   * rows are deleted, but their freed pages may stay in the file until the next compaction.
+   */
+  compactionError?: string;
 }
 
 /** POST /api/sessions/:id/audio/delete */

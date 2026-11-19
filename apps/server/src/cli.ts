@@ -53,6 +53,9 @@ const USAGE = `Usage: npm run cli -- <sessions|lookup|export|anonymise|erase|era
 const PARTICIPANT_ONLY = new Set(["lookup", "erase", "erasures", "delete-audio", "audio-deletions"]);
 
 /** 754000 → "12.6 min", 42000 → "42 s". */
+const COMPACTION_FAILED =
+  "the database could not be compacted (the rows are deleted, but their old pages may stay in the file until the next erasure or deletion compacts it): ";
+
 function duration(ms: number): string {
   return ms >= 60_000 ? `${(ms / 60_000).toFixed(1)} min` : `${Math.round(ms / 1000)} s`;
 }
@@ -188,6 +191,8 @@ async function main() {
           console.log(
             `  ⚠  could not remove audio file ${f} (unreadable without its key): delete it by hand`,
           );
+        if (r.audioFiles.compactionError)
+          console.log(`  ⚠  ${COMPACTION_FAILED}${r.audioFiles.compactionError}`);
         if (r.exports.length) {
           console.log("These exports contained the participant — delete them on every copy and re-export:");
           for (const e of r.exports) console.log(`  ${e.id} (${e.kind}) → ${e.path}`);
@@ -311,6 +316,8 @@ async function main() {
         );
         for (const f of r.audioFiles.failed)
           console.log(`  ⚠  could not remove ${f} (unreadable without its key): delete it by hand`);
+        if (r.audioFiles.compactionError)
+          console.log(`  ⚠  ${COMPACTION_FAILED}${r.audioFiles.compactionError}`);
         console.log("Backups made before now still contain the audio.");
         break;
       }

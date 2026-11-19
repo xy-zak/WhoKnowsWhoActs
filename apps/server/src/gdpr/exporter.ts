@@ -1,4 +1,4 @@
-import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import {
   applyEvent,
@@ -70,9 +70,31 @@ function exportId(now: number): string {
  * in memory during this function and is never written anywhere.
  */
 export function exportSession(
-  deps: { store: Store; scenarios: ScenarioLibrary; exportsDir: string },
+  deps: ExportDeps,
   sessionId: string,
   kind: ExportKind = "standard",
+): ExportResult {
+  const now = nowTs();
+  const id = exportId(now);
+  const dir = path.join(deps.exportsDir, sessionId, kind === "anonymised" ? `anon-${id}` : id);
+  try {
+    return writeExport(deps, sessionId, kind, now, id, dir);
+  } catch (e) {
+    // a half-written folder holds participant codes, and no register entry points to it
+    rmSync(dir, { recursive: true, force: true });
+    throw e;
+  }
+}
+
+type ExportDeps = { store: Store; scenarios: ScenarioLibrary; exportsDir: string };
+
+function writeExport(
+  deps: ExportDeps,
+  sessionId: string,
+  kind: ExportKind,
+  now: number,
+  id: string,
+  dir: string,
 ): ExportResult {
   const { store } = deps;
   const row = store.getSession(sessionId);
@@ -80,10 +102,6 @@ export function exportSession(
   const events = store.listEvents(sessionId);
   const telemetry = store.listTelemetry(sessionId);
   const final = reduceEvents(events);
-  const now = nowTs();
-  const id = exportId(now);
-  const dirName = kind === "anonymised" ? `anon-${id}` : id;
-  const dir = path.join(deps.exportsDir, sessionId, dirName);
   mkdirSync(dir, { recursive: true });
 
   let regionNames = new Map<string, string>();
@@ -434,6 +452,9 @@ export function exportSession(
     codeHashes: kind === "anonymised" ? [] : codeHashes,
   };
   writeFileSync(path.join(dir, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
+  // sanity: every defined file exists (before the register points to the folder)
+  const present = new Set(readdirSync(dir));
+  for (const f of EXPORT_FILES) if (!present.has(f.file)) throw new Error(`export is missing ${f.file}`);
   store.registerExport({
     id,
     sessionId,
@@ -443,10 +464,6 @@ export function exportSession(
     codeHashes,
     files: written,
   });
-
-  // sanity: every defined file exists
-  const present = new Set(readdirSync(dir));
-  for (const f of EXPORT_FILES) if (!present.has(f.file)) throw new Error(`export is missing ${f.file}`);
 
   return { exportId: id, kind, sessionId, dir, files: written, participants: codes.size };
 }

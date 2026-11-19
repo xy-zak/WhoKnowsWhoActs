@@ -1,8 +1,14 @@
 import { mkdtempSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { generateParticipantCode, type NewEvent, type TelemetryItem } from "@wkwa/shared";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import {
+  generateParticipantCode,
+  type NewEvent,
+  parseSessionConfig,
+  reduceEvents,
+  type TelemetryItem,
+} from "@wkwa/shared";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AudioFileStore } from "../src/audio/fileStore";
 import { sha256 } from "../src/content";
 import { type DB, openDatabase } from "../src/db/database";
@@ -75,6 +81,16 @@ async function seedSession(store: Store, files: AudioFileStore, codes: Record<nu
     harness_version: "0",
     git_commit: "test",
   });
+  // the replay needs it to have seats
+  store.appendEvent(
+    sessionId,
+    {
+      type: "SessionCreated",
+      actorKind: "system",
+      payload: { config: parseSessionConfig({}), scenario: {}, regionIds: [], viewIds: [] },
+    } as unknown as NewEvent,
+    0,
+  );
   const seats = Object.keys(codes).map(Number);
   const trackIds: Record<number, string> = {};
   for (const seat of seats) {
@@ -219,11 +235,22 @@ describe("personal-data map", () => {
     expect(before.exports.map((e) => e.sessionId).sort()).toEqual(sessions);
     const otherRows = rowsContaining(db, others[0]!);
     const filesBefore = files.listFiles().length;
+    // a row large enough that deleting it frees whole pages
+    store.insertTelemetry(a.sessionId, 1, code, 1, 0, [
+      {
+        type: "screen_view",
+        clientTs: nowTs(),
+        payload: { screen: "x".repeat(65536) },
+      } as unknown as TelemetryItem,
+    ]);
 
     const r = map.erase(code.toLowerCase(), "invariant");
 
     expect(r.erased).toBe(true);
-    expect(r.rows).toMatchObject({ events: 2, telemetry: 2, audioTracks: 2, audioChunks: 4 });
+    // physically gone: freed pages are overwritten, and VACUUM left none on the free list
+    expect(db.pragma("secure_delete", { simple: true })).toBe(1);
+    expect(db.pragma("freelist_count", { simple: true })).toBe(0);
+    expect(r.rows).toMatchObject({ events: 2, telemetry: 3, audioTracks: 2, audioChunks: 4 });
     // each session: their cleaned track and the session-wide segments (computed from their track)
     expect(r.rows.audioDerivatives).toBe(4);
     expect(r.audioFiles).toEqual({ removed: 4, failed: [] });
@@ -258,6 +285,41 @@ describe("personal-data map", () => {
     expect(map.erase(code).erased).toBe(false);
   });
 
+  it("an erasure does not withdraw the participant who holds the seat now", async () => {
+    const [a, b] = [generateParticipantCode(), generateParticipantCode()];
+    const { sessionId } = await seedSession(store, files, { 2: a });
+    // seat 2 rebound (replaced) to b in the lobby
+    store.appendEvent(
+      sessionId,
+      {
+        type: "SeatBound",
+        actorKind: "facilitator",
+        seat: 2,
+        participantCode: b,
+        payload: { seat: 2, terminal: 2, bindingId: "b-2-again" },
+      } as NewEvent,
+      0,
+    );
+    expect(map.erase(a).erased).toBe(true);
+    expect(store.listEvents(sessionId).some((e) => e.type === "ParticipantWithdrawn")).toBe(false);
+    const seat = reduceEvents(store.listEvents(sessionId)).seats[2]!;
+    expect(seat).toMatchObject({ participantCode: b, withdrawn: false });
+  });
+
+  it("an erasure whose compaction fails still unlinks the audio files and reports the error", async () => {
+    const code = generateParticipantCode();
+    await seedSession(store, files, { 1: code });
+    const exec = db.exec.bind(db);
+    vi.spyOn(db, "exec").mockImplementation((sql: string) => {
+      if (sql === "VACUUM") throw new Error("disk I/O error");
+      return exec(sql);
+    });
+    const r = map.erase(code);
+    expect(r.erased).toBe(true);
+    expect(r.audioFiles).toEqual({ removed: 2, failed: [], compactionError: "disk I/O error" });
+    expect(store.codeExists(code)).toBe(false);
+  });
+
   it("after deleting a session no table holds its id, and the other session is untouched", async () => {
     const a = await seedSession(store, files, { 1: generateParticipantCode(), 2: generateParticipantCode() });
     const b = await seedSession(store, files, { 1: generateParticipantCode() });
@@ -268,7 +330,7 @@ describe("personal-data map", () => {
     const r = map.deleteSession(a.sessionId, { exportsDir: path.join(dir, "exports"), note: "invariant" });
 
     expect(r.rows).toEqual({
-      events: 3,
+      events: 4,
       telemetry: 2,
       exports: 1,
       audioTracks: 2,

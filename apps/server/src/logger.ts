@@ -6,7 +6,7 @@ import pino, { type Logger } from "pino";
  * Logger with data minimisation built in:
  *  - no hostname / pid in the base record,
  *  - HTTP requests are logged as method + path ONLY (no query string, no
- *    remote address, no user agent, no headers),
+ *    remote address, no user agent, no headers; a participant code in the path is redacted),
  *  - output goes to data/logs/server.log (inside the git-ignored data dir).
  */
 export function createLogger(dataDir: string, opts: { stdout: boolean; level: string }): Logger {
@@ -24,7 +24,10 @@ export function createLogger(dataDir: string, opts: { stdout: boolean; level: st
       serializers: {
         req: (req: { method?: string; url?: string }) => ({
           method: req.method,
-          path: (req.url ?? "").split("?")[0],
+          // a participant code in the path is personal data: /api/participants/:code(/erase)
+          path: (req.url ?? "")
+            .split("?")[0]
+            ?.replace(/^\/api\/participants\/[^/]+/, "/api/participants/:code"),
         }),
         res: (res: { statusCode?: number }) => ({ statusCode: res.statusCode }),
         err: pino.stdSerializers.err,

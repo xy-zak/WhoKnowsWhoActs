@@ -12,7 +12,7 @@
  *
  *   deleteSession      check → hub.release(id) → delete
  *   eraseParticipant   check (attached session, then each session the code occurs in) → erase
- *                      → hub.reloadActiveSession() when the code was in the attached session
+ *                      → hub.reloadActiveSession() when the code occurs in the attached session
  *   exportAudio        check → the session counts as busy while the export is written
  *   check              delete-audio, start-attribution: nothing around them
  *
@@ -39,7 +39,7 @@ export interface AttachedSessionSource {
   } | null;
   /** Detach the session if it is attached (connected players return to the waiting screen). */
   release(sessionId: string): void;
-  /** Reload the attached session from its (changed) event log. */
+  /** Reload the attached session from its (changed) event log; detaches it if that fails (never throws). */
   reloadActiveSession(): void;
 }
 
@@ -159,15 +159,18 @@ export class SessionGuard {
   /**
    * Erase a participant: refused while the code is in the running attached session, or while
    * any session it occurs in (`sessionsOf`, read only after that check) is busy. After the
-   * erasure the attached session is reloaded if the code was in it, running or not.
+   * erasure the attached session is reloaded if the code occurs in it (seated, or rebound
+   * away since), running or not.
    */
   eraseParticipant<T>(code: string, sessionsOf: () => readonly string[], erase: () => T): Verdict<T> {
     const active = this.deps.hub?.session ?? null;
-    const attached =
+    const seated =
       active != null && Object.values(active.state.seats).some((s) => s.participantCode === code);
-    if (attached && !sessionHasEnded(active.state.phase))
+    if (seated && !sessionHasEnded(active.state.phase))
       return refusal("running", active.sessionId, ERASE_RUNNING);
-    for (const sessionId of sessionsOf()) {
+    const sessions = sessionsOf();
+    const attached = active != null && (seated || sessions.includes(active.sessionId));
+    for (const sessionId of sessions) {
       const v = this.evaluate(ERASE_BUSY, sessionId);
       if (!v.ok) return { ...v, message: `${v.message} (session ${sessionId}): erase when it is done.` };
     }
