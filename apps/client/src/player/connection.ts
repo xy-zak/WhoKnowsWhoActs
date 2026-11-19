@@ -9,13 +9,14 @@ import type {
   TelemetryType,
 } from "@wkwa/shared";
 import { io } from "socket.io-client";
-import { MicRecorder } from "../audio";
+import { MicRecorder, type MicRecorderOptions } from "../audio";
 import { ClockSync } from "../net/clock";
+import { type Delivery, type DeliveryPolicy, SeatGate } from "../net/delivery";
 import { emitPlayer, type PlayerSocket } from "../net/socket";
+import { type KeyValueStore, safeStorage } from "../net/storage";
 import { Store } from "../net/store";
 import { Telemetry } from "../net/telemetry";
-import { IntentQueue } from "./intents";
-import { forgetTracked, RecordingController } from "./recording";
+import { forgetTracked, type RecorderLike, RecordingController } from "./recording";
 
 export interface PlayerConnState {
   connected: boolean;
@@ -30,29 +31,65 @@ export interface PlayerConnState {
   notice: string | null;
 }
 
-const TERMINAL_KEY = "wkwa.terminalKey";
-const SEAT_KEY = "wkwa.seat";
-/** One audio upload attempt: waiting for the seat plus the server's answer (the queue retries after). */
-const AUDIO_SEND_TIMEOUT_MS = 20_000;
-
-function terminalKey(): string {
-  try {
-    let k = localStorage.getItem(TERMINAL_KEY);
-    if (!k || !/^[0-9a-f]{32}$/.test(k)) {
-      const b = new Uint8Array(16);
-      crypto.getRandomValues(b);
-      k = Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
-      localStorage.setItem(TERMINAL_KEY, k);
-    }
-    return k;
-  } catch {
-    return "0".repeat(32);
-  }
+/** What the connection runs on: Socket.IO and the browser's storage in the app, fakes in tests. */
+export interface PlayerConnectionDeps {
+  /** The /player socket. The connection registers its listeners at once; Socket.IO connects by itself. */
+  socket: PlayerSocket;
+  /** localStorage: this browser's terminal key and seat token. */
+  local: KeyValueStore;
+  /** sessionStorage: the clientSeq counter and the telemetry backlog (this tab, survives a reload). */
+  session: KeyValueStore;
+  /** Builds the capture engine (MicRecorder). */
+  createRecorder(o: MicRecorderOptions): RecorderLike;
+  /** Registers `fn` for `pagehide` (the telemetry backlog is saved then). */
+  onPageHide?(fn: () => void): void;
 }
 
-function loadSeat(): { sessionId: string; seatToken: string } | null {
+/** The deps of the player app in the browser. */
+export function browserDeps(): PlayerConnectionDeps {
+  return {
+    socket: io("/player", { transports: ["websocket", "polling"] }),
+    local: safeStorage(() => localStorage),
+    session: safeStorage(() => sessionStorage),
+    createRecorder: (o) => new MicRecorder(o),
+    onPageHide: (fn) => window.addEventListener("pagehide", fn),
+  };
+}
+
+const TERMINAL_KEY = "wkwa.terminalKey";
+const SEAT_KEY = "wkwa.seat";
+const CLIENT_SEQ_KEY = "wkwa.clientSeq";
+
+/**
+ * How long an action may wait for the server's answer, reconnects included (ms). After this the
+ * player is told that it was not confirmed, and it is never sent again (the map shows whether an
+ * earlier send got through). Long enough for a reconnect, short enough for the player to act again.
+ */
+export const INTENT_DEADLINE_MS = 45_000;
+/** A request's default deadline: waiting for the seat plus the answer (ms). */
+const REQUEST_TIMEOUT_MS = 8000;
+/** One audio upload attempt: waiting for the seat plus the server's answer (the SendQueue retries after). */
+const AUDIO_SEND_TIMEOUT_MS = 20_000;
+/** One telemetry batch's answer (ms); an unanswered batch is kept and sent again. */
+const TELEMETRY_TIMEOUT_MS = 5000;
+
+/** How the seat of this socket changed (see seatChanged). */
+type SeatChange = "seated" | "disconnected" | "detached" | "released";
+
+function terminalKey(local: KeyValueStore): string {
+  let k = local.getItem(TERMINAL_KEY);
+  if (!k || !/^[0-9a-f]{32}$/.test(k)) {
+    const b = new Uint8Array(16);
+    crypto.getRandomValues(b);
+    k = Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
+    local.setItem(TERMINAL_KEY, k);
+  }
+  return k;
+}
+
+function loadSeat(local: KeyValueStore): { sessionId: string; seatToken: string } | null {
   try {
-    return JSON.parse(localStorage.getItem(SEAT_KEY) ?? "null");
+    return JSON.parse(local.getItem(SEAT_KEY) ?? "null");
   } catch {
     return null;
   }
@@ -88,7 +125,18 @@ function watchMicrophone(fn: () => void): () => void {
   };
 }
 
-/** Everything the player app needs to talk to the server. One instance per page. */
+/**
+ * Everything the player app needs to talk to the server. One instance per page.
+ *
+ * It owns the seat lifecycle (connect → `hello` → seated by hello's answer or `bound` → lost on
+ * a disconnect, `detached` or `unbound`; docs/NETWORKING.md) and every acknowledged message goes
+ * through one SeatGate, each sender with its delivery policy (net/delivery.ts):
+ *  - intent()        `resend`: never lost, never made twice (sent again after every re-seating);
+ *  - request()       `attempt`: once seated, one emit, the answer within the deadline;
+ *  - audio uploads   `attempt`: one try per call; the recorder's SendQueue backs off and retries;
+ *  - telemetry       `whileSeated`: a batch goes out only while seated, else it waits;
+ *  - clock:ping      `once`: no seat needed.
+ */
 export class PlayerConnection {
   readonly socket: PlayerSocket;
   readonly clock: ClockSync;
@@ -105,38 +153,44 @@ export class PlayerConnection {
     toast: null,
     notice: null,
   });
-  private clientSeq = Number(sessionStorage.getItem("wkwa.clientSeq") ?? Date.now());
+  private readonly local: KeyValueStore;
+  private readonly session: KeyValueStore;
+  private readonly gate: SeatGate;
+  private clientSeq: number;
   private toastTimer: ReturnType<typeof setTimeout> | null = null;
-  /** Actions not answered yet; resent after every reconnect (see intents.ts). */
-  private readonly intents = new IntentQueue({
-    send: (payload, ack) => this.socket.emit("intent", payload, ack),
-  });
-  /** Requests waiting for this browser to be seated on the current connection. */
-  private seatWaiters = new Set<() => void>();
 
-  constructor() {
-    this.socket = io("/player", { transports: ["websocket", "polling"] });
-    this.clock = new ClockSync(this.socket, (r) => this.track("clock_sync", r));
-    this.telemetry = new Telemetry(this.socket, this.clock);
-    this.recording = new RecordingController({
-      // Waits for the seat like every other request (an upload from a socket without one is only
-      // refused with "Not seated"); within one 20 s budget. An attempt the queue gave up on while
-      // waiting (`signal`) is never emitted, so a reconnect does not send the item twice.
-      send: async (event, payload, signal) => {
-        const deadline = Date.now() + AUDIO_SEND_TIMEOUT_MS;
-        try {
-          await this.whenSeated(AUDIO_SEND_TIMEOUT_MS, signal);
-        } catch {
-          return undefined;
-        }
-        if (signal?.aborted) return undefined;
-        return this.emitUntil(event, payload, deadline);
+  constructor(deps: PlayerConnectionDeps) {
+    this.socket = deps.socket;
+    this.local = deps.local;
+    this.session = deps.session;
+    this.clientSeq = Number(this.session.getItem(CLIENT_SEQ_KEY) ?? Date.now());
+    this.gate = new SeatGate((event, payload, ack) => emitPlayer(this.socket, event, payload, ack));
+    this.clock = new ClockSync(
+      async (payload, timeoutMs) => answer(await this.send("clock:ping", payload, "once", timeoutMs)),
+      (r) => this.track("clock_sync", r),
+    );
+    this.telemetry = new Telemetry({
+      send: async (batch) => {
+        const d = await this.send("telemetry", batch, "whileSeated", TELEMETRY_TIMEOUT_MS);
+        if (d.status === "unsent") return "unsent";
+        return d.status === "answered" && "stored" in d.ack ? "stored" : "failed";
       },
+      now: () => this.clock.now(),
+      clockOffsetMs: () => this.clock.offsetMs,
+      storage: this.session,
+      onPageHide: deps.onPageHide,
+    });
+    this.recording = new RecordingController({
+      // One attempt within one 20 s budget, waiting for the seat like every other request (an upload
+      // from a socket without one is only refused with "Not seated"). An attempt the queue gave up
+      // on while waiting (`signal`) is never emitted, so a reconnect does not send the item twice.
+      send: async (event, payload, signal) =>
+        answer(await this.send(event, payload, "attempt", AUDIO_SEND_TIMEOUT_MS, signal)),
       level: (p) => this.socket.volatile.emit("audio:level", p),
       now: () => this.clock.now(),
       clockOffsetMs: () => this.clock.offsetMs,
       permission: (p) => this.track("mic_permission", p),
-      createRecorder: (o) => new MicRecorder(o),
+      createRecorder: deps.createRecorder,
       watchDevices: watchMicrophone,
       queryPermission: micPermission,
     });
@@ -148,44 +202,33 @@ export class PlayerConnection {
       this.clock.start();
     });
     this.socket.on("disconnect", () => {
-      this.setSeated(false);
+      this.seatChanged("disconnected");
       this.store.set((s) => ({ ...s, connected: false }));
       this.clock.stop();
     });
     this.socket.on("rehello", () => this.hello());
     this.socket.on("terminal", (m) => this.store.set((s) => ({ ...s, terminal: m.terminal })));
     this.socket.on("bound", (m) => {
-      const prev = loadSeat();
-      if (prev?.sessionId !== m.sessionId) {
+      if (loadSeat(this.local)?.sessionId !== m.sessionId) {
         this.telemetry.clear();
         forgetTracked();
       }
-      try {
-        localStorage.setItem(SEAT_KEY, JSON.stringify({ sessionId: m.sessionId, seatToken: m.seatToken }));
-      } catch {}
+      this.local.setItem(SEAT_KEY, JSON.stringify({ sessionId: m.sessionId, seatToken: m.seatToken }));
       this.store.set((s) => ({ ...s, seat: m.seat, sessionId: m.sessionId, notice: null }));
       // the server sends `bound` once it has seated this socket (a binding, or a re-claim after hello)
-      this.setSeated(true);
+      this.seatChanged("seated");
     });
     this.socket.on("unbound", (m) => {
-      try {
-        localStorage.removeItem(SEAT_KEY);
-      } catch {}
-      this.telemetry.enabled = false;
-      this.telemetry.clear();
+      this.local.removeItem(SEAT_KEY);
       this.store.set((s) => ({ ...s, seat: null, sessionId: null, view: null, notice: m.reason }));
-      this.setSeated(false);
-      this.intents.failAll("Your seat was released, so the action was not made");
-      this.recording.onUnbound();
+      this.seatChanged("released");
     });
     // The session was detached on the server (switched, reloaded after an erasure, deleted): the
     // seat token is KEPT, so `rehello` re-claims the seat when the session is attached again.
     // Unanswered actions stay queued until then (or their deadline).
     this.socket.on("detached", (m) => {
-      this.telemetry.enabled = false;
       this.store.set((s) => ({ ...s, seat: null, view: null, notice: m.reason }));
-      this.setSeated(false);
-      this.recording.onDetached();
+      this.seatChanged("detached");
     });
     this.socket.on("state", (v) => {
       // Telemetry only after consent (mirrors the server-side rule).
@@ -197,56 +240,62 @@ export class PlayerConnection {
   }
 
   private hello() {
-    const seat = loadSeat();
-    this.socket.emit("hello", { terminalKey: terminalKey(), seatToken: seat?.seatToken ?? null }, (a) => {
+    const seat = loadSeat(this.local);
+    const msg = { terminalKey: terminalKey(this.local), seatToken: seat?.seatToken ?? null };
+    this.socket.emit("hello", msg, (a) => {
       if (!a.ok) return;
       this.store.set((s) => ({ ...s, terminal: a.terminal }));
-      // seated again (a reload, reconnect or server restart): actions still unanswered are resent
-      if (a.seat !== null) this.setSeated(true);
+      // seated again (a reload, reconnect or server restart): what waits for the seat goes out now
+      if (a.seat !== null) this.seatChanged("seated");
     });
   }
 
-  private setSeated(seated: boolean) {
+  /** The one place a change of the seat reaches the parts that depend on it. */
+  private seatChanged(change: SeatChange) {
+    const seated = change === "seated";
     if (this.store.get().seated !== seated) this.store.set((s) => ({ ...s, seated }));
-    // unanswered actions are resent once on becoming seated (hello's answer and `bound` both report it)
-    this.intents.setSeated(seated);
-    if (!seated) return;
-    for (const wake of this.seatWaiters) wake();
-    this.seatWaiters.clear();
+    if (change === "released") this.gate.release();
+    else this.gate.setSeated(seated);
+    if (change === "detached" || change === "released") this.telemetry.enabled = false;
+    if (change === "detached") this.recording.onDetached();
+    if (change === "released") {
+      this.telemetry.clear();
+      this.recording.onUnbound();
+    }
   }
 
-  /** Resolves once this socket is seated (at once if it is); rejects after `timeoutMs` or on `signal`. */
-  private whenSeated(timeoutMs: number, signal?: AbortSignal): Promise<void> {
-    if (this.store.get().seated) return Promise.resolve();
-    return new Promise((resolve, reject) => {
-      const cleanUp = () => {
-        clearTimeout(t);
-        this.seatWaiters.delete(wake);
-        signal?.removeEventListener("abort", onAbort);
-      };
-      const stop = (msg: string) => {
-        cleanUp();
-        reject(new Error(msg));
-      };
-      const onAbort = () => stop("Cancelled");
-      const wake = () => {
-        cleanUp();
-        resolve();
-      };
-      const t = setTimeout(() => stop("Not connected to the server — check the connection"), timeoutMs);
-      this.seatWaiters.add(wake);
-      signal?.addEventListener("abort", onAbort, { once: true });
-    });
+  /** Sends through the seat gate with `policy` (see net/delivery.ts). */
+  private send<K extends PlayerRequest>(
+    event: K,
+    payload: PlayerPayload<K>,
+    policy: DeliveryPolicy,
+    timeoutMs: number,
+    signal?: AbortSignal,
+  ): Promise<Delivery<PlayerAcks[K]>> {
+    return this.gate.send(event, payload, policy, { timeoutMs, signal });
   }
 
-  /** Propose or decide; resolves with the server's answer (see IntentQueue: never lost, never made twice). */
-  intent(kind: ActionKind, regionId: string): Promise<IntentAck> {
-    return this.intents.submit({
-      clientSeq: this.nextClientSeq(),
-      kind,
-      regionId,
-      clientTs: this.clock.now(),
-    });
+  /**
+   * Propose or decide; resolves with the server's answer (accepted, or rejected by the rules).
+   *
+   * The action keeps its clientSeq and click time until it is answered: it waits for the seat and
+   * is sent again, unchanged, every time the socket is seated again (and after a refusal with
+   * `retry`). The server stores an action once and repeats its first answer to a resend
+   * (SessionManager.intent), so an action is never lost and never made twice. Rejects on a
+   * permanent refusal, when the seat is released, or after INTENT_DEADLINE_MS.
+   */
+  async intent(kind: ActionKind, regionId: string): Promise<IntentAck> {
+    const payload = { clientSeq: this.nextClientSeq(), kind, regionId, clientTs: this.clock.now() };
+    const d = await this.send("intent", payload, "resend", INTENT_DEADLINE_MS);
+    switch (d.status) {
+      case "answered":
+        if ("error" in d.ack) throw new Error(d.ack.error);
+        return d.ack;
+      case "released":
+        throw new Error("Your seat was released, so the action was not made");
+      default:
+        throw new Error("The server did not confirm this action — check the map before trying again");
+    }
   }
 
   track<T extends TelemetryType>(type: T, payload: TelemetryPayloadOf<T>) {
@@ -270,37 +319,31 @@ export class PlayerConnection {
   async request<K extends PlayerRequest>(
     event: K,
     payload: PlayerPayload<K>,
-    timeoutMs = 8000,
+    timeoutMs = REQUEST_TIMEOUT_MS,
   ): Promise<PlayerAcks[K]> {
-    const deadline = Date.now() + timeoutMs;
-    await this.whenSeated(timeoutMs);
-    const ack = await this.emitUntil(event, payload, deadline);
-    if (ack === undefined) throw new Error("The server did not respond — check the connection");
+    const d = await this.send(event, payload, "attempt", timeoutMs);
+    if (d.status === "released") throw new Error("Your seat was released");
+    if (d.status !== "answered") {
+      throw new Error(
+        d.status === "timeout" && d.sent
+          ? "The server did not respond — check the connection"
+          : "Not connected to the server — check the connection",
+      );
+    }
+    const ack = d.ack;
     if (typeof ack === "object" && ack && "ok" in ack && ack.ok === false && "error" in ack)
       throw new Error(ack.error);
     return ack;
   }
 
-  /** Emit and wait for the answer until `deadline` (epoch ms); undefined when none came by then. */
-  private emitUntil<K extends PlayerRequest>(
-    event: K,
-    payload: PlayerPayload<K>,
-    deadline: number,
-  ): Promise<PlayerAcks[K] | undefined> {
-    return new Promise((resolve) => {
-      const t = setTimeout(() => resolve(undefined), Math.max(0, deadline - Date.now()));
-      emitPlayer(this.socket, event, payload, (ack) => {
-        clearTimeout(t);
-        resolve(ack);
-      });
-    });
-  }
-
   nextClientSeq(): number {
     this.clientSeq += 1;
-    try {
-      sessionStorage.setItem("wkwa.clientSeq", String(this.clientSeq));
-    } catch {}
+    this.session.setItem(CLIENT_SEQ_KEY, String(this.clientSeq));
     return this.clientSeq;
   }
+}
+
+/** The server's answer, or undefined when there was none (not sent, no answer in time, cancelled). */
+function answer<A>(d: Delivery<A>): A | undefined {
+  return d.status === "answered" ? d.ack : undefined;
 }
