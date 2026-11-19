@@ -3,6 +3,7 @@ import {
   type DashboardMsg,
   DISSOCIATED_PAIRINGS,
   fakeSeats,
+  isFinalPhase,
   isOnboardingComplete,
   isSimulated,
   K_LABELS,
@@ -617,7 +618,7 @@ export function SeatsPanel({
   const seats = seatList(st);
   const pLim = quotaLimit(st, "propose");
   const dLim = quotaLimit(st, "decide");
-  const final = ["closed", "aborted"].includes(st.phase);
+  const final = isFinalPhase(st.phase);
   const simulated = isSimulated(st);
   const audio = st.audio.enabled;
   // the server's clock now, for the age of the last stored chunk (the dashboard carries serverTs)

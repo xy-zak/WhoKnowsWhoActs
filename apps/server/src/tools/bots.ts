@@ -25,6 +25,7 @@
  */
 import https from "node:https";
 import { parseArgs } from "node:util";
+import { isFinalPhase } from "@wkwa/shared";
 import { Bot, FacilitatorClient, tlsClientOpts } from "./botClient";
 
 const { values } = parseArgs({
@@ -106,7 +107,7 @@ async function autoFacilitate() {
       const d = fac.dashboard;
       if (!d) return;
       const st = d.state;
-      if (!st || ["closed", "aborted"].includes(st.phase)) {
+      if (!st || isFinalPhase(st.phase)) {
         if (!st) {
           const r = await fac.cmd("session:create", {
             scenarioId: "demo",

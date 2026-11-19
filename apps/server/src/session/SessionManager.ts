@@ -21,6 +21,7 @@ import {
   getPolicy,
   type IntentAck,
   initialState,
+  isFinalPhase,
   isMicCheckHeld,
   isOnboardingComplete,
   isSimulated,
@@ -90,8 +91,6 @@ export interface SessionDeps {
 }
 
 type LabelAssignment = { seat: number; k: KLabel; view?: string };
-
-const FINAL_PHASES = new Set(["closed", "aborted"]);
 
 /**
  * Answers to recent intents kept per seat. A browser resends only the intents it has no answer
@@ -351,7 +350,7 @@ export class SessionManager {
   }
 
   get isFinal(): boolean {
-    return FINAL_PHASES.has(this.state.phase);
+    return isFinalPhase(this.state.phase);
   }
 
   /* ═════════════════════════ internals ═════════════════════════ */

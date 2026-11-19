@@ -2,7 +2,7 @@
  * The session guard: the one rule for "may this operation change this session's stored data now?".
  *
  * A session's stored data may not change while
- *   - it is RUNNING: attached to the hub and not ended (see `sessionHasEnded`), or
+ *   - it is RUNNING: attached to the hub and not ended (see `hasEnded`), or
  *   - it is BUSY: an attribution job of it is queued or running, or an audio export of it is
  *     being written (the export reads files that a deletion or a re-run would remove).
  *
@@ -20,13 +20,7 @@
  * guard itself keeps the exports in progress. It has no other state.
  */
 
-/** Phases after which a session takes no more game actions (the session row's `status` is its phase). */
-const ENDED_PHASES: ReadonlySet<string> = new Set(["game_complete", "closed", "aborted"]);
-
-/** Whether a session in this phase has ended (also true for `game_complete`, which is not yet final). */
-export function sessionHasEnded(phase: string): boolean {
-  return ENDED_PHASES.has(phase);
-}
+import { hasEnded } from "@wkwa/shared";
 
 /** What the guard needs from the hub (the Hub fits as it is). */
 export interface AttachedSessionSource {
@@ -140,7 +134,7 @@ export class SessionGuard {
   /** Whether the session is attached and has not ended. */
   running(sessionId: string): boolean {
     const s = this.deps.hub?.session;
-    return Boolean(s && s.sessionId === sessionId && !sessionHasEnded(s.state.phase));
+    return Boolean(s && s.sessionId === sessionId && !hasEnded(s.state.phase));
   }
 
   /** May this operation change the session now? */
@@ -166,8 +160,7 @@ export class SessionGuard {
     const active = this.deps.hub?.session ?? null;
     const seated =
       active != null && Object.values(active.state.seats).some((s) => s.participantCode === code);
-    if (seated && !sessionHasEnded(active.state.phase))
-      return refusal("running", active.sessionId, ERASE_RUNNING);
+    if (seated && !hasEnded(active.state.phase)) return refusal("running", active.sessionId, ERASE_RUNNING);
     const sessions = sessionsOf();
     const attached = active != null && (seated || sessions.includes(active.sessionId));
     for (const sessionId of sessions) {
