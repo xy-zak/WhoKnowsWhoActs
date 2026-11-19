@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { type Browser, type Locator, type Page, test } from "@playwright/test";
+import { type Browser, expect, type Locator, type Page, test } from "@playwright/test";
 import { allShots, type ScenarioName, type ShotId, scenarioOf, shotById } from "./catalogue";
 import { IMG_DIR, latest, readManifest, STAGING_DIR } from "./manifest";
 
@@ -93,6 +93,19 @@ async function done(page: Page) {
 /** Show tooltips again (they are hidden after every capture), e.g. before checking one is visible. */
 export const showTips = (page: Page) =>
   page.evaluate(() => document.documentElement.classList.remove("shot-no-tip"));
+
+/**
+ * Hover an element until its tooltip (data-tip) shows. Scrolls first and lets
+ * the scroll settle: the tooltip layer hides on every scroll.
+ */
+export async function hoverTip(page: Page, target: Locator) {
+  await target.scrollIntoViewIfNeeded();
+  await page.mouse.move(SCREEN.width / 2, 1);
+  await page.waitForTimeout(150);
+  await target.hover({ force: true });
+  await showTips(page);
+  await expect(page.locator(".tooltip")).toBeVisible();
+}
 
 /** The whole screen, as the person in front of it sees it. */
 export async function snap(page: Page, file: string, o: ShotOpts = {}) {

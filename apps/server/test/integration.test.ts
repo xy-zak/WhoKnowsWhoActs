@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { Bot } from "../src/tools/botClient";
+import { Bot, FacilitatorClient } from "../src/tools/botClient";
 import { cleanup, setupSession, startTestServer, type TestServer } from "./harness";
 
 describe("full game with 4 bot players (default rules: 3 rounds × 5 propose + 5 decide)", () => {
@@ -23,8 +23,7 @@ describe("full game with 4 bot players (default rules: 3 rounds × 5 propose + 5
   }, 60_000);
 
   afterAll(async () => {
-    for (const b of result?.bots ?? []) b.stop();
-    result?.fac.close();
+    result?.stop();
     await srv?.close();
     cleanup(srv.dir);
   });
@@ -98,12 +97,15 @@ describe("full game with 4 bot players (default rules: 3 rounds × 5 propose + 5
   it("writes no client IP addresses, user agents or query strings to the server log", async () => {
     await fetch(`${srv.url}/api/health?secret=querystring-value`, { headers: { "user-agent": "UA-MARKER" } });
     await fetch(`${srv.url}/api/sessions`);
-    await new Promise((r) => setTimeout(r, 200)); // pino writes asynchronously
-    const lines = readFileSync(path.join(srv.runtime.dataDir, "logs", "server.log"), "utf8")
-      .split("\n")
-      .filter((l) => l && !l.includes("Server listening at")); // the server's own bind address
-    const requestLines = lines.filter((l) => l.includes('"req"'));
-    expect(requestLines.length).toBeGreaterThan(0);
+    // pino writes asynchronously: wait for both requests in the log
+    const lines = await vi.waitFor(() => {
+      const all = readFileSync(path.join(srv.runtime.dataDir, "logs", "server.log"), "utf8")
+        .split("\n")
+        .filter((l) => l && !l.includes("Server listening at")); // the server's own bind address
+      expect(all.filter((l) => l.includes('"req"') && l.includes("/api/sessions")).length).toBeGreaterThan(0);
+      expect(all.filter((l) => l.includes('"req"') && l.includes("/api/health")).length).toBeGreaterThan(0);
+      return all;
+    });
     const text = lines.join("\n");
     expect(text).not.toMatch(
       /127\.0\.0\.1|::1|remoteAddress|remotePort|hostname|UA-MARKER|querystring-value/i,
@@ -122,7 +124,7 @@ describe("robustness", () => {
   });
 
   it("deduplicates resent intents, auto-pauses on disconnect and keeps the seat on reconnect", async () => {
-    const { fac, bots, sessionId } = await setupSession(srv.url, {}, 4, { autoPlay: false });
+    const { fac, bots, sessionId, stop } = await setupSession(srv.url, {}, 4, { autoPlay: false });
     await fac.cmd("round:start");
     const b = bots[1]!;
     await b.waitFor((v) => v.phase === "round_active");
@@ -164,17 +166,15 @@ describe("robustness", () => {
     await fac.cmd("action:revoke", { seq, reason: "test" });
     const v = await b.waitFor((x) => x.me.quota.propose.used === 0);
     expect(v.highlights.find((h) => h.seq === seq)).toBeUndefined();
-
-    for (const x of bots) x.stop();
-    fac.close();
+    stop();
   });
 
-  it("answers a resend after a restart with the original answer (ack cache rebuilt from the log)", async () => {
+  it("resumes from the event log after a restart; a resend gets the original answer (ack cache rebuilt)", async () => {
     // a server of its own: it is restarted on the same data folder
     const own = await startTestServer();
     let srv2: TestServer | null = null;
     try {
-      const { fac, bots, sessionId } = await setupSession(own.url, {}, 4, { autoPlay: false });
+      const { fac, bots, sessionId, stop } = await setupSession(own.url, {}, 4, { autoPlay: false });
       await fac.cmd("round:start");
       const b = bots[2]!;
       await b.waitFor((v) => v.phase === "round_active");
@@ -186,13 +186,16 @@ describe("robustness", () => {
       expect(first).toMatchObject({ ok: true });
       expect(rejected).toMatchObject({ ok: false, reason: "unknown_region" });
       const { seat, seatToken } = b;
-      for (const x of bots) x.stop();
-      fac.close();
+      const codes = Object.values(own.ctx.hub.session!.state.seats).map((s) => s.participantCode);
+      stop();
 
       // restart: the session is rebuilt from its log; the browser comes back with its seat token
       await own.close();
       srv2 = await startTestServer({}, own.dir);
       expect(srv2.ctx.hub.session?.sessionId).toBe(sessionId);
+      const st = srv2.ctx.hub.session!.state;
+      expect(st.phase).toBe("round_active");
+      expect(Object.values(st.seats).map((s) => s.participantCode)).toEqual(codes);
       const back = new Bot({ url: srv2.url, autoPlay: false, seatToken, terminalKey: b.terminalKey });
       await vi.waitFor(() => expect(back.seat).toBe(seat), { timeout: 5000 });
       expect(await back.emit("intent", ok)).toEqual({ ...first, duplicate: true });
@@ -208,7 +211,7 @@ describe("robustness", () => {
   });
 
   it("keeps seats across a session switch and an erasure reload: browsers re-claim them with their token", async () => {
-    const { fac, bots, sessionId } = await setupSession(srv.url, {}, 4, { autoPlay: false });
+    const { fac, bots, sessionId, stop } = await setupSession(srv.url, {}, 4, { autoPlay: false });
     const tokens = bots.map((b) => b.seatToken);
     expect(tokens.every((t) => typeof t === "string")).toBe(true);
 
@@ -227,13 +230,11 @@ describe("robustness", () => {
     expect(bots.map((b) => b.seatToken)).toEqual(tokens);
     await fac.cmd("round:start");
     await Promise.all(bots.map((b) => b.waitFor((v) => v.phase === "round_active")));
-
-    for (const x of bots) x.stop();
-    fac.close();
+    stop();
   });
 
   it("refuses a request from a socket that holds no seat as transient (retry), so it is sent again", async () => {
-    const { fac, bots } = await setupSession(srv.url, {}, 4, { autoPlay: false });
+    const { stop } = await setupSession(srv.url, {}, 4, { autoPlay: false });
     const stranger = new Bot({ url: srv.url, autoPlay: false });
     await stranger.waitForTerminal();
     const ack = await stranger.emit("intent", {
@@ -244,26 +245,7 @@ describe("robustness", () => {
     });
     expect(ack).toEqual({ ok: false, error: "Not seated", retry: true });
     stranger.stop();
-    for (const x of bots) x.stop();
-    fac.close();
-  });
-
-  it("resumes a session from the event log after a restart", async () => {
-    const { fac, bots, sessionId } = await setupSession(srv.url, {}, 4, { autoPlay: false });
-    await fac.cmd("round:start");
-    const before = srv.ctx.hub.session!.state;
-    const snapshot = JSON.parse(JSON.stringify(before));
-    for (const x of bots) x.stop();
-    fac.close();
-    srv.ctx.hub.resumeSession(sessionId);
-    const after = srv.ctx.hub.session!.state;
-    expect(after.phase).toBe("round_active");
-    expect(after.lastSeq).toBeGreaterThanOrEqual(snapshot.lastSeq);
-    expect(Object.values(after.seats).map((s) => s.participantCode)).toEqual(
-      Object.values(snapshot.seats as Record<string, { participantCode: string }>).map(
-        (s) => s.participantCode,
-      ),
-    );
+    stop();
   });
 });
 
@@ -278,7 +260,6 @@ describe("label pairings", () => {
   });
 
   it("derives P from the pairing; dissociated without a number picks D1–D6 and logs it", async () => {
-    const { FacilitatorClient, Bot } = await import("../src/tools/botClient");
     const fac = new FacilitatorClient(srv.url);
     await fac.connected();
     await fac.cmd("session:create", { scenarioId: "demo", config: {}, notes: "" });

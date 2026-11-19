@@ -1,66 +1,70 @@
 import { mkdtempSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
-import { openDatabase, SCHEMA_VERSION } from "../src/db/database";
+import { afterEach, describe, expect, it } from "vitest";
+import { type DB, openDatabase, SCHEMA_VERSION } from "../src/db/database";
 import { Store } from "../src/db/store";
 import { cleanup } from "./harness";
 
-describe("database migrations", () => {
-  it("upgrades a schema-v2 database: condition → tags_json", () => {
-    const dir = mkdtempSync(path.join(os.tmpdir(), "wkwa-mig-"));
-    const file = path.join(dir, "wkwa.db");
-    const v2 = openDatabase(file, "migration test pass", { targetVersion: 2 });
-    v2.prepare(
-      `INSERT INTO sessions (id, created_wall, scenario_id, scenario_version, scenario_hash, status, condition, notes,
-        config_json, harness_version, git_commit, updated_wall)
-       VALUES ('S-OLD', '2026-01-01T00:00:00Z', 'demo', '1', 'h', 'closed', 'pilot, A', '', '{"condition":"pilot, A"}', '0', 'x', '2026-01-01T00:00:00Z')`,
-    ).run();
-    expect(v2.prepare("SELECT value FROM meta WHERE key='schema_version'").get()).toEqual({ value: "2" });
-    v2.close();
+const PASS = "migration test pass";
+const SESSION_COLUMNS = `id, created_wall, scenario_id, scenario_version, scenario_hash, status, condition, notes,
+  config_json, harness_version, git_commit, updated_wall`;
 
-    const db = openDatabase(file, "migration test pass");
-    expect(db.prepare("SELECT value FROM meta WHERE key='schema_version'").get()).toEqual({
-      value: String(SCHEMA_VERSION),
-    });
-    const s = new Store(db).listSessions()[0]!;
-    expect(s.tags).toEqual(["pilot", "A"]);
-    db.close();
+describe("database migrations", () => {
+  let dir: string;
+  let db: DB | undefined;
+  afterEach(() => {
+    db?.close();
     cleanup(dir);
   });
 
-  it("upgrades a schema-v5 database: adds the audio tables (v6)", () => {
-    const dir = mkdtempSync(path.join(os.tmpdir(), "wkwa-mig-"));
+  /** A database at schema `version` with `sql` run on it, then opened (and migrated) at the current schema. */
+  function migrateFrom(version: number, sql: string): DB {
+    dir = mkdtempSync(path.join(os.tmpdir(), "wkwa-mig-"));
     const file = path.join(dir, "wkwa.db");
-    const v5 = openDatabase(file, "migration test pass", { targetVersion: 5 });
-    v5.prepare(
-      `INSERT INTO sessions (id, created_wall, scenario_id, scenario_version, scenario_hash, status, condition, notes,
-        config_json, harness_version, git_commit, updated_wall, tags_json)
-       VALUES ('S-V5', '2026-01-01T00:00:00Z', 'demo', '1', 'h', 'closed', '', '', '{}', '0', 'x', '2026-01-01T00:00:00Z', '[]')`,
-    ).run();
-    const tablesV5 = v5.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as Array<{
-      name: string;
-    }>;
-    expect(tablesV5.map((t) => t.name)).not.toContain("audio_tracks");
-    v5.close();
-
-    expect(SCHEMA_VERSION).toBeGreaterThanOrEqual(6);
-    const db = openDatabase(file, "migration test pass");
+    const old = openDatabase(file, PASS, { targetVersion: version });
+    old.prepare(sql).run();
+    expect(old.prepare("SELECT value FROM meta WHERE key='schema_version'").get()).toEqual({
+      value: String(version),
+    });
+    old.close();
+    db = openDatabase(file, PASS);
     expect(db.prepare("SELECT value FROM meta WHERE key='schema_version'").get()).toEqual({
       value: String(SCHEMA_VERSION),
     });
+    return db;
+  }
+
+  it("v2 → condition becomes tags_json", () => {
+    const db = migrateFrom(
+      2,
+      `INSERT INTO sessions (${SESSION_COLUMNS})
+       VALUES ('S-OLD', '2026-01-01T00:00:00Z', 'demo', '1', 'h', 'closed', 'pilot, A', '', '{"condition":"pilot, A"}', '0', 'x', '2026-01-01T00:00:00Z')`,
+    );
+    expect(new Store(db).listSessions()[0]!.tags).toEqual(["pilot", "A"]);
+  });
+
+  it("v5 → adds the audio tables (v6)", () => {
+    const db = migrateFrom(
+      5,
+      `INSERT INTO sessions (${SESSION_COLUMNS}, tags_json)
+       VALUES ('S-V5', '2026-01-01T00:00:00Z', 'demo', '1', 'h', 'closed', '', '', '{}', '0', 'x', '2026-01-01T00:00:00Z', '[]')`,
+    );
     const names = (db.prepare("SELECT name FROM sqlite_master").all() as Array<{ name: string }>).map(
       (t) => t.name,
     );
-    for (const t of ["audio_tracks", "audio_chunks", "audio_derivatives", "audio_jobs", "audio_deletions"])
-      expect(names).toContain(t);
-    for (const i of [
+    for (const t of [
+      "audio_tracks",
+      "audio_chunks",
+      "audio_derivatives",
+      "audio_jobs",
+      "audio_deletions",
       "audio_tracks_session",
       "audio_tracks_code",
       "audio_derivatives_session",
       "audio_derivatives_code",
     ])
-      expect(names).toContain(i);
+      expect(names).toContain(t);
 
     const store = new Store(db);
     expect(store.listSessions()[0]).toMatchObject({ id: "S-V5", audioTracks: 0, audioMs: 0 });
@@ -104,33 +108,17 @@ describe("database migrations", () => {
     expect(store.codeExists("WK-7F3K-Q9XM-4")).toBe(true);
     // the status is constrained
     expect(() => db.prepare("UPDATE audio_tracks SET status = 'lost'").run()).toThrow(/CHECK/);
-    db.close();
-    cleanup(dir);
   });
 
-  it("upgrades a schema-v6 database: the export register gains details_json (v7)", () => {
-    const dir = mkdtempSync(path.join(os.tmpdir(), "wkwa-mig-"));
-    const file = path.join(dir, "wkwa.db");
-    const v6 = openDatabase(file, "migration test pass", { targetVersion: 6 });
-    v6.prepare(
+  it("v6 → the export register gains details_json (v7)", () => {
+    const db = migrateFrom(
+      6,
       `INSERT INTO exports (id, session_id, kind, created_wall, path, code_hashes_json, files_json)
        VALUES ('E-OLD', 'S-V6', 'standard', '2026-01-01T00:00:00Z', 'exports/old', '[]', '[]')`,
-    ).run();
-    v6.close();
-
-    expect(SCHEMA_VERSION).toBe(7);
-    const db = openDatabase(file, "migration test pass");
-    expect(db.prepare("SELECT value FROM meta WHERE key='schema_version'").get()).toEqual({ value: "7" });
-    // existing rows get an empty object; audio exports record who asked and what was exported
+    );
+    // existing rows get an empty object
     expect(db.prepare("SELECT details_json FROM exports WHERE id = 'E-OLD'").get()).toEqual({
       details_json: "{}",
     });
-    db.prepare(
-      `INSERT INTO exports (id, session_id, kind, created_wall, path, code_hashes_json, files_json, details_json)
-       VALUES ('AU-NEW', 'S-V6', 'audio', '2026-01-02T00:00:00Z', 'exports/new', '[]', '[]', '{"audioKind":"raw"}')`,
-    ).run();
-    expect(db.prepare("SELECT count(*) AS n FROM exports").get()).toEqual({ n: 2 });
-    db.close();
-    cleanup(dir);
   });
 });

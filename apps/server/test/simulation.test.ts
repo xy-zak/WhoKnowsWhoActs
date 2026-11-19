@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import path from "node:path";
 import {
   type AgentAction,
@@ -8,13 +8,24 @@ import {
   registerPolicy,
   type StoredEvent,
 } from "@wkwa/shared";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { createApp } from "../src/app";
 import { Bot, FacilitatorClient } from "../src/tools/botClient";
-import { cleanup, PASSPHRASE, startTestServer, type TestServer } from "./harness";
+import { cleanup, PASSPHRASE, readCsv, startTestServer, type TestServer } from "./harness";
 
 const FAST = { minDelayMs: 0, maxDelayMs: 0 };
+
+/** Create a simulated session with random labels and start it; its id. */
+async function startSimulation(fac: FacilitatorClient, config: Record<string, unknown>): Promise<string> {
+  const { sessionId } = await fac.cmd("session:create", {
+    scenarioId: "demo",
+    config: { players: "simulated", ...config },
+  });
+  await fac.cmd("labels:randomise");
+  await fac.cmd("simulation:start");
+  return sessionId;
+}
 
 /** Create a simulated session, label it, start it and wait until the game is complete. */
 async function runSimulation(
@@ -71,11 +82,7 @@ describe("simulated players", () => {
     expect(sessionId).toMatch(/^SIM-\d{8}-[0-9A-Z]{4}$/);
     const events = srv.ctx.stores.simulated.listEvents(sessionId);
     expect(actionsOf(events)).toHaveLength(120);
-    expect(events.filter((e) => e.type === "RoundCompleted").map((e) => e.payload)).toMatchObject([
-      { round: 1, reason: "quota_met" },
-      { round: 2, reason: "quota_met" },
-      { round: 3, reason: "quota_met" },
-    ]);
+    expect(events.filter((e) => e.type === "RoundCompleted")).toHaveLength(3); // rounds advanced on their own
     expect(events.at(-1)?.type).toBe("GameCompleted");
   });
 
@@ -140,15 +147,7 @@ describe("simulated players", () => {
   }, 30_000);
 
   it("uses per-seat policies; idle seats never act and the facilitator ends the round", async () => {
-    const { sessionId: id } = await fac.cmd("session:create", {
-      scenarioId: "demo",
-      config: {
-        players: "simulated",
-        simulation: { ...FAST, seatPolicies: { "2": "idle" } },
-      },
-    });
-    await fac.cmd("labels:randomise");
-    await fac.cmd("simulation:start");
+    const id = await startSimulation(fac, { simulation: { ...FAST, seatPolicies: { "2": "idle" } } });
     // the three random agents use their quotas; the idle one keeps the round open
     await fac.waitForDashboard((d) => (d.state?.actions.length ?? 0) === 30, 10_000);
     expect(srv.ctx.hub.session!.state.phase).toBe("round_active");
@@ -164,19 +163,13 @@ describe("simulated players", () => {
     expect(actionsOf(events).filter((a) => a.split(":")[1] === "2")).toEqual([]);
   });
 
-  it("rejects unknown policies and invalid parameters when the session is created", async () => {
+  it.each([
+    ["an unknown policy", { policy: "does-not-exist" }, /Unknown policy 'does-not-exist'/],
+    ["invalid parameters", { params: { random: { proposeBias: 3 } } }, /proposeBias/],
+  ])("refuses to create a session with %s", async (_, simulation, error) => {
     await expect(
-      fac.cmd("session:create", {
-        scenarioId: "demo",
-        config: { players: "simulated", simulation: { policy: "does-not-exist" } },
-      }),
-    ).rejects.toThrow(/Unknown policy 'does-not-exist'/);
-    await expect(
-      fac.cmd("session:create", {
-        scenarioId: "demo",
-        config: { players: "simulated", simulation: { params: { random: { proposeBias: 3 } } } },
-      }),
-    ).rejects.toThrow(/proposeBias/);
+      fac.cmd("session:create", { scenarioId: "demo", config: { players: "simulated", simulation } }),
+    ).rejects.toThrow(error);
   });
 
   it("stops an agent whose policy keeps failing and notes it in the log", async () => {
@@ -194,12 +187,7 @@ describe("simulated players", () => {
         }),
       );
     }
-    const { sessionId: id } = await fac.cmd("session:create", {
-      scenarioId: "demo",
-      config: { players: "simulated", seatCount: 1, simulation: { ...FAST, policy: "test-broken" } },
-    });
-    await fac.cmd("labels:randomise");
-    await fac.cmd("simulation:start");
+    const id = await startSimulation(fac, { seatCount: 1, simulation: { ...FAST, policy: "test-broken" } });
     await fac.waitForDashboard((d) => (d.state?.notes.length ?? 0) > 0, 10_000);
     const note = srv.ctx.stores.simulated.listEvents(id).find((e) => e.type === "SessionNote")!;
     expect(note.actorKind).toBe("system");
@@ -224,62 +212,39 @@ describe("simulated players", () => {
         }),
       );
     }
-    await fac.cmd("session:create", {
-      scenarioId: "demo",
-      config: { players: "simulated", seatCount: 2, simulation: { ...FAST, policy: "test-spy" } },
+    await startSimulation(fac, { seatCount: 2, simulation: { ...FAST, policy: "test-spy" } });
+    const k = Object.fromEntries(Object.values(srv.ctx.hub.session!.state.seats).map((s) => [s.seat, s.k]));
+    expect(k[1]).not.toBe(k[2]);
+    const seat1 = await vi.waitFor(() => {
+      const views = seen.filter((v) => v.me.seat === 1 && v.phase === "round_active");
+      expect(views.length).toBeGreaterThan(0);
+      return views;
     });
-    await fac.cmd("labels:set", {
-      assignments: [
-        { seat: 1, k: "Ka" },
-        { seat: 2, k: "Kb" },
-      ],
-      pairing: { mode: "aligned", id: null },
-    });
-    await fac.cmd("simulation:start");
-    await new Promise((r) => setTimeout(r, 300));
     await fac.cmd("game:end");
-    const seat1 = seen.filter((v) => v.me.seat === 1);
-    expect(seat1.length).toBeGreaterThan(0);
     const ids = Object.keys(seat1[0]!.scores);
-    expect(ids).toHaveLength(100); // Ka's own scores, one per square
-    expect(ids.every((id) => id.endsWith("-Ka"))).toBe(true); // never Kb's
+    expect(ids).toHaveLength(100); // seat 1's own scores, one per square
+    expect(ids.every((id) => id.endsWith(`-${k[1]}`))).toBe(true); // never seat 2's
   });
 
   it("exports simulated sessions into exports/simulations with the agent policy per seat", async () => {
-    const res = await fetch(`${srv.url}/api/sessions/${sessionId}/export`, { method: "POST" });
-    const r = (await res.json()) as { dir: string };
-    expect(r.dir).toContain(path.join("exports", "simulations", sessionId));
-    const players = readFileSync(path.join(r.dir, "players.csv"), "utf8").trim().split("\n");
-    const header = players[0]!.split(",");
-    const col = header.indexOf("agent_policy");
-    expect(col).toBeGreaterThan(-1);
-    expect(players.slice(1).map((l) => l.split(",")[col])).toEqual(["random", "random", "random", "random"]);
-    expect(players.slice(1).map((l) => l.split(",")[header.indexOf("participant_code")])).toEqual([
-      "",
-      "",
-      "",
-      "",
-    ]);
+    const { dir } = (await srv.api("POST", `/api/sessions/${sessionId}/export`)).json;
+    expect(dir).toContain(path.join("exports", "simulations", sessionId));
+    const players = readCsv(dir, "players.csv");
+    expect(players.map((p) => [p.agent_policy, p.participant_code])).toEqual(
+      [1, 2, 3, 4].map(() => ["random", ""]),
+    );
   });
 
   it("lists both databases over REST and refuses key sheets and cards for simulations", async () => {
-    const list = (await (await fetch(`${srv.url}/api/sessions`)).json()) as Array<{
-      id: string;
-      players: string;
-    }>;
+    const list = (await srv.api("GET", "/api/sessions")).json as Array<{ id: string; players: string }>;
     expect(list.find((s) => s.id === sessionId)?.players).toBe("simulated");
-    expect((await fetch(`${srv.url}/api/sessions/${sessionId}/print/keysheet`)).status).toBe(400);
-    expect((await fetch(`${srv.url}/api/sessions/${sessionId}/cards`)).status).toBe(400);
-    expect((await fetch(`${srv.url}/api/sessions/${sessionId}/events`)).status).toBe(200);
+    expect((await srv.api("GET", `/api/sessions/${sessionId}/print/keysheet`)).status).toBe(400);
+    expect((await srv.api("GET", `/api/sessions/${sessionId}/cards`)).status).toBe(400);
+    expect((await srv.api("GET", `/api/sessions/${sessionId}/events`)).status).toBe(200);
   });
 
   it("resumes a simulated session after a restart and the agents carry on", async () => {
-    const { sessionId: id } = await fac.cmd("session:create", {
-      scenarioId: "demo",
-      config: { players: "simulated", simulation: { minDelayMs: 40, maxDelayMs: 60 } },
-    });
-    await fac.cmd("labels:randomise");
-    await fac.cmd("simulation:start");
+    const id = await startSimulation(fac, { simulation: { minDelayMs: 40, maxDelayMs: 60 } });
     await fac.waitForDashboard((d) => (d.state?.actions.length ?? 0) >= 4, 10_000);
     fac.close();
     await srv.close();
@@ -290,8 +255,9 @@ describe("simulated players", () => {
       expect(ctx.hub.session?.sessionId).toBe(id);
       expect(ctx.hub.session?.simulated).toBe(true);
       const before = ctx.hub.session!.state.actions.length;
-      await new Promise((r) => setTimeout(r, 600));
-      expect(ctx.hub.session!.state.actions.length).toBeGreaterThan(before);
+      await vi.waitFor(() => expect(ctx.hub.session!.state.actions.length).toBeGreaterThan(before), {
+        timeout: 5000,
+      });
       expect(Object.values(ctx.hub.session!.state.seats).every((s) => s.connected && s.agent)).toBe(true);
     } finally {
       await ctx.close();

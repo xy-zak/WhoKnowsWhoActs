@@ -7,5 +7,12 @@ export default defineConfig({
     environment: "node",
     testTimeout: 30_000,
     hookTimeout: 30_000,
+    // `npm run test:coverage`: what the unit tests reach (not enforced; see docs/changelog)
+    coverage: {
+      provider: "v8",
+      include: ["packages/*/src/**", "apps/*/src/**"],
+      reporter: ["text-summary", "json-summary"],
+      reportsDirectory: "coverage",
+    },
   },
 });

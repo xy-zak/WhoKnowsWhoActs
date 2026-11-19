@@ -10,6 +10,9 @@ import {
   trackInputs,
 } from "./attributionSynth";
 
+/** Wall-clock limits are checked in the normal run only: coverage instrumentation slows the code down. */
+const TIMED = !process.env.WKWA_COVERAGE;
+
 /**
  * Accuracy on synthetic 4-minute, four-seat sessions with calibration, ±100 ppm drift, 0–50 ms
  * device latency, ±20 ms timestamp jitter, ≈ 10 % overlapping speech, a 20 s dropout of seat 3
@@ -96,7 +99,7 @@ describe("attribution accuracy (synthetic mixes)", () => {
     const tracks = trackInputs(a.s);
     const t = performance.now();
     const b = analyse({ tracks, seats: [1, 2, 3, 4], calibration: { turns: a.s.turns } });
-    expect(performance.now() - t).toBeLessThan(2000);
+    if (TIMED) expect(performance.now() - t).toBeLessThan(2000);
     expect(b.segments).toEqual(a.r.segments);
     expect(b.leakage.matrixDb).toEqual(a.r.leakage.matrixDb);
   }, 60_000);

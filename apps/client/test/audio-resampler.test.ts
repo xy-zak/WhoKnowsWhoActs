@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Resampler, resampledLength } from "../src/audio/resampler";
+import { mulberry32 as rng } from "./helpers";
 
 function sine(freq: number, rate: number, seconds: number, amp = 0.5): Float32Array {
   const n = Math.round(rate * seconds);
@@ -22,18 +23,6 @@ function rmsDb(x: Float32Array, from: number, to: number): number {
   let s = 0;
   for (let i = from; i < to; i++) s += x[i]! * x[i]!;
   return 10 * Math.log10(s / (to - from));
-}
-
-/** Deterministic PRNG (mulberry32). */
-function rng(seed: number): () => number {
-  let a = seed >>> 0;
-  return () => {
-    a = (a + 0x6d2b79f5) >>> 0;
-    let t = a;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
 }
 
 function resampleAll(rate: number, x: Float32Array, blocks?: () => number): Float32Array {
@@ -86,27 +75,26 @@ describe("resampler", () => {
     });
   }
 
-  it("produces the exact sample count over 10 minutes of 48 kHz and 44.1 kHz input in random block sizes", () => {
-    for (const rate of [48000, 44100]) {
-      const noise = new Float32Array(8192).map(rng(rate));
-      const r = new Resampler({ inputRate: rate });
-      const blocks = rng(rate + 1);
-      const total = rate * 600 + 77; // not a whole number of output periods
-      let fed = 0;
-      let produced = 0;
-      while (fed < total) {
-        const n = Math.min(total - fed, 1 + Math.floor(blocks() * 8191));
-        produced += r.process(noise.subarray(0, n)).length;
-        fed += n;
-        // never ahead of the input: output k needs input position k·rate/16000
-        expect(produced * rate).toBeLessThanOrEqual(fed * 16000);
-      }
-      produced += r.flush().length;
-      expect(produced).toBe(resampledLength(total, rate));
-      expect(produced).toBe(Math.ceil((total * 16000) / rate));
-      expect(r.outputSamples).toBe(produced);
-      expect(r.inputSamples).toBe(total);
+  it("produces the exact sample count over 10 minutes of 44.1 kHz input in random block sizes", () => {
+    const rate = 44100; // a non-integer ratio to 16 kHz: rounding errors would accumulate
+    const noise = new Float32Array(8192).map(rng(rate));
+    const r = new Resampler({ inputRate: rate });
+    const blocks = rng(rate + 1);
+    const total = rate * 600 + 77; // not a whole number of output periods
+    let fed = 0;
+    let produced = 0;
+    while (fed < total) {
+      const n = Math.min(total - fed, 1 + Math.floor(blocks() * 8191));
+      produced += r.process(noise.subarray(0, n)).length;
+      fed += n;
+      // never ahead of the input: output k needs input position k·rate/16000
+      expect(produced * rate).toBeLessThanOrEqual(fed * 16000);
     }
+    produced += r.flush().length;
+    expect(produced).toBe(resampledLength(total, rate));
+    expect(produced).toBe(Math.ceil((total * 16000) / rate));
+    expect(r.outputSamples).toBe(produced);
+    expect(r.inputSamples).toBe(total);
   }, 60_000);
 
   it("handles other device rates, including upsampling and an odd rate", () => {

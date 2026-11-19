@@ -25,6 +25,17 @@ const E2E_PORT = process.env.E2E_PORT ?? "3999";
 if (process.argv.some((a) => a.includes("screenshots"))) process.env.WKWA_SCREENSHOTS = "1";
 const screenshots = process.env.WKWA_SCREENSHOTS === "1";
 
+/** Only the "docs" project (or only docs specs) asked for: no server needed. */
+function docsOnly(): boolean {
+  const args = process.argv.slice(2);
+  const projects = args.flatMap((a, i) =>
+    a.startsWith("--project=") ? [a.slice(10)] : a === "--project" ? [args[i + 1] ?? ""] : [],
+  );
+  if (projects.length) return projects.every((p) => p === "docs");
+  const files = args.filter((a) => a.endsWith(".spec.ts"));
+  return files.length > 0 && files.every((f) => /docs-[^/]*\.spec\.ts$/.test(f));
+}
+
 export default defineConfig({
   testDir: "e2e",
   reporter: [["list"]],
@@ -62,7 +73,7 @@ export default defineConfig({
       : []),
   ],
   // Only the "app" project needs the server; it gets a fresh temporary database each run.
-  webServer: process.argv.some((a) => a.includes("docs"))
+  webServer: docsOnly()
     ? undefined
     : {
         command: "npm run build && node scripts/e2e-server.mjs",

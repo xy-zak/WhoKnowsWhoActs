@@ -15,7 +15,7 @@ The screenshots are documentation for a public repository and part of the thesis
 | --- | --- |
 | `e2e/screenshots/catalogue.ts` | Every shot: id (`server/…` facilitator, `client/…` player), gallery group and subgroup, title, size (`full` / `half` / `small`), the scenario that takes it, and `sources` (files whose changes can show in it). Also the groups, `GLOBAL_SOURCES` and `REPRESENTATIVE`. |
 | `e2e/screenshots/capture.ts` | Capture API. `snap()` / `snapCrop()` write a PNG to any path (usable from any Playwright spec). `shot(page, id)` / `crop(page, id, locators)` do the same for a catalogued shot. `scenario(name, title, body)` declares a scenario. `writeReport()` compares the captures with the published versions. Options: `tip`, `keepMouse`, `fixed`, `wait`, `pad`, `keepScroll`. |
-| `e2e/screenshots/flows.ts` | Reusable steps through the UI: setup wizard (`chooseScenario`, `fillRounds`, `bind`, `saveLabels`, `confirmKeySheet`, `nextThrough`), players (`newPlayer`, `onboard`, `act`, `acts`, `playerDisplay`), `panel`, `hoverTip`, `blur`, `popupFoot`, `wrapUp`. |
+| `e2e/flows.ts` | Steps through the UI, shared with the e2e specs: `setupSession(fac, plan)` walks the setup by each step's `data-step` key (`onStep` takes a step's shot), `bind`, `addFake`, players (`newPlayer`, `openPlayer`, `onboard`, `act`, `acts`, `playerDisplay`), `panel`, `blur`, `popupFoot`, `wrapUp`, `tab`. `hoverTip` is in `capture.ts`. Setup shots are named `server/setup-<step key>`. |
 | `e2e/screenshots.spec.ts` | The scenarios: `session` (4 player PCs, 2 rounds, wrap-up, database, replay), `small-grid` (5 × 5, one PC and three fake players), `simulation` (agents). |
 | `e2e/screenshots/manifest.ts` | Version history and the gallery generator. |
 | `scripts/screenshots.ts` | The CLI below (`npm run screenshots -- …`). |
@@ -75,7 +75,7 @@ Then understand the features: `git log --stat <marker>..HEAD`, the commit messag
 2. **Take it in the scenario**, at the moment the feature is on screen. Use `shot(page, id)` for a whole screen, or `crop(page, id, panel(page, "Title"))` for one part. Reach the state with the helpers in `flows.ts`, and add new helpers there rather than inline code. If no scenario reaches the feature, extend one, or add a scenario: a name in `ScenarioName` plus `scenario(…)` in the spec.
 3. Rules for capture code:
    - **Never rely on a shot's side effects.** A shot that wasn't requested does nothing: no scroll, no mouse move. Scroll and hover explicitly; use `hoverTip()` for tooltips.
-   - **Keep runs repeatable:** fixed labels (`saveLabels`, never `shuffleLabels`), scripted moves, the seeded simulation. Otherwise every capture differs from the last one.
+   - **Keep runs repeatable:** fixed labels (the default aligned pairing or a fixed `{ dissociated: n }`), scripted moves, the seeded simulation. Otherwise every capture differs from the last one.
    - **Fictional data only:** the demo scenarios and scripted players, never real sessions or names.
 4. `npx tsc -p e2e` must pass (shot ids are type-checked against the catalogue).
 

@@ -10,6 +10,7 @@
       "!**/*.md",
       "!playwright-report",
       "!test-results",
+      "!coverage",
       "!.screenshots",
       "!docs/.obsidian",
       "!.claude"

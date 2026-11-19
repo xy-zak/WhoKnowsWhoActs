@@ -1,369 +1,113 @@
-import { type Browser, expect, type Page, test } from "@playwright/test";
-import { addFake, consent, saveLabels } from "./screenshots/flows";
+import { expect, test } from "@playwright/test";
+import {
+  act,
+  type Bot,
+  bind,
+  bindBots,
+  newPlayer,
+  onboard,
+  PARTICIPANT_CODE,
+  type Player,
+  setupSession,
+  startRound,
+  tab,
+  wrapUp,
+} from "./flows";
 
 /**
- * End-to-end through the real UI: the facilitator walks the 11-step setup
- * accordion, four player browsers onboard and play one round, the tab flips to
- * LIVE, the wrap-up popups export and close the session, then REPLAY.
+ * The game end to end through the real UI. What the server already proves over sockets
+ * (apps/server/test: quotas, filtered views, reconnects, exports) is not repeated here: these
+ * tests prove that the screens drive it.
  */
 test.setTimeout(180_000);
+test.beforeEach(({ page }) => {
+  page.on("pageerror", (e) => console.log("facilitator page error:", e.message));
+});
 
-async function newPlayer(browser: Browser): Promise<{ page: Page; terminal: number }> {
-  const ctx = await browser.newContext({ viewport: { width: 1300, height: 850 } });
-  const page = await ctx.newPage();
-  await page.goto("/");
-  await expect(page.getByText("Waiting for the facilitator to assign a seat")).toBeVisible();
-  const terminal = Number(await page.locator(".client-number").textContent());
-  return { page, terminal };
-}
-
-/** Consent (accordion) → about you → briefing (no audio here: the mic check is in e2e/app-audio.spec.ts). */
-async function onboard(page: Page) {
-  // every sub-section has to be gone through before "I agree"
-  await expect(page.getByText("Information and consent").first()).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByRole("button", { name: /I agree/ })).toBeDisabled();
-  await consent(page);
-  await expect(page.locator(".panel-title", { hasText: "About you" })).toBeVisible();
-  for (const fs of await page.locator("fieldset").all())
-    await fs.locator("input[type=radio]").first().check();
-  await page.getByRole("button", { name: /Continue/ }).click();
-  await expect(page.locator(".panel-title", { hasText: "Briefing" })).toBeVisible();
-  await page.getByRole("button", { name: /I'm ready/ }).click();
-  await expect(page.getByText("You're all set")).toBeVisible();
-}
-
-/** Click a square of the grid map, then Propose/Decide in its panel (lands on the player's power-type sub-square). */
-async function act(page: Page, kind: "Propose" | "Decide", square: string) {
-  await page.locator(`g[data-square="${square}"] rect.grid-square`).click();
-  await expect(page.locator(".panel-title", { hasText: `Square ${square}` })).toBeVisible();
-  await page
-    .locator("aside")
-    .getByRole("button", { name: new RegExp(`^${kind} ${square} · K[a-d]`) })
-    .click();
-  await page.keyboard.press("Enter"); // inline confirm prompt
-  await expect(page.locator("aside").getByRole("button", { name: /Confirm/ })).toHaveCount(0);
-}
-
-/** The primary button of the expanded setup step (accordion). */
-const next = (fac: Page) =>
-  fac
-    .locator(".acc-step.current .acc-foot")
-    .getByRole("button", { name: /Next|Create session|Start onboarding/ });
-const current = (fac: Page, key: string) =>
-  expect(fac.locator(`.acc-step.current[data-step="${key}"]`)).toBeVisible();
-
-test("setup wizard → live round → wrap-up → replay", async ({ page: fac, browser }) => {
-  fac.on("pageerror", (e) => console.log("facilitator page error:", e.message));
-  await fac.goto("/facilitator");
+test("full session: setup → one player browser + three bots → round → wrap-up → DATABASE → REPLAY", async ({
+  page: fac,
+  browser,
+}) => {
+  let player: Player | undefined;
+  const bots: Bot[] = [];
   // the welcome page, opened before there is a session: title and welcome, no button yet
   const welcome = await (await browser.newContext()).newPage();
   await welcome.goto("/landing");
   await expect(welcome.getByRole("heading", { name: "Who Knows, Who Acts?" })).toBeVisible();
   await expect(welcome.getByText("The session has not started yet")).toBeVisible();
   await expect(welcome.getByRole("button", { name: "Join live session" })).toHaveCount(0);
+  try {
+    await setupSession(fac, {
+      tags: "e2e, pilot",
+      labels: { dissociated: 6 },
+      connect: async () => {
+        // the session exists: the welcome page offers it (plain HTTP here: no certificate warning)
+        const join = welcome.getByRole("button", { name: "Join live session" });
+        await expect(join).toBeVisible({ timeout: 10_000 });
+        await expect(welcome.getByText(/security warning/)).toHaveCount(0);
+        await join.click();
+        await expect(welcome.getByText("Waiting for the facilitator to assign a seat")).toBeVisible();
+        await welcome.context().close();
+        player = await newPlayer(browser);
+        await bind(fac, 1, player);
+        bots.push(...(await bindBots(fac, [2, 3, 4])));
+      },
+    });
+    const p = player!.page;
 
-  // 01 scenario
-  await current(fac, "scenario");
-  await expect(fac.locator(".popup")).toHaveCount(0); // setup uses an accordion, not popups
-  await fac.getByRole("radio", { name: /^Demo grid/ }).check();
-  await next(fac).click();
-  // 02 rounds: one round, 1 + 1 actions
-  await current(fac, "rounds");
-  await fac.getByRole("spinbutton", { name: "Number of rounds" }).fill("1");
-  await fac.getByRole("spinbutton", { name: "Proposals per player" }).fill("1");
-  await fac.getByRole("spinbutton", { name: "Decisions per player" }).fill("1");
-  await next(fac).click();
-  // 03 who plays, 04 seats (defaults) → 05 onboarding (defaults)
-  await current(fac, "who");
-  await expect(fac.getByRole("radio", { name: "Real participants" })).toBeChecked();
-  await next(fac).click();
-  await current(fac, "players");
-  await next(fac).click();
-  await current(fac, "onboarding");
-  await next(fac).click();
-  // 06 tags
-  await current(fac, "tags");
-  await fac.getByRole("textbox", { name: "Tags" }).fill("e2e, pilot, E2E");
-  await expect(fac.locator(".chip")).toHaveCount(2);
-  await next(fac).click();
-  // 07 create: only the confirmation (each step above sums itself up)
-  await current(fac, "create");
-  await expect(fac.locator(".acc-step.current.accent .acc-body")).toContainText(
-    "steps 01–07 are then locked",
-  );
-  await expect(fac.locator('.acc-step[data-step="tags"]')).toContainText("tags: e2e, pilot");
-  // the wayfinder is pinned (sticky) and filled with the primary colour
-  const way = fac.locator("nav.wayfinder");
-  expect(await way.evaluate((el) => getComputedStyle(el).position)).toBe("sticky");
-  await expect(way).toContainText("STEP 07/11");
-  await next(fac).click();
+    await onboard(p);
+    await startRound(fac, 1, 1);
+    await expect(p.getByText(/Round 1\/1/)).toBeVisible();
+    await act(p, "Propose", "B2");
+    await act(p, "Decide", "E5");
+    await expect(p.getByText(PARTICIPANT_CODE)).toBeVisible({ timeout: 20_000 });
 
-  // 08 connect & bind; the welcome page now offers the session (plain HTTP here: no certificate warning)
-  await current(fac, "connect");
-  const join = welcome.getByRole("button", { name: "Join live session" });
-  await expect(join).toBeVisible({ timeout: 10_000 });
-  await expect(welcome.getByText(/security warning/)).toHaveCount(0);
-  await join.click();
-  await expect(welcome.getByText("Waiting for the facilitator to assign a seat")).toBeVisible();
-  await welcome.context().close();
-  const players = [];
-  for (let i = 0; i < 4; i++) players.push(await newPlayer(browser));
-  for (const [i, p] of players.entries()) {
+    await wrapUp(fac, true);
+
+    // DATABASE lists it with its tags; REPLAY reproduces the end state
+    await tab(fac, 3);
+    await expect(fac.locator(".chip", { hasText: "pilot" }).first()).toBeVisible();
     await fac
-      .getByRole("combobox", { name: `Bind a client to seat ${i + 1}` })
-      .selectOption({ label: `Client ${p.terminal}` });
-    await expect(p.page.getByText(`Seat ${i + 1}`)).toBeVisible();
+      .locator("table")
+      .getByRole("button", { name: /Replay/ })
+      .first()
+      .click();
+    const slider = fac.getByRole("slider", { name: "Replay position" });
+    await slider.fill((await slider.getAttribute("max")) ?? "0");
+    await expect(fac.locator(".panel").getByText("SessionClosed").first()).toBeVisible(); // its last event
+  } finally {
+    for (const b of bots) b.stop();
   }
-  await expect(fac.locator(".acc-step.current").getByText("4/4 seats bound")).toBeVisible();
-  await next(fac).click();
-  // 09 labels: fully dissociated pairing D6 in seat order (Ka–Pd, Kb–Pc, Kc–Pa, Kd–Pb), saved at once
-  await expect(
-    fac.locator(".acc-step.current").getByRole("button", { name: /Save labels|Shuffle/ }),
-  ).toHaveCount(0);
-  await saveLabels(fac, { dissociated: 6 });
-  await expect(fac.locator(".acc-step.current")).toContainText("Ka–Pd Kb–Pc Kc–Pa Kd–Pb");
-  const matrix = fac.getByRole("table", { name: "K–P pairing matrix" });
-  await expect(matrix.locator("tr", { hasText: "SEAT 1" })).toContainText("Ka");
-  await next(fac).click();
-  // 10 key sheet
-  await current(fac, "keysheet");
-  await fac.getByRole("checkbox", { name: /key sheet is printed/ }).check();
-  await next(fac).click();
-  // 11 start onboarding (same accent colour as create) → LIVE
-  await current(fac, "start");
-  await expect(fac.locator('.acc-step.current.accent[data-step="start"]')).toBeVisible();
-  await next(fac).click();
-  await expect(fac.locator(".live-indicator")).toBeVisible();
-  await expect(fac.locator(".tab.active")).toContainText("LIVE");
-
-  await Promise.all(players.map((p) => onboard(p.page)));
-  const start = fac.getByRole("button", { name: /Start round 1 of 1/ });
-  await expect(start).toBeEnabled();
-  await start.click();
-  const squares = ["B2", "E5", "G7", "J10"];
-  await Promise.all(
-    players.map(async (p, i) => {
-      await expect(p.page.getByText(/Round 1\/1/)).toBeVisible();
-      await act(p.page, "Propose", squares[i]!);
-      await act(p.page, "Decide", squares[(i + 1) % 4]!);
-    }),
-  );
-  for (const p of players)
-    await expect(p.page.getByText(/WK-[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]/)).toBeVisible({ timeout: 20_000 });
-  await players[0]!.page.screenshot({ path: "test-results/player-end.png" });
-  await fac.screenshot({ path: "test-results/facilitator-live.png", fullPage: true });
-
-  // wrap-up: cards → export → close
-  const popupNext = fac.locator(".popup-foot").getByRole("button", { name: /Next/ });
-  await fac.getByRole("button", { name: /Wrap up session/ }).click();
-  await fac.getByRole("checkbox", { name: /Cards are handed out/ }).check();
-  await popupNext.click();
-  await fac
-    .locator(".popup")
-    .getByRole("button", { name: /Export session/ })
-    .click();
-  await expect(fac.locator(".popup").getByText(/Written to/)).toBeVisible();
-  await popupNext.click();
-  await fac
-    .locator(".popup-foot")
-    .getByRole("button", { name: /Close session/ })
-    .click();
-  await expect(fac.locator(".live-indicator")).toHaveCount(0);
-  await expect(fac.locator(".tab.active")).toContainText("SETUP");
-
-  // DATABASE lists it with its tags; REPLAY reproduces the end state
-  await fac.keyboard.press("3");
-  await expect(fac.locator(".chip", { hasText: "pilot" }).first()).toBeVisible();
-  await fac.screenshot({ path: "test-results/facilitator-database.png", fullPage: true });
-  await fac
-    .locator("table")
-    .getByRole("button", { name: /Replay/ })
-    .first()
-    .click();
-  const slider = fac.getByRole("slider", { name: "Replay position" });
-  await slider.fill((await slider.getAttribute("max")) ?? "0");
-  await expect(fac.locator(".panel").getByText("SessionClosed").first()).toBeVisible(); // last event of the closed session
-  await fac.screenshot({ path: "test-results/facilitator-replay.png", fullPage: true });
 });
 
-test("simulated players: setup without clients or key sheet → agents play LIVE → export → simulation database", async ({
-  page: fac,
-}) => {
-  fac.on("pageerror", (e) => console.log("facilitator page error:", e.message));
-  const primary = () =>
-    fac
-      .locator(".acc-step.current .acc-foot")
-      .getByRole("button", { name: /Next|Create session|Start simulation/ });
-  await fac.goto("/facilitator");
-
-  // 01 scenario → 02 rounds: two short rounds
-  await current(fac, "scenario");
-  await fac.getByRole("radio", { name: /^Demo grid/ }).check();
-  await primary().click();
-  await current(fac, "rounds");
-  await fac.getByRole("spinbutton", { name: "Number of rounds" }).fill("2");
-  await fac.getByRole("spinbutton", { name: "Proposals per player" }).fill("2");
-  await fac.getByRole("spinbutton", { name: "Decisions per player" }).fill("1");
-  await primary().click();
-
-  // 03 who plays: simulated, one idle-free setup with a fixed seed and a quick pace
-  await current(fac, "who");
-  await fac.getByRole("radio", { name: "Simulated players" }).check();
-  const step3 = fac.locator(".acc-step.current");
-  await expect(step3.getByRole("combobox", { name: "Policy of seat 4" })).toBeVisible();
-  await step3.getByRole("combobox").filter({ hasText: "Watchable" }).selectOption("quick");
-  await step3.getByPlaceholder("random", { exact: true }).fill("E2ESEED");
-  await expect(fac.locator("nav.wayfinder")).toContainText("simulated players");
-  await primary().click();
-  await expect(fac.locator('.acc-step[data-step="who"]')).toContainText("simulated · random ×4");
-  await current(fac, "players");
-  await primary().click();
-
-  // 05 onboarding is skipped for agents
-  await current(fac, "onboarding");
-  await expect(fac.locator(".acc-step.current")).toContainText("Simulated players skip onboarding");
-  await primary().click();
-  await current(fac, "tags");
-  await expect(fac.locator(".wayfinder-strip button.skipped")).toHaveText(/– 05 Onboarding/);
-  await primary().click();
-
-  // 07 create (simulation database)
-  await current(fac, "create");
-  await primary().click();
-
-  // 08 agents instead of client binding: already done
-  await current(fac, "connect");
-  const agents = fac.locator(".acc-step.current");
-  await expect(agents).toContainText("Simulated players");
-  await expect(agents.getByText("Random (random v2)")).toHaveCount(4);
-  await expect(agents).toContainText("E2ESEED:3");
-  await primary().click();
-
-  // 09 labels
-  await saveLabels(fac);
-  await primary().click();
-
-  // 10 key sheet: not needed (– glyph); 11 start simulation → LIVE
-  await current(fac, "keysheet");
-  await expect(fac.locator(".acc-step.current")).toContainText("Not needed");
-  await primary().click();
-  await current(fac, "start");
-  // 01–07 are locked (■) now; 10 stays skipped (–)
-  await expect(fac.locator(".wayfinder-strip button.skipped")).toHaveText(/– 10 Key sheet/);
-  await expect(primary()).toHaveText(/Start simulation/);
-  await primary().click();
+test("simulated players: agents play LIVE → export → simulation database", async ({ page: fac }) => {
+  await setupSession(fac, {
+    rounds: { rounds: 2, propose: 2, decide: 1 },
+    simulated: { pace: "quick", seed: "E2ESEED" },
+    // agents need no onboarding and no key sheet: the wayfinder shows them skipped (–); once the
+    // session exists, steps 01–07 are locked (■) instead
+    onStep: async (key) => {
+      const skipped = fac.locator(".wayfinder-strip button.skipped");
+      if (key === "tags") await expect(skipped).toHaveText(/– .*Onboarding/);
+      if (key === "start") await expect(skipped).toHaveText(/– .*Key sheet/);
+    },
+  });
   await expect(fac.locator(".live-indicator")).toContainText("SIM-");
-  await expect(fac.locator(".topbar")).toContainText("SIMULATION");
-  await expect(fac.locator(".statusbar")).toContainText("4/4 agents");
 
   // the agents play round 1 by themselves; the facilitator starts round 2
-  await fac.getByRole("button", { name: /Start round 2 of 2/ }).click({ timeout: 30_000 });
+  await startRound(fac, 2, 2);
   await expect(fac.getByText("Simulation complete")).toBeVisible({ timeout: 30_000 });
-  await fac.screenshot({ path: "test-results/facilitator-simulation-live.png", fullPage: true });
+  await wrapUp(fac, false);
 
-  // wrap-up without takedown cards: export → close
-  await fac.getByRole("button", { name: /Wrap up session/ }).click();
-  await expect(fac.locator(".popup")).toContainText("STEP 01/02");
-  await fac
-    .locator(".popup")
-    .getByRole("button", { name: /Export session/ })
-    .click();
-  await expect(fac.locator(".popup").getByText(/exports\/simulations\/SIM-/)).toBeVisible();
-  await fac.locator(".popup-foot").getByRole("button", { name: /Next/ }).click();
-  await fac
-    .locator(".popup-foot")
-    .getByRole("button", { name: /Close session/ })
-    .click();
-  await expect(fac.locator(".live-indicator")).toHaveCount(0);
-
-  // DATABASE opens on the simulation database; no erasure tools there
-  await fac.keyboard.press("3");
+  // DATABASE opens on the simulation database: no key sheet, nothing to erase; not among participants
+  await tab(fac, 3);
   await expect(fac.locator("nav.subtabs .tab.active")).toContainText("Simulations");
   const row = fac.locator("table tr", { hasText: /SIM-\d{8}/ }).first();
   await expect(row).toBeVisible();
   await expect(row.getByRole("button", { name: /Key sheet/ })).toHaveCount(0);
-  await expect(fac.getByText("nothing to look up or erase")).toBeVisible();
-  await fac.screenshot({ path: "test-results/facilitator-database-simulations.png", fullPage: true });
   await fac
     .locator("nav.subtabs")
     .getByRole("button", { name: /Participants/ })
     .click();
   await expect(fac.locator("table tr", { hasText: /SIM-\d{8}/ })).toHaveCount(0);
-  await expect(fac.getByRole("button", { name: /Look up/ })).toBeVisible();
-});
-
-test("fake players: one real browser + three server-created fake players → round → wrap-up → marked in DATABASE", async ({
-  page: fac,
-  browser,
-}) => {
-  fac.on("pageerror", (e) => console.log("facilitator page error:", e.message));
-  await fac.goto("/facilitator");
-  await current(fac, "scenario");
-  await fac.getByRole("radio", { name: /^Demo grid/ }).check();
-  await next(fac).click();
-  await current(fac, "rounds");
-  await fac.getByRole("spinbutton", { name: "Number of rounds" }).fill("1");
-  await fac.getByRole("spinbutton", { name: "Proposals per player" }).fill("1");
-  await fac.getByRole("spinbutton", { name: "Decisions per player" }).fill("1");
-  for (const key of ["rounds", "who", "players", "onboarding", "tags", "create"]) {
-    await current(fac, key);
-    await next(fac).click();
-  }
-
-  // 08: one real browser on seat 4, then a fake player in each of seats 1–3 (no "fill all" any more)
-  await current(fac, "connect");
-  const real = await newPlayer(browser);
-  await fac
-    .getByRole("combobox", { name: "Bind a client to seat 4" })
-    .selectOption({ label: `Client ${real.terminal}` });
-  await expect(real.page.getByText("Seat 4")).toBeVisible();
-  await expect(fac.getByRole("combobox", { name: "Fake player pace" })).toHaveCount(0);
-  for (const seat of [1, 2, 3]) await addFake(fac, seat);
-  const step7 = fac.locator(".acc-step.current");
-  await expect(step7.getByText("4/4 seats bound")).toBeVisible();
-  await expect(step7.getByText("3 fake players")).toBeVisible();
-  await expect(step7.getByText("none (fake player)")).toHaveCount(3);
-  await next(fac).click();
-
-  await saveLabels(fac);
-  await next(fac).click();
-  await current(fac, "keysheet");
-  await expect(fac.locator(".acc-step.current")).toContainText("Seat 1, 2, 3 are fake players");
-  await fac.getByRole("checkbox", { name: /key sheet is printed/ }).check();
-  await next(fac).click();
-  await current(fac, "start");
-  await expect(fac.locator(".acc-step.current")).toContainText("Fake players (test clients");
-  await next(fac).click();
-  await expect(fac.locator(".topbar")).toContainText("FAKE PLAYERS ×3");
-
-  // only the real player goes through onboarding; the fake players are ready at once
-  await onboard(real.page);
-  await fac.getByRole("button", { name: /Start round 1 of 1/ }).click();
-  await expect(real.page.getByText(/Round 1\/1/)).toBeVisible();
-  await act(real.page, "Propose", "C3");
-  await act(real.page, "Decide", "D4");
-  await expect(real.page.getByText(/WK-[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]/)).toBeVisible({ timeout: 20_000 });
-  await fac.screenshot({ path: "test-results/facilitator-fake-live.png", fullPage: true });
-
-  // wrap-up: a takedown card only for the real participant
-  await fac.getByRole("button", { name: /Wrap up session/ }).click();
-  const popup = fac.locator(".popup");
-  await expect(popup.getByRole("button", { name: /Card PDF/ })).toHaveCount(1);
-  await fac.getByRole("checkbox", { name: /Cards are handed out/ }).check();
-  await fac.locator(".popup-foot").getByRole("button", { name: /Next/ }).click();
-  await popup.getByRole("button", { name: /Export session/ }).click();
-  await expect(popup.getByText(/Written to/)).toBeVisible();
-  await fac.locator(".popup-foot").getByRole("button", { name: /Next/ }).click();
-  await fac
-    .locator(".popup-foot")
-    .getByRole("button", { name: /Close session/ })
-    .click();
-
-  await expect(fac.locator(".live-indicator")).toHaveCount(0);
-
-  // DATABASE (participants): the session is marked as having fake players
-  await fac.keyboard.press("3");
-  await expect(fac.locator("nav.subtabs .tab.active")).toContainText("Participants");
-  await expect(fac.locator("table tr", { hasText: "fake ×3" })).toHaveCount(1);
-  await fac.screenshot({ path: "test-results/facilitator-database-fake.png", fullPage: true });
 });

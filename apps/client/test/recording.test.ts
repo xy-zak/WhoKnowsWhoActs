@@ -12,6 +12,7 @@ import {
   stopReasonFor,
   wantsRecording,
 } from "../src/player/recordingMachine";
+import { flushPromises as settle } from "./helpers";
 
 /* ─── fixtures ─── */
 
@@ -524,61 +525,74 @@ function setup() {
   };
 }
 
-const settle = async () => {
-  for (let i = 0; i < 10; i++) await new Promise((r) => setTimeout(r, 0));
-};
+/** The engine's start and stop calls only (not prepare, resume, onReconnect, clearPending). */
+const tracks = (r: FakeRecorder) => r.calls.filter((c) => c.startsWith("start:") || c.startsWith("stop:"));
 
 describe("RecordingController", () => {
-  it("starts inside the mic check's Start click, after preparing the audio engine", async () => {
+  it("starts inside the mic check's Start click and keeps the click through a detached session", async () => {
     const t = setup();
+    t.ctl.onConnect();
     t.ctl.update(MIC_CHECK);
     await settle();
     expect(t.rec().calls).toEqual([]);
     t.ctl.startFromClick();
-    // synchronously, inside the click
+    // synchronously, inside the click, after preparing the audio engine
     expect(t.rec().calls).toEqual(["prepare", "start:mic_check"]);
     await settle();
     expect(t.snap()).toMatchObject({ status: { state: "recording" }, gesture: true });
     expect(t.permissions).toEqual([{ state: "granted" }]);
+    // detached and back at the mic check (the screen may remount): still recording, no new click
+    t.ctl.onDetached();
+    await settle();
+    t.ctl.update(MIC_CHECK);
+    await settle();
+    expect(tracks(t.rec())).toEqual(["start:mic_check", "stop:disconnect", "start:reconnect"]);
+    expect(t.snap()).toMatchObject({ status: { state: "recording" }, gesture: true });
   });
 
-  it("never opens the microphone while the mic check is held or the session has no audio", async () => {
+  it("runs a session: held, pause and resume, a reconnect, a detached session, game complete, unbind", async () => {
     const t = setup();
+    t.ctl.onConnect();
+    // never opens the microphone while the session has no audio or the mic check is held
     t.ctl.update(view({ why: "audio_off" }));
     await settle();
     t.ctl.update(view({ why: "mic_check_held" }));
-    await settle();
     t.ctl.startFromClick();
     await settle();
     expect(t.rec().calls).toEqual(["prepare"]);
-  });
-
-  it("runs a session: pause and resume, a reconnect, game complete", async () => {
-    const t = setup();
-    t.ctl.onConnect();
-    t.ctl.update(GAME);
-    await settle();
-    t.ctl.update(PAUSED);
-    await settle();
-    t.ctl.update(GAME);
-    await settle();
+    for (const v of [GAME, PAUSED, GAME]) {
+      t.ctl.update(v);
+      await settle();
+    }
     t.ctl.onConnect(); // the socket came back
     t.ctl.update(GAME);
     await settle();
+    expect(t.rec().calls).toContain("onReconnect");
+    t.ctl.onDetached(); // another session was resumed: the seat token is kept
+    await settle();
+    t.ctl.update(GAME); // the session is attached again and the seat re-claimed
+    await settle();
     t.ctl.update(COMPLETE);
     await settle();
-    expect(t.rec().calls).toEqual([
+    expect(tracks(t.rec())).toEqual([
       "start:reload",
       "stop:paused",
       "start:resume",
-      "onReconnect",
+      "stop:disconnect",
+      "start:reconnect",
       "stop:disconnect",
       "start:reconnect",
       "stop:game_complete",
     ]);
+    // a detached session keeps what was not sent; unbinding drops it
+    expect(t.rec().calls).not.toContain("clearPending");
+    t.ctl.onUnbound();
+    await settle();
+    expect(t.rec().calls.at(-1)).toBe("clearPending");
+    expect(t.snap().gesture).toBe(false);
   });
 
-  it("reports a denied microphone, waits, and retries with permission_regained after a click", async () => {
+  it("loses the microphone: reports denied, waits for a click, retries after a device change", async () => {
     const t = setup();
     t.ctl.update(GAME);
     await settle();
@@ -598,75 +612,28 @@ describe("RecordingController", () => {
     await settle();
     expect(t.rec().calls.slice(1)).toEqual(["prepare", "start:permission_regained"]);
     expect(t.snap().status.state).toBe("recording");
-  });
-
-  it("retries after a device change (a microphone plugged in, a permission granted)", async () => {
-    const t = setup();
-    t.ctl.update(GAME);
-    await settle();
-    // the engine loses the microphone mid-game
+    // the engine loses the microphone again; a device change (a microphone plugged in) retries
     t.rec().set({
       state: "error",
       trackId: null,
       error: { name: "NotReadableError" } as RecorderStatus["error"],
     });
     await settle();
+    expect(t.permissions.at(-1)).toEqual({ state: "error", errorName: "NotReadableError" });
     t.deviceChanged();
     await settle();
-    expect(t.rec().calls).toEqual(["start:reload", "start:permission_regained"]);
-  });
-
-  it("asks for a click after a reload when the browser keeps audio suspended", async () => {
-    const t = setup();
-    t.ctl.update(GAME);
-    await settle();
+    expect(tracks(t.rec())).toEqual([
+      "start:reload",
+      "start:permission_regained",
+      "start:permission_regained",
+    ]);
+    // after a reload the browser keeps audio suspended: the click resumes it
     t.rec().set({ state: "paused", needsGesture: true });
     expect(t.snap().status.needsGesture).toBe(true);
     t.ctl.fixFromClick();
     await settle();
     expect(t.rec().calls.at(-1)).toBe("resume");
     expect(t.snap().status.state).toBe("recording");
-  });
-
-  it("on unbind stops with client_stop and drops what was not sent", async () => {
-    const t = setup();
-    t.ctl.update(BRIEFING);
-    await settle();
-    t.ctl.onUnbound();
-    await settle();
-    expect(t.rec().calls).toEqual(["start:reload", "stop:client_stop", "clearPending"]);
-    expect(t.snap().gesture).toBe(false);
-  });
-
-  it("on a detached session stops with disconnect, keeps what was not sent, and resends once seated again", async () => {
-    const t = setup();
-    t.ctl.onConnect();
-    t.ctl.update(GAME);
-    await settle();
-    t.ctl.onDetached(); // another session was resumed: the seat token is kept
-    await settle();
-    expect(t.rec().calls).toEqual(["start:reload", "stop:disconnect"]);
-    t.ctl.update(GAME); // the session is attached again and the seat re-claimed
-    await settle();
-    expect(t.rec().calls).toEqual(["start:reload", "stop:disconnect", "onReconnect", "start:reconnect"]);
-  });
-
-  it("keeps the Start click through a detached session at the mic check (the screen may remount)", async () => {
-    const t = setup();
-    t.ctl.onConnect();
-    t.ctl.update(MIC_CHECK);
-    t.ctl.startFromClick();
-    await settle();
-    t.ctl.onDetached();
-    await settle();
-    t.ctl.update(MIC_CHECK);
-    await settle();
-    expect(t.rec().calls.filter((c) => c.startsWith("st"))).toEqual([
-      "start:mic_check",
-      "stop:disconnect",
-      "start:reconnect",
-    ]);
-    expect(t.snap()).toMatchObject({ status: { state: "recording" }, gesture: true });
   });
 
   it("sends the engine's messages as they are, and volatile levels", async () => {

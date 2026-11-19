@@ -16,7 +16,6 @@ import {
   playerView,
   reduceEvents,
   replayScores,
-  roundSpecFor,
   STANDARD,
   scoreChangesForRevoke,
   scoreChangesOf,
@@ -26,15 +25,7 @@ import {
   standardRules,
   validateIntent,
 } from "../src";
-import { act, type EventLog, readySession, TEST_BOARD, TEST_SCORES, testScenario } from "./helpers";
-
-function startRound(log: EventLog, round = 1) {
-  log.push(
-    "RoundStarted",
-    { round, spec: roundSpecFor(log.state.config, round), startedBy: "facilitator" },
-    { actor: "facilitator" },
-  );
-}
+import { act, readySession, startRound, TEST_BOARD, TEST_SCORES, testScenario } from "./helpers";
 
 const actor = (seat: number, p: "Pa" | "Pb" | "Pc" | "Pd") => ({ seat, k: null, p });
 

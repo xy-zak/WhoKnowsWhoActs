@@ -13,9 +13,8 @@ import {
 } from "@wkwa/shared";
 import type { AudioFileStore } from "../src/audio/fileStore";
 import type { Store } from "../src/db/store";
-import { wall } from "../src/runtime";
 import { type SynthConfig, type SynthSession, synthesise } from "./attributionSynth";
-import { writeTestTrack } from "./audioFixtures";
+import { insertBareSession, writeTestTrack } from "./audioFixtures";
 
 export interface SeededSession {
   sessionId: string;
@@ -34,19 +33,7 @@ export async function seedAudioSession(
 ): Promise<SeededSession> {
   const synth = synthesise({ seed: 7, durationSec: 70, profile: "headset", calibration: true, ...cfg });
   const sessionId = opts.sessionId ?? generateSessionId(new Date(synth.t0));
-  store.insertSession({
-    id: sessionId,
-    created_wall: wall(synth.t0),
-    scenario_id: "demo",
-    scenario_version: "1",
-    scenario_hash: "h",
-    status: "closed",
-    tags_json: "[]",
-    notes: "synthetic audio session",
-    config_json: "{}",
-    harness_version: "0",
-    git_commit: "test",
-  });
+  insertBareSession(store, sessionId, synth.t0);
   const codes: Record<number, string> = {};
   for (const s of synth.seats) codes[s] = generateParticipantCode();
   const ev = <T extends EventType>(type: T, payload: PayloadOf<T>, ts: number, seat: number | null = null) =>

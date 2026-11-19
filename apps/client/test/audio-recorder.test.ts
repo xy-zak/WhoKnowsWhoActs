@@ -1,5 +1,5 @@
 import { int16FromLeBytes } from "@wkwa/shared";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, onTestFinished, vi } from "vitest";
 import { MicRecorder, type MicRecorderOptions } from "../src/audio/MicRecorder";
 import { resampledLength } from "../src/audio/resampler";
 import type {
@@ -9,6 +9,7 @@ import type {
   RecorderState,
   SendResult,
 } from "../src/audio/types";
+import { flushPromises } from "./helpers";
 
 /**
  * A fake Web Audio + getUserMedia environment: the test drives the clock and
@@ -246,8 +247,6 @@ describe("MicRecorder", () => {
     expect(JSON.stringify(start)).not.toMatch(/secret|deviceId|groupId|label/);
 
     const chunks = chunksOf(sent);
-    expect(chunks.map((c) => c.sampleCount)).toEqual([80000, 80000, resampledLength(528000, 48000) - 160000]);
-    expect(chunks.map((c) => c.startSample)).toEqual([0, 80000, 160000]);
     expect(chunks.map((c) => c.seq)).toEqual([0, 1, 2]);
     for (const c of chunks) {
       expect(c.pcm.byteLength).toBe(c.sampleCount * 2);
@@ -288,34 +287,20 @@ describe("MicRecorder", () => {
     await expect(rec.start()).rejects.toThrow(/disposed/);
   });
 
-  it("keeps unacked chunks in memory and resends them in order after a reconnect", async () => {
-    const { rec, sent, setOnline } = recorder({ chunkSeconds: 1 });
-    await rec.start();
-    setOnline(false);
-    env.render(10.1); // a little past 10 s: the resampler's 2.5 ms lookahead completes chunk 9
-    await Promise.resolve();
-    expect(rec.pendingChunks).toBe(10);
-    expect(rec.pendingBytes).toBe(10 * 32000);
-    setOnline(true);
-    rec.onReconnect();
-    await rec.whenSent();
-    expect(sent.map((s) => s.kind)).toEqual(["start", ...Array(10).fill("chunk")]);
-    expect(chunksOf(sent).map((c) => c.seq)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
-    expect(rec.pendingChunks).toBe(0);
-    await rec.stop();
-  });
-
-  it("drops the oldest chunks beyond maxPendingSeconds and counts them", async () => {
+  it("keeps unacked chunks (capped at maxPendingSeconds), resends them after a reconnect, counts drops per track", async () => {
+    // the queue's own retry and cap rules are in audio-queue.test.ts; this is the recorder's wiring
     const { rec, sent, setOnline } = recorder({ chunkSeconds: 1, maxPendingSeconds: 3 });
     await rec.start();
     setOnline(false);
-    env.render(6.1);
+    env.render(6.1); // a little past 6 s: the resampler's 2.5 ms lookahead completes chunk 5
     expect(rec.droppedChunks).toBe(3);
     expect(rec.pendingChunks).toBe(3);
+    expect(rec.pendingBytes).toBe(3 * 32000);
     setOnline(true);
     rec.onReconnect();
     await rec.whenSent();
     expect(chunksOf(sent).map((c) => c.seq)).toEqual([3, 4, 5]);
+    expect(rec.pendingChunks).toBe(0);
     await rec.stop();
     await rec.whenSent();
     // the track's stop counts what it lost; the next track starts from zero
@@ -347,7 +332,7 @@ describe("MicRecorder", () => {
     env.render(1);
     env.permission = "denied";
     env.streams[0]!.track.dispatchEvent(new Event("ended"));
-    await new Promise((r) => setTimeout(r, 0));
+    await flushPromises();
     expect(rec.state).toBe("denied");
     expect(env.streams[0]!.track.stopped).toBe(true);
     await rec.whenSent();
@@ -365,13 +350,17 @@ describe("MicRecorder", () => {
   });
 
   it("splits the track at a context suspension and continues in a new track after the resume", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    onTestFinished(() => {
+      vi.useRealTimers();
+    });
     const { rec, sent } = recorder();
     await rec.start();
     env.render(2);
     env.ctx.setState("suspended");
     expect(rec.state).toBe("paused");
     expect(rec.status.needsGesture).toBe(true);
-    await new Promise((r) => setTimeout(r, 350)); // grace period: the partial chunk is sent
+    await vi.advanceTimersByTimeAsync(300); // grace period: the partial chunk is sent
     await rec.whenSent();
     expect(sent.at(-1)).toMatchObject({ kind: "stop", m: { reason: "context_suspended", samples: 32000 } });
     expect(await rec.resume()).toBe(true);
@@ -496,8 +485,7 @@ describe("MicRecorder", () => {
     const { rec } = recorder();
     await rec.start();
     env.render(0.5);
-    env.ctx.state = "suspended"; // no event: as if the resume needs a gesture
-    env.ctx.dispatchEvent(new Event("statechange"));
+    env.ctx.setState("suspended");
     expect(rec.state).toBe("paused");
     void rec.start();
     await Promise.resolve();

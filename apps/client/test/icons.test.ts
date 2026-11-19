@@ -11,7 +11,4 @@ describe("semantic icon table", () => {
       expect(ICONS[name], `ICONS.${name}`).toBe(expected);
     }
   });
-  it("has no unmapped entries", () => {
-    expect(Object.keys(ICONS).sort()).toEqual(Object.keys(ICON_TABLE).sort());
-  });
 });

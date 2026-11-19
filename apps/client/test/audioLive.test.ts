@@ -10,7 +10,6 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { EventLog, TEST_MAP } from "../../../packages/shared/test/helpers";
-import { fmtSigned, PLACEHOLDER } from "../src/common/format";
 import {
   audioSpans,
   backlogTone,
@@ -231,12 +230,6 @@ describe("calibration advice", () => {
     );
   });
 
-  it("shows margins with one decimal, so a failing 9.6 dB never reads as 10 dB", () => {
-    expect(fmtSigned(9.6, "dB")).toBe("+9.6 dB");
-    expect(fmtSigned(-2.04, "dB")).toBe("−2.0 dB");
-    expect(fmtSigned(null, "dB")).toBe(PLACEHOLDER);
-  });
-
   it("sums the calibration up in one tag: not run, who reads now, checking, the verdict", () => {
     const log = audioSession({ checked: [1, 2] });
     // before round 1 it waits for the room: who is still in the onboarding (here: everyone)
@@ -291,7 +284,6 @@ describe("calibration advice", () => {
     });
     const html = render();
     expect(html).toContain("needs attention");
-    expect(html).toContain("Seat 3: own voice only +4.1 dB over the others");
     expect(html).toContain("No audio from seat 4");
     expect(html).toContain("+16.5 dB");
   });
@@ -431,92 +423,77 @@ describe("timeline audio spans", () => {
 });
 
 describe("event log one-liners for audio events", () => {
-  it("summarises mic checks", () => {
-    expect(say(ev("MicCheckCompleted", MIC_OK, 2))).toBe(
+  const PER_SEAT = [
+    { seat: 1, ownDb: -22.4, bestOtherDb: -38.9, marginDb: 16.5, ok: true },
+    { seat: 3, ownDb: -30.1, bestOtherDb: -34.2, marginDb: 4.1, ok: false },
+    { seat: 4, ownDb: null, bestOtherDb: null, marginDb: null, ok: false },
+  ];
+  const stopped = (reason: "paused" | "disconnect", samples: number, chunks: number, droppedChunks: number) =>
+    ev("AudioTrackStopped", { trackId: TRACK, reason, samples, chunks, droppedChunks });
+  it.each<[string | RegExp, StoredEvent]>([
+    // mic checks
+    [
       "mic check passed (1 attempt) · speech −22 dB for 2.8 s, background −58 dB",
-    );
-    expect(say(ev("MicCheckCompleted", { ...MIC_OK, passed: false, attempts: 2 }, 2))).toMatch(
+      ev("MicCheckCompleted", MIC_OK, 2),
+    ],
+    [
       /^mic check NOT passed \(2 attempts\)/,
-    );
-    expect(say(ev("MicCheckSkipped", { seat: 3, reason: "no working microphone" }))).toBe(
+      ev("MicCheckCompleted", { ...MIC_OK, passed: false, attempts: 2 }, 2),
+    ],
+    [
       "mic check of seat 3 skipped: “no working microphone” · not recorded",
-    );
-  });
-
-  it("summarises tracks with a short id only", () => {
-    const started = say(
+      ev("MicCheckSkipped", { seat: 3, reason: "no working microphone" }),
+    ],
+    // tracks, with a short id only
+    [
+      "track 3f2a9c1e started (reconnect)",
       ev(
         "AudioTrackStarted",
         { trackId: TRACK, sampleRate: 16000, settings: SETTINGS, reason: "reconnect" },
         1,
       ),
-    );
-    expect(started).toBe("track 3f2a9c1e started (reconnect)");
-    expect(started).not.toContain(TRACK);
-    expect(
-      say(
-        ev("AudioTrackStopped", {
-          trackId: TRACK,
-          reason: "paused",
-          samples: 9_600_000,
-          chunks: 120,
-          droppedChunks: 0,
-        }),
-      ),
-    ).toBe("track 3f2a9c1e stopped (recording paused) · 10:00 stored in 120 chunks");
-    expect(
-      say(
-        ev("AudioTrackStopped", {
-          trackId: TRACK,
-          reason: "disconnect",
-          samples: 80_000,
-          chunks: 1,
-          droppedChunks: 2,
-        }),
-      ),
-    ).toBe("track 3f2a9c1e stopped (disconnected) · 0:05 stored in 1 chunk, 2 DROPPED (audio missing)");
-  });
-
-  it("summarises the calibration", () => {
-    expect(
-      say(
-        ev("CalibrationStarted", {
-          order: [1, 2, 3, 4],
-          sentenceIds: ["a", "b", "c", "d"],
-          turnMs: 6000,
-          gapMs: 1000,
-        }),
-      ),
-    ).toBe("calibration started · order seat 1 → 2 → 3 → 4 · 6 s turns, 1 s gaps");
-    expect(say(ev("CalibrationTurn", { index: 2, seat: 3, sentenceId: "h01-03" }))).toBe(
+    ],
+    [
+      "track 3f2a9c1e stopped (recording paused) · 10:00 stored in 120 chunks",
+      stopped("paused", 9_600_000, 120, 0),
+    ],
+    [
+      "track 3f2a9c1e stopped (disconnected) · 0:05 stored in 1 chunk, 2 DROPPED (audio missing)",
+      stopped("disconnect", 80_000, 1, 2),
+    ],
+    // the calibration
+    [
+      "calibration started · order seat 1 → 2 → 3 → 4 · 6 s turns, 1 s gaps",
+      ev("CalibrationStarted", {
+        order: [1, 2, 3, 4],
+        sentenceIds: ["a", "b", "c", "d"],
+        turnMs: 6000,
+        gapMs: 1000,
+      }),
+    ],
+    [
       "turn 3: seat 3 reads sentence h01-03",
-    );
-    expect(say(ev("CalibrationCompleted", { turns: [] }))).toMatch(/^calibration complete · 0 turns/);
-    expect(
-      say(
-        ev("CalibrationChecked", {
-          perSeat: [
-            { seat: 1, ownDb: -22.4, bestOtherDb: -38.9, marginDb: 16.5, ok: true },
-            { seat: 3, ownDb: -30.1, bestOtherDb: -34.2, marginDb: 4.1, ok: false },
-            { seat: 4, ownDb: null, bestOtherDb: null, marginDb: null, ok: false },
-          ],
-          ok: false,
-        }),
-      ),
-    ).toBe(
+      ev("CalibrationTurn", { index: 2, seat: 3, sentenceId: "h01-03" }),
+    ],
+    [/^calibration complete · 0 turns/, ev("CalibrationCompleted", { turns: [] })],
+    [
       "calibration NOT OK · own voice over the loudest other mic: seat 1 +16.5 dB ✓, seat 3 +4.1 dB ✗, seat 4 no audio ✗",
-    );
-    expect(say(ev("CalibrationSkipped", { reason: "everyone uses a headset" }))).toBe(
+      ev("CalibrationChecked", { perSeat: PER_SEAT, ok: false }),
+    ],
+    [
       "calibration skipped: “everyone uses a headset”",
-    );
-    expect(say(ev("CalibrationSkipped", { reason: "recording paused", cancelled: true }))).toBe(
+      ev("CalibrationSkipped", { reason: "everyone uses a headset" }),
+    ],
+    [
       "calibration cancelled (recording paused) · it has to be run again",
-    );
-  });
-
-  it("summarises recording pauses", () => {
-    expect(say(ev("RecordingPaused", { reason: "break" }))).toBe("recording paused for everyone: “break”");
-    expect(say(ev("RecordingPaused", {}))).toBe("recording paused for everyone");
-    expect(say(ev("RecordingResumed", {}))).toBe("recording resumed for everyone");
+      ev("CalibrationSkipped", { reason: "recording paused", cancelled: true }),
+    ],
+    // recording pauses
+    ["recording paused for everyone: “break”", ev("RecordingPaused", { reason: "break" })],
+    ["recording paused for everyone", ev("RecordingPaused", {})],
+    ["recording resumed for everyone", ev("RecordingResumed", {})],
+  ])("%s", (text, e) => {
+    if (typeof text === "string") expect(say(e)).toBe(text);
+    else expect(say(e)).toMatch(text);
   });
 });

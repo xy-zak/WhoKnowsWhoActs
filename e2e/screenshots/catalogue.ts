@@ -172,20 +172,20 @@ export type GroupId = (typeof GROUPS)[number]["id"];
 
 export const SHOTS = [
   // 1. setup
-  { id: "server/setup-01-scenario", group: "setup", title: "Step 01 · Scenario", size: "half" },
-  { id: "server/setup-02-rounds", group: "setup", title: "Step 02 · Rounds", size: "half" },
-  { id: "server/setup-03-players", group: "setup", title: "Step 03 · Who plays", size: "half" },
-  { id: "server/setup-04-onboarding", group: "setup", title: "Step 05 · Onboarding", size: "half" },
-  { id: "server/setup-05-tags", group: "setup", title: "Step 06 · Tags", size: "half" },
-  { id: "server/setup-06-review", group: "setup", title: "Step 07 · Create session", size: "half" },
-  { id: "server/setup-08-labels", group: "setup", title: "Step 09 · Labels", size: "half" },
-  { id: "server/setup-09-key-sheet", group: "setup", title: "Step 10 · Key sheet", size: "half" },
-  { id: "server/setup-10-start", group: "setup", title: "Step 11 · Start", size: "half" },
+  { id: "server/setup-scenario", group: "setup", title: "Setup · Scenario", size: "half" },
+  { id: "server/setup-rounds", group: "setup", title: "Setup · Rounds", size: "half" },
+  { id: "server/setup-who", group: "setup", title: "Setup · Who plays", size: "half" },
+  { id: "server/setup-onboarding", group: "setup", title: "Setup · Onboarding", size: "half" },
+  { id: "server/setup-tags", group: "setup", title: "Setup · Tags", size: "half" },
+  { id: "server/setup-create", group: "setup", title: "Setup · Create session", size: "half" },
+  { id: "server/setup-labels", group: "setup", title: "Setup · Labels", size: "half" },
+  { id: "server/setup-keysheet", group: "setup", title: "Setup · Key sheet", size: "half" },
+  { id: "server/setup-start", group: "setup", title: "Setup · Start", size: "half" },
 
   // 2. connect
   { id: "client/01-waiting-for-seat", group: "connect", title: "Waiting for a seat", size: "half" },
-  { id: "server/setup-07-connect", group: "connect", title: "Step 08 · Connect", size: "half" },
-  { id: "server/setup-07-connect-bound", group: "connect", title: "Step 08 · All seats bound", size: "half" },
+  { id: "server/setup-connect", group: "connect", title: "Setup · Connect", size: "half" },
+  { id: "server/setup-connect-bound", group: "connect", title: "Setup · All seats bound", size: "half" },
   { id: "client/02-seat-assigned", group: "connect", title: "Seat assigned", size: "half" },
 
   // 3. onboarding
@@ -559,22 +559,22 @@ export const SHOTS = [
 
   // 11. testing
   {
-    id: "server/setup-07-connect-fake-players",
+    id: "server/setup-connect-fake-players",
     group: "testing",
     title: "Fake players",
     size: "half",
     scenario: "small-grid",
   },
   {
-    id: "server/setup-03-players-simulated",
+    id: "server/setup-who-simulated",
     group: "testing",
-    title: "Simulated players · Step 03",
+    title: "Simulated players · Setup",
     size: "half",
   },
   {
     id: "server/simulation-01-agents",
     group: "testing",
-    title: "Simulated players · Step 08",
+    title: "Simulated players · Agents",
     size: "half",
     scenario: "simulation",
   },
@@ -589,9 +589,9 @@ export const SHOTS = [
 
   // 12. small map
   {
-    id: "server/setup-01-scenario-small-grid",
+    id: "server/setup-scenario-small-grid",
     group: "small-map",
-    title: "Step 01 · Small grid",
+    title: "Setup · Small grid",
     size: "half",
     scenario: "small-grid",
     sources: [`${C}/facilitator/setup/**`],
@@ -660,7 +660,7 @@ export const GLOBAL_SOURCES = [
 
 /** Shots that together show most of the shared UI: captured when a GLOBAL_SOURCES file changes. */
 export const REPRESENTATIVE: readonly ShotId[] = [
-  "server/setup-01-scenario",
+  "server/setup-scenario",
   "server/live-02-round",
   "server/theme-mocha",
   "client/03-consent",

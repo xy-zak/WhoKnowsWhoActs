@@ -24,6 +24,9 @@ import {
 } from "../src/audio/wav";
 import { mulberry32, synthesise, trackInputs } from "./attributionSynth";
 
+/** Wall-clock limits are checked in the normal run only: coverage instrumentation slows the code down. */
+const TIMED = !process.env.WKWA_COVERAGE;
+
 const FS = 16_000;
 
 function sine(n: number, amp: number, hz = 400): Int16Array {
@@ -198,7 +201,7 @@ describe("Silero VAD", () => {
     for (let i = 0; i < 100; i++) p = await vad.next(noise);
     expect(p).toBeGreaterThanOrEqual(0);
     expect(p).toBeLessThan(0.5); // quiet noise is not speech
-    expect((performance.now() - t) / 100).toBeLessThan(5);
+    if (TIMED) expect((performance.now() - t) / 100).toBeLessThan(5);
   });
 });
 
@@ -325,7 +328,7 @@ describe("quick calibration check", () => {
       const s = synthesise({ seed: 11, durationSec: 36, profile });
       const t = performance.now();
       const report = quickCalibrationCheck(trackInputs(s), s.turns, window(s));
-      expect(performance.now() - t).toBeLessThan(200);
+      if (TIMED) expect(performance.now() - t).toBeLessThan(200);
       expect(report.seats).toHaveLength(4);
       if (profile === "headset") {
         expect(report.ok).toBe(true);

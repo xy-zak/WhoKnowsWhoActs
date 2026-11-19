@@ -2,18 +2,15 @@
  * A SessionManager on its own encrypted database, driven directly: no hub, no sockets. With the
  * helpers that take its seats through binding, labels, consent, mic check and onboarding.
  */
-import { mkdtempSync } from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { AUDIO_CONSENT_ITEM, type SessionConfigInput, type StoredEvent } from "@wkwa/shared";
 import pino from "pino";
-import { AudioFileStore } from "../src/audio/fileStore";
+import type { AudioFileStore } from "../src/audio/fileStore";
 import { loadOnboardingContent, ScenarioLibrary } from "../src/content";
-import { openDatabase } from "../src/db/database";
-import { Store } from "../src/db/store";
+import type { Store } from "../src/db/store";
 import { REPO_ROOT } from "../src/runtime";
 import { SessionManager } from "../src/session/SessionManager";
-import { cleanup, PASSPHRASE } from "./harness";
+import { tempStore } from "./audioFixtures";
 
 export const CONFIG_DIR = path.join(REPO_ROOT, "config");
 export const SCENARIOS = new ScenarioLibrary(path.join(REPO_ROOT, "scenarios"));
@@ -30,8 +27,9 @@ export interface Direct {
   m: SessionManager;
   store: Store;
   files: AudioFileStore;
-  dir: string;
   events: StoredEvent[];
+  /** The session loaded again from the store, as after a server restart (disposed by close()). */
+  reload(): SessionManager;
   close(): void;
 }
 
@@ -40,35 +38,37 @@ export function direct(
   config: SessionConfigInput = { audio: { enabled: true } },
   opts: { clock?: () => number; sim?: boolean } = {},
 ): Direct {
-  const dir = mkdtempSync(path.join(os.tmpdir(), "wkwa-live-"));
-  const db = openDatabase(path.join(dir, "wkwa.db"), PASSPHRASE);
-  const files = new AudioFileStore(path.join(dir, "audio"));
-  const store = new Store(db, opts.sim ? null : files);
+  const t = tempStore({ audio: !opts.sim });
   const events: StoredEvent[] = [];
   const audio = config.players !== "simulated" && config.audio?.enabled === true;
+  const deps = {
+    store: t.store,
+    scenario: SCENARIOS.load("demo"),
+    onboarding: loadOnboardingContent(CONFIG_DIR, { audio }),
+    serverSecret: "test-secret",
+    log: pino({ level: "silent" }),
+    clock: opts.clock,
+  };
   const m = SessionManager.create(
-    {
-      store,
-      scenario: SCENARIOS.load("demo"),
-      onboarding: loadOnboardingContent(CONFIG_DIR, { audio }),
-      serverSecret: "test-secret",
-      log: pino({ level: "silent" }),
-      onEvents: (e) => events.push(...e),
-      clock: opts.clock,
-    },
+    { ...deps, onEvents: (e) => events.push(...e) },
     { seatCount: 2, roundCount: 1, defaultRound: ROUND, ...config } as never,
     "live audio test",
   );
+  const loaded: SessionManager[] = [];
   return {
     m,
-    store,
-    files,
-    dir,
+    store: t.store,
+    files: t.files,
     events,
+    reload() {
+      const r = SessionManager.load({ ...deps, onEvents: () => {} }, m.sessionId);
+      loaded.push(r);
+      return r;
+    },
     close() {
+      for (const r of loaded) r.dispose();
       m.dispose();
-      db.close();
-      cleanup(dir);
+      t.close();
     },
   };
 }

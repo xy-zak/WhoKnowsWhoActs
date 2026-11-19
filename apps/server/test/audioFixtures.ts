@@ -1,8 +1,67 @@
 import { randomUUID } from "node:crypto";
+import { mkdtempSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { AUDIO_SAMPLE_RATE } from "@wkwa/shared";
-import type { AudioFileStore, AudioReadIssue } from "../src/audio/fileStore";
-import type { Store } from "../src/db/store";
-import { nowTs } from "../src/runtime";
+import { AudioFileStore, type AudioReadIssue } from "../src/audio/fileStore";
+import { type DB, openDatabase } from "../src/db/database";
+import { Store } from "../src/db/store";
+import { nowTs, wall } from "../src/runtime";
+import { cleanup, PASSPHRASE } from "./harness";
+
+export interface TempStore {
+  /** The temp folder: the database and the audio folder are in `dataDir`, exports in `exportsDir`. */
+  dir: string;
+  dataDir: string;
+  exportsDir: string;
+  db: DB;
+  files: AudioFileStore;
+  store: Store;
+  close(): void;
+}
+
+/** An encrypted database and audio file store in a new temp folder (`audio: false`: a store without audio). */
+export function tempStore(opts: { audio?: boolean } = {}): TempStore {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "wkwa-store-"));
+  const dataDir = path.join(dir, "data");
+  const db = openDatabase(path.join(dataDir, "wkwa.db"), PASSPHRASE);
+  const files = new AudioFileStore(path.join(dataDir, "audio"));
+  const store = new Store(db, opts.audio === false ? null : files);
+  return {
+    dir,
+    dataDir,
+    exportsDir: path.join(dir, "exports"),
+    db,
+    files,
+    store,
+    close() {
+      db.close();
+      cleanup(dir);
+    },
+  };
+}
+
+/** A closed session row only (no events, not attached to a hub). Returns its id. */
+export function insertBareSession(
+  store: Store,
+  id = `S-20261118-${randomUUID().slice(0, 4).toUpperCase()}`,
+  createdTs = nowTs(),
+): string {
+  store.insertSession({
+    id,
+    created_wall: wall(createdTs),
+    scenario_id: "demo",
+    scenario_version: "1",
+    scenario_hash: "h",
+    status: "closed",
+    tags_json: "[]",
+    notes: "",
+    config_json: "{}",
+    harness_version: "0",
+    git_commit: "test",
+  });
+  return id;
+}
 
 /**
  * Synthetic 16 kHz mono s16le PCM: a 440 Hz tone whose loudness depends on

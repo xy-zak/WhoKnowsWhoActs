@@ -241,29 +241,6 @@ describe("PlayerConnection: intents", () => {
     expect(intentPayloads(socket).map((x) => x.regionId)).toEqual(["A1", "A2", "A3"]);
   });
 
-  it("keeps an intent refused with retry (not seated yet) and sends it again once seated again", async () => {
-    const { socket, conn } = setup();
-    bind(socket);
-    const p = conn.intent("propose", "A1");
-    socket.answer("intent", { ok: false, error: "Not seated", retry: true });
-    reconnect(socket);
-    expect(socket.sent("intent")).toHaveLength(2);
-    socket.answer("intent", { ok: true, seq: 9 });
-    await expect(p).resolves.toEqual({ ok: true, seq: 9 });
-  });
-
-  it("sends an intent refused with retry while still seated (a server error) again after a pause", async () => {
-    const { socket, conn } = setup();
-    bind(socket);
-    const p = conn.intent("propose", "A1");
-    socket.answer("intent", { ok: false, error: "Server error", retry: true });
-    await vi.advanceTimersByTimeAsync(1000);
-    expect(intentPayloads(socket)).toHaveLength(2);
-    expect(intentPayloads(socket)[1]).toEqual(intentPayloads(socket)[0]);
-    socket.answer("intent", { ok: true, seq: 4 });
-    await expect(p).resolves.toEqual({ ok: true, seq: 4 });
-  });
-
   it("rejects on a permanent refusal", async () => {
     const { socket, conn } = setup();
     bind(socket);
@@ -343,35 +320,6 @@ describe("PlayerConnection: requests", () => {
     expect(await c2).toMatch(/did not respond/);
   });
 
-  it("a refusal with retry in a reconnect race is sent again once seated again, not shown as an error", async () => {
-    const { socket, conn } = setup();
-    bind(socket);
-    const p = conn.request("consent:submit", consent);
-    // the server lost this socket's seat before the client heard of it
-    socket.answer("consent:submit", { ok: false, error: "Not seated", retry: true });
-    socket.disconnect();
-    socket.connect();
-    await vi.advanceTimersByTimeAsync(1000);
-    expect(socket.sent("consent:submit")).toHaveLength(1); // not before hello's answer
-    socket.answer("hello", { ok: true, terminal: 1, seat: 2 });
-    expect(socket.sent("consent:submit").map((e) => e.payload)).toEqual([consent, consent]);
-    socket.answer("consent:submit", { ok: true });
-    await expect(p).resolves.toEqual({ ok: true });
-  });
-
-  it("a refusal with retry while still seated (a server error) is sent again after a pause", async () => {
-    const { socket, conn } = setup();
-    bind(socket);
-    const p = conn.request("mic:check", { passed: true } as never);
-    socket.answer("mic:check", { ok: false, error: "Server error", retry: true });
-    await vi.advanceTimersByTimeAsync(999);
-    expect(socket.sent("mic:check")).toHaveLength(1);
-    await vi.advanceTimersByTimeAsync(1);
-    expect(socket.sent("mic:check")).toHaveLength(2);
-    socket.answer("mic:check", { ok: true });
-    await expect(p).resolves.toEqual({ ok: true });
-  });
-
   it("keeps retrying only until its deadline", async () => {
     const { socket, conn } = setup();
     bind(socket);
@@ -391,6 +339,64 @@ describe("PlayerConnection: requests", () => {
     reconnect(socket);
     expect(socket.sent("consent:submit")).toHaveLength(1);
   });
+});
+
+/* ─── refusals with retry: the same rules for intents and requests ─── */
+
+describe("PlayerConnection: refusals with retry", () => {
+  const SENDS = [
+    {
+      what: "an intent",
+      event: "intent",
+      ok: { ok: true, seq: 9 },
+      seatBackMs: 0, // seated again within the retry pause
+      send: (c: PlayerConnection) => c.intent("propose", "A1"),
+    },
+    {
+      what: "a request",
+      event: "mic:check",
+      ok: { ok: true },
+      seatBackMs: 1000, // seated again after the retry pause ran out
+      send: (c: PlayerConnection) => c.request("mic:check", { passed: true } as never),
+    },
+  ] as const;
+
+  it.each(SENDS)(
+    "$what refused in a reconnect race (not seated) is sent again once seated again, $seatBackMs ms later",
+    async (x) => {
+      const { socket, conn } = setup();
+      bind(socket);
+      const p = x.send(conn);
+      // the server lost this socket's seat before the client heard of it
+      socket.answer(x.event, { ok: false, error: "Not seated", retry: true });
+      socket.disconnect();
+      socket.connect();
+      await vi.advanceTimersByTimeAsync(x.seatBackMs);
+      expect(socket.sent(x.event)).toHaveLength(1); // not before hello's answer
+      socket.answer("hello", { ok: true, terminal: 1, seat: 2 });
+      const [first, again] = socket.sent(x.event).map((e) => e.payload);
+      expect(again).toEqual(first);
+      socket.answer(x.event, x.ok);
+      await expect(p).resolves.toEqual(x.ok);
+    },
+  );
+
+  it.each(SENDS)(
+    "$what refused while still seated (a server error) is sent again after a pause",
+    async (x) => {
+      const { socket, conn } = setup();
+      bind(socket);
+      const p = x.send(conn);
+      socket.answer(x.event, { ok: false, error: "Server error", retry: true });
+      await vi.advanceTimersByTimeAsync(999);
+      expect(socket.sent(x.event)).toHaveLength(1);
+      await vi.advanceTimersByTimeAsync(1);
+      const [first, again] = socket.sent(x.event).map((e) => e.payload);
+      expect(again).toEqual(first);
+      socket.answer(x.event, x.ok);
+      await expect(p).resolves.toEqual(x.ok);
+    },
+  );
 });
 
 /* ─── telemetry: `whileSeated` ─── */

@@ -1,18 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
   AUDIO_START_REASON_DEFS,
-  AUDIO_START_REASONS,
   AUDIO_STOP_REASON_DEFS,
   AUDIO_STOP_REASONS,
-  AudioStartReasonSchema,
-  AudioStopReasonSchema,
   audioTrackEnding,
   INTERRUPTED_STOP_REASONS,
   isAudioStartReason,
   isAudioStopReason,
   MIC_LEVEL_STATES,
   MIC_STATE_DEFS,
-  MicLevelStateSchema,
   micCapturing,
   micHasLevel,
 } from "../src";
@@ -101,22 +97,5 @@ describe("audio reason catalogue", () => {
       expect(d.description).toMatch(/^[a-z'].*[^.]$/);
     }
     for (const d of Object.values(MIC_STATE_DEFS)) expect(d.description).toMatch(/^[a-z].*[^.]$/);
-  });
-
-  it("builds the zod enums and their descriptions from the catalogue", () => {
-    expect(AudioStartReasonSchema.options).toEqual(AUDIO_START_REASONS);
-    expect(AudioStopReasonSchema.options).toEqual(AUDIO_STOP_REASONS);
-    expect(MicLevelStateSchema.options).toEqual(MIC_LEVEL_STATES);
-    for (const r of AUDIO_START_REASONS)
-      expect(AudioStartReasonSchema.description).toContain(
-        `'${r}' = ${AUDIO_START_REASON_DEFS[r].description}`,
-      );
-    for (const r of AUDIO_STOP_REASONS)
-      expect(AudioStopReasonSchema.description).toContain(
-        `'${r}' = ${AUDIO_STOP_REASON_DEFS[r].description}`,
-      );
-    for (const s of MIC_LEVEL_STATES)
-      expect(MicLevelStateSchema.description).toContain(`'${s}' = ${MIC_STATE_DEFS[s].description}`);
-    expect(AudioStopReasonSchema.safeParse("context_closed").success).toBe(false);
   });
 });

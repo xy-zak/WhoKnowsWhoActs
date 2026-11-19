@@ -13,47 +13,20 @@ import {
   playerView,
   randomPolicy,
   resolvePolicyParams,
-  SessionConfigSchema,
   seatPolicyId,
   seededRandom,
 } from "../src";
-import { EventLog, TEST_MAP, testScenario } from "./helpers";
+import { newSession, testScenario } from "./helpers";
 
 /** A simulated session with agents in every seat, labelled, at round 1. */
-function simulatedSession(seatCount = 2): EventLog {
-  const log = new EventLog("SIM-TEST-0001");
-  const config = normaliseForPlayers(
-    SessionConfigSchema.parse({ players: "simulated", seatCount, simulation: { seed: "S" } }),
-  );
-  log.push("SessionCreated", {
-    config,
-    scenario: { id: "test", title: "Test", version: "1", hash: "test" },
-    ...TEST_MAP,
-    viewIds: ["Ka", "Kb", "Kc", "Kd"],
-    harness: { version: "0", gitCommit: "test" },
-    notes: "",
+const simulatedSession = (seatCount = 2) =>
+  newSession({
+    sessionId: "SIM-TEST-0001",
+    agents: true,
+    config: normaliseForPlayers(
+      parseSessionConfig({ players: "simulated", seatCount, simulation: { seed: "S" } }),
+    ),
   });
-  for (let seat = 1; seat <= seatCount; seat++) {
-    log.push(
-      "AgentBound",
-      { seat, policy: "random", policyVersion: "2", params: { proposeBias: 0.5 }, seed: `S:${seat}` },
-      { seat },
-    );
-  }
-  log.push("LabelsAssigned", {
-    assignments: Array.from({ length: seatCount }, (_, i) => ({
-      seat: i + 1,
-      k: (["Ka", "Kb", "Kc", "Kd"] as const)[i]!,
-      p: (["Pa", "Pb", "Pc", "Pd"] as const)[i]!,
-      view: (["Ka", "Kb", "Kc", "Kd"] as const)[i]!,
-    })),
-    method: "manual",
-    seed: null,
-    pairing: { mode: "aligned", id: null },
-  });
-  log.push("OnboardingStarted", { steps: [] });
-  return log;
-}
 
 const view = (state: GameState, seat: number): PlayerView => playerView(state, testScenario, seat, null, 0);
 const ctx = (seed = "x", params: Record<string, unknown> = { proposeBias: 0.5 }) => ({
@@ -179,12 +152,5 @@ describe("random policy", () => {
       { seat: 1, actor: "player" },
     );
     expect(randomPolicy.act(view(log.state, 1), ctx())).toBeNull();
-  });
-
-  it("sees only its own knowledge type's scores (the player projection)", () => {
-    const log = simulatedSession();
-    const v = view(log.state, 1);
-    expect(Object.keys(v.scores).length).toBe(4);
-    expect(Object.keys(v.scores).every((id) => id.endsWith("-Ka"))).toBe(true);
   });
 });

@@ -74,7 +74,8 @@ For real sessions, follow the **[session runbook](docs/SESSION-RUNBOOK.md)**.
 | `npm run bots -- [--count N] [--auto] [--audio] [--url U]` | External test players that connect like browsers (to this laptop over HTTPS or HTTP, whichever the server speaks, unless `--url` says otherwise) (and optionally an automatic facilitator; `--audio` also tests microphone recording with synthetic audio), e.g. for load tests. They are **not** marked in the data: for rehearsals use **fake players** (setup step 08); for agents choose *Simulated players* (step 03). |
 | `npm run cli -- <command> [--sim]` | Data management: `sessions`, `lookup`, `export`, `anonymise`, `erase`, `erasures`, `delete-session`, `deletions`, `delete-audio`, `audio-deletions`, `backup`, `rekey`, `verify`; `--sim` works on the simulation database |
 | `npm test` | Unit and integration tests (rules, full bot games, GDPR guarantees, docs drift) |
-| `npm run test:e2e` | Playwright: a full game through the real UI with 4 player browsers, plus a render check of every diagram |
+| `npm run test:coverage` | The unit tests with a coverage summary (`coverage/`); speed checks are skipped, nothing is enforced |
+| `npm run test:e2e` | Playwright: a full game through the real UI (one player browser and three bots), a simulated session, audio with a fake microphone, display settings, plus a render check of every diagram |
 | `npm run docs:generate` | Regenerate the schema-derived parts of `docs/` |
 | `npm run screenshots -- <command>` | Versioned documentation screenshots: `plan` (what changed since the last review), `capture` (Playwright plays the sessions needed, on a temporary database), `publish` (new version `name-v2.png` … in `docs/img/`, gallery regenerated), `check`, `mark`. Not part of `test:e2e`; the `/screenshot-app` skill runs the whole workflow |
 | `npm run lint` / `npm run typecheck` | Biome / TypeScript |

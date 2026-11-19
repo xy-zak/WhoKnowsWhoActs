@@ -129,39 +129,35 @@ describe("seat monitor", () => {
     d.m.submitMicLevel(1, LEVEL);
     d.m.submitPresence(1, "A1-Ka");
     d.m.playerDisconnected(1, "transport close");
+    d.m.playerDisconnected(2, "transport close"); // never connected: nothing to log
     expect(stats(1)).toMatchObject({ hoverRegionId: null, mic: { state: "idle" } });
+    expect(d.events.filter((e) => e.type === "PlayerDisconnected").map((e) => e.seat)).toEqual([1]);
   });
 });
 
 describe("fake player admission", () => {
-  it("takes only a seat that exists and is not bound", () => {
+  it.each([
+    ["a bound seat", false, (m: Direct["m"]) => m.bindSeat(1, 1), 1, /Seat 1 is already bound/],
+    ["a seat that does not exist", false, () => {}, 9, /Seat 9 does not exist/],
+    ["outside the lobby", false, (m: Direct["m"]) => onboard(m), 1, /only be added in the lobby/],
+    ["in a simulated session", true, () => {}, 1, /simulated session/],
+  ])("is refused for %s", (_, sim, prepare, seat, refusal) => {
+    d = direct(sim ? { players: "simulated" } : {}, { sim });
+    prepare(d.m);
+    expect(d.m.fakePlayerRefusal(seat)).toMatch(refusal);
+    expect(() => d.m.fakePlayerSeats([seat])).toThrow(refusal);
+  });
+
+  it("takes the free seats, and never replaces the client of a bound seat", () => {
     d = direct({ seatCount: 3 });
     d.m.bindSeat(1, 1);
-    expect(d.m.fakePlayerRefusal(1)).toMatch(/Seat 1 is already bound/);
-    expect(d.m.fakePlayerRefusal(9)).toMatch(/Seat 9 does not exist/);
     expect(d.m.fakePlayerRefusal(2)).toBeNull();
     expect(d.m.fakePlayerSeats(null)).toEqual([2, 3]);
-    expect(() => d.m.fakePlayerSeats([2, 1])).toThrow(/Seat 1 is already bound/);
     // a fake player never replaces the client of a bound seat (a real client does)
     expect(() => d.m.bindSeat(5, 1, { fake: true })).toThrow(/already bound/);
     expect(d.m.bindSeat(5, 1).fake).toBe(false);
     d.m.bindSeat(2, 2, { fake: true });
     d.m.bindSeat(3, 3);
     expect(() => d.m.fakePlayerSeats(null)).toThrow(/Every seat is already bound/);
-  });
-
-  it("is refused outside the lobby", () => {
-    d = direct({});
-    d.m.bindSeat(1, 1);
-    d.m.unbindSeat(1, "test");
-    onboard(d.m);
-    expect(d.m.fakePlayerRefusal(1)).toMatch(/only be added in the lobby/);
-    expect(() => d.m.fakePlayerSeats([1])).toThrow(/only be added in the lobby/);
-  });
-
-  it("is refused in a simulated session", () => {
-    d = direct({ players: "simulated" }, { sim: true });
-    expect(d.m.fakePlayerRefusal(1)).toMatch(/simulated session/);
-    expect(() => d.m.fakePlayerSeats(null)).toThrow(/simulated session/);
   });
 });
