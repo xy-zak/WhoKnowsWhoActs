@@ -8,7 +8,6 @@ import {
   type PlayerAcks,
   type PlayerPayload,
   type PlayerView,
-  STOP_REASON_FOR,
   type TelemetryPayloadOf,
 } from "@wkwa/shared";
 import type {
@@ -24,11 +23,22 @@ import type {
 } from "../audio";
 import { Store } from "../net/store";
 import type { RecState } from "../ui/audioMeta";
+import {
+  atMicCheck,
+  type Effect,
+  INITIAL,
+  type Input,
+  type Machine,
+  step,
+  wantsRecording,
+} from "./recordingMachine";
 
 /*
  * The player's recorder controller: drives the capture engine (audio/MicRecorder) from the
  * server's PlayerView.audio and wires it to the socket. It lives on the PlayerConnection, not in
  * a component, because screens remount on every screen change (and twice under StrictMode).
+ * Its decisions, with every start and stop reason, are the state machine in recordingMachine.ts;
+ * this file feeds it the views, clicks and engine states and carries out what it asks.
  *
  * When recording runs (PlayerView.audio.record, the server's recording verdict: it folds in the
  * consent hold, the facilitator's pause, the phase, a skipped mic check and withdrawal, and
@@ -53,7 +63,6 @@ export interface RecorderLike {
   readonly status: RecorderStatus;
   readonly pendingChunks: number;
   readonly pendingBytes: number;
-  readonly droppedChunks: number;
   readonly captureSettings: EngineCaptureSettings;
   prepare(): boolean;
   resume(): Promise<boolean>;
@@ -99,14 +108,10 @@ export interface RecordingDeps {
 
 export interface RecordingSnapshot {
   status: RecorderStatus;
-  /** The participant clicked Start in the mic check (this page). */
+  /** The participant clicked Start in the mic check (this page; survives a remount of the screen). */
   gesture: boolean;
-  /** Capture failed (denied / error) and waits for "Try again" (or a device change). */
-  failed: boolean;
   /** Rate of the browser's audio engine (Hz), from the latest track start. */
   contextSampleRate: number | null;
-  pendingChunks: number;
-  droppedChunks: number;
 }
 
 const IDLE_STATUS: RecorderStatus = {
@@ -118,27 +123,6 @@ const IDLE_STATUS: RecorderStatus = {
 };
 
 /* ─────────────────────────── pure helpers (unit-tested) ─────────────────────────── */
-
-/** The server wants this browser to capture now. */
-export function wantsRecording(v: PlayerView | null): boolean {
-  return !!v && v.audio.enabled && v.audio.record;
-}
-
-/** The mic check is this seat's current step. */
-export function atMicCheck(v: PlayerView | null): boolean {
-  return !!v && v.phase === "onboarding" && !v.me.withdrawn && v.me.nextStep === "mic_check";
-}
-
-/** Why the running track stops when the server no longer wants recording (its verdict's reason). */
-export function stopReasonFor(v: PlayerView | null): AudioStopReason {
-  const why = v?.audio.notRecording;
-  return why ? STOP_REASON_FOR[why] : "client_stop";
-}
-
-/** The start reason of a track (falls back to `reload` / `mic_check` when there is no specific one). */
-export function startReasonFor(v: PlayerView | null, next: AudioStartReason | null): AudioStartReason {
-  return next ?? (atMicCheck(v) ? "mic_check" : "reload");
-}
 
 /**
  * What the recording indicator shows (null = the session records no audio). While the server's
@@ -191,10 +175,7 @@ export class RecordingController {
   readonly store = new Store<RecordingSnapshot>({
     status: IDLE_STATUS,
     gesture: false,
-    failed: false,
     contextSampleRate: null,
-    pendingChunks: 0,
-    droppedChunks: 0,
   });
   /**
    * Latest ~250 ms level while capturing (null when not capturing). A store of its own: it changes
@@ -204,34 +185,17 @@ export class RecordingController {
   private rec: RecorderLike | null = null;
   private unwatch: (() => void) | null = null;
   private view: PlayerView | null = null;
-  /** capture was asked for (start) and not stopped since */
-  private running = false;
-  private gesture = false;
-  private failed = false;
-  /** a track has started in this page (for the reason of the next start) */
-  private everTracked = false;
-  private nextReason: AudioStartReason | null = null;
-  private reconnectPending = false;
-  /** the session was detached (seat kept): the running track stops as a disconnect */
-  private detached = false;
+  private m: Machine = INITIAL;
   private connectedOnce = false;
-  private clearWhenIdle = false;
+  /** a sync pass runs (it awaits the engine's stops); `dirty`: run another one after it */
   private syncing = false;
   private dirty = false;
-  /** last mic_permission state reported in this attempt (dedupes) */
+  /** last mic_permission state reported since the latest start (dedupes) */
   private reported: string | null = null;
-  /** chunks dropped so far when each track began / ended (droppedChunks of audio:stop) */
-  private dropMarks = new Map<string, { from: number; to: number | null }>();
-  private lastTrack: string | null = null;
-  private lastState: RecorderState = "idle";
 
   constructor(private readonly deps: RecordingDeps) {}
 
-  get snapshot(): RecordingSnapshot {
-    return this.store.get();
-  }
-
-  /** Every new PlayerView (null when the seat was unbound). */
+  /** Every new PlayerView. */
   update(v: PlayerView | null) {
     this.view = v;
     if (!this.rec && !v?.audio.enabled) return;
@@ -240,21 +204,15 @@ export class RecordingController {
 
   /** The socket connected; after the first time, the next state push resyncs the recorder. */
   onConnect() {
-    if (this.connectedOnce) this.reconnectPending = true;
+    if (this.connectedOnce) this.dispatch("reconnected");
     this.connectedOnce = true;
   }
 
   /** The seat was unbound: stop, drop everything not yet sent, and forget the mic check click. */
   onUnbound() {
     this.view = null;
-    this.gesture = false;
-    this.everTracked = false;
-    this.nextReason = null;
-    this.failed = false;
-    this.reconnectPending = false;
-    this.detached = false;
-    this.clearWhenIdle = true;
     setTrackedBefore(false);
+    this.dispatch("unbound");
     this.publish();
     if (this.rec) this.kick();
   }
@@ -267,8 +225,7 @@ export class RecordingController {
    */
   onDetached() {
     this.view = null;
-    this.detached = true;
-    this.reconnectPending = true;
+    this.dispatch("detached");
     this.publish();
     if (this.rec) this.kick();
   }
@@ -281,12 +238,9 @@ export class RecordingController {
     const rec = this.ensure();
     if (!rec) return;
     rec.prepare();
-    this.gesture = true;
-    if (this.failed) {
-      this.failed = false;
-      if (this.everTracked) this.nextReason ??= "permission_regained";
-    }
-    if (!this.running && wantsRecording(this.view)) this.begin();
+    const effects = this.dispatch("click");
+    if (effects.length)
+      void this.perform(effects); // a start: it reaches the engine at once
     else if (rec.status.needsGesture) void rec.resume();
     this.publish();
     this.kick();
@@ -314,6 +268,11 @@ export class RecordingController {
     return this.rec?.captureSettings ?? {};
   }
 
+  dispose() {
+    this.unwatch?.();
+    this.unwatch = null;
+  }
+
   /* ─── internals ─── */
 
   private ensure(): RecorderLike | null {
@@ -329,6 +288,31 @@ export class RecordingController {
     });
     this.unwatch = this.deps.watchDevices?.(() => this.onDeviceChange()) ?? null;
     return this.rec;
+  }
+
+  /** Feeds one input to the state machine; returns what it asks of the engine. */
+  private dispatch(input: Input, view = this.view): Effect[] {
+    const s = step(this.m, input, { view, trackedInTab: trackedBefore() });
+    this.m = s.m;
+    return s.effects;
+  }
+
+  /** Carries out the machine's effects in order, awaiting each stop. */
+  private async perform(effects: Effect[]) {
+    const rec = this.rec;
+    if (!rec) return;
+    for (const e of effects) {
+      if (e.do === "start") this.begin(rec, e.reason);
+      else if (e.do === "resend") rec.onReconnect();
+      else if (e.do === "clear") {
+        rec.clearPending();
+        this.publish();
+      } else {
+        await rec.stop(e.reason);
+        this.reportDrained();
+        this.publish();
+      }
+    }
   }
 
   private kick() {
@@ -349,55 +333,16 @@ export class RecordingController {
     })();
   }
 
+  /** One pass against the view it starts with: settle a reconnect, then start or stop to match. */
   private async syncOnce() {
     const v = this.view;
-    const rec = this.rec ?? (v?.audio.enabled ? this.ensure() : null);
-    if (!rec) return;
-    const want = wantsRecording(v);
-    if (v) this.detached = false;
-    if (this.reconnectPending && v) {
-      this.reconnectPending = false;
-      // resend what was not acknowledged (oldest first), then close the old track and open a new one
-      rec.onReconnect();
-      if (this.running) {
-        this.running = false;
-        const reason = want ? "disconnect" : stopReasonFor(v);
-        this.nextReason = want ? "reconnect" : reason === "paused" ? "resume" : null;
-        await rec.stop(reason);
-        this.reportDrained();
-        this.publish();
-      }
-    }
-    if (want && !this.running) {
-      if (this.failed) return;
-      if (atMicCheck(v) && !this.gesture) return; // the Start button
-      this.begin();
-    } else if (!want && this.running) {
-      this.running = false;
-      const reason = this.detached ? "disconnect" : stopReasonFor(v);
-      if (reason === "paused") this.nextReason = "resume";
-      if (reason === "disconnect") this.nextReason = "reconnect";
-      await rec.stop(reason);
-      this.reportDrained();
-      this.publish();
-    }
-    if (!v && !this.running && this.clearWhenIdle) {
-      this.clearWhenIdle = false;
-      rec.clearPending();
-      this.dropMarks.clear();
-      this.publish();
-    }
+    if (!this.rec && !v?.audio.enabled) return;
+    this.ensure();
+    await this.perform(this.dispatch("resync", v));
+    await this.perform(this.dispatch("settle", v));
   }
 
-  private begin() {
-    const rec = this.rec;
-    if (!rec) return;
-    let reason = startReasonFor(this.view, this.nextReason);
-    // the page was reloaded after this seat had already recorded (at the mic check): not its first capture
-    if (reason === "mic_check" && trackedBefore()) reason = "reload";
-    this.running = true;
-    this.failed = false;
-    this.nextReason = null;
+  private begin(rec: RecorderLike, reason: AudioStartReason) {
     this.reported = null;
     void this.deps
       .queryPermission?.()
@@ -407,51 +352,34 @@ export class RecordingController {
       .catch(() => {});
     void rec.start(reason).catch((err) => {
       console.error(err);
-      this.running = false;
+      this.dispatch("start_failed");
     });
   }
 
   private onDeviceChange() {
-    // a microphone came back (plugged in, or the permission was granted again): try once more
-    if (!this.failed || !wantsRecording(this.view)) return;
-    if (atMicCheck(this.view) && !this.gesture) return;
-    this.failed = false;
-    if (this.everTracked) this.nextReason ??= "permission_regained";
+    const before = this.m;
+    this.dispatch("device_change");
+    if (this.m === before) return;
     this.publish();
     this.kick();
   }
 
   private onState(status: RecorderStatus) {
-    const prev = this.lastState;
-    this.lastState = status.state;
-    // track bookkeeping (droppedChunks per track)
-    if (status.trackId !== this.lastTrack) {
-      const rec = this.rec;
-      const dropped = rec?.droppedChunks ?? 0;
-      if (this.lastTrack) {
-        const m = this.dropMarks.get(this.lastTrack);
-        if (m && m.to === null) m.to = dropped;
-      }
-      if (status.trackId) {
-        this.dropMarks.set(status.trackId, { from: dropped, to: null });
-        this.everTracked = true;
-        setTrackedBefore(true);
-      }
-      this.lastTrack = status.trackId;
+    // the store holds the status of the previous call
+    const prev = this.store.get().status;
+    if (status.trackId && status.trackId !== prev.trackId) {
+      setTrackedBefore(true);
+      this.dispatch("track_started");
     }
     if (status.state === "denied" || status.state === "error") {
-      if (this.running) {
-        this.running = false;
-        this.failed = true;
-        if (this.everTracked) this.nextReason = "permission_regained";
-      }
+      this.dispatch("mic_failed");
       this.report(status.state, status.error?.name);
-      if (prev !== status.state) this.reportDrained();
+      if (prev.state !== status.state) this.reportDrained();
     } else if (micCapturing(status.state)) {
       this.report("granted");
     }
     this.publish(status);
-    if (prev !== status.state) this.sendLevel(null);
+    if (prev.state !== status.state) this.sendLevel(null);
   }
 
   private report(state: "granted" | "denied" | "error" | "prompt", errorName?: string) {
@@ -463,11 +391,6 @@ export class RecordingController {
 
   private onLevel(level: MicLevel) {
     this.levelStore.set(level);
-    const pendingChunks = this.rec?.pendingChunks ?? 0;
-    const droppedChunks = this.rec?.droppedChunks ?? 0;
-    const s = this.store.get();
-    if (s.pendingChunks !== pendingChunks || s.droppedChunks !== droppedChunks)
-      this.store.set({ ...s, pendingChunks, droppedChunks });
     this.sendLevel(level);
   }
 
@@ -501,17 +424,9 @@ export class RecordingController {
   }
 
   private publish(status?: RecorderStatus) {
-    const rec = this.rec;
-    const st = status ?? rec?.status ?? IDLE_STATUS;
+    const st = status ?? this.rec?.status ?? IDLE_STATUS;
     if (!micCapturing(st.state) && this.levelStore.get() !== null) this.levelStore.set(null);
-    this.store.set((s) => ({
-      ...s,
-      status: st,
-      gesture: this.gesture,
-      failed: this.failed,
-      pendingChunks: rec?.pendingChunks ?? 0,
-      droppedChunks: rec?.droppedChunks ?? 0,
-    }));
+    this.store.set((s) => ({ ...s, status: st, gesture: this.m.gesture }));
   }
 
   private async sendStart(info: AudioStartInfo, signal?: AbortSignal): Promise<SendResult> {
@@ -523,24 +438,8 @@ export class RecordingController {
     return audioSendResult(await this.deps.send("audio:chunk", chunk, signal));
   }
 
+  /** The engine counts the track's dropped chunks itself (AudioStopInfo.droppedChunks). */
   private async sendStop(info: AudioStopInfo, signal?: AbortSignal): Promise<SendResult> {
-    const m = this.dropMarks.get(info.trackId);
-    const dropped = m ? Math.max(0, (m.to ?? this.rec?.droppedChunks ?? m.from) - m.from) : 0;
-    const ack = await this.deps.send(
-      "audio:stop",
-      {
-        ...info,
-        droppedChunks: Math.min(dropped, info.chunks),
-      },
-      signal,
-    );
-    const r = audioSendResult(ack);
-    if (r !== false) this.dropMarks.delete(info.trackId);
-    return r;
-  }
-
-  dispose() {
-    this.unwatch?.();
-    this.unwatch = null;
+    return audioSendResult(await this.deps.send("audio:stop", info, signal));
   }
 }
