@@ -21,10 +21,11 @@ import {
   type SpeechSegmentRow,
 } from "@wkwa/shared";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { HttpError } from "../src/api/http";
 import { AudioFileStore } from "../src/audio/fileStore";
 import { AudioJobRunner, runInWorker, scrubError, type TaskRunner } from "../src/audio/jobs";
 import { seqOrderedChunks } from "../src/audio/jobWorker";
-import { AudioRequestError, AudioService } from "../src/audio/service";
+import { AudioService } from "../src/audio/service";
 import { parseWavHeader } from "../src/audio/wav";
 import { openDatabase } from "../src/db/database";
 import { PersonalDataMap } from "../src/db/personalData";
@@ -89,7 +90,7 @@ describe("audio processing: jobs, derivatives, export", () => {
     const { sessionId, codes } = seeded;
     const queued = service.startAttribution(sessionId);
     expect(queued.status).toBe("queued");
-    expect(() => service.startAttribution(sessionId)).toThrow(AudioRequestError); // one job per session
+    expect(() => service.startAttribution(sessionId)).toThrow(HttpError); // one job per session
     await runner.whenIdle();
     const job = service.job(queued.jobId);
     expect(job.status).toBe("done");
@@ -555,7 +556,7 @@ describe("audio processing: jobs, derivatives, export", () => {
     try {
       service.startAttribution(sessionId);
     } catch (e) {
-      expect((e as AudioRequestError).statusCode).toBe(409);
+      expect((e as HttpError).statusCode).toBe(409);
     }
     await expect(service.exportAudio(sessionId, { kind: "raw", requestedBy: "t" })).rejects.toMatchObject({
       statusCode: 409,

@@ -45,6 +45,7 @@ import {
   samplesToMs,
 } from "@wkwa/shared";
 import type { Logger } from "pino";
+import { HttpError, orThrow } from "../api/http";
 import { sha256 } from "../content";
 import { type AudioDeletionResult, PersonalDataMap } from "../db/personalData";
 import type {
@@ -56,7 +57,7 @@ import type {
   Store,
 } from "../db/store";
 import { nowTs, wall } from "../runtime";
-import { SessionGuard, type Verdict } from "../session/sessionGuard";
+import { SessionGuard } from "../session/sessionGuard";
 import {
   type AttributionOptions,
   type AttributionResult,
@@ -95,16 +96,6 @@ import {
 import { wavStream } from "./wav";
 
 const round = (v: number, digits = 2) => Math.round(v * 10 ** digits) / 10 ** digits;
-
-/** A refused request; REST routes answer with `statusCode`. */
-export class AudioRequestError extends Error {
-  constructor(
-    readonly statusCode: 400 | 404 | 409,
-    message: string,
-  ) {
-    super(message);
-  }
-}
 
 export const CLEAN_ATTENUATION_DB = -30;
 export const CLEAN_FADE_MS = 10;
@@ -323,12 +314,6 @@ function deletionView(d: AudioDeletionRow): AudioDeletionRecord {
 
 /* ─────────── the service ─────────── */
 
-/** A guard refusal as the error the audio routes answer with; the value otherwise. */
-function orThrow<T>(v: Verdict<T>): T {
-  if (!v.ok) throw new AudioRequestError(v.status, v.message);
-  return v.value;
-}
-
 export class AudioService {
   private readonly store: Store;
   private readonly runTask: TaskRunner;
@@ -343,7 +328,7 @@ export class AudioService {
 
   private session(sessionId: string) {
     const row = this.store.getSession(sessionId);
-    if (!row) throw new AudioRequestError(404, "Unknown session");
+    if (!row) throw new HttpError(404, "Unknown session");
     return row;
   }
 
@@ -407,7 +392,7 @@ export class AudioService {
 
   job(jobId: string): AttributionJobView {
     const j = this.store.getAudioJob(jobId);
-    if (!j) throw new AudioRequestError(404, "Unknown job");
+    if (!j) throw new HttpError(404, "Unknown job");
     return jobView(j);
   }
 
@@ -676,13 +661,13 @@ export class AudioService {
     opts: { kind: AudioExportRequestKind; seats?: number[]; note?: string; requestedBy: string },
   ): Promise<AudioExportResult> {
     const store = this.store;
-    if (!store.audioFiles) throw new AudioRequestError(409, "This database stores no audio.");
+    if (!store.audioFiles) throw new HttpError(409, "This database stores no audio.");
     const tracks = store.listAudioTracks(sessionId);
-    if (tracks.length === 0) throw new AudioRequestError(409, "This session has no audio.");
+    if (tracks.length === 0) throw new HttpError(409, "This session has no audio.");
     const allSeats = [...new Set(tracks.map((t) => t.seat))].sort((a, b) => a - b);
     const seats = opts.seats?.length ? [...new Set(opts.seats)].sort((a, b) => a - b) : allSeats;
     for (const s of seats)
-      if (!allSeats.includes(s)) throw new AudioRequestError(400, `Seat ${s} has no audio in this session.`);
+      if (!allSeats.includes(s)) throw new HttpError(400, `Seat ${s} has no audio in this session.`);
     const kinds: AudioExportKind[] = opts.kind === "both" ? ["raw", "clean"] : [opts.kind];
 
     const live = tracks.filter((t) => t.status !== "deleted" && t.hasKey && t.fileName && t.chunks > 0);
@@ -695,11 +680,11 @@ export class AudioService {
     if (kinds.includes("raw"))
       for (const s of seats)
         if (!live.some((t) => t.seat === s))
-          throw new AudioRequestError(409, `The raw audio of seat ${s} was deleted (or holds no audio).`);
+          throw new HttpError(409, `The raw audio of seat ${s} was deleted (or holds no audio).`);
     if (kinds.includes("clean"))
       for (const s of seats)
         if (!clean.has(s))
-          throw new AudioRequestError(
+          throw new HttpError(
             409,
             `Seat ${s} has no cleaned track: run the speaker attribution first (raw audio is needed for it).`,
           );
@@ -723,8 +708,7 @@ export class AudioService {
           })),
         );
       }
-      if (!timing)
-        throw new AudioRequestError(409, "The tracks have no timestamped chunks to place on a timeline.");
+      if (!timing) throw new HttpError(409, "The tracks have no timestamped chunks to place on a timeline.");
     }
 
     const now = nowTs();
@@ -847,7 +831,7 @@ export class AudioService {
   ): AudioDeletionResult & Pick<AudioDeleteResult, "record" | "audioExportsOnDisk"> {
     this.session(sessionId);
     if (opts.confirm.trim() !== sessionId)
-      throw new AudioRequestError(400, "Confirmation does not match the session id");
+      throw new HttpError(400, "Confirmation does not match the session id");
     orThrow(this.guard.check("delete-audio", sessionId));
     const r = new PersonalDataMap(this.store).deleteAudio(sessionId, {
       scope: opts.scope,

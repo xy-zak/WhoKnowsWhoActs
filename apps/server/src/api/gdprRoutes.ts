@@ -1,14 +1,11 @@
-import type { FastifyReply, FastifyRequest } from "fastify";
 import type { AppContext } from "../app";
 import { loadOnboardingContent } from "../content";
 import { PersonalDataMap, parseCodeOrThrow } from "../db/personalData";
 import { exportsDirFor } from "../db/stores";
 import { exportSession } from "../gdpr/exporter";
 import { cardSeats, keySheetHtml, takedownCardPdf } from "../gdpr/print";
-import type { SessionGuard, Verdict } from "../session/sessionGuard";
-import { sessionOr404 } from "./sessionLookup";
-
-type Guard = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
+import type { SessionGuard } from "../session/sessionGuard";
+import { type Guard, HttpError, orThrow, requireSession, rethrowAs } from "./http";
 
 /**
  * Export, erasure, anonymisation and print routes (facilitator-only).
@@ -19,51 +16,37 @@ type Guard = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
 export function registerGdprApi(ctx: AppContext, guard: Guard, sessionGuard: SessionGuard) {
   const { app, store, stores, scenarios, runtime } = ctx;
   const opts = { preHandler: guard };
-  /** The guard's answer: the value, or its refusal (409 and why). */
-  const render = <T>(reply: FastifyReply, v: Verdict<T>) =>
-    v.ok ? v.value : reply.code(v.status).send({ error: v.message });
   /** Participant look-up and erasure: the participant database only. */
   const participants = new PersonalDataMap(store);
 
-  type Found = NonNullable<ReturnType<typeof sessionOr404>>;
-  const exportDeps = (f: Found) => ({
+  const exportDeps = (f: ReturnType<typeof requireSession>) => ({
     store: f.store,
     scenarios,
     exportsDir: exportsDirFor(runtime.exportsDir, f.players),
   });
   /** Key sheets and takedown cards only exist for sessions with participants. */
-  const participantSessionOr4xx = (id: string, reply: FastifyReply): Found | null => {
-    const found = sessionOr404(stores, id, reply);
-    if (found?.players === "simulated") {
-      reply
-        .code(400)
-        .send({ error: "Simulated sessions have no participants: no key sheet or takedown cards." });
-      return null;
-    }
-    return found;
-  };
+  const participantSession = (id: string) =>
+    requireSession(stores, id, {
+      participants: "Simulated sessions have no participants: no key sheet or takedown cards.",
+    });
 
-  app.post<{ Params: { id: string } }>("/api/sessions/:id/export", opts, async (req, reply) => {
-    const found = sessionOr404(stores, req.params.id, reply);
-    if (!found) return;
-    return exportSession(exportDeps(found), req.params.id, "standard");
-  });
+  app.post<{ Params: { id: string } }>("/api/sessions/:id/export", opts, async (req) =>
+    exportSession(exportDeps(requireSession(stores, req.params.id)), req.params.id, "standard"),
+  );
 
-  app.post<{ Params: { id: string } }>("/api/sessions/:id/anonymise", opts, async (req, reply) => {
-    const found = sessionOr404(stores, req.params.id, reply);
-    if (!found) return;
-    return exportSession(exportDeps(found), req.params.id, "anonymised");
-  });
+  app.post<{ Params: { id: string } }>("/api/sessions/:id/anonymise", opts, async (req) =>
+    exportSession(exportDeps(requireSession(stores, req.params.id)), req.params.id, "anonymised"),
+  );
 
   app.get<{ Params: { id: string } }>("/api/sessions/:id/print/keysheet", opts, async (req, reply) => {
-    if (!participantSessionOr4xx(req.params.id, reply)) return;
+    participantSession(req.params.id);
     const study = loadOnboardingContent(runtime.configDir).study;
     reply.type("text/html").send(keySheetHtml(store, req.params.id, study));
   });
 
   /** Seats that have a takedown card (i.e. a participant code). */
-  app.get<{ Params: { id: string } }>("/api/sessions/:id/cards", opts, async (req, reply) => {
-    if (!participantSessionOr4xx(req.params.id, reply)) return;
+  app.get<{ Params: { id: string } }>("/api/sessions/:id/cards", opts, async (req) => {
+    participantSession(req.params.id);
     return { seats: cardSeats(store, req.params.id) };
   });
 
@@ -72,21 +55,17 @@ export function registerGdprApi(ctx: AppContext, guard: Guard, sessionGuard: Ses
     "/api/sessions/:id/cards/:seat",
     opts,
     async (req, reply) => {
-      if (!participantSessionOr4xx(req.params.id, reply)) return;
+      participantSession(req.params.id);
       const seat = Number(req.params.seat);
       const study = loadOnboardingContent(runtime.configDir).study;
-      try {
-        const pdf = await takedownCardPdf(store, req.params.id, seat, study);
-        reply
-          .type("application/pdf")
-          .header(
-            "Content-Disposition",
-            `attachment; filename="takedown-card-${req.params.id}-seat${seat}.pdf"`,
-          )
-          .send(pdf);
-      } catch (e) {
-        reply.code(404).send({ error: (e as Error).message });
-      }
+      const pdf = await rethrowAs(404, () => takedownCardPdf(store, req.params.id, seat, study));
+      reply
+        .type("application/pdf")
+        .header(
+          "Content-Disposition",
+          `attachment; filename="takedown-card-${req.params.id}-seat${seat}.pdf"`,
+        )
+        .send(pdf);
     },
   );
 
@@ -98,23 +77,22 @@ export function registerGdprApi(ctx: AppContext, guard: Guard, sessionGuard: Ses
   app.post<{ Params: { id: string }; Body: { confirm?: string; deleteExports?: boolean; note?: string } }>(
     "/api/sessions/:id/delete",
     opts,
-    async (req, reply) => {
+    async (req) => {
       const id = req.params.id;
-      const found = sessionOr404(stores, id, reply);
-      if (!found) return;
-      if ((req.body?.confirm ?? "").trim() !== id) {
-        return reply.code(400).send({ error: "Confirmation does not match the session id" });
-      }
-      const v = sessionGuard.deleteSession(id, () =>
-        new PersonalDataMap(found.store).deleteSession(id, {
-          exportsDir: exportsDirFor(runtime.exportsDir, found.players),
-          deleteExports: req.body?.deleteExports === true,
-          note: req.body?.note ?? "",
-        }),
+      const found = requireSession(stores, id);
+      if ((req.body?.confirm ?? "").trim() !== id)
+        throw new HttpError(400, "Confirmation does not match the session id");
+      const r = orThrow(
+        sessionGuard.deleteSession(id, () =>
+          new PersonalDataMap(found.store).deleteSession(id, {
+            exportsDir: exportsDirFor(runtime.exportsDir, found.players),
+            deleteExports: req.body?.deleteExports === true,
+            note: req.body?.note ?? "",
+          }),
+        ),
       );
-      if (v.ok)
-        ctx.log.info({ rows: v.value.rows, exportsDeleted: v.value.exportsDeleted }, "session deleted");
-      return render(reply, v);
+      ctx.log.info({ rows: r.rows, exportsDeleted: r.exportsDeleted }, "session deleted");
+      return r;
     },
   );
 
@@ -122,13 +100,9 @@ export function registerGdprApi(ctx: AppContext, guard: Guard, sessionGuard: Ses
     stores.collect((s) => new PersonalDataMap(s).sessionDeletions()),
   );
 
-  app.get<{ Params: { code: string } }>("/api/participants/:code", opts, async (req, reply) => {
-    try {
-      return participants.lookup(req.params.code);
-    } catch (e) {
-      return reply.code(400).send({ error: (e as Error).message });
-    }
-  });
+  app.get<{ Params: { code: string } }>("/api/participants/:code", opts, async (req) =>
+    rethrowAs(400, () => participants.lookup(req.params.code)),
+  );
 
   /**
    * Erase a participant. The body must repeat the code (typed again by the facilitator).
@@ -137,26 +111,22 @@ export function registerGdprApi(ctx: AppContext, guard: Guard, sessionGuard: Ses
   app.post<{ Params: { code: string }; Body: { confirm?: string; note?: string } }>(
     "/api/participants/:code/erase",
     opts,
-    async (req, reply) => {
-      let code: string;
-      try {
-        code = parseCodeOrThrow(req.params.code);
-      } catch (e) {
-        return reply.code(400).send({ error: (e as Error).message });
-      }
+    async (req) => {
+      const code = await rethrowAs(400, () => parseCodeOrThrow(req.params.code));
       let confirm: string | null = null;
       try {
         confirm = parseCodeOrThrow(req.body?.confirm ?? "");
       } catch {}
-      if (confirm !== code) return reply.code(400).send({ error: "Confirmation does not match the code" });
-      const v = sessionGuard.eraseParticipant(
-        code,
-        () => participants.lookup(code).occurrences.map((o) => o.sessionId),
-        () => participants.erase(code, req.body?.note ?? ""),
+      if (confirm !== code) throw new HttpError(400, "Confirmation does not match the code");
+      const r = orThrow(
+        sessionGuard.eraseParticipant(
+          code,
+          () => participants.lookup(code).occurrences.map((o) => o.sessionId),
+          () => participants.erase(code, req.body?.note ?? ""),
+        ),
       );
-      if (v.ok)
-        ctx.log.info({ sessions: v.value.occurrences.length, rows: v.value.rows }, "participant erased");
-      return render(reply, v);
+      ctx.log.info({ sessions: r.occurrences.length, rows: r.rows }, "participant erased");
+      return r;
     },
   );
 
