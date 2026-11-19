@@ -2,6 +2,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import {
   type ActionKind,
   AUDIO_CONSENT_ITEM,
+  type AudioAck,
   activeSeats,
   afterReplay,
   agentSeed,
@@ -35,6 +36,7 @@ import {
   type PayloadOf,
   pairedP,
   parseSessionConfig,
+  parseTelemetryItem,
   quotaLimit,
   quotaUsed,
   RECORDING_PHASES,
@@ -48,19 +50,22 @@ import {
   type Scenario,
   type SessionConfig,
   type StoredEvent,
+  type StoredTelemetry,
   scoreChangesForIntent,
   scoreChangesForRevoke,
   seatList,
   seatPolicyId,
   seededRandom,
+  type TelemetryItem,
   type Validator,
   validateIntent,
 } from "@wkwa/shared";
 import type { Logger } from "pino";
-import { LiveAudio } from "../audio/live";
+import { type AudioChunkMsg, type AudioStartMsg, type AudioStopMsg, LiveAudio } from "../audio/live";
 import type { Store } from "../db/store";
 import { harnessVersion, nowTs, wall } from "../runtime";
 import { CalibrationError, CalibrationRunner } from "./CalibrationRunner";
+import { type MicLevelReading, SeatMonitor } from "./SeatMonitor";
 
 export { CALIBRATION_CHECK_WAIT_MS } from "./CalibrationRunner";
 
@@ -120,7 +125,12 @@ export class SessionManager {
   private readonly clock: () => number;
   private readonly validators: Validator[];
   /** Live audio ingest: tracks, chunks and the calibration audio of this session (see audio/live.ts). */
-  readonly audio: LiveAudio;
+  private readonly audio: LiveAudio;
+  /**
+   * The volatile per-seat figures of the facilitator's dashboard (see SeatMonitor.ts). The hub reads
+   * them; they change only through this manager's submit* methods and the events it appends.
+   */
+  readonly monitor: SeatMonitor;
   /** The facilitator-led calibration of an audio session (see CalibrationRunner.ts). */
   private readonly calibration: CalibrationRunner;
 
@@ -150,6 +160,10 @@ export class SessionManager {
       isFinal: () => this.isFinal,
       audio: this.audio,
       content: () => this.onboarding.audio?.calibration,
+    });
+    this.monitor = new SeatMonitor({
+      state: () => this.state,
+      trackStats: (seat) => this.audio.seatStats(seat),
     });
   }
 
@@ -286,8 +300,6 @@ export class SessionManager {
     if (events.length === 0) throw new Error(`Session ${sessionId} has no events`);
     for (const ev of events) {
       applyEvent(m.game, ev);
-      m.audio.observe(ev, true);
-      m.calibration.observe(ev);
       if (ev.clientSeq !== null && ev.seat !== null) {
         m.lastClientSeq.set(ev.seat, Math.max(m.lastClientSeq.get(ev.seat) ?? 0, ev.clientSeq));
         // the answers to recent intents, so a browser's resend after a restart gets the same one
@@ -370,6 +382,8 @@ export class SessionManager {
     if (this.state.phase !== before) this.deps.store.setSessionStatus(this.sessionId, this.state.phase);
     // close audio tracks the event ends (pause, withdrawal, disconnect, game complete, ...)
     this.audio.observe(stored);
+    // and clear the live figures it ends (unbinding, withdrawal, mic check skipped, end of session)
+    this.monitor.observe(stored);
     return stored;
   }
 
@@ -420,10 +434,54 @@ export class SessionManager {
   }
 
   /**
+   * Why a fake player may not take this seat now (null = it may): only in a session with real
+   * players, in the lobby (before onboarding), on a seat that exists and is not bound. Stricter than
+   * `bindSeat` for a real client, which replaces the client in a bound seat.
+   */
+  fakePlayerRefusal(seat: number): string | null {
+    const s = this.state.seats[seat];
+    return (
+      this.fakeSessionRefusal() ??
+      (!s ? `Seat ${seat} does not exist in this session` : null) ??
+      (s?.bound ? `Seat ${seat} is already bound; unbind it first` : null)
+    );
+  }
+
+  /** The part of fakePlayerRefusal that holds for every seat. */
+  private fakeSessionRefusal(): string | null {
+    if (this.simulated)
+      return "Fake players are for sessions with real players; a simulated session already has an agent in every seat";
+    if (this.state.phase !== "lobby")
+      return "Fake players can only be added in the lobby (setup step 07), before onboarding";
+    return null;
+  }
+
+  /**
+   * The seats to start fake players for: the given ones, or (null) every unbound seat. Throws a
+   * CommandError when there is none, or when one of them may not have a fake player.
+   */
+  fakePlayerSeats(requested: readonly number[] | null): number[] {
+    const why = this.fakeSessionRefusal();
+    if (why) throw new CommandError(why);
+    const seats = requested
+      ? [...requested]
+      : seatList(this.state)
+          .filter((s) => !s.bound)
+          .map((s) => s.seat);
+    if (seats.length === 0) throw new CommandError("Every seat is already bound");
+    for (const seat of seats) {
+      const refused = this.fakePlayerRefusal(seat);
+      if (refused) throw new CommandError(refused);
+    }
+    return seats;
+  }
+
+  /**
    * Bind a connected client to a seat. A real client gets a new participant
-   * code. A fake player (a test client the server created, `fake: true`) gets
-   * none: it is not a participant, so it never appears on the key sheet, on a
-   * takedown card or in an erasure.
+   * code (and replaces the client in a bound seat). A fake player (a test client
+   * the server created, `fake: true`) gets none: it is not a participant, so it
+   * never appears on the key sheet, on a takedown card or in an erasure; it may
+   * only take a free seat (fakePlayerRefusal).
    */
   bindSeat(
     terminal: number,
@@ -434,6 +492,8 @@ export class SessionManager {
       this.requireReal("Binding a client");
       this.requirePhase("lobby");
       const s = this.requireSeat(seat);
+      const fakeRefused = opts.fake ? this.fakePlayerRefusal(seat) : null;
+      if (fakeRefused) throw new CommandError(fakeRefused);
       if (s.bound) {
         this.append({
           type: "SeatUnbound",
@@ -769,7 +829,7 @@ export class SessionManager {
   close() {
     this.run(() => {
       this.requirePhase("game_complete");
-      this.audio.closeAll("closed");
+      this.audio.beforeFinal("closed");
       this.append({ type: "SessionClosed", actorKind: "facilitator", payload: {} });
       this.dispose();
     });
@@ -778,7 +838,7 @@ export class SessionManager {
   abort(reason: string) {
     this.run(() => {
       if (this.isFinal) throw new CommandError("Session has already ended");
-      this.audio.closeAll("aborted");
+      this.audio.beforeFinal("aborted");
       this.append({ type: "SessionAborted", actorKind: "facilitator", payload: { reason } });
       this.dispose();
     });
@@ -800,7 +860,9 @@ export class SessionManager {
     });
   }
 
+  /** The seat's browser disconnected (its socket was the seat's): its live figures go blank, then it is logged. */
   playerDisconnected(seat: number, reason: string) {
+    this.monitor.disconnected(seat);
     this.run(() => {
       const s = this.state.seats[seat];
       if (!s?.bound || !s.connected || this.isFinal) return;
@@ -973,6 +1035,33 @@ export class SessionManager {
     });
   }
 
+  /* ═════════════════════════ audio: live ingest ═════════════════════════ */
+
+  /** A seat's browser starts a track (`audio:start`; gates and acks: see audio/live.ts). */
+  submitAudioStart(seat: number, msg: AudioStartMsg): Promise<AudioAck> {
+    return this.audio.start(seat, msg);
+  }
+
+  /** A chunk of a seat's track (`audio:chunk`). */
+  submitAudioChunk(seat: number, msg: AudioChunkMsg): ReturnType<LiveAudio["chunk"]> {
+    return this.audio.chunk(seat, msg);
+  }
+
+  /** A seat's browser stopped a track (`audio:stop`). */
+  submitAudioStop(seat: number, msg: AudioStopMsg): AudioAck {
+    return this.audio.stop(seat, msg);
+  }
+
+  /**
+   * A seat's mic meter reading (`audio:level`, volatile): kept in the seat monitor only while the
+   * seat may be recorded at all. Returns whether it was kept.
+   */
+  submitMicLevel(seat: number, level: MicLevelReading): boolean {
+    if (this.audio.refusal(seat) !== null) return false;
+    this.monitor.micLevel(seat, level);
+    return true;
+  }
+
   /* ═════════════════════════ audio: recording pause ═════════════════════════ */
 
   /**
@@ -1036,6 +1125,59 @@ export class SessionManager {
       if (e instanceof CalibrationError) throw new CommandError(e.message);
       throw e;
     }
+  }
+
+  /* ═════════════════════════ telemetry and presence ═════════════════════════ */
+
+  /**
+   * A seat's telemetry batch: stored only for a participant whose consent was given or skipped and
+   * who has not withdrawn, while the session has not ended; items that do not parse are dropped. Returns how many items
+   * were stored and the live ones among them (for the facilitator pages open now).
+   */
+  submitTelemetry(
+    seat: number,
+    batch: { clockOffsetMs: number; items: readonly unknown[] },
+  ): { stored: number; live: StoredTelemetry[] } {
+    const none = { stored: 0, live: [] };
+    const code = this.collectsInteraction(seat);
+    if (!code) return none;
+    const items: TelemetryItem[] = [];
+    for (const raw of batch.items) {
+      const it = parseTelemetryItem(raw);
+      if (it) items.push(it);
+    }
+    if (items.length === 0) return none;
+    const stored = this.deps.store.insertTelemetry(
+      this.sessionId,
+      seat,
+      code,
+      this.state.round,
+      batch.clockOffsetMs,
+      items,
+    );
+    return { stored: stored.length, live: this.monitor.telemetry(seat, items, stored, this.clock()) };
+  }
+
+  /**
+   * The region a seat's player points at now (`presence`, volatile: never stored). Kept and shown
+   * live under the same rule as telemetry. Returns whether it was kept (the hub relays it then).
+   */
+  submitPresence(seat: number, regionId: string | null): boolean {
+    if (!this.collectsInteraction(seat)) return false;
+    this.monitor.hover(seat, regionId);
+    return true;
+  }
+
+  /**
+   * The participant code of a seat whose interaction (telemetry, hover) may be collected now, or
+   * null: only after consent was given or skipped, never after withdrawal, while the session runs.
+   */
+  private collectsInteraction(seat: number): string | null {
+    const s = this.state.seats[seat];
+    if (!s?.participantCode || this.isFinal) return null;
+    if (s.consent !== "given" && s.consent !== "skipped") return null;
+    if (s.withdrawn) return null;
+    return s.participantCode;
   }
 
   /* ═════════════════════════ intents ═════════════════════════ */

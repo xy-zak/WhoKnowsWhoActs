@@ -129,6 +129,21 @@ describe("PlayerConnection: seat lifecycle", () => {
     expect(conn.store.get()).toMatchObject({ seated: true, seat: 2, notice: null });
   });
 
+  it("withdrawn: stops telemetry and drops its backlog", () => {
+    const { socket, conn, session } = setup();
+    bind(socket);
+    socket.server("state", view());
+    expect(conn.telemetry.enabled).toBe(true);
+    conn.track("screen_view", { screen: "game" });
+    const withdrawn = view("given", 6);
+    socket.server("state", { ...withdrawn, me: { ...withdrawn.me, withdrawn: true } });
+    expect(conn.telemetry.enabled).toBe(false);
+    expect(JSON.parse(session.getItem("wkwa.telemetry.pending")!)).toEqual([]);
+    conn.track("screen_view", { screen: "end" });
+    vi.advanceTimersByTime(5000);
+    expect(socket.sent("telemetry")).toEqual([]);
+  });
+
   it("unbound: forgets the seat token and clears the seat, view and telemetry backlog", async () => {
     const { socket, conn, local, session } = setup();
     bind(socket);

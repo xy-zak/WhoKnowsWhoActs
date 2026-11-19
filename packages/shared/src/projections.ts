@@ -283,13 +283,3 @@ export function playerView(
     audio: playerAudioView(state, seat, nextStep, onboarding),
   };
 }
-
-/** The facilitator sees everything: full state + every view (the composite). */
-export interface FacilitatorView {
-  state: ReadonlyGameState;
-  serverTs: number;
-}
-
-export function facilitatorView(state: ReadonlyGameState, now: number): FacilitatorView {
-  return { state, serverTs: now };
-}

@@ -159,6 +159,15 @@ export interface AudioState {
   pausedTs: number | null;
   /** The facilitator's reason for the current pause (null when none was given or not paused). */
   pauseReason: string | null;
+  /**
+   * Every recording pause so far (server clock), oldest first; `toTs` is null while it lasts (also
+   * when the game completed during it). Audio captured in a pause is never stored.
+   */
+  pauses: Array<{ fromTs: number; toTs: number | null }>;
+  /** When the game was complete (server clock; null before): audio captured from then on is never stored. */
+  gameCompleteTs: number | null;
+  /** How many calibrations were started (CalibrationStarted events): the number of the latest run. */
+  calibrationRuns: number;
   calibration: CalibrationState;
 }
 
@@ -273,6 +282,9 @@ export function emptyAudioState(config?: SessionConfig): AudioState {
     recordingPaused: false,
     pausedTs: null,
     pauseReason: null,
+    pauses: [],
+    gameCompleteTs: null,
+    calibrationRuns: 0,
     calibration: emptyCalibration(),
   };
 }

@@ -148,6 +148,7 @@ export function applyEvent(state: GameState, ev: StoredEvent): GameState {
       break;
     case "CalibrationStarted": {
       const p = ev.payload;
+      state.audio.calibrationRuns++;
       state.audio.calibration = {
         ...emptyCalibration(),
         status: "running",
@@ -214,12 +215,16 @@ export function applyEvent(state: GameState, ev: StoredEvent): GameState {
       state.audio.recordingPaused = true;
       state.audio.pausedTs = ev.serverTs;
       state.audio.pauseReason = ev.payload.reason ?? null;
+      state.audio.pauses.push({ fromTs: ev.serverTs, toTs: null });
       break;
-    case "RecordingResumed":
+    case "RecordingResumed": {
       state.audio.recordingPaused = false;
       state.audio.pausedTs = null;
       state.audio.pauseReason = null;
+      const open = state.audio.pauses.at(-1);
+      if (open && open.toTs === null) open.toTs = ev.serverTs;
       break;
+    }
     case "DemographicsSubmitted": {
       const s = seatOf(ev.seat);
       if (s) s.demographics = true;
@@ -329,6 +334,7 @@ export function applyEvent(state: GameState, ev: StoredEvent): GameState {
       state.phase = "game_complete";
       state.endReason = ev.payload.reason;
       state.paused = false;
+      state.audio.gameCompleteTs = ev.serverTs;
       break;
     case "SessionClosed":
       state.phase = "closed";

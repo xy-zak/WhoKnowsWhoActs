@@ -849,3 +849,71 @@ describe("audio messages", () => {
     expect(audioSendResult(undefined)).toBe(false);
   });
 });
+
+describe("recording windows and calibration runs (reducer)", () => {
+  const PAUSE = ["RecordingPaused", {}] as const;
+  const RESUME = ["RecordingResumed", {}] as const;
+  const GAME_END = ["GameCompleted", { roundsPlayed: 1, reason: "facilitator" }] as const;
+  const CALIBRATE = [
+    "CalibrationStarted",
+    { order: [1], sentenceIds: ["s1"], turnMs: 1000, gapMs: 0 },
+  ] as const;
+  const CANCEL = ["CalibrationSkipped", { reason: "paused", cancelled: true }] as const;
+  type Step = typeof PAUSE | typeof RESUME | typeof GAME_END | typeof CALIBRATE | typeof CANCEL;
+
+  // pauses and the game's end are given as indexes into the steps (their events' serverTs); null = still open
+  const cases: Array<{
+    name: string;
+    steps: Step[];
+    pauses: Array<[number, number | null]>;
+    gameComplete: number | null;
+    runs: number;
+  }> = [
+    { name: "nothing yet", steps: [], pauses: [], gameComplete: null, runs: 0 },
+    { name: "a pause, resumed", steps: [PAUSE, RESUME], pauses: [[0, 1]], gameComplete: null, runs: 0 },
+    {
+      name: "two pauses",
+      steps: [PAUSE, RESUME, PAUSE, RESUME],
+      pauses: [
+        [0, 1],
+        [2, 3],
+      ],
+      gameComplete: null,
+      runs: 0,
+    },
+    { name: "a resume with no pause open", steps: [RESUME], pauses: [], gameComplete: null, runs: 0 },
+    { name: "a pause still open", steps: [PAUSE], pauses: [[0, null]], gameComplete: null, runs: 0 },
+    {
+      name: "a pause still open at game complete stays open",
+      steps: [PAUSE, GAME_END],
+      pauses: [[0, null]],
+      gameComplete: 1,
+      runs: 0,
+    },
+    {
+      name: "resumed after the game completed",
+      steps: [PAUSE, GAME_END, RESUME],
+      pauses: [[0, 2]],
+      gameComplete: 1,
+      runs: 0,
+    },
+    {
+      name: "every started calibration counts, a cancelled one too",
+      steps: [CALIBRATE, PAUSE, CANCEL, RESUME, CALIBRATE],
+      pauses: [[1, 3]],
+      gameComplete: null,
+      runs: 2,
+    },
+  ];
+
+  it.each(cases)("$name", ({ steps, pauses, gameComplete, runs }) => {
+    const log = readySession({ audio: { enabled: true } });
+    const ts = steps.map(([type, payload]) => log.push(type, payload as never).serverTs);
+    const at = (i: number | null) => (i === null ? null : ts[i]!);
+    expect(log.state.audio.pauses).toEqual(pauses.map(([from, to]) => ({ fromTs: at(from), toTs: at(to) })));
+    expect(log.state.audio.gameCompleteTs).toBe(at(gameComplete));
+    expect(log.state.audio.calibrationRuns).toBe(runs);
+    // the same log folded again gives the same figures (a session loaded after a restart)
+    expect(reduceEvents(log.events).audio).toEqual(log.state.audio);
+  });
+});

@@ -446,7 +446,8 @@ export const MESSAGES: MessageCatalogue = {
     direction: "client→server",
     description: "Volatile 'currently hovering' signal for the facilitator's live mirrors.",
     schema: Presence,
-    logged: "Not stored (ephemeral). The persisted record is telemetry 'region_hover'.",
+    logged:
+      "Not stored (ephemeral). The persisted record is telemetry 'region_hover'. Dropped, like telemetry, before consent, after a withdrawal and once the session ended.",
   },
   "audio:start": {
     namespace: "/player",
@@ -782,7 +783,8 @@ export const MESSAGES: MessageCatalogue = {
   "presence:live": {
     namespace: "/facilitator",
     direction: "server→client",
-    description: "Relayed hover presence of a seat for the live mirrors.",
+    description:
+      "Relayed hover presence of a seat for the live mirrors; null when the seat withdraws, is unbound or disconnects.",
     schema: "{ seat: number, regionId: string | null }",
     logged: "—",
   },

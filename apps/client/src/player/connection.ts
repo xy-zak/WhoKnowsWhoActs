@@ -232,8 +232,9 @@ export class PlayerConnection {
       this.seatChanged("detached");
     });
     this.socket.on("state", (v) => {
-      // Telemetry only after consent (mirrors the server-side rule).
-      this.telemetry.enabled = v.me.consent === "given" || v.me.consent === "skipped";
+      // Telemetry only after consent, and none after a withdrawal (mirrors the server-side rule).
+      this.telemetry.enabled = !v.me.withdrawn && (v.me.consent === "given" || v.me.consent === "skipped");
+      if (v.me.withdrawn) this.telemetry.clear();
       this.store.set((s) => ({ ...s, view: v }));
       this.recording.update(v);
       this.track("state_received", { seq: v.seq });
