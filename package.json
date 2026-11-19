@@ -27,7 +27,7 @@
     "docs:generate": "tsx scripts/generate-docs.ts",
     "docs:check": "tsx scripts/generate-docs.ts --check",
     "screenshots": "tsx scripts/screenshots.ts",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "WKWA_COVERAGE=1 vitest run --coverage"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.6.8",
