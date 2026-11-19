@@ -1,4 +1,6 @@
 import {
+  AUDIO_START_REASON_DEFS,
+  AUDIO_STOP_REASON_DEFS,
   EVENT_TYPES,
   formatScoreChanges,
   type ReadonlyGameState,
@@ -9,7 +11,7 @@ import {
 import { Fragment, useMemo, useState } from "react";
 import { fmtDuration, fmtSigned, plural } from "../common/format";
 import { Button, formatDb, Panel, SeatDot } from "../ui";
-import { START_REASON_TEXT, STOP_REASON_TEXT, shortTrack } from "./audioLive";
+import { shortTrack } from "./audioLive";
 
 function ms(ts: number) {
   const d = new Date(ts);
@@ -74,11 +76,11 @@ export function summarise(ev: StoredEvent, regionName: (id: string) => string): 
     case "MicCheckSkipped":
       return `mic check of seat ${ev.payload.seat} skipped${ev.payload.reason ? `: “${ev.payload.reason}”` : ""} · not recorded`;
     case "AudioTrackStarted":
-      return `track ${shortTrack(ev.payload.trackId)} started (${START_REASON_TEXT[ev.payload.reason]})`;
+      return `track ${shortTrack(ev.payload.trackId)} started (${AUDIO_START_REASON_DEFS[ev.payload.reason].label})`;
     case "AudioTrackStopped": {
       const p = ev.payload;
       const dropped = p.droppedChunks ? `, ${p.droppedChunks} DROPPED (audio missing)` : "";
-      return `track ${shortTrack(p.trackId)} stopped (${STOP_REASON_TEXT[p.reason]}) · ${fmtDuration(samplesToMs(p.samples))} stored in ${plural(p.chunks, "chunk")}${dropped}`;
+      return `track ${shortTrack(p.trackId)} stopped (${AUDIO_STOP_REASON_DEFS[p.reason].label}) · ${fmtDuration(samplesToMs(p.samples))} stored in ${plural(p.chunks, "chunk")}${dropped}`;
     }
     case "CalibrationStarted":
       return `calibration started · order seat ${ev.payload.order.join(" → ")} · ${ev.payload.turnMs / 1000} s turns, ${ev.payload.gapMs / 1000} s gaps`;

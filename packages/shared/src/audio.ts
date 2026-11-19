@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { AudioStopReasonSchema } from "./audioReasons";
 import type { AudioExportKind, AudioExportRequestKind } from "./exportColumns";
 import { SeatSchema } from "./labels";
 import type { AudioChunk } from "./protocol";
@@ -100,51 +101,7 @@ export function int16FromLeBytes(bytes: Uint8Array): Int16Array {
 export const Dbfs = (d: string) =>
   z.number().min(AUDIO_SILENCE_DB).max(0).describe(`${d} (dBFS, ${AUDIO_SILENCE_DB}–0; 0 = full scale)`);
 
-/** Why a track (one continuous capture run) started. */
-export const AUDIO_START_REASONS = [
-  "mic_check",
-  "resume",
-  "reconnect",
-  "reload",
-  "permission_regained",
-  "context_resumed",
-  "clock_jump",
-  "discontinuity",
-  "cleared",
-] as const;
-export type AudioStartReason = (typeof AUDIO_START_REASONS)[number];
-export const AudioStartReasonSchema = z
-  .enum(AUDIO_START_REASONS)
-  .describe(
-    "Why the track started: 'mic_check' = first capture of the seat (its mic check), 'resume' = recording resumed after a facilitator pause, 'reconnect' = the browser reconnected, 'reload' = the page was reloaded, 'permission_regained' = the microphone came back after a permission or device loss, 'context_resumed' = the browser's audio engine ran again after the system suspended it (e.g. sleep, another app took the device), 'clock_jump' = the capture clock jumped, so a new track keeps the sample timeline exact, 'discontinuity' = the browser delivered a gap or overlap in the audio too large to patch, 'cleared' = the browser discarded its unsent audio (e.g. the seat was unbound) and capture continued in a new track",
-  );
-
-/** Why a track stopped. */
-export const AUDIO_STOP_REASONS = [
-  "paused",
-  "game_complete",
-  "closed",
-  "aborted",
-  "withdrawn",
-  "disconnect",
-  "permission_lost",
-  "error",
-  "client_stop",
-  "skipped",
-  "interrupted",
-  "context_suspended",
-  "context_interrupted",
-  "clock_jump",
-  "discontinuity",
-  "track_ended",
-  "cleared",
-] as const;
-export type AudioStopReason = (typeof AUDIO_STOP_REASONS)[number];
-export const AudioStopReasonSchema = z
-  .enum(AUDIO_STOP_REASONS)
-  .describe(
-    "Why the track stopped: 'paused' = facilitator paused recording, 'game_complete' = the game ended, 'closed' / 'aborted' = the session was closed or aborted, 'withdrawn' = the participant withdrew, 'disconnect' = the browser disconnected (the server closed the track), 'permission_lost' = the microphone permission or device went away, 'error' = capture failed, 'client_stop' = the browser stopped the track itself (e.g. page unload), 'skipped' = the facilitator skipped the seat's mic check (the seat is not recorded), 'interrupted' = the server found the track still open when it loaded the session again (e.g. after a restart) or the seat started another track, 'context_suspended' / 'context_interrupted' = the system suspended or interrupted the browser's audio engine, 'clock_jump' = the capture clock jumped, 'discontinuity' = a gap or overlap in the audio too large to patch, 'track_ended' = the browser ended the microphone track (device unplugged or permission revoked), 'cleared' = the browser discarded its unsent audio (e.g. the seat was unbound)",
-  );
+/* Track start and stop reasons and microphone states: the catalogue in audioReasons.ts. */
 
 /**
  * How long after its close (or its last late chunk) a track still accepts late chunks (ms; 10 min):
@@ -153,23 +110,6 @@ export const AudioStopReasonSchema = z
  * complete is never stored, late or not (see the server's live audio ingest).
  */
 export const AUDIO_LATE_CHUNK_GRACE_MS = 10 * 60_000;
-
-/** State of a seat's microphone, as reported by its browser in `audio:level`. */
-export const MIC_LEVEL_STATES = [
-  "recording",
-  "no_signal",
-  "denied",
-  "error",
-  "idle",
-  "paused",
-  "requesting",
-] as const;
-export type MicLevelState = (typeof MIC_LEVEL_STATES)[number];
-export const MicLevelStateSchema = z
-  .enum(MIC_LEVEL_STATES)
-  .describe(
-    "Microphone state: 'recording' = capturing with signal, 'no_signal' = capturing but silent for a long time (muted or unplugged mic), 'denied' = permission refused, 'error' = capture failed, 'idle' = not capturing (not yet, or not allowed), 'paused' = recording paused by the facilitator (or the browser's audio engine was suspended), 'requesting' = waiting for the permission prompt or setting up capture",
-  );
 
 /**
  * What is recorded about a microphone: the processing flags the browser actually applied and

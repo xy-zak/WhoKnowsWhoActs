@@ -1,3 +1,4 @@
+import { AUDIO_START_REASONS_DOC, AUDIO_STOP_REASONS_DOC, INTERRUPTED_STOP_REASONS } from "./audioReasons";
 import type { DataClass } from "./meta";
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -628,21 +629,19 @@ export const EXPORT_FILES: ExportFileDef[] = [
       {
         name: "status",
         type: "string",
-        description:
-          "open (still recording) | closed (stopped normally) | interrupted (the browser or microphone went away, or the server restarted) | deleted (raw audio deleted, metadata kept)",
+        description: `open (still recording) | closed (stopped normally) | interrupted (the browser or microphone went away, or the server restarted: stop_reason ${INTERRUPTED_STOP_REASONS.join(", ")}, or a reason this version does not know) | deleted (raw audio deleted, metadata kept)`,
         source: "audio_tracks.status + stop_reason",
       },
       {
         name: "start_reason",
         type: "string",
-        description: "Why the track started: mic_check | resume | reconnect | reload | permission_regained",
+        description: AUDIO_START_REASONS_DOC,
         source: "AudioTrackStarted.reason",
       },
       {
         name: "stop_reason",
         type: "string",
-        description:
-          "Why the track stopped: paused | game_complete | closed | aborted | withdrawn | disconnect | permission_lost | error | client_stop (empty while open)",
+        description: `${AUDIO_STOP_REASONS_DOC}; empty while open`,
         source: "AudioTrackStopped.reason",
       },
       {

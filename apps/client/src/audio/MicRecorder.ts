@@ -1,4 +1,10 @@
-import { AUDIO_CHUNK_SECONDS, AUDIO_MAX_CHUNK_SECONDS, AUDIO_SAMPLE_RATE } from "@wkwa/shared";
+import {
+  AUDIO_CHUNK_SECONDS,
+  AUDIO_MAX_CHUNK_SECONDS,
+  AUDIO_SAMPLE_RATE,
+  type AudioStartReason,
+  type AudioStopReason,
+} from "@wkwa/shared";
 import type { ChunkDraft } from "./chunker";
 import { classifyMicError, MicError, type MicErrorInfo, micSupportProblem } from "./errors";
 import { LevelMeter } from "./levels";
@@ -106,7 +112,7 @@ interface ActiveTrack {
 interface Split {
   /** first context frame rendered after the suspension */
   frame: number;
-  reason: string;
+  reason: AudioStopReason;
   timer: ReturnType<typeof setTimeout>;
 }
 
@@ -228,8 +234,8 @@ export class MicRecorder {
   private split: Split | null = null;
   /** recording is wanted (between start() and stop()) */
   private wanted = false;
-  private startReason = "start";
-  private nextReason: string | null = null;
+  private startReason: AudioStartReason = "reload";
+  private nextReason: AudioStartReason | null = null;
   /** bumped by every start() and stop(): a stale operation stops at its next await */
   private gen = 0;
   private starting: { gen: number; promise: Promise<RecorderState> } | null = null;
@@ -377,7 +383,7 @@ export class MicRecorder {
    * resulting state ("recording", "paused" when a click is needed, "denied" or
    * "error"); it never rejects for microphone problems. A no-op while recording.
    */
-  start(reason = "start"): Promise<RecorderState> {
+  start(reason: AudioStartReason = "reload"): Promise<RecorderState> {
     if (this.disposed) return Promise.reject(new Error("MicRecorder: disposed"));
     // synchronously, so that a start() from a click resumes the context in the gesture
     // (also when it is already recording but paused)
@@ -401,7 +407,7 @@ export class MicRecorder {
   }
 
   /** Stops recording: flushes the partial last chunk, ends the track and releases the microphone. */
-  stop(reason = "stop"): Promise<void> {
+  stop(reason: AudioStopReason = "client_stop"): Promise<void> {
     if (this.stopping) {
       // cancels a start() queued behind the running stop
       ++this.gen;
@@ -445,7 +451,7 @@ export class MicRecorder {
   async dispose(): Promise<void> {
     if (this.disposed) return;
     this.disposed = true;
-    await this.stop("dispose");
+    await this.stop("client_stop");
     this.queue.dispose();
     this.taps.clear();
     const ctx = this.ctx;
@@ -457,7 +463,7 @@ export class MicRecorder {
 
   // ── start / stop ───────────────────────────────────────────────────────
 
-  private async doStart(gen: number, reason: string): Promise<RecorderState> {
+  private async doStart(gen: number, reason: AudioStartReason): Promise<RecorderState> {
     this.wanted = true;
     this.startReason = reason;
     this.nextReason = reason;
@@ -511,7 +517,7 @@ export class MicRecorder {
     return this._state;
   }
 
-  private async doStop(reason: string) {
+  private async doStop(reason: AudioStopReason) {
     ++this.gen;
     this.wanted = false;
     const cap = this.capture;
@@ -711,9 +717,10 @@ export class MicRecorder {
       return;
     }
     if (st === "closed") {
-      // closed by the browser (dispose() detaches this listener first)
+      // closed by the browser (dispose() detaches this listener first): the recorder fails, so the
+      // track stops with `error` (as fail() would stop it)
       const gen = this.gen;
-      this.endTrack("context_closed");
+      this.endTrack("error");
       this.release();
       this.clearSplit();
       this.ctx = null;
@@ -724,7 +731,7 @@ export class MicRecorder {
       return;
     }
     if (this.capture && this.track && !this.split) {
-      const reason = st === "interrupted" ? "context_interrupted" : "context_suspended";
+      const reason: AudioStopReason = st === "interrupted" ? "context_interrupted" : "context_suspended";
       // currentTime stops at the suspension: later frames were rendered after the resume
       const split: Split = {
         frame: Math.round(ctx.currentTime * ctx.sampleRate),
@@ -854,7 +861,7 @@ export class MicRecorder {
   }
 
   /** Ends the current track: flushes the resampler and the partial chunk, then queues the stop. */
-  private endTrack(reason: string) {
+  private endTrack(reason: AudioStopReason) {
     const t = this.track;
     if (!t) return;
     this.track = null;

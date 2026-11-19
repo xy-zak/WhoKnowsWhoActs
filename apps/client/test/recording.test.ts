@@ -8,8 +8,6 @@ import {
   startReasonFor,
   stopReasonFor,
   wantsRecording,
-  wireStartReason,
-  wireStopReason,
 } from "../src/player/recording";
 
 /* ─── fixtures ─── */
@@ -163,15 +161,6 @@ describe("recording: reasons and states", () => {
     expect(startReasonFor(view(), null)).toBe("mic_check");
     expect(startReasonFor(view({ nextStep: "demographics" }), null)).toBe("reload");
     expect(startReasonFor(view({ phase: "round_active", nextStep: null }), "resume")).toBe("resume");
-  });
-
-  it("only sends reasons the server accepts", () => {
-    expect(wireStopReason("paused")).toBe("paused");
-    expect(wireStopReason("track_ended")).toBe("track_ended");
-    expect(wireStopReason("dispose")).toBe("client_stop");
-    expect(wireStopReason("context_closed")).toBe("error");
-    expect(wireStartReason("context_resumed")).toBe("context_resumed");
-    expect(wireStartReason("start")).toBe("reload");
   });
 
   it("shows the facilitator's pause and a skipped mic check over the engine state", () => {
@@ -335,14 +324,14 @@ describe("RecordingController", () => {
     expect(t.rec().calls).toEqual(["start:reload", "stop:disconnect", "onReconnect", "start:reconnect"]);
   });
 
-  it("sends documented reasons, the dropped chunks of the track and volatile levels", async () => {
+  it("sends the engine's reasons as they are, the dropped chunks of the track and volatile levels", async () => {
     const t = setup();
     t.ctl.update(view({ nextStep: "briefing" }));
     await settle();
     const r = t.rec();
     await r.o.sendStart({
       trackId: "track-1",
-      reason: "start",
+      reason: "reload",
       sampleRate: 16000,
       chunkSamples: 80000,
       clientTs: 1,
@@ -361,7 +350,7 @@ describe("RecordingController", () => {
     r.droppedChunks = 2;
     await r.o.sendStop({
       trackId: "track-1",
-      reason: "dispose",
+      reason: "client_stop",
       chunks: 5,
       samples: 400000,
       clientTs: 2,
