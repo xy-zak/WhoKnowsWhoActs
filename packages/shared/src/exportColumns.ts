@@ -794,7 +794,8 @@ export const EXPORT_FILES: ExportFileDef[] = [
       {
         name: "confidence",
         type: "number",
-        description: "0–1: how clearly the speech was attributed to this seat (mean per 10 ms frame)",
+        description:
+          "0–1: mean speech probability of the speech model over the segment (with the energy fallback: share of frames that passed the gate)",
         source: "attribution segment.confidence",
       },
       {

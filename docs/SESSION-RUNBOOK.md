@@ -63,7 +63,7 @@ Approximate timing: 30 min setup, about 10 min onboarding, the rounds, 10 min wr
 - [ ] **Default session settings** in `config/session.default.json`: rounds, quotas, visibility, onboarding, `audio` (off by default). They pre-fill the setup wizard and can be changed per session.
 - [ ] **Software installed** on the facilitator laptop: `npm install && npm run build`. Run `npm test` once; it should be all green.
 - [ ] **Database passphrase chosen**, at least 5 random words. Store it in a password manager and/or a sealed envelope held by your supervisor. A lost passphrase means lost data: there is no recovery.
-- [ ] **Dry run** with bots: `npm start`, then `npm run bots -- --count 3` in a second terminal (for an audio session add `--audio`, which makes the bots pass the mic check and upload synthetic audio). Play the fourth seat yourself on another device. Tag practice sessions `pilot` (step 05), or use a separate data directory (`WKWA_DATA_DIR=data-pilot npm start`).
+- [ ] **Dry run** with bots: `npm start`, then `npm run bots -- --count 3` in a second terminal (for an audio session add `--audio`, which makes the bots pass the mic check and upload synthetic audio; start the server with `WKWA_SPEECH_MODEL=off npm start` then, because the speech model finds no speech in the bots' synthetic sound). Play the fourth seat yourself on another device. Tag practice sessions `pilot` (step 05), or use a separate data directory (`WKWA_DATA_DIR=data-pilot npm start`).
 - [ ] **Network** planned: ideally a dedicated router/switch without internet, with Wi-Fi "client isolation" off, and a **fixed (DHCP-reserved) IP address** for the laptop, so its certificate stays the same from session to session. See [NETWORKING.md](NETWORKING.md).
 - [ ] **HTTPS tried out:** `npm start` makes the laptop's self-signed certificate. Open `https://localhost:3000/facilitator`, accept the warning ([§ 10](#10-https-and-the-certificate-warning)), then open the player URL on a second computer and accept it there too, in each browser you expect participants to bring (Chrome, Edge, Firefox, Safari).
 - [ ] **Printer** reachable from the laptop. The key sheet and the takedown cards (one PDF per participant) are printed per session from the manager.
@@ -74,7 +74,7 @@ Approximate timing: 30 min setup, about 10 min onboarding, the rounds, 10 min wr
 - [ ] Router/switch and cables tested; a test computer on the session network can open `https://<laptop-ip>:3000/` (after accepting the certificate warning, [§ 10](#10-https-and-the-certificate-warning)).
 - [ ] Firewall on the laptop allows incoming TCP 3000 (see NETWORKING.md § troubleshooting).
 - [ ] Encrypted backup of the database: `npm run cli -- backup --out /path/to/backup/wkwa-YYYYMMDD.db` (this copies the audio folder to `<out>.audio/` as well).
-- [ ] **Audio sessions:** free disk space on the laptop (about 0.5 GB per hour of session for four seats, twice that with cleaned tracks; `[placeholder: minimum free space]`), headsets for the participants if you have them, and a room that can be closed ([§ 11](#11-sessions-with-audio)).
+- [ ] **Audio sessions:** free disk space on the laptop (about 0.5 GB per hour of session for four seats, twice that with cleaned tracks; `[placeholder: minimum free space]`), **one wired single-ear USB headset per player** plus a spare, with a USB-C plug or adapter for tablets and phones (no Bluetooth headsets), and a room that can be closed ([§ 11](#11-sessions-with-audio)).
 
 ## 4. Session day
 
@@ -183,6 +183,7 @@ Debrief participants as your protocol requires.
 | Manager says **ACCESS DENIED** | It was opened from another PC | Use `https://localhost:3000/facilitator` on the laptop, or start with `ADMIN_TOKEN=…` and open `/facilitator?token=…`. |
 | Animations are distracting / slow, or text is hard to read | Display settings | Manager: `D` (or the DISPLAY segment in the status bar), or directly `A` animations, `T` colours (incl. High contrast), `F` font (incl. OpenDyslexic), `S` text size. Players: the **DISPLAY** button in the bottom-right corner of their screen has the same four settings; show the participant where it is. Anyone whose OS requests reduced motion never gets animations. |
 | A **microphone fails** during the session | The seat's Mic column shows `[NO SIGNAL]`, `[MIC DENIED]` or `[MIC ERROR]`; the game goes on | Ask the participant to follow the fix steps on their screen (unmute, replug, **Try again**). If it cannot be fixed, carry on without that seat's audio and add a note. Before round 1 you can skip the seat's mic check ([§ 11](#11-sessions-with-audio)). |
+| The calibration flags a seat (**low margin**, below 12 dB) | That seat's voice is nearly as loud on another microphone; usually the device records from its built-in mic, not the headset | Check that the wired USB headset is plugged in (not a Bluetooth one), chosen as the microphone if the device asked, and worn with its mic at the corner of the mouth. Then **REDO** the calibration ([§ 11](#11-sessions-with-audio)). |
 | A participant **withdraws** during an audio session | Their own recording stops at once, but the other mics still hear them | Withdraw the seat, then ask them to leave the room quietly, or **Pause recording** while they leave ([§ 11](#11-sessions-with-audio)) |
 | Someone **enters the room** | Every mic records them | **Pause recording**, resume when they have gone, and add a note (no names) |
 | Browser says the **microphone is blocked** | Not a secure page, or permission refused | Open the `https://` URL and accept the warning ([§ 10](#10-https-and-the-certificate-warning)); then the fix steps on the player's screen |
@@ -193,13 +194,13 @@ Debrief participants as your protocol requires.
 **Before participants arrive**
 - [ ] Network up; `npm start`; passphrase entered
 - [ ] Steps 01–06 done (scenario, rounds, players, onboarding, tags) → session created
-- [ ] Audio sessions: Record audio ticked in step 04, room closed and a sign on the door, free disk space checked
+- [ ] Audio sessions: Record audio ticked in step 04, room closed and a sign on the door, free disk space checked, a wired USB headset plugged into every player device
 - [ ] Step 07: 4 clients bound (certificate warning accepted on each) · Step 08: labels assigned · Step 09: key sheet printed
 
 **With participants**
 - [ ] Names written on the key sheet (by hand)
 - [ ] Step 10: onboarding started (tab shows LIVE)
-- [ ] Audio sessions: all mic checks done → calibration done (or skipped with a reason) → *mics 4/4*
+- [ ] Audio sessions: headsets on → all mic checks done → calibration done, every margin 12 dB or more (or skipped with a reason) → *mics 4/4*
 - [ ] All seats ready → round 1 … round N
 - [ ] Wrap-up 1: takedown cards handed out
 
@@ -321,7 +322,7 @@ flowchart TD
   E -->|"fixed"| F["All mic checks done<br/>START CALIBRATION"]
   F --> G["Each seat reads its sentence in turn<br/>quality check in about 15 s"]
   G --> H{"Every seat clearly<br/>louder on its own mic?"}
-  H -->|"no: move closer, headset, REDO"| F
+  H -->|"no: check headset plugged in, chosen, worn; REDO"| F
   H -->|"yes, or SKIP with a reason"| I["Round 1 ... N<br/>watch the Mic column"]
   I --> J["Game complete, wrap-up audio check<br/>All audio uploaded"]
   J --> K["DATABASE: attribution,<br/>export audio, delete raw audio"]
@@ -330,18 +331,19 @@ flowchart TD
 ### 11.1 Before the session
 
 - **Ethics and consent.** The ethics approval must mention audio, and the audio texts must be the approved ones ([§ 2](#2-once-before-the-study)). Tell participants beforehand, in the information letter, that all four microphones record the whole room, that they cannot mute themselves, and about the calibration.
-- **Room.** A closed room with a sign on the door ("recording in progress"). Every microphone also hears the other three players, the facilitator and anyone who enters. Headsets make the separation much better than laptop microphones.
+- **Headsets.** Every player wears a **wired single-ear USB headset**, plugged into the device they play on (USB-C on tablets and phones). Bluetooth headsets are not suitable: in call mode their sound is compressed and their delay varies. The attribution relies on each headset hearing its own player far louder than the others (20 to 30 dB); a built-in laptop microphone gives only 3 to 10 dB, and the calibration flags it. Plug each headset in before the player opens the page, so the browser offers it.
+- **Room.** A closed room with a sign on the door ("recording in progress"). Every microphone also hears the other three players, the facilitator and anyone who enters, only much more quietly than its own player.
 - **HTTPS.** Browsers allow the microphone only on `https://` pages. Every PC accepts the certificate warning once ([§ 10](#10-https-and-the-certificate-warning)). If setup step 04 shows a plain-HTTP warning, restart the server without `WKWA_TLS=off`.
 - **Disk space and backup.** Check the free space ([§ 3](#3-the-day-before-a-session)).
-- **Dry run.** `npm run bots -- --count 4 --auto --audio` plays a whole audio session, calibration included.
+- **Dry run.** `npm run bots -- --count 4 --auto --audio` plays a whole audio session, calibration included. Start the server with `WKWA_SPEECH_MODEL=off` for it: the bots' synthetic sound is no real voice, so the speech model would find no speech and the attribution would come out empty.
 - **Setup step 04.** Tick **Record audio**. The review (step 06) shows an Audio row. Fake players and simulated sessions never record.
 
 ### 11.2 Onboarding: consent hold, mic check, calibration
 
 1. **Consent hold.** Players tick the audio item on the consent screen. Those who finish early see that they are waiting for the other seats. No microphone is open until the last real seat has consented. If a participant declines, the hold stays on: **withdraw that seat** (Seats panel) to release it, or abort the session.
-2. **Mic check.** Each player clicks **Start** (the browser asks for permission: *Allow*), sees a level meter and reads a short phrase aloud. It passes after about one second of speech. Recording starts here and runs until the game is complete. If the player has no working microphone, use **Skip mic check** on that seat in NEXT (it asks for a reason, which is logged); that seat is then not recorded.
-3. **Calibration.** When every mic check is done, NEXT offers **START CALIBRATION**. Each recorded seat in turn reads a sentence aloud (about 6 s, then 1 s of silence) while the others stay quiet, so tell the room to keep silent. The facilitator's card shows the running turn, then *checking…*, then a table per seat: own level, loudest other mic, margin in dB and a verdict, with advice such as *Seat 3: own voice only +4.1 dB over the others. Move the laptop closer or use a headset*.
-   - **Redo** after fixing a problem (the previous run is cancelled cleanly). **Skip** asks for a reason: without the calibration the attribution has to estimate how voices leak between microphones, which is less reliable with laptop microphones.
+2. **Mic check.** The screen tells each player to wear the headset with its microphone at the corner of the mouth (about two fingers away), and to choose the headset if the device asks which microphone to use. The player clicks **Start** (the browser asks for permission: *Allow*), sees a level meter and reads a short phrase aloud. It passes after about one second of speech. Recording starts here and runs until the game is complete. If the player has no working microphone, use **Skip mic check** on that seat in NEXT (it asks for a reason, which is logged); that seat is then not recorded.
+3. **Calibration.** When every mic check is done, NEXT offers **START CALIBRATION**. Each recorded seat in turn reads a sentence aloud (about 6 s, then 1 s of silence) while the others stay quiet, so tell the room to keep silent. The facilitator's card shows the running turn, then *checking…*, then a table per seat: own level, loudest other mic, margin in dB and a verdict, with advice such as *Seat 3: own voice only +4.1 dB over the others. Check the headset is plugged in, chosen as microphone and its mic sits at the corner of the mouth*. A seat passes at a margin of 12 dB or more; headsets reach about 20 to 30 dB.
+   - **Redo** after fixing a problem (the previous run is cancelled cleanly). **Skip** asks for a reason: without the calibration the attribution assumes a conservative leakage between the microphones, so overlapping speech (two people at once) is missed more often.
    - Round 1 cannot start until the calibration is done or skipped (`requireCalibration`). The calibration can also be run between rounds.
    - It cannot run while recording is paused: resume first.
 
@@ -360,15 +362,17 @@ flowchart TD
 - **Wrap-up audio check.** Every wrap-up step starts with a callout, refreshed every 5 seconds: *All audio uploaded*, or *Seat 2 still uploading 3 chunks: keep that browser open*, *Seat 4: track interrupted (disconnected)*, missing chunks, or *no audio recorded*. It does not block closing, but the close button reads *Close anyway* while uploads are pending. It relies on the browser's last report, so a browser that was closed early may leave an old number on screen.
 - **DATABASE → Audio** (the Audio column of the sessions list, for participant sessions). The popup has:
   - **Seats:** tracks, recorded time, gaps and breaks per seat, with `[RAW]`, `[CLEAN]` and `[RAW DELETED]` tags.
-  - **Speaker attribution:** *Run* (or *Re-run*, which asks first because the new result replaces the old one). Disabled while the session is running, while a job is active, or when the raw audio is deleted. It shows progress, then the grade, calibration status, talk time per seat, overlap, the share of ambiguous speech, the quality warnings and a margin, drift, lag and coverage table. A *poor* grade means treat the speaker timeline with care.
+  - **Speaker attribution:** *Run* (or *Re-run*, which asks first because the new result replaces the old one). Disabled while the session is running, while a job is active, or when the raw audio is deleted. It shows progress, then the grade, calibration status, talk time per seat, overlap, the share of ambiguous speech, the quality warnings and a margin, drift and coverage table. The line under the grade names the speech detector: *Silero VAD*, or *energy (fallback)* when the model could not run or the server ran with `WKWA_SPEECH_MODEL=off`. A *poor* grade means treat the speaker timeline with care.
   - **Speech timeline:** who spoke when, one row per seat.
   - **Export audio:** raw, clean or both, all seats or one, with an optional note. The **WAV** button of a seat exports that seat. The result lists each file, its length, size and a short checksum, and the folder on the laptop; there is no browser download. The files are personal data and not encrypted: move them to institutional storage and delete the local copy. The export is recorded in the export register.
   - **Delete audio…:** type the session id, then choose *Raw audio, keep derived* (removes raw recordings **and cleaned tracks**, keeps the timing results) or *All audio* (removes everything audio of the session). Exported WAV files are **not** deleted: delete them by hand. The popup shows the register entry and any files that could not be removed.
-- **Erasure.** The takedown lookup lists the audio tracks of a code. The confirmation says that the session's attribution results and every seat's cleaned tracks go with it, so the attribution has to be run again.
+- **Erasure.** The takedown lookup lists the audio tracks of a code. The confirmation says that the session's attribution results and every seat's cleaned tracks go with it, so the attribution has to be run again. Erasure and session deletion are refused while an attribution or an audio export of that session is still running: wait until it has finished.
 - **Backup.** `npm run cli -- backup --out …` copies the audio folder with the database. `npm run cli -- verify` checks every audio chunk.
 
 ### 11.5 What the quality depends on
 
-- Headsets, or laptops close to the speaker, give much better separation than laptop microphones far apart. A margin below 10 dB raises a warning.
-- Coughs and typing close to a microphone count as speech. A very short session gives only a rough estimate of the clock drift between PCs, which the attribution corrects from the audio itself.
+- A headset worn properly gives a calibration margin of about 20 to 30 dB. Below 12 dB the seat is flagged: usually the headset is not chosen as the microphone (the device fell back to its built-in mic), or its mic is far from the mouth. With laptop microphones the result is graded *fair* or *poor* and overlapping speech is mostly missed.
+- Run the calibration: without it, overlapping speech is missed much more often.
+- If a seat's microphone drops out while that player talks, a neighbour's microphone may be credited with their voice for that stretch. The quality report warns about seats with gaps (coverage).
+- Laughter, coughs and noises right next to a microphone can still count as speech. A very short session gives only a rough estimate of the clock drift between devices; this does not change who spoke.
 - Cleaned tracks turn other voices down by 30 dB but do not remove them, and overlapping speech stays at full level.

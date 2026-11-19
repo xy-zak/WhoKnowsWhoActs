@@ -559,7 +559,8 @@ export const EVENT_DEFS = {
     trigger: "Server, right after CalibrationCompleted, from the audio of the calibration turns.",
     actors: ["system"],
     changesState: true,
-    visibleTo: "Facilitator (LIVE: per-seat margins and advice, e.g. 'move closer or use a headset')",
+    visibleTo:
+      "Facilitator (LIVE: per-seat margins and advice, e.g. 'check the headset is plugged in and worn close to the mouth')",
     dataClass: "pseudonymous",
     frequency: "1 per CalibrationCompleted",
     payload: z.object({
@@ -590,7 +591,7 @@ export const EVENT_DEFS = {
 
   CalibrationSkipped: defineRecord({
     summary:
-      "The facilitator skipped (or cancelled) the calibration; speaker attribution then estimates the leakage between microphones from the recordings. Logged by the server with `cancelled: true` when it had to stop a running calibration itself (recording paused, server restart): the calibration is then back to not done and has to be run (or skipped) again.",
+      "The facilitator skipped (or cancelled) the calibration; speaker attribution then assumes a conservative default leakage between microphones. Logged by the server with `cancelled: true` when it had to stop a running calibration itself (recording paused, server restart): the calibration is then back to not done and has to be run (or skipped) again.",
     trigger:
       "Facilitator clicks 'Skip calibration' and confirms; or the server stops a running calibration (recording paused, restart).",
     actors: ["facilitator", "system"],

@@ -4,6 +4,12 @@ History of [AUDIO-TRANSCRIPTION.md](../AUDIO-TRANSCRIPTION.md). Newest first. Ho
 
 ## Unreleased
 
+### Not yet committed · documents `880ecba` (Headset gate engine: Silero VAD + cross-channel level gate; storage fixes)
+
+- **Type:** Risk mitigation
+- **Change:** The table of what exists, the non-goals, requirement R11, the echo-matching and word-timing text and the pipeline diagram no longer mention lag refinement or loudness-only attribution; they describe one clock fit per track and speech detection plus a level gate.
+- **Reason:** The engine this research builds on changed; the document must not rely on an alignment from the audio that the code no longer does (docs drifting from the code).
+
 ### Not yet committed · links to `docs/AUDIO.md`
 
 - **Type:** Risk mitigation

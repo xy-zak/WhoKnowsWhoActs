@@ -36,12 +36,12 @@ The audio feature (built in waves 1–3 of the audio plan) records, stores and a
 | **Capture**: raw 16 kHz mono PCM (s16le) per seat, in 5 s chunks; browser echo cancellation, noise suppression and gain control off | 16 kHz mono is the input format of every engine in § 3, so no resampling | `apps/client/src/audio/` |
 | **Tracks**: one continuous capture run per track (random UUID); a reload, recording pause or permission loss starts a new one | Gaps are known exactly; nothing is transcribed across them | `audio_tracks`, `audio_chunks` |
 | **Encrypted store**: `data/audio/<sessionId>/<fileId>.wka`, every chunk AES-256-GCM, a random key per track kept in SQLCipher | Transcription reads through the same store and never writes plaintext audio to disk | `apps/server/src/audio/fileStore.ts`, `crypto.ts` |
-| **Timing**: every chunk placed on the server clock (corrected `clientTs` plus sample index); sample-clock drift estimated; lag between mics refined by cross-correlating energy envelopes | Word times can be put on the same clock as `server_ts` in `actions.csv` | attribution engine |
+| **Timing**: every chunk placed on the server clock (corrected `clientTs` plus sample index); sample-clock drift estimated per track; the mics line up to within a few tens of milliseconds (not refined from the audio) | Word times can be put on the same clock as `server_ts` in `actions.csv` | attribution engine |
 | **Calibration**: each seat reads a fixed sentence in turn; a 4×4 leakage matrix (how loud seat *i* is on mic *j*) | The fixed sentence doubles as a free accuracy check per seat (§ 10) | `CalibrationTurn` events |
-| **Attribution engine** (offline): `speech_segments` (seat, `startTs`, `endTs`, confidence, overlap, round, phase) and **cleaned per-seat tracks** in which other voices are attenuated by −30 dB | Decides *what* to transcribe and *for whom*; the ASR never has to guess who spoke | `apps/server/src/audio/attribution/` |
+| **Attribution engine** (offline): speech detected on each headset mic (Silero VAD) and a level gate between the mics; `speech_segments` (seat, `startTs`, `endTs`, confidence, overlap, round, phase) and **cleaned per-seat tracks** in which other voices are attenuated by −30 dB | Decides *what* to transcribe and *for whom*; the ASR never has to guess who spoke | `apps/server/src/audio/attribution/` |
 | **Jobs and REST routes** in the DATABASE tab: download raw or clean WAV, run attribution | Transcription is one more job kind with the same progress, cancel and register | `apps/server/src/audio/jobs.ts`, `apps/server/src/api/audioRoutes.ts` |
 | **Delete raw audio, keep derived** (retention still undecided) | Transcripts are derived data and would survive it (§ 9) | `audio_deletions` register |
-| **Loudness only, never voiceprints** | Transcription must not bring speaker embeddings back in (requirement R11) | — |
+| **Speech detection and loudness only, never voiceprints** | Transcription must not bring speaker embeddings back in (requirement R11) | — |
 | **Exports** `audio_tracks.csv` and `speech_segments.csv` | Who spoke when, without content; transcripts add the content | `packages/shared/src/exportColumns.ts` |
 
 ### 1.2 What this document proposes
@@ -55,7 +55,7 @@ The audio feature (built in waves 1–3 of the audio plan) records, stores and a
 ### 1.3 Out of scope
 
 - Live transcription during play.
-- Recognising speakers by their voice (diarization with speaker embeddings). Who spoke is decided by loudness only.
+- Recognising speakers by their voice (diarization with speaker embeddings). Who spoke is decided by speech detection on each mic and loudness only.
 - Languages other than English, and translation.
 - Cloud or hosted APIs of any kind. The harness is LAN-only, and voice is personal data.
 - Automatic coding of the discussion. Content analysis stays with human coders; transcripts are its input.
@@ -74,7 +74,7 @@ The audio feature (built in waves 1–3 of the audio plan) records, stores and a
 | R8 | **Licence** of code and weights allows research use. Permissive (MIT, Apache-2.0, BSD) preferred; CC-BY-4.0 needs attribution; non-commercial weights are acceptable for a thesis but noted | The repository is public (MIT); weights are never committed to it | Licence column in § 3 |
 | R9 | **Reproducible.** Engine and version, model id and file SHA-256, decoding parameters, prompt, VAD settings and the attribution run are stored with every transcript. Decoding is deterministic (greedy or a fixed beam, temperature 0, no random fallback) | A transcript must be traceable to exactly what produced it, like `SessionCreated` does for the scenario | `transcript_runs` row (§ 6); re-running gives the same text |
 | R10 | **Fits the Node/TypeScript server.** Runs as a job like attribution (progress, cancel, re-run), on Windows, macOS and Linux | One install for the facilitator; no separate tool chain on session days | § 5.3 |
-| R11 | **No identification by voice.** No speaker embeddings, voiceprints or diarization models | Keeps the processing out of Art. 9 biometric data; attribution stays loudness only | Dependency review: no pyannote or speaker models loaded |
+| R11 | **No identification by voice.** No speaker embeddings, voiceprints or diarization models | Keeps the processing out of Art. 9 biometric data; attribution stays speech/non-speech plus loudness | Dependency review: no pyannote or speaker models loaded |
 | R12 | **No invented text.** Nothing transcribed where nobody spoke; suspicious output flagged and counted | Whisper-family models are known to hallucinate on silence and noise (§ 4.1) | Inserted words in non-speech regions of the pilot sample |
 
 ## 3. Candidate engines
@@ -175,7 +175,7 @@ The **cleaned tracks** add a risk of their own: frames of other speakers are att
 | # | Mitigation | Effect |
 | --- | --- | --- |
 | 1 | **Transcribe only attributed speech.** Input is the seat's `speech_segments` cut from its cleaned track, padded by 0.2 s on each side; segments of the same seat with a gap under 1 s are joined into one batch of at most 30 s (Whisper's window) | The model never sees long silence or another seat's turn |
-| 2 | **VAD inside the batch** (Silero) as a second gate; batches with less than 0.3 s of speech are dropped | Catches residue and breathing the loudness attribution let through |
+| 2 | **VAD inside the batch** (Silero) as a second gate; batches with less than 0.3 s of speech are dropped | Catches residue and breathing the attribution let through (it already runs Silero on the raw tracks; this runs it again on the cleaned batch) |
 | 3 | **Decoding settings**: language `en`, greedy or a fixed beam; for Whisper engines also temperature 0, no temperature fallback, `condition_on_previous_text` off (each batch independent), default no-speech, log-probability and compression-ratio thresholds | No error carried into the next batch; deterministic (R9) |
 | 4 | **Post-filters**: an n-gram repeated three or more times in a row is cut to one and flagged (`loop`); output that is only a known hallucination ("thank you", "thanks for watching", subtitle credits) on a batch with little VAD speech is dropped and flagged; words whose timestamps fall outside VAD speech are dropped; output that repeats the vocabulary prompt is treated as a hallucination | Removes the most common failure patterns [[52]](https://arxiv.org/abs/2501.11378) |
 | 5 | **Prefer a non-autoregressive engine** (CTC or TDT transducer) where accuracy allows | These decoders emit text per audio frame and cannot run on by themselves [[54]](https://arxiv.org/abs/2505.12969) |
@@ -187,7 +187,7 @@ With laptop mics, a loud neighbour can be almost as loud on my mic as I am. Insi
 
 1. **The cleaned tracks and segments** (§ 4.1, mitigation 1) remove everything outside my turns.
 2. **Text-level dedup across seats** is the safety net. After all four seats are transcribed and mapped to the server clock, every word on seat *i* is compared with the words of the other seats:
-   - Match: the same normalised text and time overlap of at least 50 %. After lag alignment, an echo of the same word lines up within a few tens of milliseconds. Runs of two or more matching words are strong evidence; a single short word (*yes*, *no*, *okay*) only counts within 80 ms.
+   - Match: the same normalised text and time overlap of at least 50 %. On the common timeline, an echo of the same word lines up within a few tens of milliseconds. Runs of two or more matching words are strong evidence; a single short word (*yes*, *no*, *okay*) only counts within 80 ms.
    - Only one of the two seats has an attributed segment at that moment: keep the word there and drop the other copy (`dropped = crosstalk`).
    - Both seats are attributed (an overlap): keep the word on the seat whose level beats its leakage prediction by more, that is the attribution confidence. If the two copies start more than 150 ms apart, two people may really have said the same word, so both are kept and flagged `possible_echo`.
 3. **No diarization to fix it.** Speaker-embedding models (pyannote in WhisperX, NeMo speaker models) would be voiceprint processing (R11). The loudness attribution and the dedup are enough, and the evaluation measures what is left (§ 10).
@@ -222,7 +222,7 @@ Players will name squares a dozen ways: "C7", "C seven", "see seven", "sea seven
 
 ### 4.7 Timestamps and the join with the event log
 
-- **The chain.** An ASR word time is relative to its batch. The batch starts at a known sample of the seat's aligned timeline, and the attribution engine has already removed drift and lag from that timeline. So `word.start_ts = t0 + (batch_start_sample + word_offset_samples) / 16 000 × 1000`, where `t0` is the server-clock time of sample 0 of the aligned timeline. The result is epoch milliseconds, like `server_ts`.
+- **The chain.** An ASR word time is relative to its batch. The batch starts at a known sample of the seat's aligned timeline, and the attribution engine's clock fit has already removed each track's drift from that timeline (the devices still differ by a few tens of milliseconds). So `word.start_ts = t0 + (batch_start_sample + word_offset_samples) / 16 000 × 1000`, where `t0` is the server-clock time of sample 0 of the aligned timeline. The result is epoch milliseconds, like `server_ts`.
 - **Utterance boundaries come from the attribution** (10 ms hop), not from the ASR. Word times only refine the position inside a segment and are clamped to it. Each batch is anchored on its own, so timing errors cannot build up over a session.
 - **Word timing quality differs by engine.** Whisper's DTW timestamps are estimates per token, and punctuation can land late [[55]](https://github.com/ggml-org/whisper.cpp/pull/1485); with a 200 ms collar on AMI meetings, plain Whisper found 78.9 % precision and 52.1 % recall of word boundaries, WhisperX's wav2vec2 alignment 84.1 % and 60.3 % [[10]](https://arxiv.org/abs/2303.00747). Transducer models emit timestamps per audio frame (§ 3).
 - **Joining to actions.** A proposal or decision marker sits at its `client_ts` (the confirm click, corrected to the server clock); `server_ts` keeps the order. On a LAN the two differ by a few milliseconds ([ARCHITECTURE.md § 10](ARCHITECTURE.md#10-timing-model)).
@@ -237,7 +237,7 @@ Players will name squares a dozen ways: "C7", "C seven", "see seven", "sea seven
 flowchart TB
   subgraph BUILT["In place (audio waves 1–3)"]
     RAW[("Raw tracks per seat<br/>data/audio, AES-256-GCM")]
-    ATT["Attribution engine<br/>drift and lag alignment,<br/>leakage matrix, frame attribution"]
+    ATT["Attribution engine<br/>clock fit per track,<br/>speech detection, level gate"]
     SEG["speech_segments<br/>seat, startTs, endTs,<br/>confidence, overlap"]
     CLEAN[("Cleaned tracks per seat<br/>other voices −30 dB<br/>audio_derivatives")]
     RAW --> ATT

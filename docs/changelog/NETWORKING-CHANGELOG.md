@@ -4,6 +4,12 @@ History of [NETWORKING.md](../NETWORKING.md). Newest first. How entries are writ
 
 ## Unreleased
 
+### Not yet committed · documents `880ecba` (Headset gate engine: Silero VAD + cross-channel level gate; storage fixes) and `c438572` (e2e server: speech by energy for the bots' synthetic audio)
+
+- **Type:** Feature
+- **Change:** § 4 adds the environment variable `WKWA_SPEECH_MODEL` (`off` = speech found by energy instead of the speech model, for bots and demos; the e2e server sets it). In § 10, session deletion and participant erasure are refused (409) while an attribution or audio export of the session runs, the audio export folder is written as `.partial` and renamed once registered, and the job summary names the speech detector (the per-seat lag figure is gone).
+- **Reason:** The commit adds the setting, new refusals and a new export sequence, and changes the attribution summary sent over REST.
+
 ### Not yet committed · `detached` keeps seats across session switches; audio waits for the seat
 
 - **Type:** Bug fix

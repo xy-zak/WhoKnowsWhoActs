@@ -4,6 +4,12 @@ History of [ARCHITECTURE.md](../ARCHITECTURE.md). Newest first. How entries are 
 
 ## Unreleased
 
+### Not yet committed · documents `880ecba` (Headset gate engine: Silero VAD + cross-channel level gate; storage fixes) and `c438572` (e2e server: speech by energy for the bots' synthetic audio)
+
+- **Type:** Feature
+- **Change:** The component table, the code layout and § 15 (diagram and table) add the Silero VAD model file with its SHA-256 check, `onnxruntime-node` loaded only in the attribution worker, and the busy check that blocks deletion during a job or export. The bot `--audio` flag explains when to use `WKWA_SPEECH_MODEL=off`, and the testing table lists the new audio tests.
+- **Reason:** The commit adds a runtime dependency and a model file to the server and a new rule between audio jobs and deletion.
+
 ### Not yet committed · read-only game state; `detached` on session switch
 
 - **Type:** Risk mitigation

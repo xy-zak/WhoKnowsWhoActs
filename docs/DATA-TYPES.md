@@ -265,7 +265,7 @@ Columns shared by every event row:
 | [`CalibrationTurn`](#calibrationturn) | A seat's calibration turn began (the event's serverTs is the start of the turn): that seat reads its sentence aloud, the others stay quiet. | system | yes | pseudonymous | 1 per seat per calibration |
 | [`CalibrationCompleted`](#calibrationcompleted) | Every calibration turn has run; the turn windows are used to measure the leakage between microphones. | system | yes | non-personal | 0–1 per calibration |
 | [`CalibrationChecked`](#calibrationchecked) | Quick quality check of the calibration: per seat, how much louder its own voice was on its own microphone than on the loudest other one. | system | yes | pseudonymous | 1 per CalibrationCompleted |
-| [`CalibrationSkipped`](#calibrationskipped) | The facilitator skipped (or cancelled) the calibration; speaker attribution then estimates the leakage between microphones from the recordings. Logged by the server with `cancelled: true` when it had to stop a running calibration itself (recording paused, server restart): the calibration is then back to not done and has to be run (or skipped) again. | facilitator, system | yes | non-personal | 0–1 per session (audio sessions only), plus 1 per cancelled run |
+| [`CalibrationSkipped`](#calibrationskipped) | The facilitator skipped (or cancelled) the calibration; speaker attribution then assumes a conservative default leakage between microphones. Logged by the server with `cancelled: true` when it had to stop a running calibration itself (recording paused, server restart): the calibration is then back to not done and has to be run (or skipped) again. | facilitator, system | yes | non-personal | 0–1 per session (audio sessions only), plus 1 per cancelled run |
 | [`RoundStarted`](#roundstarted) | A round began; players may now propose/decide. | facilitator, system | yes | non-personal | roundCount per session (default 3) |
 | [`ProposalMade`](#proposalmade) | A player proposed a sub-square of the map (hatched in its knowledge-type colour for all players). | player | yes | pseudonymous | ≤ quota.propose × seats × rounds (default 60) |
 | [`DecisionMade`](#decisionmade) | A player decided on a sub-square of the map (filled in its knowledge-type colour for all players); the game rules change the scores. | player | yes | pseudonymous | ≤ quota.decide × seats × rounds (default 60) |
@@ -1358,7 +1358,7 @@ Quick quality check of the calibration: per seat, how much louder its own voice 
 | **Trigger** | Server, right after CalibrationCompleted, from the audio of the calibration turns. |
 | **Caused by** | system |
 | **Changes game state** | yes |
-| **Visible to** | Facilitator (LIVE: per-seat margins and advice, e.g. 'move closer or use a headset') |
+| **Visible to** | Facilitator (LIVE: per-seat margins and advice, e.g. 'check the headset is plugged in and worn close to the mouth') |
 | **Data class** | pseudonymous |
 | **Typical frequency** | 1 per CalibrationCompleted |
 
@@ -1415,7 +1415,7 @@ Quick quality check of the calibration: per seat, how much louder its own voice 
 
 ### `CalibrationSkipped`
 
-The facilitator skipped (or cancelled) the calibration; speaker attribution then estimates the leakage between microphones from the recordings. Logged by the server with `cancelled: true` when it had to stop a running calibration itself (recording paused, server restart): the calibration is then back to not done and has to be run (or skipped) again.
+The facilitator skipped (or cancelled) the calibration; speaker attribution then assumes a conservative default leakage between microphones. Logged by the server with `cancelled: true` when it had to stop a running calibration itself (recording paused, server restart): the calibration is then back to not done and has to be run (or skipped) again.
 
 |  |  |
 | --- | --- |
@@ -2995,12 +2995,12 @@ The cipher is AES-256-GCM with a random 32-byte key per file. The authenticated 
 | | `rms_db`, `peak_db`, `clipped` | REAL, INTEGER | Level summary (dBFS) and number of clipped samples |
 | `audio_derivatives` | `derivative_id`, `session_id` | TEXT | One result of an attribution run |
 | | `seat`, `participant_code` | INTEGER, TEXT | Empty for session-wide results (`talk_time`, `quality_report`, `leakage_matrix`) |
-| | `kind` | TEXT | `speech_segments` (JSON: segments and talk time of one seat), `talk_time`, `quality_report` (with the alignment), `leakage_matrix`, `clean` (an encrypted track with attenuation 30 dB and 10 ms fades). Later: `transcript` (planned). |
-| | `source_tracks_json` | TEXT | The tracks it was computed from. Erasing a participant removes every result whose sources include one of their tracks. |
+| | `kind` | TEXT | `speech_segments` (JSON: segments and talk time of one seat), `talk_time`, `quality_report` (grade, speech detector `silero` or `energy`, calibration per seat, ambiguous share, and per seat coverage, clipping, noise floor, speech level, signal-to-noise ratio, drift, talk time and overlap; plus the alignment of every track), `leakage_matrix` (dB, `[speaker][mic]`, source `calibration` or `default`), `clean` (an encrypted track with attenuation 30 dB and 10 ms fades). Later: `transcript` (planned). |
+| | `source_tracks_json` | TEXT | The tracks it was computed from. Erasing a participant removes every result whose sources include one of their tracks, and removes their seat from the `overlapWith` of the other seats' kept speech segments. |
 | | `file_name`, `file_key`, `data_json` | TEXT, BLOB, TEXT | An encrypted file (cleaned track) or small JSON (the rest) |
-| | `params_json`, `engine_version` | TEXT | Parameters and version of the attribution engine |
+| | `params_json`, `engine_version` | TEXT | Parameters and version of the attribution engine (now `wkwa-gate-attribution/2.0.0`). *Export audio* reuses the stored alignment only when its `engine_version` is the current one; otherwise it places the tracks by their chunk timestamps. |
 | `audio_jobs` | `job_id`, `session_id`, `kind`, `status` | TEXT | `kind` is `attribution`; `status` is `queued`, `running`, `done` or `failed` |
-| | `progress`, `params_json`, `result_json`, `error` | REAL, TEXT | 0 to 1; options; the summary; an error text with anything that looks like a participant code scrubbed |
+| | `progress`, `params_json`, `result_json`, `error` | REAL, TEXT | 0 to 1; options; the summary (talk time, overlap, grade, speech detector, margin, drift and coverage per seat, ambiguous share, warnings; set to NULL for the whole session when a participant of it is erased); an error text with anything that looks like a participant code scrubbed |
 | `audio_deletions` | `session_id`, `scope` | TEXT | `raw` or `all` |
 | | `requested_wall`, `executed_wall`, `note` | TEXT | When, and a free note (no names) |
 | | `counts_json` | TEXT | `tracks`, `audioMs`, `chunks`, `derivatives`, `jobs`, `files`, `bytes`, `seatMask` (a bit mask of seats) |
@@ -3240,7 +3240,7 @@ Who spoke when, from the speaker attribution run in the DATABASE tab: it compare
 | `paused` | bool01 | 1 if the game was paused when the speech started | GamePaused / GameResumed |
 | `recording_paused` | bool01 | 1 if recording was paused when the speech started (only possible at the edge of a pause) | RecordingPaused / RecordingResumed |
 | `mean_db` | number | Mean level of the seat's own microphone over the speech (dBFS) | attribution segment.meanDb |
-| `confidence` | number | 0–1: how clearly the speech was attributed to this seat (mean per 10 ms frame) | attribution segment.confidence |
+| `confidence` | number | 0–1: mean speech probability of the speech model over the segment (with the energy fallback: share of frames that passed the gate) | attribution segment.confidence |
 | `overlap` | bool01 | 1 if another seat spoke at the same time for part of the segment | attribution segment.overlap |
 | `overlap_ms` | number | Time within the segment during which another seat also spoke | attribution segment.overlapMs |
 | `overlap_with` | seat-list | Seats that spoke at the same time | attribution segment.overlapWith |

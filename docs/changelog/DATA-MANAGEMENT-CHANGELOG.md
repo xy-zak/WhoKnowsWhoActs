@@ -4,6 +4,12 @@ History of [DATA-MANAGEMENT.md](../DATA-MANAGEMENT.md). Newest first. How entrie
 
 ## Unreleased
 
+### Not yet committed · documents `880ecba` (Headset gate engine: Silero VAD + cross-channel level gate; storage fixes)
+
+- **Type:** Risk mitigation
+- **Change:** § 1, § 2 and § 8 say that who spoke when now combines a speech/non-speech model (Silero VAD) with loudness, and why that is not biometric processing (no voice description, the model's numbers are not stored). § 10 and § 11 add that an erasure removes the erased seat from the other seats' overlap partners and clears the session's job summaries, that erasure and session deletion wait for a running attribution or audio export, and that audio exports are written under a `.partial` name; risks #19, #22 and #26 reflect the headset set-up.
+- **Reason:** A model now processes the voices, and the commit closes gaps where an erased seat or an unregistered folder of voice files could remain (privacy, data protection).
+
 ### Not yet committed · documents `0f6971a`…`abcacbe` (microphone audio, checked against the build)
 
 - **Type:** Bug fix

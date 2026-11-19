@@ -104,6 +104,7 @@ The server binds to `HOST:PORT` (default `0.0.0.0:3000`, i.e. all interfaces) an
 | `ADMIN_TOKEN` | — | Enables remote facilitator access with a bearer token (otherwise the facilitator is localhost-only) |
 | `WKWA_TLS` | `auto` | `auto`: HTTPS with a **self-signed certificate** the server makes and keeps in `data/tls/` ([§ 11](#11-security-on-the-lan)). **Required for sessions with audio**: browsers only allow the microphone on a secure page. `off`: plain HTTP. `npm run dev`, the Playwright server and the unit tests use `off`; they run on `localhost`/`127.0.0.1`, which browsers treat as secure anyway. |
 | `TLS_CERT`, `TLS_KEY` | — | Your own certificate and unencrypted key (PEM files), instead of the self-signed one. Set both or neither (one alone stops the server). When both are set they are used whatever `WKWA_TLS` says (mode `provided`). |
+| `WKWA_SPEECH_MODEL` | on | Speaker attribution detects speech with the Silero VAD model ([AUDIO.md § 10](AUDIO.md#10-speaker-attribution)). `off`: speech is taken as energy above each mic's noise floor instead, and the quality report says so. Only for bots and demos, whose synthetic audio has no real voice in it; the e2e test server (`scripts/e2e-server.mjs`) sets it. |
 | `HTTP_REDIRECT_PORT` | — | Optional second, plain-HTTP port that answers every request with `301` to `https://<same host>:PORT<same path>`, so that a typed `http://` address still arrives. E.g. `8080`, or `80` so players can type just `http://LAPTOP-IP` (port 80 needs administrator rights on Linux). Ignored when TLS is off. |
 
 | URL | Who |
@@ -381,17 +382,17 @@ Used by the dashboard's data pages and by scripts. **Localhost-only** unless `AD
 | `GET` | `/api/sessions/:id/print/keysheet` | Printable key sheet (seat → code, blank name column). 400 for a simulated session. |
 | `GET` | `/api/sessions/:id/cards` | Seats that have a takedown card. 400 for a simulated session. |
 | `GET` | `/api/sessions/:id/cards/:seat` | One takedown card as a PDF (A6, JetBrains Mono), downloaded as `takedown-card-<session>-seat<n>.pdf` |
-| `POST` | `/api/sessions/:id/delete` | Delete the entire session. Body `{ "confirm": "<session id>", "deleteExports"?: true }`. Refused (409) while it is running. |
+| `POST` | `/api/sessions/:id/delete` | Delete the entire session. Body `{ "confirm": "<session id>", "deleteExports"?: true }`. Refused (409) while it is running, and while a speaker attribution of it is queued or running or an audio export of it is being written. |
 | `GET` | `/api/session-deletions` | Session-deletion registers of both databases (`players` per entry) |
 | `GET` | `/api/participants/:code` | Look up a participant code (typos tolerated): sessions and row counts, exports containing it, earlier erasures |
-| `POST` | `/api/participants/:code/erase` | Erase all data of a code. Body `{ "confirm": "<code>", "note"?: "…" }` must repeat the code. Refused (409) while the participant is in a session that is still running. |
+| `POST` | `/api/participants/:code/erase` | Erase all data of a code. Body `{ "confirm": "<code>", "note"?: "…" }` must repeat the code. Refused (409) while the participant is in a session that is still running, and while a speaker attribution or an audio export of one of their sessions is in progress. |
 | `GET` | `/api/erasures` | Erasure register |
 | `GET` | `/api/exports` | Export registers of both databases (`players` per entry; audio exports have `kind` `audio`) |
 | `GET` | `/api/sessions/:id/audio` | Everything about a session's audio: tracks (no keys, no file names), cleaned tracks, jobs, deletion register, audio exports, per-seat totals, the attribution summary. A simulated session returns an empty summary. |
 | `POST` | `/api/sessions/:id/audio/attribution` | Queue a speaker attribution (`202` and the job). One queued or running job per session (409 otherwise); refused (409) once the raw audio is deleted. |
-| `GET` | `/api/audio/jobs/:jobId` | Job status: progress, the attribution summary when done, the error when failed |
+| `GET` | `/api/audio/jobs/:jobId` | Job status: progress, the attribution summary when done (engine version, talk time, overlap, grade, and a quality block with the speech detector, calibration status, margin, drift and coverage per seat, ambiguous share and warnings), the error when failed |
 | `GET` | `/api/sessions/:id/audio/segments` | Who spoke when (JSON, timing only); empty until an attribution has run |
-| `POST` | `/api/sessions/:id/audio/export` | **Export audio**, the only way sound leaves the encrypted store. Body: `kind` (`raw`, `clean` or `both`), optional `seats`, optional `note`. Writes WAV files and a manifest to `exports/<sessionId>/audio-AU-…/` and registers the export; no browser download. |
+| `POST` | `/api/sessions/:id/audio/export` | **Export audio**, the only way sound leaves the encrypted store. Body: `kind` (`raw`, `clean` or `both`), optional `seats`, optional `note`. Writes WAV files and a manifest to `exports/<sessionId>/audio-AU-….partial/`, registers the export, then renames the folder to `audio-AU-…/` (half-written folders are removed at the next start); no browser download. |
 | `POST` | `/api/sessions/:id/audio/delete` | Delete raw audio (`scope` `raw`) or all audio (`all`). The body must repeat the session id. Refused (409) while the session runs. |
 
 ## 11. Security on the LAN

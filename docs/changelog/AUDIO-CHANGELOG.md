@@ -4,6 +4,12 @@ History of [AUDIO.md](../AUDIO.md). Newest first. How entries are written: [READ
 
 ## Unreleased
 
+### Not yet committed · documents `880ecba` (Headset gate engine: Silero VAD + cross-channel level gate; storage fixes) and `c438572` (e2e server: speech by energy for the bots' synthetic audio)
+
+- **Type:** Feature
+- **Change:** § 1 and § 2 add the hardware assumption (one wired single-ear USB headset per player, no Bluetooth) and the shipped, checksum-checked speech model. § 10 is rewritten for the new engine, a speech detector (Silero VAD) plus a level gate between the mics, with a new pipeline diagram and new synthetic accuracy figures with and without a calibration; § 6, § 9, § 11 and § 13 follow (one clock line per track and no lag refinement, leakage and the 12 dB gain-invariant pass margin from the calibration, export timing only from this engine version, `.partial` export folders, damaged clean records kept in place, erased seats removed from overlap partners, new limits).
+- **Reason:** The energy-pattern engine was replaced by a simpler method that relies on close headset microphones, and the storage layer was fixed; the design reference must describe the method the code runs and what it cannot do.
+
 ### Not yet committed · uploads wait for the seat; a detached session keeps the unsent audio
 
 - **Type:** Bug fix

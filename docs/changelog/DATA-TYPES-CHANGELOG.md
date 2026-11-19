@@ -4,6 +4,12 @@ History of [DATA-TYPES.md](../DATA-TYPES.md). Newest first. How entries are writ
 
 ## Unreleased
 
+### Not yet committed · documents `880ecba` (Headset gate engine: Silero VAD + cross-channel level gate; storage fixes)
+
+- **Type:** Feature
+- **Change:** The *Audio storage* table describes the new content of the `quality_report` (speech detector, per-seat coverage, clipping, noise floor, speech level, drift, talk time) and `leakage_matrix` results, names the engine version `wkwa-gate-attribution/2.0.0` and says that *Export audio* reuses a stored alignment only from that version. It also states that an erasure strips the erased seat from kept speech segments and clears `audio_jobs.result_json`.
+- **Reason:** The new attribution engine stores results of a different shape (an older alignment can no longer be read), and the erasure now changes stored rows of other seats.
+
 ### Not yet committed · documents `simplify/audio-cleanup` (#16)
 
 - **Type:** Correction

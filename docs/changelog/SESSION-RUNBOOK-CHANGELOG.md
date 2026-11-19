@@ -4,6 +4,12 @@ History of [SESSION-RUNBOOK.md](../SESSION-RUNBOOK.md). Newest first. How entrie
 
 ## Unreleased
 
+### Not yet committed · documents `880ecba` (Headset gate engine: Silero VAD + cross-channel level gate; storage fixes) and `c438572` (e2e server: speech by energy for the bots' synthetic audio)
+
+- **Type:** Risk mitigation
+- **Change:** § 2, § 3, § 7 and § 11 now ask for one wired single-ear USB headset per player (no Bluetooth), describe the new mic-check instructions, the 12 dB calibration pass margin with headset advice, the speech-detector line of the DATABASE result (the Lag column is gone), the refusal of erasure while a job runs, and `WKWA_SPEECH_MODEL=off` for bot dry runs; § 6 gets a row for a seat with a low calibration margin.
+- **Reason:** Attribution now depends on headsets worn close to the mouth (research validity), and bot audio would otherwise give an empty attribution.
+
 ### Not yet committed · documents `0f6971a`…`abcacbe` (microphone audio)
 
 - **Type:** Feature
