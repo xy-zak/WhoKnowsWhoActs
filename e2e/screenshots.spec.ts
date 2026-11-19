@@ -682,7 +682,10 @@ scenario(
 scenario(
   "audio-data",
   "audio: a session played by bots with synthetic audio, then DATABASE: attribution, export, delete",
-  async ({ page: fac }) => {
+  async ({ page: fac, browser }) => {
+    // player PCs of the earlier scenarios are still connected (unseated): close them, so that
+    // `--auto` binds the bots and not those pages
+    for (const c of browser.contexts()) if (c !== fac.context()) await c.close();
     await fac.goto("/facilitator");
     // the session is created here (audio on); `--auto` then binds the bots, calibrates and runs the rounds
     await chooseScenario(fac, "Demo grid");
@@ -692,10 +695,10 @@ scenario(
     await enableAudio(fac);
     await nextThrough(fac, ["onboarding", "tags", "review"]);
     await current(fac, "connect");
+    // tsx directly (not through npx), so that SIGTERM at the end reaches the bots
     const bots = spawn(
-      "npx",
+      "node_modules/.bin/tsx",
       [
-        "tsx",
         "apps/server/src/tools/bots.ts",
         "--url",
         BASE,
@@ -724,23 +727,22 @@ scenario(
       await expect(row).toBeVisible();
       await shot(fac, "server/audio-db-01-list");
 
-      await row.getByRole("button", { name: /\d/ }).first().click();
+      await row.getByRole("button", { name: / tr · / }).click();
       const popup = fac.locator(".popup");
       await expect(popup.getByRole("button", { name: /Run speaker attribution/ })).toBeVisible();
       await shot(fac, "server/audio-db-02-popup");
 
       await popup.getByRole("button", { name: /Run speaker attribution/ }).click();
-      await expect(popup.getByText("Talk time")).toBeVisible({ timeout: 180_000 });
-      await popup.getByText("Talk time").scrollIntoViewIfNeeded();
+      await expect(popup.getByText("Talk time", { exact: true })).toBeVisible({ timeout: 180_000 });
+      await popup.getByText("Talk time", { exact: true }).scrollIntoViewIfNeeded();
       await shot(fac, "server/audio-db-03-attribution", { keepScroll: true });
 
       await popup.getByRole("radio", { name: "Clean" }).check();
-      await popup.getByRole("button", { name: /WAV/ }).first().click();
-      await expect(popup.getByText(/Written to|Exported/).first()).toBeVisible({ timeout: 30_000 });
-      await popup
-        .getByText(/Written to|Exported/)
-        .first()
-        .scrollIntoViewIfNeeded();
+      await popup.getByRole("button", { name: "WAV", exact: true }).first().click();
+      const exported = popup.getByText(/^audio export [A-Z]+-/).first();
+      await expect(exported).toBeVisible({ timeout: 30_000 });
+      // the whole result (files, timing, warning) in view at the bottom of the popup
+      await exported.evaluate((el) => el.closest(".callout")?.scrollIntoView({ block: "end" }));
       await shot(fac, "server/audio-db-04-export", { keepScroll: true });
 
       await popup.getByRole("button", { name: /Delete audio…/ }).click();
