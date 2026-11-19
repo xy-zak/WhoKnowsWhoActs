@@ -1,4 +1,13 @@
-import type { PlayerSocket } from "./socket";
+import type { ClockPingAck, PlayerPayload } from "@wkwa/shared";
+
+/** How long one sample waits for the server's answer (ms). */
+const PING_TIMEOUT_MS = 3000;
+
+/** Emits `clock:ping` and resolves with the answer, or undefined after `timeoutMs`. */
+export type ClockPing = (
+  payload: PlayerPayload<"clock:ping">,
+  timeoutMs: number,
+) => Promise<ClockPingAck | undefined>;
 
 /**
  * NTP-style clock synchronisation with the server.
@@ -16,7 +25,7 @@ export class ClockSync {
   private timer: ReturnType<typeof setInterval> | null = null;
 
   constructor(
-    private readonly socket: PlayerSocket,
+    private readonly sendPing: ClockPing,
     private readonly onSync?: (r: { offsetMs: number; rttMs: number; samples: number }) => void,
   ) {}
 
@@ -24,16 +33,12 @@ export class ClockSync {
     return performance.timeOrigin + performance.now() + this.offsetMs;
   }
 
-  private ping(): Promise<{ offset: number; rtt: number } | null> {
-    return new Promise((resolve) => {
-      const t0 = performance.now();
-      const timeout = setTimeout(() => resolve(null), 3000);
-      this.socket.emit("clock:ping", { t0 }, (ack) => {
-        clearTimeout(timeout);
-        const t1 = performance.now();
-        resolve({ offset: ack.serverTs - (performance.timeOrigin + (t0 + t1) / 2), rtt: t1 - t0 });
-      });
-    });
+  private async ping(): Promise<{ offset: number; rtt: number } | null> {
+    const t0 = performance.now();
+    const ack = await this.sendPing({ t0 }, PING_TIMEOUT_MS);
+    if (!ack) return null;
+    const t1 = performance.now();
+    return { offset: ack.serverTs - (performance.timeOrigin + (t0 + t1) / 2), rtt: t1 - t0 };
   }
 
   async sync(samples = 5) {
