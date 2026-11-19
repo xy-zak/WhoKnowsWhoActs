@@ -4,6 +4,7 @@ import {
   applyEvent,
   EXPORT_FILES,
   type ExportColumn,
+  type ExportKind,
   expandColumns,
   exportFile,
   fakeSeats,
@@ -18,6 +19,7 @@ import {
   randomCrockford,
   reduceEvents,
   renderCodebook,
+  type SessionExportResult,
   type StoredEvent,
   type StoredTelemetry,
 } from "@wkwa/shared";
@@ -25,17 +27,6 @@ import { speechSegmentsOf, trackViews } from "../audio/records";
 import { type ScenarioLibrary, sha256 } from "../content";
 import type { Store } from "../db/store";
 import { nowTs, wall } from "../runtime";
-
-export type ExportKind = "standard" | "anonymised";
-
-export interface ExportResult {
-  exportId: string;
-  kind: ExportKind;
-  sessionId: string;
-  dir: string;
-  files: Array<{ name: string; rows: number; sha256: string }>;
-  participants: number;
-}
 
 /* ─────────────────────────── CSV ─────────────────────────── */
 
@@ -73,7 +64,7 @@ export function exportSession(
   deps: ExportDeps,
   sessionId: string,
   kind: ExportKind = "standard",
-): ExportResult {
+): SessionExportResult {
   const now = nowTs();
   const id = exportId(now);
   const dir = path.join(deps.exportsDir, sessionId, kind === "anonymised" ? `anon-${id}` : id);
@@ -95,7 +86,7 @@ function writeExport(
   now: number,
   id: string,
   dir: string,
-): ExportResult {
+): SessionExportResult {
   const { store } = deps;
   const row = store.getSession(sessionId);
   if (!row) throw new Error(`Unknown session ${sessionId}`);
@@ -134,7 +125,7 @@ function writeExport(
   const pid = (code: string | null | undefined) =>
     code ? (kind === "anonymised" ? (anon.get(code) ?? null) : code) : null;
 
-  const written: ExportResult["files"] = [];
+  const written: SessionExportResult["files"] = [];
   const write = (name: string, content: string, rows: number) => {
     writeFileSync(path.join(dir, name), content);
     written.push({ name, rows, sha256: sha256(content) });

@@ -12,6 +12,7 @@ export * from "./meta";
 export * from "./projections";
 export * from "./protocol";
 export * from "./recordingVerdict";
+export * from "./rest";
 export * from "./rules/reducer";
 export * from "./rules/roundRules";
 export * from "./rules/validators";

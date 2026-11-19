@@ -1,6 +1,6 @@
 import path from "node:path";
-import type { PlayerMode } from "@wkwa/shared";
-import type { SessionRow, SessionSummary, Store } from "./store";
+import type { PlayerMode, SessionSummary } from "@wkwa/shared";
+import type { SessionRow, Store } from "./store";
 
 /** File names of the two databases in the data directory. */
 export const DB_FILES: Record<PlayerMode, string> = {

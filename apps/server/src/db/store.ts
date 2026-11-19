@@ -1,7 +1,10 @@
 import type {
   AudioDeletionScope,
   AudioDerivativeKind,
+  ExportRow,
   NewEvent,
+  RegisteredExportKind,
+  SessionSummary,
   StoredEvent,
   StoredTelemetry,
   TelemetryItem,
@@ -25,25 +28,6 @@ export interface SessionRow {
   harness_version: string;
   git_commit: string;
   updated_wall: string;
-}
-
-export interface SessionSummary {
-  id: string;
-  createdWall: string;
-  updatedWall: string;
-  scenarioId: string;
-  scenarioVersion: string;
-  status: string;
-  tags: string[];
-  notes: string;
-  eventCount: number;
-  telemetryCount: number;
-  /** Seats bound to fake players (test clients the server created) at the end of the log; [] = none. */
-  fakeSeats: number[];
-  /** Audio tracks whose audio is still stored (tracks whose raw audio was deleted are not counted). */
-  audioTracks: number;
-  /** Recorded duration of those tracks, in ms (samples received / sample rate). */
-  audioMs: number;
 }
 
 /* ─────────── audio rows (schema v6) ─────────── */
@@ -713,17 +697,6 @@ export class Store {
     ).join(" UNION ");
     return this.db.prepare(sql).pluck().all() as string[];
   }
-}
-
-/** Kinds in the export register: the two CSV exports and the separate "Export audio" action. */
-export type RegisteredExportKind = "standard" | "anonymised" | "audio";
-
-export interface ExportRow {
-  id: string;
-  sessionId: string;
-  kind: RegisteredExportKind;
-  createdWall: string;
-  path: string;
 }
 
 /** An export register entry with what was asked for (`details`) and how many files it wrote. */

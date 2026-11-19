@@ -16,9 +16,15 @@ import {
   type AudioDeletionCounts,
   type AudioDeletionScope,
   type AudioFilesRemoved,
+  type CodeOccurrence,
+  type ErasureEntry,
+  type ErasureResult,
   type ErasureRows,
+  type ExportRow,
+  type LookupResult,
   normaliseParticipantCode,
   reduceEvents,
+  type SessionDeletionEntry,
   type SessionDeletionResult,
   type SessionDeletionRows,
   type SpeechSegmentRow,
@@ -27,7 +33,7 @@ import { fileBytes, isAudioDerivativeKind } from "../audio/records";
 import { sha256 } from "../content";
 import { nowTs, wall } from "../runtime";
 import { compactAfterDelete, fromRow } from "./database";
-import type { AudioDeletionRow, AudioTrackRowStatus, ExportRow, Store } from "./store";
+import type { AudioDeletionRow, AudioTrackRowStatus, Store } from "./store";
 
 /* ─────────────────────────── the registry ─────────────────────────── */
 
@@ -157,58 +163,6 @@ export const AUDIO_MS_SQL =
   "coalesce(sum(CASE WHEN a.sample_rate > 0 THEN a.samples * 1000.0 / a.sample_rate END), 0)";
 
 /* ─────────────────────────── results ─────────────────────────── */
-
-/** Where a participant code occurs in one session. */
-export interface CodeOccurrence {
-  sessionId: string;
-  seat: number | null;
-  events: number;
-  telemetry: number;
-  /** Track rows carrying the code (including the metadata kept after a raw-audio deletion). */
-  audioTracks: number;
-  /** Their recorded duration, in ms. */
-  audioMs: number;
-}
-
-export interface LookupResult {
-  code: string;
-  occurrences: CodeOccurrence[];
-  /** Exports whose register entry holds the code (by hash): delete them on every copy. */
-  exports: ExportRow[];
-  previouslyErased: Array<{ executedWall: string }>;
-}
-
-export interface ErasureResult extends LookupResult {
-  erased: boolean;
-  rows: ErasureRows;
-  /** Encrypted audio files unlinked after the commit. */
-  audioFiles: AudioFilesRemoved;
-}
-
-export interface ErasureEntry {
-  id: number;
-  codeSha256: string;
-  requestedWall: string;
-  executedWall: string;
-  sessions: Array<{ sessionId: string; seat: number | null }>;
-  /**
-   * Rows deleted, and `audioFiles`: encrypted audio files whose keys were deleted (crypto-shredded),
-   * which are then unlinked. Audio counts are 0 for entries made before audio existed.
-   */
-  rows: ErasureRows & { audioFiles: number };
-  note: string;
-}
-
-export interface SessionDeletionEntry {
-  id: number;
-  sessionId: string;
-  deletedWall: string;
-  createdWall: string;
-  /** Row counts (audio counts are 0 for entries made before audio existed). */
-  rows: SessionDeletionRows;
-  participants: number;
-  note: string;
-}
 
 /** What deleteAudio did (the REST result adds the register entry as `record`). */
 export interface AudioDeletionResult extends Omit<AudioDeleteResult, "record" | "audioExportsOnDisk"> {

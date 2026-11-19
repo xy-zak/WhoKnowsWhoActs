@@ -1,12 +1,17 @@
 import {
-  type AudioFilesRemoved,
-  type ErasureRows,
+  type ErasureEntry,
+  type ErasureResult,
+  type ExportRow,
   hasEnded,
   isFinalPhase,
   isSimulatedSessionId,
+  type LookupResult,
   normaliseParticipantCode,
   type PlayerMode,
+  type SessionDeletionEntry,
   type SessionDeletionResult,
+  type SessionExportResult,
+  type SessionSummary as StoredSessionSummary,
 } from "@wkwa/shared";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { fmtDuration, fmtMinutes, plural } from "../common/format";
@@ -31,73 +36,15 @@ import type { FacilitatorConnection } from "./connection";
 import { AudioPopup } from "./database/AudioPopup";
 import { type AudioSessionView, audioCell, whenWall as when } from "./database/audioModel";
 
-interface SessionSummary {
-  id: string;
-  /** Which database the session is in. */
-  players: PlayerMode;
-  createdWall: string;
-  updatedWall: string;
-  scenarioId: string;
-  scenarioVersion: string;
-  status: string;
-  tags: string[];
-  notes: string;
-  eventCount: number;
-  telemetryCount: number;
-  /** Seats played by fake players (test clients the server created). */
-  fakeSeats: number[];
-  /** Tracks whose audio is still stored (raw-deleted tracks not counted), and their recorded duration (ms). */
-  audioTracks?: number;
-  audioMs?: number;
-}
-interface ExportResult {
-  /** Database of the exported session (set here, from the session row). */
-  players: PlayerMode;
-  exportId: string;
-  kind: string;
-  dir: string;
-  files: Array<{ name: string; rows: number }>;
-}
-interface ExportRow {
-  id: string;
-  sessionId: string;
-  kind: string;
-  createdWall: string;
-  path: string;
-}
-interface Lookup {
-  code: string;
-  occurrences: Array<{
-    sessionId: string;
-    seat: number | null;
-    events: number;
-    telemetry: number;
-    audioTracks?: number;
-    audioMs?: number;
-  }>;
-  exports: ExportRow[];
-  previouslyErased: Array<{ executedWall: string }>;
-}
-interface Deletion {
-  id: number;
-  sessionId: string;
-  deletedWall: string;
-  rows: { events: number; telemetry: number; audioTracks?: number };
-  participants: number;
-}
-interface Erasure {
-  id: number;
-  codeSha256: string;
-  executedWall: string;
-  sessions: Array<{ sessionId: string }>;
-  rows: { events: number; telemetry: number; audioTracks?: number; audioFiles?: number };
-  note: string;
-}
+/* REST responses (shared with the server); `InDb` rows carry the database they are in. */
+type SessionSummary = InDb<StoredSessionSummary>;
+/** `players` is set here, from the session row. */
+type ExportResult = InDb<SessionExportResult>;
+type Lookup = LookupResult;
+type Deletion = SessionDeletionEntry;
+type Erasure = ErasureEntry;
 /** Rows and audio files removed by an erasure. */
-interface ErasureAudio {
-  rows: ErasureRows;
-  audioFiles: AudioFilesRemoved;
-}
+type ErasureAudio = Pick<ErasureResult, "rows" | "audioFiles">;
 type SessionDeleteResult = SessionDeletionResult;
 
 const STATUS_TONE: Record<string, "live" | "warn" | "danger" | "neutral" | "primary"> = {
