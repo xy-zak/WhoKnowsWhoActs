@@ -11,6 +11,7 @@ import type {
 import type { AudioFileStore } from "../audio/fileStore";
 import { nowTs, wall } from "../runtime";
 import type { DB } from "./database";
+import { AUDIO_MS_SQL, CODE_TABLES } from "./personalData";
 
 export interface SessionRow {
   id: string;
@@ -270,10 +271,6 @@ const DERIVATIVE_COLUMNS = `derivative_id, session_id, seat, participant_code, k
   file_key IS NOT NULL AS has_key, data_json IS NOT NULL AS has_data, params_json, engine_version,
   created_server_ts, created_wall`;
 
-/** Milliseconds of audio in a set of tracks (SQL aggregate over `audio_tracks a`). */
-const AUDIO_MS_SQL =
-  "coalesce(sum(CASE WHEN a.sample_rate > 0 THEN a.samples * 1000.0 / a.sample_rate END), 0)";
-
 function rowToTrack(r: AudioTrackDbRow): AudioTrackRow {
   return {
     trackId: r.track_id,
@@ -419,7 +416,7 @@ export class Store {
   /**
    * @param audioFiles where this database's encrypted audio files live (data/audio).
    *   Only the participant database has one: simulated sessions never record audio.
-   *   Erasure, session deletion and audio deletion unlink files through it.
+   *   Erasure, session deletion and audio deletion (PersonalDataMap) unlink files through it.
    */
   constructor(
     readonly db: DB,
@@ -885,28 +882,6 @@ export class Store {
     return row;
   }
 
-  /**
-   * Delete every audio row of a session: chunks, tracks (with their file keys), derivatives and
-   * jobs. Returns the row counts. Run it inside the caller's transaction; the files are the
-   * caller's to unlink (they are unreadable once their keys are gone).
-   */
-  deleteSessionAudioRows(sessionId: string): {
-    tracks: number;
-    chunks: number;
-    derivatives: number;
-    jobs: number;
-  } {
-    const run = (sql: string) => this.db.prepare(sql).run(sessionId).changes;
-    return {
-      chunks: run(
-        "DELETE FROM audio_chunks WHERE track_id IN (SELECT track_id FROM audio_tracks WHERE session_id = ?)",
-      ),
-      tracks: run("DELETE FROM audio_tracks WHERE session_id = ?"),
-      derivatives: run("DELETE FROM audio_derivatives WHERE session_id = ?"),
-      jobs: run("DELETE FROM audio_jobs WHERE session_id = ?"),
-    };
-  }
-
   /* ─────────── audio jobs ─────────── */
 
   /** Insert a job, or update an existing one (status, progress, params, result, error, finishedWall). */
@@ -1036,88 +1011,115 @@ export class Store {
     ];
   }
 
-  /* ─────────── participants ─────────── */
+  /* ─────────── export register ─────────── */
 
-  /** Tables with a participant_code column. */
-  static readonly CODE_TABLES = ["events", "telemetry", "audio_tracks", "audio_derivatives"] as const;
+  /**
+   * Add an entry to the export register (`exports`). `codeHashes` are the SHA-256
+   * of every participant code the export contains, so an erasure request finds it.
+   */
+  registerExport(e: {
+    id: string;
+    sessionId: string;
+    kind: RegisteredExportKind;
+    createdWall: string;
+    path: string;
+    codeHashes: string[];
+    files: unknown[];
+    details?: Record<string, unknown>;
+  }) {
+    this.db
+      .prepare(
+        `INSERT INTO exports (id, session_id, kind, created_wall, path, code_hashes_json, files_json, details_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        e.id,
+        e.sessionId,
+        e.kind,
+        e.createdWall,
+        e.path,
+        JSON.stringify([...e.codeHashes].sort()),
+        JSON.stringify(e.files),
+        JSON.stringify(e.details ?? {}),
+      );
+  }
+
+  /** The export register, newest first (of one session and/or one kind when given). */
+  listExports(filter: { sessionId?: string; kind?: RegisteredExportKind } = {}): ExportListRow[] {
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM exports WHERE (@sessionId IS NULL OR session_id = @sessionId) AND (@kind IS NULL OR kind = @kind)
+         ORDER BY created_wall DESC, id`,
+      )
+      .all({ sessionId: filter.sessionId ?? null, kind: filter.kind ?? null }) as Array<{
+      id: string;
+      session_id: string;
+      kind: RegisteredExportKind;
+      created_wall: string;
+      path: string;
+      details_json: string;
+      files_json: string;
+    }>;
+    return rows.map((r) => ({
+      id: r.id,
+      sessionId: r.session_id,
+      kind: r.kind,
+      createdWall: r.created_wall,
+      path: r.path,
+      details: JSON.parse(r.details_json) as Record<string, unknown>,
+      files: (JSON.parse(r.files_json) as unknown[]).length,
+    }));
+  }
+
+  /** Audio rows (tracks and derivatives) in this database: the simulation database must have none. */
+  audioRowCount(): number {
+    return (
+      this.db
+        .prepare("SELECT (SELECT count(*) FROM audio_tracks) + (SELECT count(*) FROM audio_derivatives) AS n")
+        .get() as { n: number }
+    ).n;
+  }
+
+  /* ─────────── participant codes (the tables: CODE_TABLES in personalData.ts) ─────────── */
 
   codeExists(code: string): boolean {
-    return Store.CODE_TABLES.some((t) =>
-      this.db.prepare(`SELECT 1 FROM ${t} WHERE participant_code = ? LIMIT 1`).get(code),
+    return CODE_TABLES.some((t) =>
+      this.db.prepare(`SELECT 1 FROM ${t.table} WHERE ${t.codeColumn} = ? LIMIT 1`).get(code),
     );
   }
 
-  /** Every participant code that occurs in a session (events, telemetry, audio rows), unordered. */
+  /** Every participant code that occurs in a session, unordered. */
   sessionCodes(sessionId: string): string[] {
-    const rows = this.db
-      .prepare(
-        `SELECT participant_code AS c FROM events WHERE session_id = @id AND participant_code IS NOT NULL
-         UNION SELECT participant_code FROM telemetry WHERE session_id = @id
-         UNION SELECT participant_code FROM audio_tracks WHERE session_id = @id
-         UNION SELECT participant_code FROM audio_derivatives WHERE session_id = @id AND participant_code IS NOT NULL`,
-      )
-      .all({ id: sessionId }) as Array<{ c: string }>;
+    const sql = CODE_TABLES.map(
+      (t) =>
+        `SELECT ${t.codeColumn} AS c FROM ${t.table} WHERE (${t.ofSession}) AND ${t.codeColumn} IS NOT NULL`,
+    ).join(" UNION ");
+    const rows = this.db.prepare(sql).all(...CODE_TABLES.map(() => sessionId)) as Array<{ c: string }>;
     return rows.map((r) => r.c);
   }
 
-  /** Where does a participant code occur? (for takedown look-ups) */
-  lookupCode(code: string): CodeOccurrence[] {
-    const ev = this.db
-      .prepare(
-        "SELECT session_id, max(seat) AS seat, count(*) AS n FROM events WHERE participant_code = ? GROUP BY session_id",
-      )
-      .all(code) as Array<{ session_id: string; seat: number | null; n: number }>;
-    const tel = this.db
-      .prepare(
-        "SELECT session_id, count(*) AS n FROM telemetry WHERE participant_code = ? GROUP BY session_id",
-      )
-      .all(code) as Array<{ session_id: string; n: number }>;
-    // every track row counts, including the metadata kept after a raw-audio deletion: it carries the code too
-    const audio = this.db
-      .prepare(
-        `SELECT a.session_id, max(a.seat) AS seat, count(*) AS n, ${AUDIO_MS_SQL} AS ms FROM audio_tracks a
-         WHERE a.participant_code = ? GROUP BY a.session_id`,
-      )
-      .all(code) as Array<{ session_id: string; seat: number; n: number; ms: number }>;
-    const derived = this.db
-      .prepare(
-        "SELECT session_id, max(seat) AS seat FROM audio_derivatives WHERE participant_code = ? GROUP BY session_id",
-      )
-      .all(code) as Array<{ session_id: string; seat: number | null }>;
-    const map = new Map<string, CodeOccurrence>();
-    const entry = (sessionId: string, seat: number | null): CodeOccurrence => {
-      const e = map.get(sessionId) ?? {
-        sessionId,
-        seat,
-        events: 0,
-        telemetry: 0,
-        audioTracks: 0,
-        audioMs: 0,
-      };
-      if (e.seat === null) e.seat = seat;
-      map.set(sessionId, e);
-      return e;
-    };
-    for (const r of ev) entry(r.session_id, r.seat).events = r.n;
-    for (const r of tel) entry(r.session_id, null).telemetry = r.n;
-    for (const r of audio) {
-      const e = entry(r.session_id, r.seat);
-      e.audioTracks = r.n;
-      e.audioMs = Math.round(r.ms);
-    }
-    for (const r of derived) entry(r.session_id, r.seat);
-    return [...map.values()];
+  /** Every participant code in the database, unordered (for integrity checks). */
+  participantCodes(): string[] {
+    const sql = CODE_TABLES.map(
+      (t) => `SELECT ${t.codeColumn} AS c FROM ${t.table} WHERE ${t.codeColumn} IS NOT NULL`,
+    ).join(" UNION ");
+    return this.db.prepare(sql).pluck().all() as string[];
   }
 }
 
-/** Where a participant code occurs in one session. */
-export interface CodeOccurrence {
+/** Kinds in the export register: the two CSV exports and the separate "Export audio" action. */
+export type RegisteredExportKind = "standard" | "anonymised" | "audio";
+
+export interface ExportRow {
+  id: string;
   sessionId: string;
-  seat: number | null;
-  events: number;
-  telemetry: number;
-  /** Track rows carrying the code (including the metadata kept after a raw-audio deletion). */
-  audioTracks: number;
-  /** Their recorded duration, in ms. */
-  audioMs: number;
+  kind: RegisteredExportKind;
+  createdWall: string;
+  path: string;
+}
+
+/** An export register entry with what was asked for (`details`) and how many files it wrote. */
+export interface ExportListRow extends ExportRow {
+  details: Record<string, unknown>;
+  files: number;
 }

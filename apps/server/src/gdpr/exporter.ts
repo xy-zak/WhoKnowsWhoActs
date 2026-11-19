@@ -27,8 +27,6 @@ import type { Store } from "../db/store";
 import { nowTs, wall } from "../runtime";
 
 export type ExportKind = "standard" | "anonymised";
-/** Kinds in the export register: the two CSV exports and the separate "Export audio" action. */
-export type RegisteredExportKind = ExportKind | "audio";
 
 export interface ExportResult {
   exportId: string;
@@ -436,7 +434,7 @@ export function exportSession(
     codeHashes: kind === "anonymised" ? [] : codeHashes,
   };
   writeFileSync(path.join(dir, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
-  registerExport(store, {
+  store.registerExport({
     id,
     sessionId,
     kind,
@@ -453,108 +451,8 @@ export function exportSession(
   return { exportId: id, kind, sessionId, dir, files: written, participants: codes.size };
 }
 
-/**
- * Add an entry to the export register (`exports`). `codeHashes` are the SHA-256
- * of every participant code the export contains, so an erasure request finds it.
- */
-export function registerExport(
-  store: Store,
-  e: {
-    id: string;
-    sessionId: string;
-    kind: RegisteredExportKind;
-    createdWall: string;
-    path: string;
-    codeHashes: string[];
-    files: unknown[];
-    details?: Record<string, unknown>;
-  },
-) {
-  store.db
-    .prepare(
-      `INSERT INTO exports (id, session_id, kind, created_wall, path, code_hashes_json, files_json, details_json)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    )
-    .run(
-      e.id,
-      e.sessionId,
-      e.kind,
-      e.createdWall,
-      e.path,
-      JSON.stringify([...e.codeHashes].sort()),
-      JSON.stringify(e.files),
-      JSON.stringify(e.details ?? {}),
-    );
-}
-
 function unique(xs: string[]): string[] {
   return [...new Set(xs)];
-}
-
-export interface ExportRow {
-  id: string;
-  sessionId: string;
-  kind: RegisteredExportKind;
-  createdWall: string;
-  path: string;
-}
-
-/** An export register entry with what was asked for (`details`) and how many files it wrote. */
-export interface ExportListRow extends ExportRow {
-  details: Record<string, unknown>;
-  files: number;
-}
-
-/** The export register, newest first (of one session and/or one kind when given). */
-export function listExports(
-  store: Store,
-  filter: { sessionId?: string; kind?: RegisteredExportKind } = {},
-): ExportListRow[] {
-  const rows = store.db
-    .prepare(
-      `SELECT * FROM exports WHERE (@sessionId IS NULL OR session_id = @sessionId) AND (@kind IS NULL OR kind = @kind)
-       ORDER BY created_wall DESC, id`,
-    )
-    .all({ sessionId: filter.sessionId ?? null, kind: filter.kind ?? null }) as Array<{
-    id: string;
-    session_id: string;
-    kind: RegisteredExportKind;
-    created_wall: string;
-    path: string;
-    details_json: string;
-    files_json: string;
-  }>;
-  return rows.map((r) => ({
-    id: r.id,
-    sessionId: r.session_id,
-    kind: r.kind,
-    createdWall: r.created_wall,
-    path: r.path,
-    details: JSON.parse(r.details_json) as Record<string, unknown>,
-    files: (JSON.parse(r.files_json) as unknown[]).length,
-  }));
-}
-
-/** Exports whose register entry contains this participant code (by hash). */
-export function exportsContaining(store: Store, code: string): ExportRow[] {
-  const h = sha256(code);
-  const rows = store.db.prepare("SELECT * FROM exports ORDER BY created_wall").all() as Array<{
-    id: string;
-    session_id: string;
-    kind: RegisteredExportKind;
-    created_wall: string;
-    path: string;
-    code_hashes_json: string;
-  }>;
-  return rows
-    .filter((r) => (JSON.parse(r.code_hashes_json) as string[]).includes(h))
-    .map((r) => ({
-      id: r.id,
-      sessionId: r.session_id,
-      kind: r.kind,
-      createdWall: r.created_wall,
-      path: r.path,
-    }));
 }
 
 /** Read back a manifest (used by tests and the CLI). */

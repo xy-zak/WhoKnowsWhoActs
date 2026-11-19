@@ -7,10 +7,8 @@ import { HEADER_BYTES, RECORD_PREFIX_BYTES } from "../src/audio/crypto";
 import { isAudioDerivativeKind } from "../src/audio/records";
 import { verifyAudio } from "../src/audio/verify";
 import { openDatabase } from "../src/db/database";
+import { PersonalDataMap } from "../src/db/personalData";
 import { Store } from "../src/db/store";
-import { deleteSessionAudio, SessionRunningError } from "../src/gdpr/deleteAudio";
-import { deleteSession, listSessionDeletions } from "../src/gdpr/deleteSession";
-import { listErasures, lookupParticipant } from "../src/gdpr/erase";
 import { nowTs, REPO_ROOT, wall } from "../src/runtime";
 import { addTrack, readTrackPcm, type TestTrack } from "./audioFixtures";
 import { cleanup, PASSPHRASE, setupSession, startTestServer, type TestServer } from "./harness";
@@ -117,7 +115,7 @@ describe("audio: store, GDPR hooks and CLI", () => {
       audioTracks: 4,
       audioMs: 1200,
     });
-    const occ = lookupParticipant(store, codes[1]!).occurrences;
+    const occ = new PersonalDataMap(store).lookup(codes[1]!).occurrences;
     expect(occ).toMatchObject([{ sessionId, seat: 1, audioTracks: 1, audioMs: 300 }]);
     expect(occ[0]!.events).toBeGreaterThan(0);
     // the file holds what the database says
@@ -154,7 +152,16 @@ describe("audio: store, GDPR hooks and CLI", () => {
   });
 
   it("refuses to delete audio while the session is running", async () => {
-    expect(() => deleteSessionAudio(srv.ctx, sessionId, { scope: "raw" })).toThrow(SessionRunningError);
+    const res = await fetch(`${srv.url}/api/sessions/${sessionId}/audio/delete`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ confirm: sessionId, scope: "raw" }),
+    });
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { error: string }).error).toBe(
+      "This session is still running. Close or abort it first, then delete its audio.",
+    );
+    expect(srv.ctx.store.listAudioDeletions(sessionId)).toEqual([]);
     await fac.cmd("round:start");
     await fac.waitForDashboard((d) => d.state?.phase === "game_complete", 20_000);
     for (const b of bots) await b.flushTelemetry();
@@ -288,7 +295,7 @@ describe("audio: store, GDPR hooks and CLI", () => {
     expect(store.getAudioDerivative("D-CLEAN-2")).toBeDefined();
     expect(store.listAudioTracks(sessionId).map((t) => t.seat)).toEqual([2, 3, 4]);
     expect(store.codeExists(code)).toBe(false);
-    const reg = listErasures(store).at(-1)!;
+    const reg = new PersonalDataMap(store).erasures().at(-1)!;
     expect(reg.rows).toMatchObject({ audioTracks: 1, audioChunks: 3, audioDerivatives: 2, audioFiles: 2 });
     expect((await verifyAudio(store, audioFiles)).problems).toEqual([]);
   });
@@ -315,7 +322,7 @@ describe("audio: store, GDPR hooks and CLI", () => {
     });
     const before = store.listAudioTracks(sessionId);
 
-    const r = deleteSessionAudio(srv.ctx, sessionId, { scope: "raw", note: "retention" });
+    const r = new PersonalDataMap(srv.ctx.store).deleteAudio(sessionId, { scope: "raw", note: "retention" });
     expect(r.counts).toMatchObject({ tracks: 3, chunks: 0, derivatives: 1, jobs: 0, files: 4, audioMs: 900 });
     expect(r.audioFiles).toEqual({ removed: 4, failed: [], dirRemoved: false });
     const after = store.listAudioTracks(sessionId);
@@ -334,7 +341,7 @@ describe("audio: store, GDPR hooks and CLI", () => {
       audioMs: 0,
     });
     // the metadata still carries the codes, so erasure still finds it
-    expect(lookupParticipant(store, codes[2]!).occurrences[0]).toMatchObject({ audioTracks: 1 });
+    expect(new PersonalDataMap(store).lookup(codes[2]!).occurrences[0]).toMatchObject({ audioTracks: 1 });
     expect(store.listAudioDeletions(sessionId)).toMatchObject([
       { scope: "raw", note: "retention", counts: { tracks: 3, files: 4 } },
     ]);
@@ -347,7 +354,7 @@ describe("audio: store, GDPR hooks and CLI", () => {
 
   it("delete-audio all: every audio row, job and the folder go", () => {
     const { store, audioFiles } = srv.ctx;
-    const r = deleteSessionAudio(srv.ctx, sessionId, { scope: "all" });
+    const r = new PersonalDataMap(srv.ctx.store).deleteAudio(sessionId, { scope: "all" });
     expect(r.counts).toMatchObject({ tracks: 3, chunks: 9, derivatives: 1, jobs: 1, files: 0 });
     expect(r.audioFiles.dirRemoved).toBe(true);
     for (const t of ["audio_tracks", "audio_derivatives", "audio_jobs"])
@@ -355,8 +362,12 @@ describe("audio: store, GDPR hooks and CLI", () => {
     expect(count(store, "SELECT count(*) AS n FROM audio_chunks")).toBe(0);
     expect(existsSync(path.join(audioFiles.root, sessionId))).toBe(false);
     expect(store.listAudioDeletions(sessionId).map((d) => d.scope)).toEqual(["raw", "all"]);
-    expect(() => deleteSessionAudio(srv.ctx, sessionId, { scope: "nope" as "raw" })).toThrow(/scope/);
-    expect(() => deleteSessionAudio(srv.ctx, "S-UNKNOWN", { scope: "all" })).toThrow(/Unknown session/);
+    expect(() =>
+      new PersonalDataMap(srv.ctx.store).deleteAudio(sessionId, { scope: "nope" as "raw" }),
+    ).toThrow(/scope/);
+    expect(() => new PersonalDataMap(srv.ctx.store).deleteAudio("S-UNKNOWN", { scope: "all" })).toThrow(
+      /Unknown session/,
+    );
   });
 
   it("deleting a session removes its audio rows, jobs and folder, and hashes its audio codes", async () => {
@@ -375,14 +386,14 @@ describe("audio: store, GDPR hooks and CLI", () => {
       error: null,
     });
     writeFileSync(path.join(audioFiles.root, id, `${"e".repeat(32)}.wka`), "orphan in the same folder");
-    const r = deleteSession(store, id, { exportsDir: srv.runtime.exportsDir });
+    const r = new PersonalDataMap(store).deleteSession(id, { exportsDir: srv.runtime.exportsDir });
     expect(r.rows).toMatchObject({ audioTracks: 1, audioChunks: 2, audioDerivatives: 0, audioJobs: 1 });
     expect(r.audio).toEqual({ dirRemoved: true, files: 2 });
     expect(existsSync(path.join(audioFiles.root, id))).toBe(false);
     expect(audioFiles.exists(id, t.fileName)).toBe(false);
     expect(store.getAudioTrack(t.trackId)).toBeUndefined();
     expect(store.getAudioJob("J-DEL")).toBeUndefined();
-    const entry = listSessionDeletions(store).at(-1)!;
+    const entry = new PersonalDataMap(store).sessionDeletions().at(-1)!;
     expect(entry).toMatchObject({ sessionId: id, participants: 1, rows: { audioTracks: 1, audioChunks: 2 } });
   });
 

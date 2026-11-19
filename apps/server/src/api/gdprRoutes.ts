@@ -2,10 +2,9 @@ import type { FastifyReply, FastifyRequest } from "fastify";
 import type { AppContext } from "../app";
 import type { AudioService } from "../audio/service";
 import { loadOnboardingContent } from "../content";
+import { PersonalDataMap, parseCodeOrThrow } from "../db/personalData";
 import { exportsDirFor } from "../db/stores";
-import { deleteSession, listSessionDeletions } from "../gdpr/deleteSession";
-import { eraseParticipant, listErasures, lookupParticipant, parseCodeOrThrow } from "../gdpr/erase";
-import { exportSession, listExports } from "../gdpr/exporter";
+import { exportSession } from "../gdpr/exporter";
 import { cardSeats, keySheetHtml, takedownCardPdf } from "../gdpr/print";
 import { sessionOr404 } from "./sessionLookup";
 
@@ -20,6 +19,8 @@ type Guard = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
 export function registerGdprApi(ctx: AppContext, guard: Guard, audio: Pick<AudioService, "busyReason">) {
   const { app, store, stores, scenarios, runtime, hub } = ctx;
   const opts = { preHandler: guard };
+  /** Participant look-up and erasure: the participant database only. */
+  const participants = new PersonalDataMap(store);
 
   type Found = NonNullable<ReturnType<typeof sessionOr404>>;
   const exportDeps = (f: Found) => ({
@@ -109,7 +110,7 @@ export function registerGdprApi(ctx: AppContext, guard: Guard, audio: Pick<Audio
       const busy = audio.busyReason(id);
       if (busy) return reply.code(409).send({ error: `${busy}: delete the session when it is done.` });
       hub.release(id);
-      const r = deleteSession(found.store, id, {
+      const r = new PersonalDataMap(found.store).deleteSession(id, {
         exportsDir: exportsDirFor(runtime.exportsDir, found.players),
         deleteExports: req.body?.deleteExports === true,
         note: req.body?.note ?? "",
@@ -119,11 +120,13 @@ export function registerGdprApi(ctx: AppContext, guard: Guard, audio: Pick<Audio
     },
   );
 
-  app.get("/api/session-deletions", opts, async () => stores.collect(listSessionDeletions));
+  app.get("/api/session-deletions", opts, async () =>
+    stores.collect((s) => new PersonalDataMap(s).sessionDeletions()),
+  );
 
   app.get<{ Params: { code: string } }>("/api/participants/:code", opts, async (req, reply) => {
     try {
-      return lookupParticipant(store, req.params.code);
+      return participants.lookup(req.params.code);
     } catch (e) {
       return reply.code(400).send({ error: (e as Error).message });
     }
@@ -153,22 +156,22 @@ export function registerGdprApi(ctx: AppContext, guard: Guard, audio: Pick<Audio
           error: "This participant is in the running session. Withdraw them, end the session, then erase.",
         });
       }
-      for (const occ of lookupParticipant(store, code).occurrences) {
+      for (const occ of participants.lookup(code).occurrences) {
         const busy = audio.busyReason(occ.sessionId);
         if (busy)
           return reply
             .code(409)
             .send({ error: `${busy} (session ${occ.sessionId}): erase when it is done.` });
       }
-      const result = eraseParticipant(store, code, req.body?.note ?? "");
+      const result = participants.erase(code, req.body?.note ?? "");
       if (attached) hub.reloadActiveSession();
       ctx.log.info({ sessions: result.occurrences.length, rows: result.rows }, "participant erased");
       return result;
     },
   );
 
-  app.get("/api/erasures", opts, async () => listErasures(store));
+  app.get("/api/erasures", opts, async () => participants.erasures());
   app.get("/api/exports", opts, async () =>
-    stores.collect(listExports).sort((a, b) => b.createdWall.localeCompare(a.createdWall)),
+    stores.collect((s) => s.listExports()).sort((a, b) => b.createdWall.localeCompare(a.createdWall)),
   );
 }

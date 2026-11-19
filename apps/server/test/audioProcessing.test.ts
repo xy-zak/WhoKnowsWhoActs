@@ -27,8 +27,8 @@ import { seqOrderedChunks } from "../src/audio/jobWorker";
 import { AudioRequestError, AudioService } from "../src/audio/service";
 import { parseWavHeader } from "../src/audio/wav";
 import { openDatabase } from "../src/db/database";
+import { PersonalDataMap } from "../src/db/personalData";
 import { Store } from "../src/db/store";
-import { eraseParticipant, lookupParticipant } from "../src/gdpr/erase";
 import { exportSession } from "../src/gdpr/exporter";
 import { readTrackPcm } from "./audioFixtures";
 import { type SeededSession, seedAudioSession } from "./audioSession";
@@ -235,7 +235,7 @@ describe("audio processing: jobs, derivatives, export", () => {
     });
     expect(JSON.parse(row.files_json)).toHaveLength(9);
     expect(JSON.parse(row.code_hashes_json)).toHaveLength(4);
-    expect(lookupParticipant(env.store, codes[3]!).exports.map((e) => e.id)).toContain(r.exportId);
+    expect(new PersonalDataMap(env.store).lookup(codes[3]!).exports.map((e) => e.id)).toContain(r.exportId);
 
     // a single seat (the DATABASE tab's "download WAV")
     const one = await service.exportAudio(sessionId, { kind: "clean", seats: [2], requestedBy: "test" });
@@ -366,7 +366,7 @@ describe("audio processing: jobs, derivatives, export", () => {
 
   it("erasure afterwards removes the participant's tracks and segments from future exports", () => {
     const { sessionId, codes } = seeded;
-    eraseParticipant(env.store, codes[2]!, "test");
+    new PersonalDataMap(env.store).erase(codes[2]!, "test");
     const r = exportSession({ store: env.store, scenarios, exportsDir: env.exportsDir }, sessionId);
     const tracks = parseCsv(readFileSync(path.join(r.dir, "audio_tracks.csv"), "utf8"));
     const segs = parseCsv(readFileSync(path.join(r.dir, "speech_segments.csv"), "utf8"));

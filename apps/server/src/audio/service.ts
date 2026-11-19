@@ -46,6 +46,7 @@ import {
 } from "@wkwa/shared";
 import type { Logger } from "pino";
 import { sha256 } from "../content";
+import { type AudioDeletionResult, PersonalDataMap } from "../db/personalData";
 import type {
   AudioChunkRow,
   AudioDeletionRow,
@@ -54,14 +55,6 @@ import type {
   NewAudioDerivative,
   Store,
 } from "../db/store";
-import {
-  type ActiveSessionProbe,
-  type AudioDeletionResult,
-  deleteSessionAudio,
-  isSessionRunning,
-  SessionRunningError,
-} from "../gdpr/deleteAudio";
-import { listExports, registerExport } from "../gdpr/exporter";
 import { nowTs, wall } from "../runtime";
 import {
   type AttributionOptions,
@@ -101,6 +94,21 @@ import {
 import { wavStream } from "./wav";
 
 const round = (v: number, digits = 2) => Math.round(v * 10 ** digits) / 10 ** digits;
+
+/** What the audio service needs to know about the server's attached session (the Hub fits). */
+export interface ActiveSessionProbe {
+  readonly session: {
+    readonly sessionId: string;
+    readonly isFinal: boolean;
+    readonly state: { readonly phase: string };
+  } | null;
+}
+
+/** Same rule as the delete-session and erase routes: attached, not final, not game_complete. */
+export function isSessionRunning(hub: ActiveSessionProbe | undefined, sessionId: string): boolean {
+  const s = hub?.session;
+  return Boolean(s && s.sessionId === sessionId && !s.isFinal && s.state.phase !== "game_complete");
+}
 
 /** A refused request; REST routes answer with `statusCode`. */
 export class AudioRequestError extends Error {
@@ -408,7 +416,7 @@ export class AudioService {
   }
 
   private audioExports(sessionId: string): AudioExportEntry[] {
-    return listExports(this.store, { sessionId, kind: "audio" }).map((r) => {
+    return this.store.listExports({ sessionId, kind: "audio" }).map((r) => {
       const details = r.details as { audioKind?: AudioExportEntry["audioKind"]; seats?: unknown };
       return {
         exportId: r.id,
@@ -857,7 +865,7 @@ export class AudioService {
       };
       const manifestText = `${JSON.stringify(manifest, null, 2)}\n`;
       writeFileSync(path.join(work, "manifest.json"), manifestText, { mode: 0o600 });
-      registerExport(store, {
+      store.registerExport({
         id: exportId,
         sessionId,
         kind: "audio",
@@ -899,21 +907,21 @@ export class AudioService {
         "An attribution of this session is queued or running: wait until it ends.",
       );
     this.refuseWhileExporting(sessionId, "delete the audio");
-    try {
-      const r = deleteSessionAudio({ store: this.store, hub: this.deps.hub }, sessionId, {
-        scope: opts.scope,
-        ...(opts.note !== undefined ? { note: opts.note } : {}),
-      });
-      return {
-        ...r,
-        record: deletionView(r.entry),
-        audioExportsOnDisk: this.audioExports(sessionId)
-          .filter((e) => e.onDisk)
-          .map((e) => e.path),
-      };
-    } catch (e) {
-      if (e instanceof SessionRunningError) throw new AudioRequestError(409, e.message);
-      throw e;
-    }
+    if (isSessionRunning(this.deps.hub, sessionId))
+      throw new AudioRequestError(
+        409,
+        "This session is still running. Close or abort it first, then delete its audio.",
+      );
+    const r = new PersonalDataMap(this.store).deleteAudio(sessionId, {
+      scope: opts.scope,
+      ...(opts.note !== undefined ? { note: opts.note } : {}),
+    });
+    return {
+      ...r,
+      record: deletionView(r.entry),
+      audioExportsOnDisk: this.audioExports(sessionId)
+        .filter((e) => e.onDisk)
+        .map((e) => e.path),
+    };
   }
 }
