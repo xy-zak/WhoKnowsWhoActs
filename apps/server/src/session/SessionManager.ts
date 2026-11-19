@@ -1130,8 +1130,8 @@ export class SessionManager {
   /* ═════════════════════════ telemetry and presence ═════════════════════════ */
 
   /**
-   * A seat's telemetry batch: stored only for a participant whose consent was given or skipped,
-   * while the session has not ended; items that do not parse are dropped. Returns how many items
+   * A seat's telemetry batch: stored only for a participant whose consent was given or skipped and
+   * who has not withdrawn, while the session has not ended; items that do not parse are dropped. Returns how many items
    * were stored and the live ones among them (for the facilitator pages open now).
    */
   submitTelemetry(
@@ -1142,8 +1142,10 @@ export class SessionManager {
     const s = this.state.seats[seat];
     const code = s?.participantCode;
     if (!s || !code || this.isFinal) return none;
-    // No interaction telemetry is stored before the participant has consented.
+    // No interaction telemetry is stored before the participant has consented,
     if (s.consent !== "given" && s.consent !== "skipped") return none;
+    // nor after they withdrew.
+    if (s.withdrawn) return none;
     const items: TelemetryItem[] = [];
     for (const raw of batch.items) {
       const it = parseTelemetryItem(raw);

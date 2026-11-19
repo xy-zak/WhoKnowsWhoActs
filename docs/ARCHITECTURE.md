@@ -320,7 +320,7 @@ stateDiagram-v2
 
 - **Mic check (audio sessions only).** The step follows consent. It applies only to real participants who ticked the audio item. **No seat may start it, and so no microphone opens, until every real seat has given consent** (the consent hold, [AUDIO.md § 8](AUDIO.md#8-recording-lifecycle)); a decliner keeps the hold until the facilitator withdraws that seat. The facilitator can skip one seat's mic check (`MicCheckSkipped`), and that seat is then not recorded. Fake players and agents have no mic check.
 - A disabled onboarding step is skipped (consent then shows status `skipped`). **Keep consent enabled for real sessions.**
-- **No telemetry before consent.** UI telemetry for a seat starts only once its consent is `given` (or `skipped`). Until then only operational events are recorded.
+- **No telemetry before consent, nor after a withdrawal.** UI telemetry for a seat starts only once its consent is `given` (or `skipped`), and stops when the seat is withdrawn. Outside that span only operational events are recorded.
 - If a player **declines** consent, the seat is blocked and the facilitator is alerted. Round 1 cannot start until every active seat is ready. The decliner's remaining records can be erased afterwards (see [DATA-MANAGEMENT.md § 7](DATA-MANAGEMENT.md#7-consent-design)).
 - A **withdrawn** seat is excluded from round completion and its intents are rejected (`seat_inactive`).
 - *Unbound → bound* happens only in the lobby. Once onboarding has started, seats are locked.

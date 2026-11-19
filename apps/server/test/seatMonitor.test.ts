@@ -35,6 +35,12 @@ describe("telemetry", () => {
     expect(d.m.monitor.liveTelemetry).toHaveLength(1);
     // seat 2 has not consented yet
     expect(d.m.submitTelemetry(2, batch(focus(true))).stored).toBe(0);
+
+    // a withdrawn participant's telemetry is neither stored nor counted
+    d.m.withdraw(1);
+    expect(d.m.submitTelemetry(1, batch(focus(true)))).toEqual({ stored: 0, live: [] });
+    expect(d.store.listTelemetry(d.m.sessionId)).toHaveLength(1);
+    expect(stats(1)).toMatchObject({ focused: false, telemetryCount: 1 });
   });
 
   it("stores nothing for a declined consent or after the session ended", () => {

@@ -22,7 +22,8 @@ export interface TelemetryDeps {
 /**
  * Batches UI telemetry and sends it every 2 s or every 20 items.
  *
- * Items are recorded only while `enabled` (after consent; the connection sets it from the state).
+ * Items are recorded only while `enabled` (after consent and before a withdrawal; the connection
+ * sets it from the state).
  * They are sent only while the socket is seated; items that could not be delivered (a disconnect,
  * a refusal, no answer) are kept, in sessionStorage too, and sent again later.
  */
