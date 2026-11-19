@@ -24,6 +24,7 @@ import {
   StatusTag,
   useNow,
 } from "../ui";
+import { useSubmit } from "./chrome";
 import type { PlayerConnection } from "./connection";
 import { RecordingProblem, RecordingTag } from "./RecordingIndicator";
 
@@ -43,7 +44,7 @@ export function Game({ conn, view }: { conn: PlayerConnection; view: PlayerView 
   const [tool, setToolState] = useState<ActionKind | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [draft, setDraft] = useState<{ kind: ActionKind; regionId: string } | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [busy, run] = useSubmit(conn);
   const inspectOpenedAt = useRef<number | null>(null);
   const hoverStart = useRef<{ id: string; t: number } | null>(null);
 
@@ -78,17 +79,12 @@ export function Game({ conn, view }: { conn: PlayerConnection; view: PlayerView 
     if (!draft || busy) return;
     const d = draft;
     conn.track("action_draft", { ...d, outcome: "confirmed" });
-    setBusy(true);
-    try {
+    await run(async () => {
       const ack = await conn.intent(d.kind, d.regionId);
       // a resend the server had already stored ("duplicate" without its first answer) is no error
       if (!ack.ok && ack.reason !== "duplicate") conn.showToast(ack.detail || "Action not possible");
-    } catch (e) {
-      conn.showToast((e as Error).message);
-    } finally {
-      setBusy(false);
-      setDraft(null);
-    }
+    });
+    setDraft(null);
   };
 
   // keyboard: P / D tools, Enter confirms, Esc cancels

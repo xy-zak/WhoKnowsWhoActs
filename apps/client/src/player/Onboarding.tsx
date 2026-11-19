@@ -13,7 +13,7 @@ import {
   stepGlyph,
   stepNum,
 } from "../ui";
-import { Centered, OnboardingStepper } from "./chrome";
+import { Centered, OnboardingStepper, useSubmit } from "./chrome";
 import type { PlayerConnection } from "./connection";
 
 export function Page({
@@ -72,7 +72,7 @@ export function ConsentScreen({ conn, view }: { conn: PlayerConnection; view: Pl
   const study = view.onboarding!.study;
   const openedAt = useOpenedAt();
   const [answers, setAnswers] = useState<Record<string, boolean>>({});
-  const [busy, setBusy] = useState(false);
+  const [busy, run] = useSubmit(conn);
   const [confirmDecline, setConfirmDecline] = useState(false);
   const split = useConsentSections(c.markdown, c.items);
   const sections = split?.sections ?? [];
@@ -103,23 +103,17 @@ export function ConsentScreen({ conn, view }: { conn: PlayerConnection; view: Pl
       });
   };
 
-  const submit = async (decline: boolean) => {
-    setBusy(true);
-    try {
+  const submit = (decline: boolean) =>
+    run(() => {
       const final = decline ? Object.fromEntries(c.items.map((i) => [i.id, false])) : answers;
-      await conn.request("consent:submit", {
+      return conn.request("consent:submit", {
         formVersion: c.version,
         textSha256: c.sha256,
         answers: Object.fromEntries(c.items.map((i) => [i.id, final[i.id] === true])),
         durationMs: Math.round(performance.now() - openedAt),
         clientTs: conn.clock.now(),
       });
-    } catch (e) {
-      conn.showToast((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  };
+    });
 
   const statement = (item: ConsentItemView, onChange: (v: boolean) => void) => (
     <Check
@@ -278,25 +272,19 @@ export function DemographicsScreen({ conn, view }: { conn: PlayerConnection; vie
   const form = view.onboarding!.demographics;
   const openedAt = useOpenedAt();
   const [answers, setAnswers] = useState<Record<string, string>>({});
-  const [busy, setBusy] = useState(false);
+  const [busy, run] = useSubmit(conn);
   const complete = form.questions.every((q) => answers[q.id]);
   const answered = form.questions.filter((q) => answers[q.id]).length;
 
-  const submit = async () => {
-    setBusy(true);
-    try {
-      await conn.request("demographics:submit", {
+  const submit = () =>
+    run(() =>
+      conn.request("demographics:submit", {
         formVersion: form.version,
         answers,
         durationMs: Math.round(performance.now() - openedAt),
         clientTs: conn.clock.now(),
-      });
-    } catch (e) {
-      conn.showToast((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  };
+      }),
+    );
 
   return (
     <Page
@@ -354,21 +342,15 @@ export function DemographicsScreen({ conn, view }: { conn: PlayerConnection; vie
 export function BriefingScreen({ conn, view }: { conn: PlayerConnection; view: PlayerView }) {
   const b = view.onboarding!.briefing;
   const openedAt = useOpenedAt();
-  const [busy, setBusy] = useState(false);
-  const submit = async () => {
-    setBusy(true);
-    try {
-      await conn.request("briefing:ack", {
+  const [busy, run] = useSubmit(conn);
+  const submit = () =>
+    run(() =>
+      conn.request("briefing:ack", {
         textSha256: b.sha256,
         durationMs: Math.round(performance.now() - openedAt),
         clientTs: conn.clock.now(),
-      });
-    } catch (e) {
-      conn.showToast((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  };
+      }),
+    );
   return (
     <Page
       view={view}
