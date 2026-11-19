@@ -141,6 +141,8 @@ export function Game({ conn, view }: { conn: PlayerConnection; view: PlayerView 
     hoverStart.current = null;
     conn.presence(null);
   };
+  // the pointer never "leaves" a square when the game screen closes under it
+  useEffect(() => () => conn.presence(null), [conn]);
 
   const byCell = useMemo(() => {
     const m = new Map<string, Highlight[]>();
