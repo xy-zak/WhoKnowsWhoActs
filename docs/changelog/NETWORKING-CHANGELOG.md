@@ -4,7 +4,31 @@ History of [NETWORKING.md](../NETWORKING.md). Newest first. How entries are writ
 
 ## Unreleased
 
-### Not yet committed · grid map, scores and game rules (documents the code in the same commit)
+### Not yet committed · documents `0f6971a`…`abcacbe` (microphone audio)
+
+- **Type:** Feature
+- **Change:** The REST table adds the six audio routes and the `audio` export kind. § 8 notes that audio timestamps use the clock offset. A new § 14 *Microphone audio on the network* covers the secure context, messages, chunk size, data rate, acknowledgements, retries, late chunks, volatile levels, reconnects and the fingerprint comparison. § 12 and § 13 get audio rows. The advice not to install a certificate on participants' laptops is stated (compare fingerprints instead).
+- **Reason:** The protocol narrative must say how audio travels, what happens when the network drops, and what limits apply. The generated catalogue lists the messages but not the retry and late-chunk behaviour.
+
+### 2026-11-18 · `b84158a` · Audio: live recording path on the server (consent hold, mic check, calibration, ingest) (#10)
+
+- **Type:** Feature
+- **Change:** The generated message catalogue now lists the mic check and audio messages with the acknowledgement type, the extra start and stop reasons and the `requesting` state. The `CalibrationSkipped` field `cancelled` is added to the generated tables.
+- **Reason:** The live recording path on the server changed the messages and their acknowledgements, and the catalogue is generated from the schemas.
+
+### 2026-11-18 · `fe15759` · Self-signed HTTPS by default (WKWA_TLS=auto) for microphone access (#6)
+
+- **Type:** Feature
+- **Change:** § 4 (environment and URL tables), § 11 (a new subsection on the self-signed certificate with a regeneration flowchart, plus the man-in-the-middle and key-theft rows) and § 13 (certificate troubleshooting rows) describe HTTPS by default. The fingerprint check is introduced as the way to compare certificates.
+- **Reason:** Browsers allow the microphone only on secure pages, so the server uses HTTPS with a certificate it makes itself. The network design had to say what that means for participants.
+
+### 2026-11-18 · `0f6971a` · Shared audio contracts: config, events, messages, state, projections, REST types (#5)
+
+- **Type:** Feature
+- **Change:** The generated message catalogue adds the player messages `mic:check`, `audio:start`, `audio:chunk`, `audio:stop` and `audio:level`, and the facilitator messages for calibration, mic skip and recording pause.
+- **Reason:** Microphone recording adds messages. The catalogue is generated from the schemas, so it lists them as soon as they exist.
+
+### 2026-11-18 · `fc32ce7` · Grid map with knowledge sub-squares, scores and pluggable game rules
 
 - **Type:** Feature
 - **Change:** The `state` message (generated) now lists the grid, the player's own knowledge type's scores, the map score and the knowledge type the player acts on. The REST table describes `/api/scenarios/:id` as board, views and starting scores, and the proposal effect is called a mark.

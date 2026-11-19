@@ -18,8 +18,9 @@ Related documents: [DATA-MANAGEMENT.md](DATA-MANAGEMENT.md) (why the data is col
 6. [One action, all its traces](#one-action-all-its-traces)
 7. [Session configuration](#session-configuration)
 8. [Label pairings](#label-pairings)
-9. [Other tables](#other-tables)
-10. [Export files](#export-files)
+9. [Audio storage](#audio-storage)
+10. [Other tables](#other-tables)
+11. [Export files](#export-files)
 
 ---
 
@@ -27,10 +28,10 @@ Related documents: [DATA-MANAGEMENT.md](DATA-MANAGEMENT.md) (why the data is col
 
 - **Envelope vs payload.** Every stored record has fixed *envelope* columns (who, when, which session) plus a type-specific *payload*, stored as JSON.
 - **Data class.** Each type is marked as *non-personal*, *pseudonymous* (linked to a participant code, and therefore personal data under GDPR) or *pseudonymous · sensitive* (consent and demographics). See [DATA-MANAGEMENT.md § 13](DATA-MANAGEMENT.md#13-personal-data-classes-per-record-type).
-- **Participant codes appear in exactly one column** (`participant_code`) of the `events` and `telemetry` tables, and **never inside a payload**. Inside a session, players are referred to by seat number. This is what makes erasure complete.
+- **Participant codes appear only in `participant_code` columns** (of `events` and `telemetry`, and of the audio tables `audio_tracks` and `audio_derivatives`), and **never inside a payload, an audio file name or an audio file**. Inside a session, players are referred to by seat number. This is what makes erasure complete.
 - **Time.** `server_ts` is epoch milliseconds with sub-millisecond precision (authoritative order). `client_ts` is the player PC's time, corrected to the server clock. See [ARCHITECTURE.md § 10](ARCHITECTURE.md#10-timing-model).
 - **No telemetry before consent.** Telemetry rows exist only for seats whose consent status is `given` (or `skipped`, if the consent step is disabled). The server drops earlier batches. Before consent, a seat has only operational events (`SeatBound`, `PlayerConnected` / `PlayerDisconnected`); a participant who declines additionally has `ConsentRecorded` with `consented: false`.
-- **Not logged anywhere:** names, e-mail addresses, IP addresses, user agents/device data, pointer coordinates, keystrokes, free text typed by players.
+- **Not logged anywhere:** names, e-mail addresses, IP addresses, user agents/device data, pointer coordinates, keystrokes, free text typed by players, **microphone names, device ids or group ids** (only the processing flags and sample rate of a microphone are kept), voiceprints.
 
 ## Overview of record kinds
 
@@ -46,9 +47,14 @@ Related documents: [DATA-MANAGEMENT.md](DATA-MANAGEMENT.md) (why the data is col
 | Facilitator / audit events (`SessionNote`, `FacilitatorBroadcast`, `ActionRevoked`, `GamePaused`, `GameResumed`, `ParticipantWithdrawn`, `SessionClosed`, `SessionAborted`) | `events` | Facilitator (or system on disconnect/erasure) | 0–20 | mostly non-personal |
 | UI telemetry (hover, inspect, pan/zoom, tool, confirm, focus, visibility, idle, screen) | `telemetry` | Player's interface use, **after consent only** | hundreds to a few thousand | pseudonymous |
 | Delivery acks and clock sync (`state_received`, `clock_sync`) | `telemetry` | Every state push / every 60 s | hundreds | pseudonymous / non-personal |
+| Microphone audio (sessions that record it): raw 16 kHz mono PCM, 5 s chunks | Encrypted `.wka` files in `data/audio/<sessionId>/`; track and chunk rows in `audio_tracks`, `audio_chunks` | Player's browser while the seat should record | about 115 MB per seat per hour | **voice** (identifying) |
+| Audio events (`MicCheckCompleted`, `MicCheckSkipped`, `AudioTrackStarted`, `AudioTrackStopped`, `Calibration*`) | `events` | Mic check, track start and stop, calibration | a few per seat and track | pseudonymous (some non-personal) |
+| Recording pauses (`RecordingPaused`, `RecordingResumed`) | `events` | Facilitator | 0–5 | non-personal |
+| Audio results: speech segments, talk time, quality report, leakage matrix, cleaned tracks | `audio_derivatives` (cleaned tracks also as encrypted files), `audio_jobs` | Speaker attribution run from DATABASE | one `speech_segments` and one `clean` row per recorded seat, plus 3 session-wide rows | pseudonymous (timing); cleaned tracks are **voice** |
+| Audio deletion register entry | `audio_deletions` | Delete raw or all audio | 0–n | pseudonymous (via the session) |
 | Session row | `sessions` | Session created/updated | 1 | non-personal |
 | Erasure register entry | `erasures` | Erasure executed | 0–n (whole DB) | pseudonymous (hash of code) |
-| Export register entry + `manifest.json` | `exports` + export folder | Export written | 1 per export | pseudonymous (hashes of codes) |
+| Export register entry + `manifest.json` (audio exports too) | `exports` + export folder | Export written | 1 per export | pseudonymous (hashes of codes) |
 | Database metadata | `meta` | DB creation | constant | non-personal |
 
 ## Storage model
@@ -60,6 +66,11 @@ erDiagram
   sessions ||--o{ events : "has log"
   sessions ||--o{ telemetry : "has telemetry"
   sessions ||--o{ exports : "exported as"
+  sessions ||--o{ audio_tracks : "records (audio sessions)"
+  audio_tracks ||--o{ audio_chunks : "one row per 5 s chunk"
+  sessions ||--o{ audio_derivatives : "attribution results"
+  sessions ||--o{ audio_jobs : "processing runs"
+  sessions ||--o{ audio_deletions : "audio deletion register"
   erasures }o..o{ sessions : "lists affected (JSON)"
   meta {
     TEXT key PK "schema_version, server_secret, created_wall"
@@ -120,15 +131,84 @@ erDiagram
   exports {
     TEXT id PK
     TEXT session_id FK
-    TEXT kind "standard or anonymised"
+    TEXT kind "standard, anonymised or audio"
     TEXT created_wall
     TEXT path
     TEXT code_hashes_json
     TEXT files_json
+    TEXT details_json "schema v7: who asked, note, seats (audio exports)"
+  }
+  audio_tracks {
+    TEXT track_id PK
+    TEXT session_id FK
+    INTEGER seat
+    TEXT participant_code "indexed"
+    TEXT file_name "random hex, never the code"
+    BLOB file_key "AES-256 key, NULL after raw deletion"
+    INTEGER sample_rate
+    TEXT settings_json "processing flags only"
+    TEXT reason "why it started"
+    REAL started_server_ts
+    REAL started_client_ts
+    REAL clock_offset_ms
+    REAL closed_server_ts
+    TEXT stop_reason
+    INTEGER samples
+    INTEGER chunks
+    INTEGER dropped_chunks
+    INTEGER bytes
+    TEXT status "recording, closed or deleted"
+  }
+  audio_chunks {
+    TEXT track_id PK, FK
+    INTEGER seq PK
+    INTEGER start_sample
+    INTEGER sample_count
+    REAL client_ts
+    REAL clock_offset_ms
+    REAL server_ts
+    TEXT server_wall
+    INTEGER round
+    TEXT phase
+    REAL rms_db
+    REAL peak_db
+    INTEGER clipped
+  }
+  audio_derivatives {
+    TEXT derivative_id PK
+    TEXT session_id FK
+    INTEGER seat "NULL for session-wide results"
+    TEXT participant_code
+    TEXT kind "speech_segments, talk_time, quality_report, leakage_matrix, clean"
+    TEXT source_tracks_json
+    TEXT file_name
+    BLOB file_key
+    TEXT data_json
+    TEXT params_json
+    TEXT engine_version
+  }
+  audio_jobs {
+    TEXT job_id PK
+    TEXT session_id FK
+    TEXT kind "attribution"
+    TEXT status "queued, running, done, failed"
+    REAL progress
+    TEXT params_json
+    TEXT result_json
+    TEXT error
+  }
+  audio_deletions {
+    INTEGER id PK
+    TEXT session_id
+    TEXT scope "raw or all"
+    TEXT requested_wall
+    TEXT executed_wall
+    TEXT counts_json
+    TEXT note
   }
 ```
 
-Consent and demographics are not separate tables. They are **events** (`ConsentRecorded`, `DemographicsSubmitted`), so they share the envelope, the ordering and the erasure path of all other data.
+The five audio tables exist in the participant database only (a simulated session never records) and are described under [Audio storage](#audio-storage). Consent and demographics are not separate tables. They are **events** (`ConsentRecorded`, `DemographicsSubmitted`), so they share the envelope, the ordering and the erasure path of all other data.
 
 ## Game events
 
@@ -2885,6 +2965,48 @@ Matrices (rows = knowledge type, columns = power type, ■ = held by the same se
 
 <!-- END GENERATED: label-pairings -->
 
+## Audio storage
+
+Sound is **not** stored in the database. Each track is an encrypted file `data/audio/<sessionId>/<random 16-byte hex>.wka`; the database holds the metadata and the key. How and why: [AUDIO.md § 7](AUDIO.md#7-storage-and-encryption). The audio events and the telemetry type `mic_permission` are generated above; the audio CSV files are generated under [Export files](#export-files).
+
+**File layout** (all integers big-endian):
+
+| Part | Bytes | Content |
+| --- | ---: | --- |
+| Header | 22 | `WKA1` (4), format version `u16` (2), file id (16 random bytes) |
+| Record (one per uploaded chunk, repeated) | 36 + payload | payload length `u32`, `seq` `u32`, nonce (12), ciphertext (payload length), GCM tag (16) |
+
+The cipher is AES-256-GCM with a random 32-byte key per file. The authenticated data of a record is the file id followed by its `seq`. A raw chunk's payload is 16 kHz mono signed 16-bit little-endian PCM; a cleaned track is written the same way.
+
+| Table | Column | Type | Description |
+| --- | --- | --- | --- |
+| `audio_tracks` | `track_id` | TEXT | Random id of the track (one continuous capture run of one seat) |
+| | `session_id`, `seat`, `participant_code` | TEXT, INTEGER, TEXT | Where and whose. The code is stored here and never in a file name. |
+| | `file_name`, `file_key` | TEXT, BLOB | Random file name; the file's AES-256 key. The key is set to NULL when the raw audio is deleted. Listings and the REST API never show either. |
+| | `sample_rate`, `settings_json` | INTEGER, TEXT | 16 000; the processing flags the browser reported (echo cancellation, noise suppression, automatic gain control, channels, capture rate). Never a device name or id. |
+| | `reason`, `stop_reason` | TEXT | Why it started and why it stopped (lists: [NETWORKING.md § 9](NETWORKING.md#9-message-catalogue)) |
+| | `started_server_ts`, `started_client_ts`, `clock_offset_ms`, `closed_server_ts` | REAL | Start on the server clock, the browser's own timestamp and offset, close time |
+| | `samples`, `chunks`, `dropped_chunks`, `bytes` | INTEGER | Totals; `dropped_chunks` counts chunks the browser had to discard from its full queue |
+| | `status` | TEXT | `recording`, `closed` or `deleted` (raw audio removed, metadata kept). The REST API adds `interrupted` for tracks that ended with `disconnect`, `permission_lost` or `error` (a track closed with the stop reason `interrupted` after a restart reads as `closed` there). |
+| `audio_chunks` | `track_id`, `seq` | TEXT, INTEGER | Primary key: a resent chunk is stored once. `seq` is also the record number in the file. |
+| | `start_sample`, `sample_count` | INTEGER | Position and length in the track |
+| | `client_ts`, `clock_offset_ms`, `server_ts`, `server_wall` | REAL, TEXT | Capture time on the server clock (as the browser computed it), the offset used, arrival time |
+| | `round`, `phase` | INTEGER, TEXT | Game position when the chunk arrived |
+| | `rms_db`, `peak_db`, `clipped` | REAL, INTEGER | Level summary (dBFS) and number of clipped samples |
+| `audio_derivatives` | `derivative_id`, `session_id` | TEXT | One result of an attribution run |
+| | `seat`, `participant_code` | INTEGER, TEXT | Empty for session-wide results (`talk_time`, `quality_report`, `leakage_matrix`) |
+| | `kind` | TEXT | `speech_segments` (JSON: segments and talk time of one seat), `talk_time`, `quality_report` (with the alignment), `leakage_matrix`, `clean` (an encrypted track with attenuation 30 dB and 10 ms fades). Later: `transcript` (planned). |
+| | `source_tracks_json` | TEXT | The tracks it was computed from. Erasing a participant removes every result whose sources include one of their tracks. |
+| | `file_name`, `file_key`, `data_json` | TEXT, BLOB, TEXT | An encrypted file (cleaned track) or small JSON (the rest) |
+| | `params_json`, `engine_version` | TEXT | Parameters and version of the attribution engine |
+| `audio_jobs` | `job_id`, `session_id`, `kind`, `status` | TEXT | `kind` is `attribution`; `status` is `queued`, `running`, `done` or `failed` |
+| | `progress`, `params_json`, `result_json`, `error` | REAL, TEXT | 0 to 1; options; the summary; an error text with anything that looks like a participant code scrubbed |
+| `audio_deletions` | `session_id`, `scope` | TEXT | `raw` or `all` |
+| | `requested_wall`, `executed_wall`, `note` | TEXT | When, and a free note (no names) |
+| | `counts_json` | TEXT | `tracks`, `audioMs`, `chunks`, `derivatives`, `jobs`, `files`, `bytes`, `seatMask` (a bit mask of seats) |
+
+**Acknowledgement shape.** Every `audio:start`, `audio:chunk` and `audio:stop` is answered with `{ ok: true, data?, duplicate? }` or `{ ok: false, error, retry }` (`retry: true` = send again later, `false` = drop it). Nothing of this is stored; it only steers the browser's send queue.
+
 ## Other tables
 
 | Table | Column | Type | Description |
@@ -2903,16 +3025,17 @@ Matrices (rows = knowledge type, columns = power type, ■ = held by the same se
 | `erasures` | `code_sha256` | TEXT | SHA-256 of the erased participant code (not the code itself) |
 | | `requested_wall`, `executed_wall` | TEXT | When the request was made and executed |
 | | `sessions_json` | TEXT | Sessions in which data was found |
-| | `rows_json` | TEXT | Rows deleted per table (`{"events":…,"telemetry":…}`) |
+| | `rows_json` | TEXT | Rows deleted per table (`{"events":…,"telemetry":…,"audioTracks":…,"audioChunks":…,"audioDerivatives":…,"audioFiles":…}`; entries made before audio existed lack the audio counts) |
 | | `note` | TEXT | Free note (no names) |
 | `session_deletions` | `session_id`, `deleted_wall`, `created_wall` | TEXT | Which session was deleted, and when it was deleted and created (schema v4) |
 | | `rows_json` | TEXT | Rows deleted (`{"events":…,"telemetry":…,"exports":…}`) |
 | | `code_hashes_json` | TEXT | SHA-256 of the participant codes the session contained (to re-apply the deletion after a backup restore) |
 | | `exports_json`, `note` | TEXT | Export folders known for the session; free note |
-| `exports` | `id`, `session_id`, `kind` | TEXT | Export id, session, `standard` / `anonymised` |
+| `exports` | `id`, `session_id`, `kind` | TEXT | Export id, session, `standard` / `anonymised` / `audio` (the *Export audio* action) |
 | | `created_wall`, `path` | TEXT | When and where it was written |
 | | `code_hashes_json` | TEXT | SHA-256 of every participant code contained (lets you find affected exports after an erasure) |
 | | `files_json` | TEXT | Files with row counts and SHA-256 checksums |
+| | `details_json` | TEXT | Schema v7. For audio exports: who asked, the note, the seats and the kind. Never a participant code: those stay hashed in `code_hashes_json`. |
 
 ## Export files
 

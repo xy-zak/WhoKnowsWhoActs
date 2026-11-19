@@ -4,7 +4,31 @@ History of [DATA-TYPES.md](../DATA-TYPES.md). Newest first. How entries are writ
 
 ## Unreleased
 
-### Not yet committed · grid map, scores and game rules (documents the code in the same commit)
+### Not yet committed · documents `0f6971a`…`abcacbe` (microphone audio)
+
+- **Type:** Feature
+- **Change:** The overview table and the ER diagram add the five audio tables and `exports.details_json`. A new *Audio storage* section gives the `.wka` file layout and a column table for every audio table, and the acknowledgement shape. The *Other tables* rows for `exports` and `erasures` cover audio, and the statements on participant codes and on what is never logged now include the audio tables and microphone names.
+- **Reason:** The hand-written part of the catalogue must show where audio and its keys are stored, and that file names never contain a code, so the erasure path stays complete.
+
+### 2026-11-18 · `f7bfd8b` · Audio: attribution jobs, audio REST routes, registered "Export audio", audio CSVs (U10) (#9)
+
+- **Type:** Feature
+- **Change:** The generated export-file section adds `audio_tracks.csv` and `speech_segments.csv`.
+- **Reason:** Standard and anonymised exports now carry the audio index and the who-spoke-when timing, and the codebook is generated from the export contract.
+
+### 2026-11-18 · `b84158a` · Audio: live recording path on the server (consent hold, mic check, calibration, ingest) (#10)
+
+- **Type:** Feature
+- **Change:** The generated event sections update `AudioTrackStarted` and `AudioTrackStopped` with the browser engine reasons, and add the `cancelled` field of `CalibrationSkipped`.
+- **Reason:** The server accepts the capture engine's start and stop reasons, so the fields and their meanings changed.
+
+### 2026-11-18 · `0f6971a` · Shared audio contracts: config, events, messages, state, projections, REST types (#5)
+
+- **Type:** Feature
+- **Change:** The generated sections add the events `MicCheckCompleted`, `MicCheckSkipped`, `AudioTrackStarted`, `AudioTrackStopped`, `Calibration*`, `RecordingPaused` and `RecordingResumed`, the telemetry type `mic_permission`, the `audio` session setting and the mic check and calibration screens.
+- **Reason:** Microphone recording adds records and settings; every one is documented from its schema.
+
+### 2026-11-18 · `fc32ce7` · Grid map with knowledge sub-squares, scores and pluggable game rules
 
 - **Type:** Feature
 - **Change:** The generated sections add `board`, `initialScores` and `rules` to `SessionCreated`, `scoreChanges` to `ProposalMade`, `DecisionMade` and `ActionRevoked`, the `rules` setting, and the `square_id`, `target_k`, `score_changes` and `map_score_after` columns of `actions.csv`; region ids are now sub-squares such as `C7-Kb`. The worked example "One action, all its traces" follows one proposal on the grid.

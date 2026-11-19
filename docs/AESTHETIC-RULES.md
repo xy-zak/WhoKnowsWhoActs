@@ -388,9 +388,11 @@ When a session records audio, each participant's microphone is recorded from the
 
 | Where | What |
 | --- | --- |
-| Player chrome (onboarding and game) | `RecordingBanner`: a slim, non-dismissable line, e.g. `[REC] Your microphone is being recorded` or `[PAUSED] Recording paused by the facilitator` |
-| Player mic check | `LevelMeter` plus the `RecTag` while asking for permission, and its result |
-| Facilitator LIVE seats | `RecTag compact` and `LevelMeter compact quietDb={null}` per seat; `upload` icon for an upload backlog; `voice` for calibration turns |
+| Player onboarding (background questions, briefing, ready, calibration) | `RecordingBanner`: a slim, non-dismissable line on top, e.g. `[REC] Your microphone is being recorded` or `[PAUSED] Recording paused by the facilitator` |
+| Player game | A `RecTag` in the status line, always visible, and a `RecordingBanner` **only when the microphone needs the participant** (permission denied, error, a browser that waits for a click, or no signal), with fix steps and a **Try again** or **Resume recording** button. There is no permanent banner in the game: a green tag is enough while all is well, and the map keeps its room. |
+| Player mic check | The mic check screen shows its own state: a `RecTag` once the mic is open, a `LevelMeter`, the phrase and the progress. The calibration screen shows a `LevelMeter` during the player's own turn |
+| Facilitator LIVE seats | `RecTag compact` and `LevelMeter compact quietDb={null}` per seat in the Mic column; `upload` icon for an upload backlog; `voice` for calibration turns |
+| Facilitator status bar, calibration card and wrap-up | `mics 3/4` with a warning microphone when fewer seats record, `RECORDING PAUSED` in the warn tone, the calibration card's verdicts as neutral or warn tags (never red), and the wrap-up audio check as callouts |
 | Facilitator DATABASE | The audio column and the per-seat audio popup: the same tags and icons (e.g. `[MIC SKIPPED]` for a seat with no audio), never a red tone for audio that was simply not recorded |
 
 ## 9. Motion and animations

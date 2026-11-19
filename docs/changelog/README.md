@@ -11,7 +11,9 @@ Each design document in `docs/` has its own change log. An entry records the dat
 | [SESSION-RUNBOOK.md](../SESSION-RUNBOOK.md) | [SESSION-RUNBOOK-CHANGELOG.md](SESSION-RUNBOOK-CHANGELOG.md) |
 | [AESTHETIC-RULES.md](../AESTHETIC-RULES.md) | [AESTHETIC-RULES-CHANGELOG.md](AESTHETIC-RULES-CHANGELOG.md) |
 | [GAME-RULES.md](../GAME-RULES.md) | [GAME-RULES-CHANGELOG.md](GAME-RULES-CHANGELOG.md) |
+| [AUDIO.md](../AUDIO.md) | [AUDIO-CHANGELOG.md](AUDIO-CHANGELOG.md) |
+| [AUDIO-TRANSCRIPTION.md](../AUDIO-TRANSCRIPTION.md) | [AUDIO-TRANSCRIPTION-CHANGELOG.md](AUDIO-TRANSCRIPTION-CHANGELOG.md) |
 
 The logs are maintained with the `/update-docs` Claude Code skill (`.claude/skills/update-docs/SKILL.md`). It reviews new commits, updates the documents and adds the entries.
 
-Reviewed up to: `a4ddecd`
+Reviewed up to: `abcacbe`

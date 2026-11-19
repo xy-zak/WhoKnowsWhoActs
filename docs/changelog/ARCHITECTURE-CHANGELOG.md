@@ -4,19 +4,31 @@ History of [ARCHITECTURE.md](../ARCHITECTURE.md). Newest first. How entries are 
 
 ## Unreleased
 
-### Not yet committed · documentation screenshots
+### Not yet committed · documents `0f6971a`…`abcacbe` (microphone audio)
+
+- **Type:** Feature
+- **Change:** The overview diagram, component table, harness table and code layout get the `audio` module, the encrypted audio folder and the browser capture engine. The lifecycle table and seat diagram add the mic check step and the consent hold. § 13 adds an Audio row to the testing table and the bots `--audio` flag. A new § 15 *Microphone audio* shows where audio fits (state, events, projection, timers, processing, who never records, recovery) with a diagram.
+- **Reason:** Audio is a new subsystem that touches the session lifecycle, the seat states and the storage, so the architecture text had to say how it fits and why the audio is never an event.
+
+### 2026-11-18 · `fe15759` · Self-signed HTTPS by default (WKWA_TLS=auto) for microphone access (#6)
+
+- **Type:** Bug fix
+- **Change:** The bots flag table in § 13 now says that `--url` defaults to `https://localhost:3000` when the server speaks HTTPS, and adds `--insecure` for a self-signed certificate on another machine.
+- **Reason:** The server now speaks HTTPS by default for microphone access, so the documented way to start the bots had to match what they do.
+
+### 2026-11-18 · `8ff2b36` · Versioned documentation screenshots: capture toolkit, gallery and /screenshot-app skill
 
 - **Type:** Feature
 - **Change:** The testing table in § 13 gets a **Screenshots** row. `npm run screenshots` (its own Playwright project, not run by `test:e2e`) plays three sessions at 1920 × 1080, takes the shots listed in a catalogue and compares them with the published ones. A real change is published as a new version (`name-v2.png`, …) in `docs/img/server/` or `docs/img/client/`. The gallery `docs/img/SCREENSHOTS.md` is generated from the version history, grouped by functionality.
 - **Reason:** The screenshots are made by a script, so they can be refreshed after UI changes instead of going stale. Old versions are kept, so the gallery also records how the interface developed. The table now lists that script next to the real tests.
 
-### Not yet committed · grid map, scores and game rules (documents the code in the same commit)
+### 2026-11-18 · `fc32ce7` · Grid map with knowledge sub-squares, scores and pluggable game rules
 
 - **Type:** Feature
 - **Change:** The glossary defines squares, sub-squares (regions), views as knowledge types, game rules and the map score. The scope table, module map, projection table and diagram, validation pipeline (new `gameRulesAllow`), event sequence diagram, testing table and extension guide (change the game rules; scenario format with `board` and `scores.json`) follow the grid map, and the SVG outline is gone.
 - **Reason:** The map changed from an SVG outline to a grid with scores, and the game rules moved into their own module, so the architecture text and diagrams must match the code.
 
-### Not yet committed · documents `7ca658f`
+### 2026-11-17 · `43264a9` · Docs: change logs for simulated and fake players; dashboard throttle note
 
 - **Type:** Feature
 - **Change:** § 14 gets a **Dashboard** bullet: while agents play, the facilitator's full dashboard is sent at most every 100 ms, and events still arrive one batch at a time.
