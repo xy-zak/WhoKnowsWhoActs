@@ -18,7 +18,7 @@ export function useRecording(conn: PlayerConnection): RecordingSnapshot {
 }
 
 /** The live microphone level (~4 Hz; null when not capturing): only for the level meters. */
-export function useMicLevel(conn: PlayerConnection): MicLevel | null {
+function useMicLevel(conn: PlayerConnection): MicLevel | null {
   return useStore(conn.recording.levelStore);
 }
 

@@ -298,7 +298,7 @@ export function labelsComplete(st: ReadonlyGameState): boolean {
 }
 
 /** 4×4 K×P matrix of a pairing; ■ = held by the same seat. Highlights the K labels in use. */
-export function PairingMatrix({ pairing, usedK }: { pairing: LabelPairing | null; usedK?: Set<string> }) {
+function PairingMatrix({ pairing, usedK }: { pairing: LabelPairing | null; usedK?: Set<string> }) {
   return (
     <table className="grid" style={{ width: "auto" }} aria-label="K–P pairing matrix">
       <thead>
@@ -575,7 +575,7 @@ export function LabelsEditor({
  * the last stored chunk (warn when stale while recording), audio stored so far and, during
  * onboarding, the mic check status. Static: nothing animates (AESTHETIC-RULES § 8.1).
  */
-export function MicColumn({
+function MicColumn({
   st,
   seat,
   mic,

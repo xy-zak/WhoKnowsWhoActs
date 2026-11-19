@@ -11,7 +11,8 @@
       "!playwright-report",
       "!test-results",
       "!.screenshots",
-      "!docs/.obsidian"
+      "!docs/.obsidian",
+      "!.claude"
     ]
   },
   "formatter": {

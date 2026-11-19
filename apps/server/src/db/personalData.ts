@@ -26,7 +26,7 @@ import {
 import { fileBytes, isAudioDerivativeKind } from "../audio/records";
 import { sha256 } from "../content";
 import { nowTs, wall } from "../runtime";
-import { compactAfterDelete } from "./database";
+import { compactAfterDelete, fromRow } from "./database";
 import type { AudioDeletionRow, AudioTrackRowStatus, ExportRow, Store } from "./store";
 
 /* ─────────────────────────── the registry ─────────────────────────── */
@@ -322,25 +322,10 @@ export class PersonalDataMap {
     for (const t of PERSONAL_DATA) {
       if (!t.codeHashes) continue;
       const rows = this.db
-        .prepare(`SELECT id, session_id, kind, created_wall, path, ${t.codeHashes} AS hashes FROM ${t.table}
-         ORDER BY created_wall`)
-        .all() as Array<{
-        id: string;
-        session_id: string;
-        kind: ExportRow["kind"];
-        created_wall: string;
-        path: string;
-        hashes: string;
-      }>;
-      for (const r of rows)
-        if ((JSON.parse(r.hashes) as string[]).includes(codeHash))
-          out.push({
-            id: r.id,
-            sessionId: r.session_id,
-            kind: r.kind,
-            createdWall: r.created_wall,
-            path: r.path,
-          });
+        .prepare(`SELECT id, session_id, kind, created_wall, path FROM ${t.table}
+         WHERE EXISTS (SELECT 1 FROM json_each(${t.codeHashes}) WHERE value = ?) ORDER BY created_wall`)
+        .all(codeHash);
+      out.push(...rows.map(fromRow<ExportRow>));
     }
     return out;
   }
@@ -486,24 +471,17 @@ export class PersonalDataMap {
 
   /** The erasure register, oldest first. */
   erasures(): ErasureEntry[] {
-    const rows = this.db.prepare("SELECT * FROM erasures ORDER BY id").all() as Array<{
-      id: number;
-      code_sha256: string;
-      requested_wall: string;
-      executed_wall: string;
-      sessions_json: string;
-      rows_json: string;
-      note: string;
-    }>;
-    return rows.map((r) => ({
-      id: r.id,
-      codeSha256: r.code_sha256,
-      requestedWall: r.requested_wall,
-      executedWall: r.executed_wall,
-      sessions: JSON.parse(r.sessions_json),
-      rows: { ...NO_ERASURE_ROWS, audioFiles: 0, ...JSON.parse(r.rows_json) },
-      note: r.note,
-    }));
+    return (
+      this.db
+        .prepare("SELECT * FROM erasures ORDER BY id")
+        .all()
+        .map(fromRow<ErasureEntry>)
+        // entries made before audio existed lack the audio counts
+        .map((e) => ({
+          ...e,
+          rows: { ...NO_ERASURE_ROWS, audioFiles: 0, ...(e.rows as Partial<ErasureEntry["rows"]>) },
+        }))
+    );
   }
 
   /* ── session deletion ── */
@@ -592,24 +570,14 @@ export class PersonalDataMap {
 
   /** The session-deletion register, oldest first. */
   sessionDeletions(): SessionDeletionEntry[] {
-    const rows = this.db.prepare("SELECT * FROM session_deletions ORDER BY id").all() as Array<{
-      id: number;
-      session_id: string;
-      deleted_wall: string;
-      created_wall: string;
-      rows_json: string;
-      code_hashes_json: string;
-      note: string;
-    }>;
-    return rows.map((r) => ({
-      id: r.id,
-      sessionId: r.session_id,
-      deletedWall: r.deleted_wall,
-      createdWall: r.created_wall,
-      rows: { ...NO_AUDIO_ROWS, ...JSON.parse(r.rows_json) },
-      participants: (JSON.parse(r.code_hashes_json) as string[]).length,
-      note: r.note,
-    }));
+    return this.db
+      .prepare(
+        `SELECT id, session_id, deleted_wall, created_wall, rows_json,
+           json_array_length(code_hashes_json) AS participants, note FROM session_deletions ORDER BY id`,
+      )
+      .all()
+      .map(fromRow<SessionDeletionEntry>)
+      .map((e) => ({ ...e, rows: { ...NO_AUDIO_ROWS, ...e.rows } }));
   }
 
   /* ── audio deletion ── */

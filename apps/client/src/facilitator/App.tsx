@@ -33,7 +33,7 @@ type Tab = "main" | "replay" | "database";
 
 const setPrefs = facilitatorPrefs.set;
 
-export const SHORTCUTS_HELP: Array<[string, string]> = [
+const SHORTCUTS_HELP: Array<[string, string]> = [
   ["1", "SETUP / LIVE tab"],
   ["2", "REPLAY tab"],
   ["3", "DATABASE tab"],

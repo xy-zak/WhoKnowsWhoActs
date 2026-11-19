@@ -5,7 +5,7 @@
  *    a session never has more than one queued or running job.
  *  - The work itself runs in a `worker_thread` (`runInWorker`), so the event
  *    loop that serves the game and the dashboard is never blocked by the
- *    analysis. `runInline` runs the same task in-process (tests only).
+ *    analysis.
  *  - Every state change is written to `audio_jobs` (queued → running →
  *    done | failed, with progress 0–1). Error texts are scrubbed of anything
  *    that looks like a participant code.
@@ -24,7 +24,6 @@ import { nowTs, wall } from "../runtime";
 import {
   type AttributionTaskInput,
   type AttributionTaskOutput,
-  runAttributionTask,
   type TaskHooks,
   WORKER_TASK,
   type WorkerMessage,
@@ -82,9 +81,6 @@ export const runInWorker: TaskRunner = (input, hooks, signal) =>
       finish(() => reject(new Error(`The analysis worker stopped unexpectedly (exit code ${code}).`))),
     );
   });
-
-/** The same task in-process (blocks the event loop while `analyse` runs): for tests only. */
-export const runInline: TaskRunner = (input, hooks) => runAttributionTask(input, hooks);
 
 /* ─────────── job runner ─────────── */
 

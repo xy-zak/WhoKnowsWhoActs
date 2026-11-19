@@ -25,14 +25,6 @@ export const ViewIdSchema = z
   .min(1)
   .describe("Id of the map view (dataset) shown to a seat, e.g. 'Ka'");
 
-/** Distinct, colour-blind-friendly seat colours (Okabe–Ito palette). */
-export const SEAT_COLOURS: Record<number, string> = {
-  1: "#E69F00",
-  2: "#56B4E9",
-  3: "#009E73",
-  4: "#CC79A7",
-};
-
 /** Interaction kinds a player can perform on a region. */
 export const ACTION_KINDS = ["propose", "decide"] as const;
 export type ActionKind = (typeof ACTION_KINDS)[number];

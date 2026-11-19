@@ -979,9 +979,5 @@ export type NewEvent = {
   };
 }[EventType];
 
-export function parsePayload<T extends EventType>(type: T, payload: unknown): PayloadOf<T> {
-  return EVENT_DEFS[type].payload.parse(payload) as PayloadOf<T>;
-}
-
 /** Types whose payload must be hidden from live dashboards and generic exports. */
 export const REDACTED_EVENT_TYPES: ReadonlySet<EventType> = new Set(["DemographicsSubmitted"]);

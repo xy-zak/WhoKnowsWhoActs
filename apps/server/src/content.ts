@@ -30,7 +30,7 @@ export function sha256(text: string | Buffer): string {
  * knowledge type and the starting score of every sub-square. Throws with a
  * readable message when anything is missing or the sizes do not match.
  */
-export function loadScenario(dir: string): Scenario {
+function loadScenario(dir: string): Scenario {
   const file = ScenarioFileSchema.parse(JSON.parse(readFileSync(path.join(dir, "scenario.json"), "utf8")));
   for (const k of K_LABELS) {
     if (!file.views[k])

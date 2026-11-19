@@ -288,6 +288,38 @@ export function getMeta(db: DB, key: string): string | null {
   return row?.value ?? null;
 }
 
+/*
+ * Row mapping by the column convention: snake_case column ↔ camelCase field,
+ * `<name>_json` holds JSON of field <name>, `has_<x>` is 0/1 for boolean has<X>.
+ * Field order follows the column order, so SELECT the columns in the order the type lists them.
+ */
+
+/** A row as an object: camelCase keys, `*_json` parsed, `has_*` as booleans. */
+export function fromRow<T>(row: unknown): T {
+  const out: Record<string, unknown> = {};
+  for (const [col, v] of Object.entries(row as Record<string, unknown>)) {
+    const key = col.replace(/_json$/, "").replace(/_(\w)/g, (_, c: string) => c.toUpperCase());
+    out[key] = col.endsWith("_json") ? JSON.parse(v as string) : col.startsWith("has_") ? v === 1 : v;
+  }
+  return out as T;
+}
+
+/** INSERT an object as one row: keys become snake_case columns; `json` fields go to `<column>_json` (null stays null). */
+export function insert(db: DB, table: string, obj: object, json: string[] = [], onConflict = "") {
+  const row: Record<string, unknown> = {};
+  for (const [key, v] of Object.entries(obj)) {
+    const col = key.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`);
+    if (json.includes(key)) row[`${col}_json`] = v === null || v === undefined ? null : JSON.stringify(v);
+    else row[col] = v;
+  }
+  const cols = Object.keys(row);
+  return db
+    .prepare(
+      `INSERT INTO ${table} (${cols.join(", ")}) VALUES (${cols.map((c) => `@${c}`).join(", ")}) ${onConflict}`,
+    )
+    .run(row);
+}
+
 /**
  * Change the database passphrase in place. Audio files need nothing: each is
  * encrypted with its own random key, and those keys are rows inside this

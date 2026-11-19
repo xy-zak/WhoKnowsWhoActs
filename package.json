@@ -31,7 +31,6 @@
   "devDependencies": {
     "@biomejs/biome": "^2.6.8",
     "@playwright/test": "^1.65.1",
-    "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^26.6.6",
     "@types/pdfkit": "^0.17.7",
     "mermaid": "^12.3.0",

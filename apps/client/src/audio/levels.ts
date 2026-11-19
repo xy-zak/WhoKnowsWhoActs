@@ -1,3 +1,4 @@
+import { AUDIO_LEVEL_INTERVAL_MS } from "@wkwa/shared";
 import type { MicLevel } from "./types";
 
 /**
@@ -38,7 +39,7 @@ export function peakDb(samples: ArrayLike<number>, fullScale = 1): number {
 
 export interface LevelMeterOptions {
   sampleRate: number;
-  /** window length; default 250 ms (≈ 4 updates per second) */
+  /** window length; default AUDIO_LEVEL_INTERVAL_MS (≈ 4 updates per second) */
   intervalMs?: number;
   /** called once per window with the window's level (rounded to 0.1 dB) and its duration */
   onLevel(level: MicLevel, windowMs: number): void;
@@ -53,7 +54,7 @@ export class LevelMeter {
   private peak = 0;
 
   constructor(private readonly o: LevelMeterOptions) {
-    this.window = Math.max(1, Math.round((o.sampleRate * (o.intervalMs ?? 250)) / 1000));
+    this.window = Math.max(1, Math.round((o.sampleRate * (o.intervalMs ?? AUDIO_LEVEL_INTERVAL_MS)) / 1000));
     this.windowMs = (this.window / o.sampleRate) * 1000;
   }
 

@@ -60,7 +60,8 @@ describe("generated documentation", () => {
 
   it("documents every socket message in NETWORKING.md", () => {
     const doc = read("NETWORKING.md");
-    for (const name of Object.keys(MESSAGES)) expect(doc, `missing message ${name}`).toContain(`\`${name}\``);
+    const names = Object.values(MESSAGES).flatMap((dirs) => Object.values(dirs).flatMap(Object.keys));
+    for (const name of names) expect(doc, `missing message ${name}`).toContain(`\`${name}\``);
   });
 
   it("documents every export file in DATA-TYPES.md", () => {
