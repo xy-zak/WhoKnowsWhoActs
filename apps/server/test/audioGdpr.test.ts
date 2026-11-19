@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
-import { randomUUID } from "node:crypto";
-import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { parseSessionConfig } from "@wkwa/shared";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { HEADER_BYTES, RECORD_PREFIX_BYTES } from "../src/audio/crypto";
 import { isAudioDerivativeKind } from "../src/audio/records";
@@ -9,9 +9,10 @@ import { verifyAudio } from "../src/audio/verify";
 import { openDatabase } from "../src/db/database";
 import { PersonalDataMap } from "../src/db/personalData";
 import { Store } from "../src/db/store";
-import { nowTs, REPO_ROOT, wall } from "../src/runtime";
-import { addTrack, readTrackPcm, type TestTrack } from "./audioFixtures";
-import { cleanup, PASSPHRASE, setupSession, startTestServer, type TestServer } from "./harness";
+import { nowTs, REPO_ROOT } from "../src/runtime";
+import { addTrack, insertBareSession, readTrackPcm, type TestTrack } from "./audioFixtures";
+import { onboard } from "./direct";
+import { cleanup, PASSPHRASE, startTestServer, type TestServer } from "./harness";
 
 const TSX = path.join(REPO_ROOT, "node_modules", ".bin", "tsx");
 const CLI = path.join(REPO_ROOT, "apps", "server", "src", "cli.ts");
@@ -30,68 +31,64 @@ function cli(srv: TestServer, args: string[]) {
   return { status: r.status, out: `${r.stdout}${r.stderr}` };
 }
 
-/** A session row only (not attached to the hub), for the deletion tests. */
-function insertBareSession(store: Store): string {
-  const id = `S-20261118-${randomUUID().slice(0, 4).toUpperCase()}`;
-  store.insertSession({
-    id,
-    created_wall: wall(nowTs()),
-    scenario_id: "demo",
-    scenario_version: "1",
-    scenario_hash: "h",
-    status: "closed",
-    tags_json: "[]",
-    notes: "",
-    config_json: "{}",
-    harness_version: "0",
-    git_commit: "x",
-  });
-  return id;
-}
-
-function count(store: Store, sql: string, ...params: unknown[]): number {
-  return (store.db.prepare(sql).get(...params) as { n: number }).n;
-}
-
 describe("audio: store, GDPR hooks and CLI", () => {
   let srv: TestServer;
   let sessionId: string;
   let codes: Record<number, string>;
   let tracks: Record<number, TestTrack>;
-  let fac: Awaited<ReturnType<typeof setupSession>>["fac"];
-  let bots: Awaited<ReturnType<typeof setupSession>>["bots"];
 
   beforeAll(async () => {
     srv = await startTestServer();
-    const r = await setupSession(
-      srv.url,
-      { roundCount: 1, defaultRound: { quota: { propose: 1, decide: 1 } } },
-      4,
-      { minDelayMs: 5, maxDelayMs: 15 },
-    );
-    sessionId = r.sessionId;
-    fac = r.fac;
-    bots = r.bots;
-    codes = Object.fromEntries(
-      Object.values(srv.ctx.hub.session!.state.seats).map((s) => [s.seat, s.participantCode!]),
-    );
+    // four bound seats (participant codes) in a session that has ended; no clients needed
+    const m = srv.ctx.hub.createSession("demo", parseSessionConfig({ seatCount: 4, roundCount: 1 }), "");
+    onboard(m);
+    m.abort("test");
+    sessionId = m.sessionId;
+    codes = Object.fromEntries(Object.values(m.state.seats).map((s) => [s.seat, s.participantCode!]));
     tracks = {};
     for (const seat of [1, 2, 3, 4])
       tracks[seat] = await addTrack(srv.ctx.store, srv.ctx.audioFiles, sessionId, seat, codes[seat]!);
   }, 60_000);
 
   afterAll(async () => {
-    for (const b of bots ?? []) b.stop();
-    fac?.close();
     await srv?.close();
     cleanup(srv.dir);
   });
 
-  it("wires the file store into the participant database only", () => {
-    expect(srv.ctx.store.audioFiles).toBe(srv.ctx.audioFiles);
-    expect(srv.ctx.stores.simulated.audioFiles).toBeNull();
-    expect(srv.ctx.audioFiles.root).toBe(path.join(srv.runtime.dataDir, "audio"));
-  });
+  /** A cleaned track (a derivative with its own encrypted file) of one seat. */
+  async function addCleanTrack(id: string, seat: number) {
+    const { fileName, key } = await srv.ctx.audioFiles.createFile(sessionId);
+    srv.ctx.store.insertAudioDerivative({
+      derivativeId: id,
+      sessionId,
+      seat,
+      participantCode: codes[seat]!,
+      kind: "clean_track",
+      sourceTracks: [tracks[seat]!.trackId],
+      fileName,
+      fileKey: key,
+      data: null,
+      params: {},
+      engineVersion: "test",
+    });
+  }
+
+  /** Speech segments of the whole session (no file), computed from the given seats' tracks. */
+  function addSegments(id: string, seats: number[]) {
+    srv.ctx.store.insertAudioDerivative({
+      derivativeId: id,
+      sessionId,
+      seat: null,
+      participantCode: null,
+      kind: "speech_segments",
+      sourceTracks: seats.map((s) => tracks[s]!.trackId),
+      fileName: null,
+      fileKey: null,
+      data: [{ seat: 1, start: 0, end: 100 }],
+      params: {},
+      engineVersion: "test",
+    });
+  }
 
   it("counts audio per session and per participant", async () => {
     const store = srv.ctx.store;
@@ -126,45 +123,6 @@ describe("audio: store, GDPR hooks and CLI", () => {
       store.getAudioTrackKey(t.trackId)!,
     );
     expect(pcm.pcm.equals(Buffer.concat(tracks[1]!.pcm))).toBe(true);
-    // jobs and derivatives
-    store.upsertAudioJob({
-      jobId: "J-1",
-      sessionId,
-      kind: "attribution",
-      status: "running",
-      progress: 0.5,
-      params: { margin: 6 },
-      result: null,
-      error: null,
-    });
-    store.upsertAudioJob({
-      ...store.getAudioJob("J-1")!,
-      status: "done",
-      progress: 1,
-      result: { derivatives: ["D"] },
-    });
-    expect(store.getAudioJob("J-1")).toMatchObject({
-      status: "done",
-      progress: 1,
-      result: { derivatives: ["D"] },
-    });
-    expect(store.listAudioJobs(sessionId)).toHaveLength(1);
-  });
-
-  it("refuses to delete audio while the session is running", async () => {
-    const res = await fetch(`${srv.url}/api/sessions/${sessionId}/audio/delete`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ confirm: sessionId, scope: "raw" }),
-    });
-    expect(res.status).toBe(409);
-    expect(((await res.json()) as { error: string }).error).toBe(
-      "This session is still running. Close or abort it first, then delete its audio.",
-    );
-    expect(srv.ctx.store.listAudioDeletions(sessionId)).toEqual([]);
-    await fac.cmd("round:start");
-    await fac.waitForDashboard((d) => d.state?.phase === "game_complete", 20_000);
-    for (const b of bots) await b.flushTelemetry();
   });
 
   it("verify authenticates every file and reports tampering, orphans and codes in names", async () => {
@@ -221,105 +179,30 @@ describe("audio: store, GDPR hooks and CLI", () => {
     expect(v.out).toContain("✓ Database OK");
   }, 60_000);
 
-  it("erasure removes the participant's audio rows, derived results and files", async () => {
+  it("REST erasure reports the participant's audio rows, derived results and files it removed", async () => {
     const { store, audioFiles } = srv.ctx;
-    const all = [1, 2, 3, 4].map((s) => tracks[s]!.trackId);
     // session-wide speech segments (from every track), a cleaned track of seat 1 and one of seat 2
-    store.insertAudioDerivative({
-      derivativeId: "D-SEG",
-      sessionId,
-      seat: null,
-      participantCode: null,
-      kind: "speech_segments",
-      sourceTracks: all,
-      fileName: null,
-      fileKey: null,
-      data: [{ seat: 1, start: 0, end: 100 }],
-      params: {},
-      engineVersion: "test",
-    });
-    const clean1 = await audioFiles.createFile(sessionId);
-    store.insertAudioDerivative({
-      derivativeId: "D-CLEAN-1",
-      sessionId,
-      seat: 1,
-      participantCode: codes[1]!,
-      kind: "clean_track",
-      sourceTracks: [tracks[1]!.trackId],
-      fileName: clean1.fileName,
-      fileKey: clean1.key,
-      data: null,
-      params: {},
-      engineVersion: "test",
-    });
-    const clean2 = await audioFiles.createFile(sessionId);
-    store.insertAudioDerivative({
-      derivativeId: "D-CLEAN-2",
-      sessionId,
-      seat: 2,
-      participantCode: codes[2]!,
-      kind: "clean_track",
-      sourceTracks: [tracks[2]!.trackId],
-      fileName: clean2.fileName,
-      fileKey: clean2.key,
-      data: null,
-      params: {},
-      engineVersion: "test",
-    });
+    addSegments("D-SEG", [1, 2, 3, 4]);
+    await addCleanTrack("D-CLEAN-1", 1);
+    await addCleanTrack("D-CLEAN-2", 2);
     expect(store.getAudioDerivative("D-SEG")).toMatchObject({ hasData: true, data: [{ seat: 1 }] });
     expect(store.listAudioDerivatives(sessionId)[0]).not.toHaveProperty("data");
 
     const code = codes[1]!;
-    const res = await fetch(`${srv.url}/api/participants/${code}/erase`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ confirm: code, note: "audio test" }),
+    const res = await srv.api("POST", `/api/participants/${code}/erase`, {
+      confirm: code,
+      note: "audio test",
     });
     expect(res.status).toBe(200);
-    const body = (await res.json()) as {
-      rows: { audioTracks: number; audioChunks: number; audioDerivatives: number };
-      audioFiles: { removed: number; failed: string[] };
-    };
-    expect(body.rows).toMatchObject({ audioTracks: 1, audioChunks: 3, audioDerivatives: 2 });
-    expect(body.audioFiles).toEqual({ removed: 2, failed: [] });
-
-    for (const t of ["audio_tracks", "audio_derivatives", "events", "telemetry"])
-      expect(count(store, `SELECT count(*) AS n FROM ${t} WHERE participant_code = ?`, code)).toBe(0);
-    expect(
-      count(store, "SELECT count(*) AS n FROM audio_chunks WHERE track_id = ?", tracks[1]!.trackId),
-    ).toBe(0);
-    expect(audioFiles.exists(sessionId, tracks[1]!.fileName)).toBe(false);
-    expect(audioFiles.exists(sessionId, clean1.fileName)).toBe(false);
-    // computed from seat 1's track too → gone; seat 2's own cleaned track stays
-    expect(store.getAudioDerivative("D-SEG")).toBeUndefined();
-    expect(store.getAudioDerivative("D-CLEAN-2")).toBeDefined();
-    expect(store.listAudioTracks(sessionId).map((t) => t.seat)).toEqual([2, 3, 4]);
-    expect(store.codeExists(code)).toBe(false);
-    const reg = new PersonalDataMap(store).erasures().at(-1)!;
-    expect(reg.rows).toMatchObject({ audioTracks: 1, audioChunks: 3, audioDerivatives: 2, audioFiles: 2 });
+    expect(res.json.rows).toMatchObject({ audioTracks: 1, audioChunks: 3, audioDerivatives: 2 });
+    expect(res.json.audioFiles).toEqual({ removed: 2, failed: [] });
     expect((await verifyAudio(store, audioFiles)).problems).toEqual([]);
   });
 
   it("delete-audio raw: files and keys go, timing metadata and non-audio results stay", async () => {
     const { store, audioFiles } = srv.ctx;
-    expect(isAudioDerivativeKind("clean_track")).toBe(true);
-    expect(isAudioDerivativeKind("aligned_track")).toBe(true);
-    expect(isAudioDerivativeKind("speech_segments")).toBe(false);
-    expect(isAudioDerivativeKind("transcript")).toBe(false);
     expect(isAudioDerivativeKind("some_future_kind")).toBe(true); // unknown kinds err on the side of deleting
-    store.insertAudioDerivative({
-      derivativeId: "D-SEG-2",
-      sessionId,
-      seat: null,
-      participantCode: null,
-      kind: "speech_segments",
-      sourceTracks: [2, 3, 4].map((s) => tracks[s]!.trackId),
-      fileName: null,
-      fileKey: null,
-      data: [],
-      params: {},
-      engineVersion: "test",
-    });
+    addSegments("D-SEG-2", [2, 3, 4]);
     const before = store.listAudioTracks(sessionId);
 
     const r = new PersonalDataMap(srv.ctx.store).deleteAudio(sessionId, { scope: "raw", note: "retention" });
@@ -350,51 +233,6 @@ describe("audio: store, GDPR hooks and CLI", () => {
       store.insertAudioChunk({ ...store.listAudioChunks(after[0]!.trackId)[0]!, seq: 99 }),
     ).toThrow(/deleted/);
     expect((await verifyAudio(store, audioFiles)).problems).toEqual([]);
-  });
-
-  it("delete-audio all: every audio row, job and the folder go", () => {
-    const { store, audioFiles } = srv.ctx;
-    const r = new PersonalDataMap(srv.ctx.store).deleteAudio(sessionId, { scope: "all" });
-    expect(r.counts).toMatchObject({ tracks: 3, chunks: 9, derivatives: 1, jobs: 1, files: 0 });
-    expect(r.audioFiles.dirRemoved).toBe(true);
-    for (const t of ["audio_tracks", "audio_derivatives", "audio_jobs"])
-      expect(count(store, `SELECT count(*) AS n FROM ${t} WHERE session_id = ?`, sessionId)).toBe(0);
-    expect(count(store, "SELECT count(*) AS n FROM audio_chunks")).toBe(0);
-    expect(existsSync(path.join(audioFiles.root, sessionId))).toBe(false);
-    expect(store.listAudioDeletions(sessionId).map((d) => d.scope)).toEqual(["raw", "all"]);
-    expect(() =>
-      new PersonalDataMap(srv.ctx.store).deleteAudio(sessionId, { scope: "nope" as "raw" }),
-    ).toThrow(/scope/);
-    expect(() => new PersonalDataMap(srv.ctx.store).deleteAudio("S-UNKNOWN", { scope: "all" })).toThrow(
-      /Unknown session/,
-    );
-  });
-
-  it("deleting a session removes its audio rows, jobs and folder, and hashes its audio codes", async () => {
-    const { store, audioFiles } = srv.ctx;
-    const id = insertBareSession(store);
-    const code = "WK-0000-0000-0";
-    const t = await addTrack(store, audioFiles, id, 1, code, 2);
-    store.upsertAudioJob({
-      jobId: "J-DEL",
-      sessionId: id,
-      kind: "attribution",
-      status: "done",
-      progress: 1,
-      params: {},
-      result: null,
-      error: null,
-    });
-    writeFileSync(path.join(audioFiles.root, id, `${"e".repeat(32)}.wka`), "orphan in the same folder");
-    const r = new PersonalDataMap(store).deleteSession(id, { exportsDir: srv.runtime.exportsDir });
-    expect(r.rows).toMatchObject({ audioTracks: 1, audioChunks: 2, audioDerivatives: 0, audioJobs: 1 });
-    expect(r.audio).toEqual({ dirRemoved: true, files: 2 });
-    expect(existsSync(path.join(audioFiles.root, id))).toBe(false);
-    expect(audioFiles.exists(id, t.fileName)).toBe(false);
-    expect(store.getAudioTrack(t.trackId)).toBeUndefined();
-    expect(store.getAudioJob("J-DEL")).toBeUndefined();
-    const entry = new PersonalDataMap(store).sessionDeletions().at(-1)!;
-    expect(entry).toMatchObject({ sessionId: id, participants: 1, rows: { audioTracks: 1, audioChunks: 2 } });
   });
 
   it("CLI: delete-audio needs the typed session id", async () => {

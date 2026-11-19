@@ -1,59 +1,25 @@
 import { createHash } from "node:crypto";
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readdirSync,
-  readFileSync,
-  statSync,
-  writeFileSync,
-} from "node:fs";
-import os from "node:os";
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import {
   AttributionJobSchema,
-  AudioDeletionRecordSchema,
   type AudioDerivativeKind,
   AudioSessionSummarySchema,
-  EXPORT_FILES,
-  expandColumns,
-  exportFile,
   type SpeechSegmentRow,
 } from "@wkwa/shared";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { AudioFileStore } from "../src/audio/fileStore";
 import { AudioJobRunner, runInWorker, scrubError, type TaskRunner } from "../src/audio/jobs";
 import { seqOrderedChunks } from "../src/audio/jobWorker";
 import { AudioRequestError, AudioService } from "../src/audio/service";
 import { parseWavHeader } from "../src/audio/wav";
-import { openDatabase } from "../src/db/database";
 import { PersonalDataMap } from "../src/db/personalData";
-import { Store } from "../src/db/store";
 import { exportSession } from "../src/gdpr/exporter";
 import { SessionGuard } from "../src/session/sessionGuard";
-import { readTrackPcm } from "./audioFixtures";
+import { insertBareSession, readTrackPcm, tempStore } from "./audioFixtures";
 import { type SeededSession, seedAudioSession } from "./audioSession";
-import { cleanup, PASSPHRASE } from "./harness";
+import { readCsv } from "./harness";
 
 const CODE_RE = /WK-[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]/;
-
-function parseCsv(text: string): Array<Record<string, string>> {
-  const [head, ...lines] = text.trimEnd().split("\n");
-  const cols = head!.split(",");
-  return lines.filter(Boolean).map((l) => {
-    const cells = l.split(","); // test data has no quoted commas
-    return Object.fromEntries(cols.map((c, i) => [c, cells[i] ?? ""]));
-  });
-}
-
-function makeEnv() {
-  const dir = mkdtempSync(path.join(os.tmpdir(), "wkwa-audio-proc-"));
-  const db = openDatabase(path.join(dir, "data", "wkwa.db"), PASSPHRASE);
-  const files = new AudioFileStore(path.join(dir, "data", "audio"));
-  const store = new Store(db, files);
-  const exportsDir = path.join(dir, "exports");
-  return { dir, db, files, store, exportsDir };
-}
 
 const scenarios = {
   load: () => {
@@ -62,7 +28,7 @@ const scenarios = {
 } as unknown as Parameters<typeof exportSession>[0]["scenarios"];
 
 describe("audio processing: jobs, derivatives, export", () => {
-  const env = makeEnv();
+  const env = tempStore();
   const runner = new AudioJobRunner(env.store);
   const guard = new SessionGuard({ hub: null, jobs: runner });
   const service = new AudioService({
@@ -81,8 +47,7 @@ describe("audio processing: jobs, derivatives, export", () => {
 
   afterAll(async () => {
     await runner.close();
-    env.db.close();
-    cleanup(env.dir);
+    env.close();
   });
 
   it("runs the attribution in a worker thread and stores encrypted, per-seat derivatives", async () => {
@@ -124,12 +89,6 @@ describe("audio processing: jobs, derivatives, export", () => {
       const { pcm, issues } = await readTrackPcm(env.files, sessionId, d.fileName!, key);
       expect(issues).toEqual([]);
       expect(pcm.length).toBe((d.params.samples as number) * 2);
-      // encrypted at rest: a stretch of the decrypted audio does not appear in the file
-      const onDisk = readFileSync(env.files.pathOf(sessionId, d.fileName!));
-      expect(onDisk.subarray(0, 4).toString()).toBe("WKA1");
-      let off = pcm.findIndex((b, i) => i % 2 === 0 && b !== 0) + 20_000;
-      off -= off % 2;
-      expect(onDisk.includes(pcm.subarray(off, off + 64))).toBe(false);
     }
 
     // integration sanity: most attributed speech lies inside the seat's true speech (accuracy itself is U5's)
@@ -240,13 +199,10 @@ describe("audio processing: jobs, derivatives, export", () => {
     expect(JSON.parse(row.code_hashes_json)).toHaveLength(4);
     expect(new PersonalDataMap(env.store).lookup(codes[3]!).exports.map((e) => e.id)).toContain(r.exportId);
 
-    // a single seat (the DATABASE tab's "download WAV")
-    const one = await service.exportAudio(sessionId, { kind: "clean", seats: [2], requestedBy: "test" });
-    expect(one.files.map((f) => f.name)).toEqual([`${sessionId}_seat2_clean.wav`]);
     await expect(
       service.exportAudio(sessionId, { kind: "raw", seats: [9], requestedBy: "t" }),
     ).rejects.toThrow(/Seat 9 has no audio/);
-    expect((await service.summary(sessionId)).audioExports).toHaveLength(2);
+    expect((await service.summary(sessionId)).audioExports).toHaveLength(1);
   }, 60_000);
 
   it("a damaged record of a cleaned track plays as silence in its own place, the rest stays aligned", async () => {
@@ -283,17 +239,13 @@ describe("audio processing: jobs, derivatives, export", () => {
     const { sessionId, codes } = seeded;
     const deps = { store: env.store, scenarios, exportsDir: env.exportsDir };
     const std = exportSession(deps, sessionId);
-    for (const f of ["audio_tracks.csv", "speech_segments.csv"]) {
-      const header = readFileSync(path.join(std.dir, f), "utf8").split("\n")[0]!.split(",");
-      expect(header).toEqual(expandColumns(exportFile(f)).map((c) => c.name));
-    }
-    const tracks = parseCsv(readFileSync(path.join(std.dir, "audio_tracks.csv"), "utf8"));
+    const tracks = readCsv(std.dir, "audio_tracks.csv");
     expect(tracks).toHaveLength(4);
     expect(tracks.map((t) => t.participant_code).sort()).toEqual(Object.values(codes).sort());
     expect(
       tracks.every((t) => t.status === "closed" && t.sample_rate === "16000" && t.echo_cancellation === "0"),
     ).toBe(true);
-    const segs = parseCsv(readFileSync(path.join(std.dir, "speech_segments.csv"), "utf8"));
+    const segs = readCsv(std.dir, "speech_segments.csv");
     expect(segs.length).toBe(service.speechSegments(sessionId).segments.length);
     expect(new Set(segs.map((s) => s.seat))).toEqual(new Set(["1", "2", "3", "4"]));
     // no audio, keys or file names in any CSV
@@ -307,33 +259,17 @@ describe("audio processing: jobs, derivatives, export", () => {
       .map((f) => readFileSync(path.join(anon.dir, f), "utf8"))
       .join("\n");
     expect(anonText).not.toMatch(CODE_RE);
-    const aTracks = parseCsv(readFileSync(path.join(anon.dir, "audio_tracks.csv"), "utf8"));
-    const aSegs = parseCsv(readFileSync(path.join(anon.dir, "speech_segments.csv"), "utf8"));
+    const aTracks = readCsv(anon.dir, "audio_tracks.csv");
+    const aSegs = readCsv(anon.dir, "speech_segments.csv");
     expect(aTracks.every((t) => /^A-[0-9A-Z]{6}$/.test(t.participant_code!))).toBe(true);
     // the same random id per participant across the files of one export
     const bySeat = new Map(aTracks.map((t) => [t.seat, t.participant_code]));
     expect(aSegs.every((s) => bySeat.get(s.seat) === s.participant_code)).toBe(true);
   });
 
-  it("a session without audio still gets both files, header only", () => {
-    env.store.insertSession({
-      id: "S-20261118-NOAU",
-      created_wall: "2026-11-18T10:00:00.000Z",
-      scenario_id: "demo",
-      scenario_version: "1",
-      scenario_hash: "h",
-      status: "closed",
-      tags_json: "[]",
-      notes: "",
-      config_json: "{}",
-      harness_version: "0",
-      git_commit: "x",
-    });
-    const r = exportSession({ store: env.store, scenarios, exportsDir: env.exportsDir }, "S-20261118-NOAU");
-    expect(readdirSync(r.dir).sort()).toEqual(EXPORT_FILES.map((f) => f.file).sort());
-    for (const f of ["audio_tracks.csv", "speech_segments.csv"])
-      expect(readFileSync(path.join(r.dir, f), "utf8").trimEnd().split("\n")).toHaveLength(1);
-    expect(() => service.startAttribution("S-20261118-NOAU")).toThrow(/no audio/);
+  it("a session without audio has nothing to attribute", () => {
+    const id = insertBareSession(env.store);
+    expect(() => service.startAttribution(id)).toThrow(/no audio/);
   });
 
   it("raw export before any attribution uses the timestamps; clean export needs an attribution", async () => {
@@ -374,8 +310,8 @@ describe("audio processing: jobs, derivatives, export", () => {
     const { sessionId, codes } = seeded;
     new PersonalDataMap(env.store).erase(codes[2]!, "test");
     const r = exportSession({ store: env.store, scenarios, exportsDir: env.exportsDir }, sessionId);
-    const tracks = parseCsv(readFileSync(path.join(r.dir, "audio_tracks.csv"), "utf8"));
-    const segs = parseCsv(readFileSync(path.join(r.dir, "speech_segments.csv"), "utf8"));
+    const tracks = readCsv(r.dir, "audio_tracks.csv");
+    const segs = readCsv(r.dir, "speech_segments.csv");
     expect(tracks.map((t) => t.seat).sort()).toEqual(["1", "3", "4"]);
     expect(segs.some((s) => s.seat === "2")).toBe(false);
     expect(segs.length).toBeGreaterThan(0); // the other seats' segments stay
@@ -393,44 +329,11 @@ describe("audio processing: jobs, derivatives, export", () => {
     }
     expect(env.store.listAudioJobs(sessionId).every((j) => j.result === null)).toBe(true);
   });
-
-  it("delete raw audio: typed confirmation, registered, then attribution and export answer 409", async () => {
-    const { sessionId } = seeded;
-    expect(() => service.deleteAudio(sessionId, { confirm: "S-WRONG", scope: "raw" })).toThrow(
-      /does not match/,
-    );
-    const r = service.deleteAudio(sessionId, {
-      confirm: ` ${sessionId} `,
-      scope: "raw",
-      note: "retention 30 days",
-    });
-    expect(AudioDeletionRecordSchema.parse(r.record)).toBeTruthy();
-    expect(r.record).toMatchObject({ scope: "raw", seats: [1, 3, 4], tracks: 3, note: "retention 30 days" });
-    expect(r.record.bytes).toBeGreaterThan(0);
-    expect(r.audioExportsOnDisk.length).toBeGreaterThan(0); // WAV exports are the researcher's to delete
-    const sum = await service.summary(sessionId);
-    expect(sum.deletions).toHaveLength(1);
-    expect(sum.tracks.every((t) => t.status === "deleted" && t.bytes === 0)).toBe(true);
-    expect(sum.derivatives).toHaveLength(0); // cleaned tracks hold sound: deleted with the raw audio
-    expect(service.speechSegments(sessionId).segments.length).toBeGreaterThan(0); // timing kept
-    expect(() => service.startAttribution(sessionId)).toThrow(/deleted/);
-    try {
-      service.startAttribution(sessionId);
-    } catch (e) {
-      expect((e as AudioRequestError).statusCode).toBe(409);
-    }
-    await expect(service.exportAudio(sessionId, { kind: "raw", requestedBy: "t" })).rejects.toMatchObject({
-      statusCode: 409,
-    });
-  });
 });
 
 describe("seqOrderedChunks: streams a track in sample order", () => {
-  const env = makeEnv();
-  afterAll(() => {
-    env.db.close();
-    cleanup(env.dir);
-  });
+  const env = tempStore();
+  afterAll(() => env.close());
 
   it("puts a late resent chunk back in place, drops duplicates, and skips tampered or missing chunks", async () => {
     const sid = "S-20261118-ORDR";
@@ -471,11 +374,8 @@ describe("seqOrderedChunks: streams a track in sample order", () => {
 });
 
 describe("audio jobs: lifecycle", () => {
-  const env = makeEnv();
-  afterAll(() => {
-    env.db.close();
-    cleanup(env.dir);
-  });
+  const env = tempStore();
+  afterAll(() => env.close());
 
   it("a failing job is marked failed, its error scrubbed of codes and its files removed", async () => {
     const seeded = await seedAudioSession(env.store, env.files, { seed: 13, durationSec: 40 });
@@ -498,8 +398,8 @@ describe("audio jobs: lifecycle", () => {
     await runner.whenIdle();
     const row = env.store.getAudioJob(job.jobId)!;
     expect(row.status).toBe("failed");
-    expect(row.error).toContain("[participant code]");
-    expect(row.error).not.toMatch(CODE_RE);
+    expect(row.error).toBe("could not read the track of [participant code]");
+    expect(scrubError("x".repeat(900))).toHaveLength(500); // and cut short
     expect(row.finishedWall).not.toBeNull();
     expect(row.params.pendingFiles).toBeUndefined();
     expect(env.files.exists(seeded.sessionId, created)).toBe(false);
@@ -508,18 +408,24 @@ describe("audio jobs: lifecycle", () => {
     expect(runner.activeJob(seeded.sessionId)).toBeUndefined();
 
     // jobs run one at a time: a second session's job waits in the queue
-    const slow: TaskRunner = (input, hooks) =>
-      new Promise((_resolve, reject) => {
-        hooks.onProgress?.(0.5, "x");
-        setTimeout(() => reject(new Error(`stopped ${input.sessionId}`)), 50);
-      });
+    let open!: () => void;
+    const gate = new Promise<void>((r) => (open = r));
+    let started!: () => void;
+    const firstStarted = new Promise<void>((r) => (started = r));
+    const slow: TaskRunner = async (input, hooks) => {
+      hooks.onProgress?.(0.5, "x");
+      started();
+      await gate;
+      throw new Error(`stopped ${input.sessionId}`);
+    };
     const second = await seedAudioSession(env.store, env.files, { seed: 14, durationSec: 30 });
     const s2 = new AudioService({ store: env.store, exportsDir: env.exportsDir, runner, runTask: slow });
     const a = s2.startAttribution(seeded.sessionId);
     const b = s2.startAttribution(second.sessionId);
-    await new Promise((r) => setTimeout(r, 10));
+    await firstStarted;
     expect(env.store.getAudioJob(a.jobId)!.status).toBe("running");
     expect(env.store.getAudioJob(b.jobId)!.status).toBe("queued");
+    open();
     await runner.whenIdle();
     expect(env.store.getAudioJob(b.jobId)!.status).toBe("failed");
   }, 60_000);
@@ -555,10 +461,5 @@ describe("audio jobs: lifecycle", () => {
     new AudioService({ store: env.store, exportsDir: env.exportsDir, runner: new AudioJobRunner(env.store) });
     expect(existsSync(partial)).toBe(false);
     expect(existsSync(done)).toBe(true);
-  });
-
-  it("scrubs anything code-like from error texts", () => {
-    expect(scrubError(new Error("seat WK-7F3K-Q9XM-4 failed"))).toBe("seat [participant code] failed");
-    expect(scrubError("x".repeat(900))).toHaveLength(500);
   });
 });

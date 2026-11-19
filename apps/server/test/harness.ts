@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import type { AddressInfo } from "node:net";
 import os from "node:os";
 import path from "node:path";
@@ -14,6 +14,9 @@ export interface TestServer {
   url: string;
   dir: string;
   runtime: RuntimeOptions;
+  /** A request to this server (JSON body when given): status, body text and the parsed JSON. */
+  // biome-ignore lint/suspicious/noExplicitAny: test responses are checked field by field
+  api(method: string, path: string, body?: unknown): Promise<{ status: number; text: string; json: any }>;
   close(): Promise<void>;
 }
 
@@ -43,11 +46,22 @@ export async function startTestServer(
   const ctx = await createApp(runtime, PASSPHRASE);
   await ctx.app.listen({ host: "127.0.0.1", port: 0 });
   const port = (ctx.app.server.address() as AddressInfo).port;
+  const url = baseUrl("127.0.0.1", port, ctx.tls.info.enabled);
   return {
     ctx,
-    url: baseUrl("127.0.0.1", port, ctx.tls.info.enabled),
+    url,
     dir: tmp,
     runtime,
+    async api(method, urlPath, body) {
+      const res = await fetch(`${url}${urlPath}`, {
+        method,
+        headers: body === undefined ? {} : { "content-type": "application/json" },
+        body: body === undefined ? undefined : JSON.stringify(body),
+      });
+      const text = await res.text();
+      const isJson = res.headers.get("content-type")?.includes("json");
+      return { status: res.status, text, json: isJson && text ? JSON.parse(text) : null };
+    },
     async close() {
       await ctx.close();
     },
@@ -58,7 +72,38 @@ export function cleanup(dir: string) {
   rmSync(dir, { recursive: true, force: true });
 }
 
-/** Facilitator + N bots: create session, bind, label, onboard. Returns when round 1 can start. */
+/** A CSV file of an export as rows keyed by column (RFC 4180: quoted cells may hold commas, quotes, newlines). */
+export function readCsv(dir: string, file: string): Array<Record<string, string>> {
+  const text = readFileSync(path.join(dir, file), "utf8");
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let cell = "";
+  let q = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i]!;
+    if (q) {
+      if (c === '"' && text[i + 1] === '"') {
+        cell += '"';
+        i++;
+      } else if (c === '"') q = false;
+      else cell += c;
+    } else if (c === '"') q = true;
+    else if (c === ",") {
+      row.push(cell);
+      cell = "";
+    } else if (c === "\n") {
+      row.push(cell);
+      rows.push(row);
+      row = [];
+      cell = "";
+    } else cell += c;
+  }
+  if (cell || row.length) rows.push([...row, cell]); // no newline after the last row
+  const [head, ...body] = rows;
+  return body.map((r) => Object.fromEntries(head!.map((h, i) => [h, r[i] ?? ""])));
+}
+
+/** Facilitator + N bots: create session, bind, label, onboard. Returns when round 1 can start; `stop()` ends the clients. */
 export async function setupSession(
   url: string,
   config: Record<string, unknown> = {},
@@ -82,5 +127,9 @@ export async function setupSession(
   await fac.waitForDashboard((d) =>
     Object.values(d.state?.seats ?? {}).every((s) => s.consent === "given" && s.demographics && s.briefing),
   );
-  return { fac, bots, sessionId };
+  const stop = () => {
+    for (const b of bots) b.stop();
+    fac.close();
+  };
+  return { fac, bots, sessionId, stop };
 }

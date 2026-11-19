@@ -1,11 +1,10 @@
-import { mkdtempSync } from "node:fs";
-import os from "node:os";
+import { writeFileSync } from "node:fs";
 import path from "node:path";
 import { generateParticipantCode, type NewEvent, type TelemetryItem } from "@wkwa/shared";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { AudioFileStore } from "../src/audio/fileStore";
+import type { AudioFileStore } from "../src/audio/fileStore";
 import { sha256 } from "../src/content";
-import { type DB, openDatabase } from "../src/db/database";
+import type { DB } from "../src/db/database";
 import {
   CODE_TABLES,
   DELETION_REGISTERS,
@@ -13,10 +12,9 @@ import {
   PersonalDataMap,
   type PersonalDataTable,
 } from "../src/db/personalData";
-import { Store } from "../src/db/store";
+import type { Store } from "../src/db/store";
 import { nowTs, wall } from "../src/runtime";
-import { addTrack } from "./audioFixtures";
-import { cleanup, PASSPHRASE } from "./harness";
+import { addTrack, insertBareSession, type TempStore, tempStore } from "./audioFixtures";
 
 /** Tables that hold no session's data and no participant code. */
 const NOT_PERSONAL = ["meta"];
@@ -61,20 +59,7 @@ function participantWhere(t: PersonalDataTable): string | null {
 let n = 0;
 /** A session with four participants and a row in every PERSONAL_DATA table. */
 async function seedSession(store: Store, files: AudioFileStore, codes: Record<number, string>) {
-  const sessionId = `S-20261119-T${String(++n).padStart(3, "0")}`;
-  store.insertSession({
-    id: sessionId,
-    created_wall: wall(nowTs()),
-    scenario_id: "demo",
-    scenario_version: "1",
-    scenario_hash: "h",
-    status: "closed",
-    tags_json: "[]",
-    notes: "",
-    config_json: "{}",
-    harness_version: "0",
-    git_commit: "test",
-  });
+  const sessionId = insertBareSession(store, `S-20261119-T${String(++n).padStart(3, "0")}`);
   const seats = Object.keys(codes).map(Number);
   const trackIds: Record<number, string> = {};
   for (const seat of seats) {
@@ -152,24 +137,19 @@ async function seedSession(store: Store, files: AudioFileStore, codes: Record<nu
 }
 
 describe("personal-data map", () => {
-  let dir: string;
+  let t: TempStore;
   let db: DB;
   let files: AudioFileStore;
   let store: Store;
   let map: PersonalDataMap;
 
   beforeEach(() => {
-    dir = mkdtempSync(path.join(os.tmpdir(), "wkwa-pdm-"));
-    db = openDatabase(path.join(dir, "wkwa.db"), PASSPHRASE);
-    files = new AudioFileStore(path.join(dir, "audio"));
-    store = new Store(db, files);
+    t = tempStore();
+    ({ db, files, store } = t);
     map = new PersonalDataMap(store);
   });
 
-  afterEach(() => {
-    db.close();
-    cleanup(dir);
-  });
+  afterEach(() => t.close());
 
   it("the registry covers every table of the schema", () => {
     const registered = new Map(PERSONAL_DATA.map((t) => [t.table, t]));
@@ -264,8 +244,10 @@ describe("personal-data map", () => {
     for (const t of PERSONAL_DATA) expect(count(db, t, t.ofSession, a.sessionId), t.table).toBeGreaterThan(0);
     const keep = PERSONAL_DATA.map((t) => count(db, t, t.ofSession, b.sessionId));
     const codes = store.sessionCodes(a.sessionId).map(sha256).sort();
+    // a file in the session's audio folder that no row refers to goes with the folder (and is counted)
+    writeFileSync(path.join(files.root, a.sessionId, `${"e".repeat(32)}.wka`), "orphan");
 
-    const r = map.deleteSession(a.sessionId, { exportsDir: path.join(dir, "exports"), note: "invariant" });
+    const r = map.deleteSession(a.sessionId, { exportsDir: t.exportsDir });
 
     expect(r.rows).toEqual({
       events: 3,
@@ -276,7 +258,7 @@ describe("personal-data map", () => {
       audioDerivatives: 3,
       audioJobs: 1,
     });
-    expect(r.audio).toEqual({ dirRemoved: true, files: 4 });
+    expect(r.audio).toEqual({ dirRemoved: true, files: 5 });
     for (const t of PERSONAL_DATA) expect(count(db, t, t.ofSession, a.sessionId), t.table).toBe(0);
     // only the deletion register still names the session (to re-apply the deletion after a restore)
     expect(rowsContaining(db, a.sessionId)).toEqual({ session_deletions: 1 });
@@ -287,26 +269,32 @@ describe("personal-data map", () => {
         (db.prepare("SELECT code_hashes_json FROM session_deletions").pluck().get() as string) ?? "[]",
       ),
     ).toEqual(codes);
-    expect(() => map.deleteSession(a.sessionId, { exportsDir: dir })).toThrow(/Unknown session/);
+    expect(() => map.deleteSession(a.sessionId, { exportsDir: t.exportsDir })).toThrow(/Unknown session/);
   });
 
-  it("deleting all audio empties every audio table of the session", async () => {
+  it("deleting all audio (after the raw audio) empties every audio table of the session", async () => {
     const a = await seedSession(store, files, { 1: generateParticipantCode(), 3: generateParticipantCode() });
+    expect(map.deleteAudio(a.sessionId, { scope: "raw" }).counts).toMatchObject({ tracks: 2, files: 4 });
     const r = map.deleteAudio(a.sessionId, { scope: "all", note: "invariant" });
     expect(r.counts).toMatchObject({
       tracks: 2,
       chunks: 4,
-      derivatives: 3,
+      derivatives: 1, // the speech segments: the cleaned tracks went with the raw audio
       jobs: 1,
-      files: 4,
+      files: 0,
       seatMask: 0b1010,
     });
-    expect(r.audioFiles).toEqual({ removed: 4, failed: [], dirRemoved: true });
+    expect(r.audioFiles).toEqual({ removed: 0, failed: [], dirRemoved: true });
     for (const t of PERSONAL_DATA) {
       const left = count(db, t, t.ofSession, a.sessionId);
       if (t.audio) expect(left, t.table).toBe(0);
       else expect(left, t.table).toBeGreaterThan(0);
     }
-    expect(store.listAudioDeletions(a.sessionId)).toMatchObject([{ scope: "all", note: "invariant" }]);
+    expect(store.listAudioDeletions(a.sessionId)).toMatchObject([
+      { scope: "raw", note: "" },
+      { scope: "all", note: "invariant" },
+    ]);
+    expect(() => map.deleteAudio(a.sessionId, { scope: "nope" as "raw" })).toThrow(/scope/);
+    expect(() => map.deleteAudio("S-UNKNOWN", { scope: "all" })).toThrow(/Unknown session/);
   });
 });

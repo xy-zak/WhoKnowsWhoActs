@@ -1,10 +1,10 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import type { StoredEvent } from "@wkwa/shared";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { createApp } from "../src/app";
 import { Bot, FacilitatorClient } from "../src/tools/botClient";
-import { cleanup, PASSPHRASE, startTestServer, type TestServer } from "./harness";
+import { cleanup, PASSPHRASE, readCsv, startTestServer, type TestServer } from "./harness";
 
 const ROUND = { rule: "quota" as const, quota: { propose: 2, decide: 1 }, timeLimitSec: null };
 
@@ -95,14 +95,11 @@ describe("fake players (real sessions)", () => {
 
   it("marks the session and the seats in listings and exports", async () => {
     expect(srv.ctx.store.listSessions().find((s) => s.id === sessionId)?.fakeSeats).toEqual([1, 2, 3]);
-    const res = await fetch(`${srv.url}/api/sessions/${sessionId}/export`, { method: "POST" });
-    const r = (await res.json()) as { dir: string };
-    const session = JSON.parse(readFileSync(path.join(r.dir, "session.json"), "utf8"));
+    const { dir } = (await srv.api("POST", `/api/sessions/${sessionId}/export`)).json;
+    const session = JSON.parse(readFileSync(path.join(dir, "session.json"), "utf8"));
     expect(session.fakeSeats).toEqual([1, 2, 3]);
-    const players = readFileSync(path.join(r.dir, "players.csv"), "utf8").trim().split("\n");
-    const head = players[0]!.split(",");
-    const rows = players.slice(1).map((l) => l.split(","));
-    const col = (name: string) => rows.map((x) => x[head.indexOf(name)]);
+    const players = readCsv(dir, "players.csv");
+    const col = (name: string) => players.map((p) => p[name]);
     expect(col("seat")).toEqual(["1", "2", "3", "4"]);
     expect(col("fake_player")).toEqual(["1", "1", "1", "0"]);
     expect(col("consent_status")).toEqual(["skipped", "skipped", "skipped", "given"]);
@@ -110,22 +107,16 @@ describe("fake players (real sessions)", () => {
   });
 
   it("lists fake players on the key sheet without a code, and gives them no takedown card", async () => {
-    const sheet = await (await fetch(`${srv.url}/api/sessions/${sessionId}/print/keysheet`)).text();
+    const sheet = (await srv.api("GET", `/api/sessions/${sessionId}/print/keysheet`)).text;
     expect(sheet.match(/FAKE PLAYER/g)).toHaveLength(3);
-    const cards = (await (await fetch(`${srv.url}/api/sessions/${sessionId}/cards`)).json()) as {
-      seats: number[];
-    };
-    expect(cards.seats).toEqual([4]);
+    expect((await srv.api("GET", `/api/sessions/${sessionId}/cards`)).json.seats).toEqual([4]);
   });
 
-  it("refuses fake players outside the lobby, in simulated sessions and on bound seats", async () => {
+  it("answers a refused fake:add with the reason (the rules themselves: seatMonitor.test.ts)", async () => {
     await expect(fac.cmd("fake:add", {})).rejects.toThrow(/lobby/);
+    // left unfinished: on the restart below, both databases hold an unfinished session
     await fac.cmd("session:create", { scenarioId: "demo", config: { players: "simulated" } });
     await expect(fac.cmd("fake:add", {})).rejects.toThrow(/simulated session/);
-    await fac.cmd("session:create", { scenarioId: "demo", config: { seatCount: 2 } });
-    await fac.cmd("fake:add", { seats: [1] });
-    await expect(fac.cmd("fake:add", { seats: [1] })).rejects.toThrow(/already bound/);
-    await fac.cmd("session:abort", { reason: "test" });
   });
 
   it("only server-created clients count as fake; a fake seat ends with its unbinding", async () => {
@@ -167,13 +158,16 @@ describe("fake players (real sessions)", () => {
       expect(ctx.hub.session?.sessionId).toBe(id);
       const st = () => ctx.hub.session!.state;
       const before = st().actions.length;
-      const deadline = Date.now() + 10_000;
-      while ((st().paused || st().actions.length <= before + 2) && Date.now() < deadline) {
-        if (st().paused && Object.values(st().seats).every((s) => s.connected)) ctx.hub.session!.resume();
-        await new Promise((r) => setTimeout(r, 50));
-      }
+      // the restart paused the game; resume once both fake players are back
+      await vi.waitFor(
+        () => {
+          if (st().paused && Object.values(st().seats).every((s) => s.connected)) ctx.hub.session!.resume();
+          expect(st().paused).toBe(false);
+          expect(st().actions.length).toBeGreaterThan(before + 2);
+        },
+        { timeout: 10_000, interval: 50 },
+      );
       expect(Object.values(st().seats).every((s) => s.connected && s.fake)).toBe(true);
-      expect(st().actions.length).toBeGreaterThan(before + 2);
     } finally {
       await ctx.close();
     }

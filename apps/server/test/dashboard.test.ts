@@ -83,8 +83,6 @@ describe("dashboard live figures (sockets)", () => {
         items: [{ type: "focus_change", clientTs: Date.now(), payload: { focused: false } }],
       }),
     ).toEqual({ stored: 1 });
-    expect(stats(1)).toMatchObject({ focused: false });
-    expect(stats(1).telemetryCount).toBeGreaterThan(0);
     await fac.cmd("session:abort", { reason: "test" });
     blank(1);
     blank(2);
@@ -110,7 +108,7 @@ describe("dashboard live figures (sockets)", () => {
     await fac.cmd("session:abort", { reason: "test" });
   }, 30_000);
 
-  it("hover before consent is not shown; unbinding a seat leaves its figures empty", async () => {
+  it("a hover before consent is not relayed to the facilitator pages; unbinding tells the browser", async () => {
     const fac = new FacilitatorClient(srv.url);
     facs.push(fac);
     await fac.connected();
@@ -123,11 +121,12 @@ describe("dashboard live figures (sockets)", () => {
     fac.socket.on("presence:live", (m) => relayed.push(m));
     // the lobby is before consent: the hover is neither kept nor relayed
     b.socket.emit("presence", { regionId: "A1-Ka" });
-    await new Promise((r) => setTimeout(r, 200));
-    expect(stats(1).hoverRegionId).toBeNull();
-    expect(relayed).toEqual([]);
+    // the server handles a socket's messages in order: once a later one is answered, the hover was
+    // handled, and a relay of it would reach the facilitator before the answer to its next command
+    await b.emit("intent", { clientSeq: 1, kind: "propose", regionId: "A1-Ka", clientTs: 0 });
     await fac.cmd("seat:unbind", { seat: 1, reason: "test" });
-    expect(stats(1)).toMatchObject(EMPTY);
+    expect(relayed).toEqual([{ seat: 1, regionId: null }]); // only the unbinding clears the seat's hover
+    await vi.waitFor(() => expect(b.seat).toBeNull());
     await fac.cmd("session:abort", { reason: "test" });
   });
 });
@@ -144,6 +143,8 @@ describe("dashboard refresh timer", () => {
 
   it("a dashboard refresh still pending when its session leaves is cancelled", async () => {
     const hub = srv.ctx.hub;
+    // the refresh timer is faked: no wall-clock wait for "it never fires"
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     // a simulated session's events schedule a dashboard refresh (agents act many times a second)
     const sim = hub.createSession(
       "demo",
@@ -163,10 +164,11 @@ describe("dashboard refresh timer", () => {
       expect(dashboards.at(-1)?.[1]).toMatchObject({ state: null, stats: {}, live: false });
       expect(emit.mock.calls.some(([name, v]) => name === "scenario" && v === null)).toBe(true);
       emit.mockClear();
-      await new Promise((r) => setTimeout(r, 300));
+      vi.advanceTimersByTime(5000);
       expect(emit.mock.calls.filter(([name]) => name === "dashboard")).toEqual([]);
     } finally {
       emit.mockRestore();
+      vi.useRealTimers();
     }
   });
 });

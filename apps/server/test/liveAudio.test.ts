@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { cpSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { cpSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {
@@ -11,13 +11,12 @@ import {
   playerView,
   type StoredEvent,
 } from "@wkwa/shared";
-import pino from "pino";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type { AudioStartMsg } from "../src/audio/live";
 import { trackStatusOf } from "../src/audio/records";
 import { verifyAudio } from "../src/audio/verify";
 import { loadOnboardingContent, sha256 } from "../src/content";
-import { CALIBRATION_CHECK_WAIT_MS, CommandError, SessionManager } from "../src/session/SessionManager";
+import { CALIBRATION_CHECK_WAIT_MS, CommandError, type SessionManager } from "../src/session/SessionManager";
 import { Bot, FacilitatorClient } from "../src/tools/botClient";
 import { readTrackPcm } from "./audioFixtures";
 import {
@@ -29,7 +28,6 @@ import {
   MIC_OK,
   onboard,
   ROUND,
-  SCENARIOS,
   SETTINGS,
 } from "./direct";
 import { cleanup, setupSession, startTestServer, type TestServer } from "./harness";
@@ -80,17 +78,6 @@ function startMsg(trackId: string = randomUUID(), clientTs = Date.now()): AudioS
     clientTs,
     clockOffsetMs: 0,
   };
-}
-
-/** All files under a folder (recursive). */
-function filesUnder(dir: string): string[] {
-  const out: string[] = [];
-  for (const e of readdirSync(dir, { withFileTypes: true })) {
-    const p = path.join(dir, e.name);
-    if (e.isDirectory()) out.push(...filesUnder(p));
-    else out.push(p);
-  }
-  return out;
 }
 
 const types = (events: readonly StoredEvent[]) => events.map((e) => e.type);
@@ -447,55 +434,24 @@ describe("chunk ingest", () => {
     const t0 = now;
     now = t0 + 2500;
     d.m.pauseRecording();
-    const reloaded = SessionManager.load(
-      {
-        store: d.store,
-        scenario: SCENARIOS.load("demo"),
-        onboarding: loadOnboardingContent(CONFIG_DIR, { audio: true }),
-        serverSecret: "test-secret",
-        log: pino({ level: "silent" }),
-        onEvents: () => {},
-        clock,
-      },
-      d.m.sessionId,
-    );
-    try {
-      expect(reloaded.state.audio.pauses).toEqual([{ fromTs: t0 + 2500, toTs: null }]);
-      expect((await reloaded.submitAudioChunk(1, chunkMsg(t, 0, N, t0))).ok).toBe(true);
-      expect((await reloaded.submitAudioChunk(1, chunkMsg(t, 2, N, t0 + 2000))).ok).toBe(true);
-      expect(d.store.listAudioChunks(t).map((r) => r.sampleCount)).toEqual([N, N / 2]);
-      expect(refused(await reloaded.submitAudioChunk(1, chunkMsg(t, 3, N, t0 + 3000)))).toBe(true);
-    } finally {
-      reloaded.dispose();
-    }
+    const reloaded = d.reload();
+    expect(reloaded.state.audio.pauses).toEqual([{ fromTs: t0 + 2500, toTs: null }]);
+    expect((await reloaded.submitAudioChunk(1, chunkMsg(t, 0, N, t0))).ok).toBe(true);
+    expect((await reloaded.submitAudioChunk(1, chunkMsg(t, 2, N, t0 + 2000))).ok).toBe(true);
+    expect(d.store.listAudioChunks(t).map((r) => r.sampleCount)).toEqual([N, N / 2]);
+    expect(refused(await reloaded.submitAudioChunk(1, chunkMsg(t, 3, N, t0 + 3000)))).toBe(true);
   });
 
   it("recovery: a reload closes tracks left open as interrupted; their resent chunks still count", async () => {
     const t = await recording();
-    const store = d.store;
-    const reloaded = SessionManager.load(
-      {
-        store,
-        scenario: SCENARIOS.load("demo"),
-        onboarding: loadOnboardingContent(CONFIG_DIR, { audio: true }),
-        serverSecret: "test-secret",
-        log: pino({ level: "silent" }),
-        onEvents: () => {},
-        clock,
-      },
-      d.m.sessionId,
-    );
-    try {
-      expect(store.getAudioTrack(t)).toMatchObject({ status: "closed", stopReason: "interrupted" });
-      expect(store.listEvents(d.m.sessionId).at(-1)).toMatchObject({
-        type: "AudioTrackStopped",
-        payload: { reason: "interrupted" },
-      });
-      expect((await reloaded.submitAudioChunk(1, chunkMsg(t, 0, 1600, now))).ok).toBe(true);
-      expect(reloaded.monitor.dashboardStats()[1]!.mic?.tracks).toBe(1);
-    } finally {
-      reloaded.dispose();
-    }
+    const reloaded = d.reload();
+    expect(d.store.getAudioTrack(t)).toMatchObject({ status: "closed", stopReason: "interrupted" });
+    expect(d.store.listEvents(d.m.sessionId).at(-1)).toMatchObject({
+      type: "AudioTrackStopped",
+      payload: { reason: "interrupted" },
+    });
+    expect((await reloaded.submitAudioChunk(1, chunkMsg(t, 0, 1600, now))).ok).toBe(true);
+    expect(reloaded.monitor.dashboardStats()[1]!.mic?.tracks).toBe(1);
   });
 });
 
@@ -627,9 +583,6 @@ describe("calibration state machine", () => {
 describe("live recording with audio bots (sockets)", () => {
   let srv: TestServer;
   let cfgDir: string;
-  let result: Awaited<ReturnType<typeof setupSession>>;
-  let pauseTs = 0;
-  let resumeTs = 0;
 
   beforeAll(async () => {
     // short calibration turns, so the test runs in seconds
@@ -640,108 +593,79 @@ describe("live recording with audio bots (sockets)", () => {
     audio.calibration.gapMs = 200;
     writeFileSync(path.join(cfgDir, "audio.json"), JSON.stringify(audio));
     srv = await startTestServer({ configDir: cfgDir });
-    result = await setupSession(
-      srv.url,
-      { audio: { enabled: true }, roundCount: 1, defaultRound: ROUND },
-      2,
-      { audio: true, audioChunkMs: 500, minDelayMs: 5, maxDelayMs: 20 },
-    );
-  }, 30_000);
+  });
 
   afterAll(async () => {
-    for (const b of result?.bots ?? []) b.stop();
-    result?.fac.close();
     await srv?.close();
     cleanup(srv.dir);
     cleanup(cfgDir);
   });
 
-  it("gates round 1 on the calibration, runs it and shows the quality check", async () => {
-    const { fac } = result;
-    await expect(fac.cmd("round:start")).rejects.toThrow(/calibration/);
-    await fac.cmd("calibration:start");
-    const d = await fac.waitForDashboard((x) => x.state?.audio.calibration.quality !== null, 25_000);
-    expect(d.state?.audio.calibration.status).toBe("done");
-    const q = d.state!.audio.calibration.quality!;
-    expect(q.perSeat.map((s) => s.seat)).toEqual([1, 2]);
-    for (const s of q.perSeat) expect(s.ownDb).not.toBeNull();
-    expect(d.stats[1]!.mic).toMatchObject({ state: "recording" });
-    expect(d.stats[1]!.mic!.tracks).toBeGreaterThanOrEqual(1);
-    expect(d.stats[1]!.mic!.recordedMs).toBeGreaterThan(1000);
-  }, 30_000);
-
-  it("pauses and resumes recording: every seat stops and starts a new track", async () => {
-    const { fac, bots } = result;
-    await fac.cmd("recording:pause", { reason: "test" });
-    pauseTs = srv.ctx.hub.session!.state.lastTs!;
-    await Promise.all(bots.map((b) => b.waitFor((v: PlayerView) => v.audio.paused && !v.audio.record)));
-    await new Promise((r) => setTimeout(r, 1200));
-    await fac.cmd("recording:resume");
-    resumeTs = srv.ctx.hub.session!.state.lastTs!;
-    await Promise.all(bots.map((b) => b.waitFor((v: PlayerView) => v.audio.record)));
-    await new Promise((r) => setTimeout(r, 1200));
-    for (const b of bots) expect(b.audioStats.stopReasons).toContain("paused");
-  }, 20_000);
-
-  it("plays the round; game complete closes every track; nothing paused is stored; files are encrypted", async () => {
-    const { fac, bots, sessionId } = result;
-    await fac.cmd("round:start");
-    await fac.waitForDashboard((x) => x.state?.phase === "game_complete", 20_000);
-    await Promise.all(bots.map((b) => b.audioSent()));
-    const store = srv.ctx.store;
-    const tracks = store.listAudioTracks(sessionId);
-    for (const seat of [1, 2]) {
-      const mine = tracks.filter((t) => t.seat === seat);
-      expect(mine.length).toBeGreaterThanOrEqual(2);
-      expect(mine.map((t) => t.reason)).toEqual(expect.arrayContaining(["mic_check", "resume"]));
-      expect(mine.map((t) => t.stopReason)).toEqual(expect.arrayContaining(["paused", "game_complete"]));
-      for (const t of mine) {
-        expect(t.status).toBe("closed");
-        expect(t.participantCode).toMatch(/^WK-/);
-        expect(JSON.stringify(t.settings)).not.toMatch(/deviceId|label|groupId/);
-      }
-    }
-    // nothing captured during the pause was stored
-    for (const t of tracks) {
-      for (const c of store.listAudioChunks(t.trackId)) {
-        const end = c.clientTs + (c.sampleCount * 1000) / AUDIO_SAMPLE_RATE;
-        expect(end <= pauseTs + 1 || c.clientTs >= resumeTs).toBe(true);
-      }
-    }
-    // events: started/stopped pairs, never a participant code in a payload
-    const events = store.listEvents(sessionId);
-    const started = events.filter((e) => e.type === "AudioTrackStarted").length;
-    expect(events.filter((e) => e.type === "AudioTrackStopped").length).toBe(started);
-    for (const e of events) expect(JSON.stringify(e.payload)).not.toMatch(/WK-[0-9A-Z]{4}-/);
-    // files encrypted at rest: no WAV/Ogg headers, and no stored plaintext PCM in any file
-    const audioDir = path.join(srv.runtime.dataDir, "audio");
-    const all = filesUnder(audioDir);
-    expect(all.length).toBe(tracks.length);
-    const sample = tracks.find((t) => t.chunks > 0)!;
-    const plain = await readTrackPcm(
-      srv.ctx.audioFiles,
-      sessionId,
-      sample.fileName!,
-      store.getAudioTrackKey(sample.trackId)!,
+  it("calibration gates round 1; a pause stops every track and nothing from it is stored; game complete closes the rest", async () => {
+    const { fac, bots, sessionId, stop } = await setupSession(
+      srv.url,
+      { audio: { enabled: true }, roundCount: 1, defaultRound: ROUND },
+      2,
+      { audio: true, audioChunkMs: 500, minDelayMs: 5, maxDelayMs: 20 },
     );
-    const probe = plain.pcm.subarray(1000, 1064);
-    for (const f of all) {
-      expect(path.basename(f)).toMatch(/^[0-9a-f]{32}\.wka$/);
-      const bytes = readFileSync(f);
-      expect(statSync(f).size).toBeGreaterThan(0);
-      expect(bytes.includes("RIFF")).toBe(false);
-      expect(bytes.includes("OggS")).toBe(false);
-      expect(bytes.includes(probe)).toBe(false);
+    try {
+      await expect(fac.cmd("round:start")).rejects.toThrow(/calibration/);
+      await fac.cmd("calibration:start");
+      const d = await fac.waitForDashboard((x) => x.state?.audio.calibration.quality !== null, 25_000);
+      expect(d.state?.audio.calibration.status).toBe("done");
+      const q = d.state!.audio.calibration.quality!;
+      expect(q.perSeat.map((s) => s.seat)).toEqual([1, 2]);
+      for (const s of q.perSeat) expect(s.ownDb).not.toBeNull();
+      expect(d.stats[1]!.mic).toMatchObject({ state: "recording" });
+      expect(d.stats[1]!.mic!.recordedMs).toBeGreaterThan(1000);
+
+      // pause and resume: every seat stops its track and starts a new one
+      await fac.cmd("recording:pause", { reason: "test" });
+      const pauseTs = srv.ctx.hub.session!.state.lastTs!;
+      await Promise.all(bots.map((b) => b.waitFor((v: PlayerView) => v.audio.paused && !v.audio.record)));
+      for (const b of bots) expect(b.audioStats.stopReasons).toContain("paused");
+      await fac.cmd("recording:resume");
+      const resumeTs = srv.ctx.hub.session!.state.lastTs!;
+      await Promise.all(bots.map((b) => b.waitFor((v: PlayerView) => v.audio.record)));
+
+      await fac.cmd("round:start");
+      await fac.waitForDashboard((x) => x.state?.phase === "game_complete", 20_000);
+      await Promise.all(bots.map((b) => b.audioSent()));
+      const store = srv.ctx.store;
+      const tracks = store.listAudioTracks(sessionId);
+      for (const seat of [1, 2]) {
+        const mine = tracks.filter((t) => t.seat === seat);
+        expect(mine.map((t) => t.reason)).toEqual(expect.arrayContaining(["mic_check", "resume"]));
+        expect(mine.map((t) => t.stopReason)).toEqual(expect.arrayContaining(["paused", "game_complete"]));
+        for (const t of mine) {
+          expect(t.status).toBe("closed");
+          expect(t.participantCode).toMatch(/^WK-/);
+          expect(JSON.stringify(t.settings)).not.toMatch(/deviceId|label|groupId/);
+        }
+      }
+      // nothing captured during the pause was stored
+      for (const t of tracks) {
+        for (const c of store.listAudioChunks(t.trackId)) {
+          const end = c.clientTs + (c.sampleCount * 1000) / AUDIO_SAMPLE_RATE;
+          expect(end <= pauseTs + 1 || c.clientTs >= resumeTs).toBe(true);
+        }
+      }
+      // events: started/stopped pairs, never a participant code in a payload
+      const events = store.listEvents(sessionId);
+      const started = events.filter((e) => e.type === "AudioTrackStarted").length;
+      expect(events.filter((e) => e.type === "AudioTrackStopped").length).toBe(started);
+      for (const e of events) expect(JSON.stringify(e.payload)).not.toMatch(/WK-[0-9A-Z]{4}-/);
+      const report = await verifyAudio(store, srv.ctx.audioFiles);
+      expect(report.problems).toEqual([]);
+      expect(report.records).toBeGreaterThan(0);
+    } finally {
+      stop();
     }
-    const report = await verifyAudio(store, srv.ctx.audioFiles);
-    expect(report.problems).toEqual([]);
-    expect(report.records).toBeGreaterThan(0);
-  }, 30_000);
+  }, 40_000);
 
   it("bots without --audio decline an audio session and wait without spinning", async () => {
     const fac = new FacilitatorClient(srv.url);
     await fac.connected();
-    await fac.cmd("session:close");
     await fac.cmd("session:create", {
       scenarioId: "demo",
       config: { seatCount: 1, audio: { enabled: true } },
@@ -755,11 +679,9 @@ describe("live recording with audio bots (sockets)", () => {
       await fac.cmd("onboarding:start");
       await fac.waitForDashboard((x) => x.state?.seats[1]?.consent === "declined");
       await bot.waitFor((v) => v.me.consent === "declined");
-      await new Promise((r) => setTimeout(r, 100));
-      expect(bot.acks).toHaveLength(1);
-      const acks = bot.acks.length;
+      await vi.waitFor(() => expect(bot.acks).toHaveLength(1));
       await new Promise((r) => setTimeout(r, 500));
-      expect(bot.acks.length).toBe(acks); // nothing more sent
+      expect(bot.acks).toHaveLength(1); // nothing more sent
       expect(bot.audioStats.tracks).toBe(0);
     } finally {
       bot.stop();

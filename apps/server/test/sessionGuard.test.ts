@@ -116,23 +116,31 @@ async function run(guard: SessionGuard, op: string) {
 }
 
 describe("SessionGuard: may this operation change the session now?", () => {
-  describe.each(ENDED_PHASES.map((p) => [p]))("attached, %s (not running)", (phase) => {
-    it.each(BUSY_TABLE)("%s while busy=%s → %s", async (op, busy, reason, message) => {
+  it.each(BUSY_TABLE)("attached but ended: %s while busy=%s → %s", async (op, busy, reason, message) => {
+    for (const phase of ENDED_PHASES) {
       const { guard } = setup({ sessionId: S, phase, codes: [CODE] }, busy);
       const v = await run(guard, op);
-      if (reason === null) expect(v.ok).toBe(true);
-      else expect(v).toEqual({ ok: false, status: 409, reason, sessionId: S, message });
-    });
+      if (reason === null) expect(v.ok, phase).toBe(true);
+      else expect(v, phase).toEqual({ ok: false, status: 409, reason, sessionId: S, message });
+    }
   });
 
-  describe.each(RUNNING_PHASES.map((p) => [p]))("attached, %s (running)", (phase) => {
-    it.each(BUSY_TABLE)("%s while busy=%s", async (op, busy) => {
-      const { guard } = setup({ sessionId: S, phase, codes: [CODE] }, busy);
-      const v = await run(guard, op);
-      // every operation checks the running session first, before any job or export
-      expect(v).toEqual({ ok: false, status: 409, sessionId: S, reason: "running", message: RUNNING[op] });
-    });
-  });
+  // every operation checks the running session first, before any job or export
+  it.each(RUNNING_PHASES.flatMap((phase) => Object.keys(RUNNING).map((op) => [phase, op] as const)))(
+    "attached, %s (running): %s is refused whatever is busy",
+    async (phase, op) => {
+      for (const busy of ["none", "attribution", "exporting", "both"] as const) {
+        const { guard } = setup({ sessionId: S, phase, codes: [CODE] }, busy);
+        expect(await run(guard, op), busy).toEqual({
+          ok: false,
+          status: 409,
+          sessionId: S,
+          reason: "running",
+          message: RUNNING[op],
+        });
+      }
+    },
+  );
 
   it.each(BUSY_TABLE)("not attached: %s while busy=%s → %s", async (op, busy, reason, message) => {
     for (const attached of [null, { sessionId: OTHER, phase: "round_active" as const }]) {
