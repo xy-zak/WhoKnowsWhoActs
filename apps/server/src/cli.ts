@@ -29,7 +29,14 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import readline from "node:readline/promises";
 import { parseArgs } from "node:util";
-import { EVENT_DEFS, type EventType, hasEnded, TELEMETRY_DEFS, type TelemetryType } from "@wkwa/shared";
+import {
+  type CodeOccurrence,
+  EVENT_DEFS,
+  type EventType,
+  hasEnded,
+  TELEMETRY_DEFS,
+  type TelemetryType,
+} from "@wkwa/shared";
 import { AudioFileStore, audioDirOf } from "./audio/fileStore";
 import { verifyAudio } from "./audio/verify";
 import { ScenarioLibrary } from "./content";
@@ -38,7 +45,7 @@ import { PersonalDataMap } from "./db/personalData";
 import { Store } from "./db/store";
 import { dbFile as dbFileOf, exportsDirFor } from "./db/stores";
 import { exportSession } from "./gdpr/exporter";
-import { obtainPassphrase, promptHidden } from "./passphrase";
+import { MIN_PASSPHRASE_LENGTH, obtainPassphrase, promptHidden } from "./passphrase";
 import { runtimeFromEnv } from "./runtime";
 
 const USAGE = `Usage: npm run cli -- <sessions|lookup|export|anonymise|erase|erasures|delete-session|deletions|delete-audio|audio-deletions|backup|rekey|verify> [options]
@@ -59,11 +66,23 @@ function duration(ms: number): string {
   return ms >= 60_000 ? `${(ms / 60_000).toFixed(1)} min` : `${Math.round(ms / 1000)} s`;
 }
 
-async function confirm(question: string): Promise<boolean> {
+async function ask(question: string): Promise<string> {
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-  const a = (await rl.question(`${question} [y/N] `)).trim().toLowerCase();
+  const a = (await rl.question(question)).trim();
   rl.close();
+  return a;
+}
+
+async function confirm(question: string): Promise<boolean> {
+  const a = (await ask(`${question} [y/N] `)).toLowerCase();
   return a === "y" || a === "yes";
+}
+
+function printOccurrences(occurrences: CodeOccurrence[]) {
+  for (const o of occurrences)
+    console.log(
+      `  ${o.sessionId}  seat ${o.seat ?? "?"}  events=${o.events} telemetry=${o.telemetry} audio=${o.audioTracks} tracks (${duration(o.audioMs)})`,
+    );
 }
 
 async function main() {
@@ -132,10 +151,7 @@ async function main() {
         const r = personalData.lookup(need(values.code, "code"));
         console.log(`Participant ${r.code}`);
         if (r.occurrences.length === 0) console.log("  no data found");
-        for (const o of r.occurrences)
-          console.log(
-            `  ${o.sessionId}  seat ${o.seat ?? "?"}  events=${o.events} telemetry=${o.telemetry} audio=${o.audioTracks} tracks (${duration(o.audioMs)})`,
-          );
+        printOccurrences(r.occurrences);
         for (const e of r.exports) console.log(`  contained in export ${e.id} (${e.kind}) → ${e.path}`);
         for (const p of r.previouslyErased) console.log(`  previously erased on ${p.executedWall}`);
         break;
@@ -161,10 +177,7 @@ async function main() {
             );
           break;
         }
-        for (const o of look.occurrences)
-          console.log(
-            `  ${o.sessionId}  seat ${o.seat ?? "?"}  events=${o.events} telemetry=${o.telemetry} audio=${o.audioTracks} tracks (${duration(o.audioMs)})`,
-          );
+        printOccurrences(look.occurrences);
         console.log(
           "If the server is running with one of these sessions attached, use the dashboard instead.",
         );
@@ -223,9 +236,7 @@ async function main() {
           "If the server is running with this session attached, use the manager (DATABASE) instead.",
         );
         if (!values.yes) {
-          const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-          const typed = (await rl.question(`Type the session id (${id}) to delete it permanently: `)).trim();
-          rl.close();
+          const typed = await ask(`Type the session id (${id}) to delete it permanently: `);
           if (typed !== id) {
             console.log("Cancelled.");
             break;
@@ -298,9 +309,7 @@ async function main() {
           );
         let typed = values.confirm;
         if (typed === undefined) {
-          const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-          typed = (await rl.question(`Type the session id (${id}) to delete its audio permanently: `)).trim();
-          rl.close();
+          typed = await ask(`Type the session id (${id}) to delete its audio permanently: `);
         }
         if (typed.trim() !== id) {
           console.log("Confirmation does not match the session id. Cancelled.");
@@ -349,7 +358,8 @@ async function main() {
       }
       case "rekey": {
         const a = await promptHidden("New passphrase: ");
-        if (a.length < 10) throw new Error("Use at least 10 characters.");
+        if (a.length < MIN_PASSPHRASE_LENGTH)
+          throw new Error(`Use at least ${MIN_PASSPHRASE_LENGTH} characters.`);
         const b = await promptHidden("Repeat new passphrase: ");
         if (a !== b) throw new Error("Passphrases do not match.");
         rekeyDatabase(db, a);

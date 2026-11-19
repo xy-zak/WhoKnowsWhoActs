@@ -1,6 +1,9 @@
 import { existsSync } from "node:fs";
 import readline from "node:readline";
 
+/** A new passphrase needs at least this many characters (and is typed twice). */
+export const MIN_PASSPHRASE_LENGTH = 10;
+
 /** Read a line from the terminal without echoing it. */
 export function promptHidden(question: string): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -41,8 +44,8 @@ export async function obtainPassphrase(dbFile: string): Promise<string> {
     console.log("Choose a strong passphrase. If you lose it, the data CANNOT be recovered.\n");
     for (;;) {
       const a = await promptHidden("New database passphrase: ");
-      if (a.length < 10) {
-        console.log("Please use at least 10 characters.");
+      if (a.length < MIN_PASSPHRASE_LENGTH) {
+        console.log(`Please use at least ${MIN_PASSPHRASE_LENGTH} characters.`);
         continue;
       }
       const b = await promptHidden("Repeat passphrase: ");
