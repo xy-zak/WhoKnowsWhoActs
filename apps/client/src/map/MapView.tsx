@@ -72,7 +72,10 @@ const IG = 4; // gap between sub-squares
 const SUB = (S - 2 * PAD - IG) / 2; // sub-square side
 const AXIS = 34; // room for column letters / row numbers
 
-export function boardBox(board: Board, axes: boolean): [number, number, number, number] {
+export function boardBox(
+  board: Pick<Board, "cols" | "rows">,
+  axes: boolean,
+): [number, number, number, number] {
   const m = axes ? AXIS : 6;
   return [
     0,
@@ -103,7 +106,9 @@ export function MapView(props: MapViewProps) {
     zoomable = false,
     markScale = 1,
   } = props;
-  const base = useMemo(() => boardBox(board, showAxes), [board, showAxes]);
+  // Keyed on the dimensions: every state message brings a new board object, and that must not reset the zoom.
+  const { cols, rows } = board;
+  const base = useMemo(() => boardBox({ cols, rows }, showAxes), [cols, rows, showAxes]);
   const [vb, setVb] = useState(base);
   const [hoverSquare, setHoverSquare] = useState<string | null>(null);
   const svgRef = useRef<SVGSVGElement>(null);
