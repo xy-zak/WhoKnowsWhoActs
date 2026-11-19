@@ -227,10 +227,15 @@ export function emptyCalibration(): CalibrationState {
   };
 }
 
+/** Does a session with this config record audio? Never a simulated one. */
+export function audioEnabled(config: Pick<SessionConfig, "players" | "audio">): boolean {
+  return config.audio.enabled && config.players !== "simulated";
+}
+
 /** Audio state of a new session (recording is never on for simulated sessions). */
 export function emptyAudioState(config?: SessionConfig): AudioState {
   return {
-    enabled: config ? config.audio.enabled && config.players !== "simulated" : AUDIO_CONFIG_DEFAULTS.enabled,
+    enabled: config ? audioEnabled(config) : AUDIO_CONFIG_DEFAULTS.enabled,
     requireCalibration: config ? config.audio.requireCalibration : AUDIO_CONFIG_DEFAULTS.requireCalibration,
     recordingPaused: false,
     calibration: emptyCalibration(),

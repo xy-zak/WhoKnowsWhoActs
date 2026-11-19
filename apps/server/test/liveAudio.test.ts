@@ -15,7 +15,8 @@ import {
 import pino from "pino";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { AudioFileStore } from "../src/audio/fileStore";
-import { trackStatusOf } from "../src/audio/status";
+import type { AudioStartMsg } from "../src/audio/live";
+import { trackStatusOf } from "../src/audio/records";
 import { verifyAudio } from "../src/audio/verify";
 import { loadOnboardingContent, ScenarioLibrary, sha256 } from "../src/content";
 import { openDatabase } from "../src/db/database";
@@ -73,7 +74,7 @@ function chunkMsg(trackId: string, seq: number, samples: number, clientTs: numbe
   };
 }
 
-function startMsg(trackId: string = randomUUID(), clientTs = Date.now()) {
+function startMsg(trackId: string = randomUUID(), clientTs = Date.now()): AudioStartMsg {
   return {
     trackId,
     reason: "mic_check" as const,
@@ -679,8 +680,8 @@ describe("live recording with audio bots (sockets)", () => {
     await expect(fac.cmd("round:start")).rejects.toThrow(/calibration/);
     await fac.cmd("calibration:start");
     const d = await fac.waitForDashboard((x) => x.state?.audio.calibration.quality !== null, 25_000);
-    expect(d.audio?.calibration.status).toBe("done");
-    const q = d.audio!.calibration.quality!;
+    expect(d.state?.audio.calibration.status).toBe("done");
+    const q = d.state!.audio.calibration.quality!;
     expect(q.perSeat.map((s) => s.seat)).toEqual([1, 2]);
     for (const s of q.perSeat) expect(s.ownDb).not.toBeNull();
     expect(d.stats[1]!.mic).toMatchObject({ state: "recording" });

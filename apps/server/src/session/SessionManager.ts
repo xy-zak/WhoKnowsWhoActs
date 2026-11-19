@@ -2,7 +2,6 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import {
   type ActionKind,
   AUDIO_CONSENT_ITEM,
-  type AudioSettings,
   activeSeats,
   agentSeed,
   applyEvent,
@@ -24,6 +23,7 @@ import {
   K_LABELS,
   type KLabel,
   type LabelPairing,
+  type MicCheckResult,
   micCheckApplies,
   type NewEvent,
   nextOnboardingStep,
@@ -91,18 +91,6 @@ const CALIBRATION_CHECK_POLL_MS = 500;
  * what arrived; a seat without audio is reported as such.
  */
 export const CALIBRATION_CHECK_WAIT_MS = 15_000;
-
-/** The mic check result, as it is logged (MicCheckCompleted). */
-export interface MicCheckResult {
-  passed: boolean;
-  attempts: number;
-  durationMs: number;
-  settings: AudioSettings;
-  noiseFloorDb: number;
-  speechDb: number;
-  speechMs: number;
-  clientTs: number;
-}
 
 /**
  * Owns ONE session: validates commands and intents, appends events to the

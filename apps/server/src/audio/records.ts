@@ -25,11 +25,19 @@ export const ATTRIBUTION_DERIVATIVE_KINDS = [
 ] as const;
 export type AttributionDerivativeKind = (typeof ATTRIBUTION_DERIVATIVE_KINDS)[number];
 
-/** Stop reasons after which a track did not end cleanly (the browser or its microphone went away). */
-const INTERRUPTED_STOP_REASONS: ReadonlySet<string> = new Set(["disconnect", "permission_lost", "error"]);
+/**
+ * Stop reasons after which a track did not end cleanly: the browser or its microphone went away, or
+ * the track was still open when the session was loaded again (`interrupted`, e.g. after a restart).
+ */
+const INTERRUPTED_STOP_REASONS: ReadonlySet<string> = new Set([
+  "disconnect",
+  "interrupted",
+  "permission_lost",
+  "error",
+]);
 const KNOWN_STOP_REASONS: ReadonlySet<string> = new Set(AUDIO_STOP_REASONS);
 
-/** DB status + stop reason → the REST status. Unknown stop reasons (e.g. a recovery after a restart) count as interrupted. */
+/** DB status + stop reason → the REST status. Unknown stop reasons count as interrupted too. */
 export function trackStatusOf(t: Pick<AudioTrackRow, "status" | "stopReason">): AudioTrackSummary["status"] {
   if (t.status === "deleted") return "deleted";
   if (t.status === "recording") return "open";
