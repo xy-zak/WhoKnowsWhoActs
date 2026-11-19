@@ -216,8 +216,8 @@ export function MicCheckScreen({ conn, view }: { conn: PlayerConnection; view: P
           <strong>Allow</strong>. Then read a short sentence aloud.
         </Callout>
       ) : (
-        <div className="col" style={{ gap: "var(--s3)" }}>
-          <div className="row" style={{ gap: "var(--s3)" }}>
+        <div className="col gap-3">
+          <div className="row gap-3">
             <span className="small upper muted">Your microphone</span>
             <MicLevelMeter conn={conn} state={st} />
           </div>
@@ -240,7 +240,7 @@ export function MicCheckScreen({ conn, view }: { conn: PlayerConnection; view: P
               >
                 {a.micCheckPhrase ?? "One, two, three, four, five."}
               </blockquote>
-              <span className="row" style={{ gap: "var(--s2)" }}>
+              <span className="row">
                 <span className="small upper muted">Speech heard</span>
                 <SpeechProgress ms={c.result?.speechMs ?? 0} need={need} />
               </span>

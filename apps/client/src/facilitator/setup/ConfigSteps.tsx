@@ -204,7 +204,7 @@ export function ScenarioStep({
             </div>
             <div className="row small">
               {K_LABELS.map((k) => (
-                <span key={k} className="row nowrap" style={{ gap: 4 }}>
+                <span key={k} className="row nowrap gap-1">
                   <LabelTag label={k} /> <span className="muted">{preview.views[k]?.name}</span>
                 </span>
               ))}
@@ -550,7 +550,7 @@ function SimulationSettings({ d, upd }: { d: Draft; upd: Upd }) {
 /** Real participants or simulated agents, with the agents' settings when simulated. */
 export function WhoPlaysStep({ d, upd }: { d: Draft; upd: Upd }) {
   return (
-    <div className="col" style={{ gap: "var(--s3)" }}>
+    <div className="col gap-3">
       <PlayerModeChoice d={d} upd={upd} />
       {d.config.players === "simulated" && <SimulationSettings d={d} upd={upd} />}
     </div>
@@ -565,7 +565,7 @@ export function PlayersStep({ d, upd }: { d: Draft; upd: Upd }) {
   const vis = (patch: Partial<SessionConfig["visibility"]>) =>
     setCfg(d, upd, { visibility: { ...c.visibility, ...patch } });
   return (
-    <div className="col" style={{ gap: "var(--s3)" }}>
+    <div className="col gap-3">
       <div className="grid-2" style={{ alignItems: "start" }}>
         <div className="col">
           <h3>Seats &amp; labels</h3>

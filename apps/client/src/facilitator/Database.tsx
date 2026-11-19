@@ -247,7 +247,7 @@ export function Database({
   const lastExportShown = lastExport?.players === db ? lastExport : null;
 
   return (
-    <div className="col" style={{ gap: "var(--s3)" }}>
+    <div className="col gap-3">
       <div className="row">
         <nav className="tabs subtabs" aria-label="Database">
           {DATABASES.map((d) => (
@@ -321,7 +321,7 @@ export function Database({
                   {s.scenarioId} v{s.scenarioVersion}
                 </td>
                 <td>
-                  <span className="row" style={{ gap: 4 }}>
+                  <span className="row gap-1">
                     {s.fakeSeats.length > 0 && (
                       <StatusTag
                         icon="fake"

@@ -520,7 +520,7 @@ function MicColumn({
           />
         )}
       </span>
-      <span className="row nowrap small" style={{ gap: 8 }}>
+      <span className="row nowrap small">
         {pending > 0 && (
           <span
             className={`row nowrap ${pendingWarn ? "t-warn" : "muted"}`}
@@ -712,11 +712,11 @@ export function SeatsPanel({
               <td className="small">
                 {st.round > 0 && s.bound ? (
                   <span className="col" style={{ gap: 0 }}>
-                    <span className="row nowrap" style={{ gap: 4 }} data-tip="Proposals used this round">
+                    <span className="row nowrap gap-1" data-tip="Proposals used this round">
                       <ActSwatch kind="propose" k={s.p ? `K${s.p[1]}` : null} />
                       <AsciiProgress used={quotaUsed(st, s.seat, "propose")} limit={pLim} />
                     </span>
-                    <span className="row nowrap" style={{ gap: 4 }} data-tip="Decisions used this round">
+                    <span className="row nowrap gap-1" data-tip="Decisions used this round">
                       <ActSwatch kind="decide" k={s.p ? `K${s.p[1]}` : null} />
                       <AsciiProgress used={quotaUsed(st, s.seat, "decide")} limit={dLim} />
                     </span>
@@ -727,7 +727,7 @@ export function SeatsPanel({
               </td>
               <td className="small">
                 {stats && s.bound && !s.withdrawn ? (
-                  <span className="row" style={{ gap: 4 }}>
+                  <span className="row gap-1">
                     {stats.focused === false && (
                       <StatusTag tone="warn" title="Game window lost focus">
                         unfocused

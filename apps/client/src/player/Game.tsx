@@ -393,12 +393,12 @@ function SquarePanel({
                 </td>
                 <td className="small">
                   {d.length > 0 && (
-                    <span className="row nowrap" style={{ gap: 4 }}>
+                    <span className="row nowrap gap-1">
                       <ActSwatch kind="decide" k={k} /> decided{showActors ? ` · ${actorsText(d)}` : ""}
                     </span>
                   )}
                   {p.length > 0 && (
-                    <span className="row nowrap" style={{ gap: 4 }}>
+                    <span className="row nowrap gap-1">
                       <ActSwatch kind="propose" k={k} /> proposed{showActors ? ` · ${actorsText(p)}` : ""}
                     </span>
                   )}
@@ -486,7 +486,7 @@ function StatusLine({
         Round {view.round}/{view.roundCount}
       </strong>
       <span className="faint">│</span>
-      <span className="row nowrap" style={{ gap: 4 }}>
+      <span className="row nowrap gap-1">
         <SeatDot seat={view.me.seat} /> <strong>SEAT {view.me.seat}</strong>
       </span>
       <RecordingTag conn={conn} view={view} />
@@ -541,7 +541,7 @@ function OthersPanel({ view }: { view: PlayerView }) {
   if (view.others.length === 0) return null;
   return (
     <Panel title="Other players" icon="seats">
-      <div className="col" style={{ gap: 4 }}>
+      <div className="col gap-1">
         {view.others.map((o) => (
           <div key={o.seat} className="row nowrap small">
             <SeatDot seat={o.seat} />
@@ -556,11 +556,7 @@ function OthersPanel({ view }: { view: PlayerView }) {
                 offline
               </StatusTag>
             ) : o.progress ? (
-              <span
-                className="muted row nowrap"
-                style={{ gap: 4 }}
-                data-tip={`Seat ${o.seat}'s quota used this round`}
-              >
+              <span className="muted row nowrap gap-1" data-tip={`Seat ${o.seat}'s quota used this round`}>
                 <ActSwatch kind="propose" /> {quotaText(o.progress.propose)} · <ActSwatch kind="decide" />{" "}
                 {quotaText(o.progress.decide)}
               </span>

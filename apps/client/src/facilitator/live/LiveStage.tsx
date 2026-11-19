@@ -583,7 +583,7 @@ export function LiveStage({ conn, now }: { conn: FacilitatorConnection; now: num
   const lc = lifecycle(st);
 
   return (
-    <div className="col" style={{ gap: "var(--s3)" }}>
+    <div className="col gap-3">
       <Panel title="Session" icon="live">
         <div className="row">
           <Stepper steps={lc.steps} current={lc.current} completed={lc.done} />
@@ -622,41 +622,20 @@ export function LiveStage({ conn, now }: { conn: FacilitatorConnection; now: num
           ))}
         </div>
       </Panel>
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "minmax(0, 3fr) minmax(320px, 2fr)",
-          gap: "var(--s3)",
-          alignItems: "start",
-        }}
-      >
+      <div className="split-3-2" style={{ gridTemplateColumns: "minmax(0, 3fr) minmax(320px, 2fr)" }}>
         <NextPanel conn={conn} st={st} now={now} onWrapUp={() => setWrapUp(true)} />
         <ToolsPanel conn={conn} st={st} onLabels={() => setLabels(true)} />
       </div>
       <CalibrationCard st={st} />
       <SeatsPanel conn={conn} dash={dash} scenario={scenario} now={now} />
       {scenario && (
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "minmax(0, 3fr) minmax(0, 2fr)",
-            gap: "var(--s3)",
-            alignItems: "start",
-          }}
-        >
+        <div className="split-3-2">
           <CompositeMap scenario={scenario} state={st} presence={fs.presence} onRevoke={confirmRevoke} />
           <PlayerMirrors scenario={scenario} state={st} presence={fs.presence} now={now} />
         </div>
       )}
       <Timeline events={fs.events} seats={seats} now={now} />
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "minmax(0, 3fr) minmax(0, 2fr)",
-          gap: "var(--s3)",
-          alignItems: "start",
-        }}
-      >
+      <div className="split-3-2">
         <EventLog events={fs.events} state={st} regionName={regionName} onRevoke={confirmRevoke} />
         <TelemetryFeed items={fs.telemetry} regionName={regionName} />
       </div>

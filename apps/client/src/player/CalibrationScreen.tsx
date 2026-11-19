@@ -85,7 +85,7 @@ export function CalibrationPendingScreen({ conn, view }: { conn: PlayerConnectio
         Each player in turn reads <strong>one sentence aloud</strong> from their screen (about 6 seconds),
         while everyone else stays quiet. This measures how loud each voice is on each microphone.
       </p>
-      <div className="row" style={{ gap: "var(--s3)" }}>
+      <div className="row gap-3">
         <span className="small upper muted">Your microphone</span>
         <MicLevelMeter conn={conn} state={snap.status.state} />
       </div>

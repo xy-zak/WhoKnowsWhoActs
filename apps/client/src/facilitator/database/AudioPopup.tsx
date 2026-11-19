@@ -266,7 +266,7 @@ export function AudioPopup({
       }
       done
     >
-      <div className="col" style={{ gap: "var(--s3)" }}>
+      <div className="col gap-3">
         {!view && !loadError && <span className="muted cursor">Loading</span>}
         <ErrorText text={loadError} />
         {view && (
@@ -302,14 +302,13 @@ export function AudioPopup({
                 <div className="row" style={{ alignItems: "flex-end", gap: "var(--s3)" }}>
                   <fieldset className="segmented">
                     <legend>Kind</legend>
-                    <div className="row" style={{ gap: "var(--s3)" }}>
+                    <div className="row gap-3">
                       {EXPORT_KINDS.map((k) => {
                         const off = k.id !== "raw" && !hasCleanTrack(view);
                         return (
                           <label
                             key={k.id}
-                            className="row nowrap small"
-                            style={{ gap: "var(--s1)" }}
+                            className="row nowrap small gap-1"
                             data-tip={
                               off ? `${k.tip}. No cleaned track yet: run the attribution first.` : k.tip
                             }
@@ -415,7 +414,7 @@ function SeatsPanel({
             return (
               <tr key={s.seat}>
                 <td>
-                  <span className="row nowrap" style={{ gap: "var(--s1)" }}>
+                  <span className="row nowrap gap-1">
                     <SeatDot seat={s.seat} />
                     <strong>SEAT {s.seat}</strong>
                   </span>
@@ -432,7 +431,7 @@ function SeatsPanel({
                   {fmtDuration(s.missingMs)}
                 </td>
                 <td>
-                  <span className="row nowrap" style={{ gap: "var(--s1)" }}>
+                  <span className="row nowrap gap-1">
                     {s.rawDeleted ? (
                       <StatusTag
                         icon="microphoneOff"
@@ -578,10 +577,10 @@ const AttributionResult = memo(function AttributionResult({
         </span>
       </div>
       <div className="grid-2" style={{ alignItems: "start" }}>
-        <div className="col" style={{ gap: "var(--s1)" }}>
+        <div className="col gap-1">
           <span className="label micro upper muted">Talk time</span>
           {bars.map((b) => (
-            <div key={b.seat} className="row nowrap small" style={{ gap: "var(--s2)" }}>
+            <div key={b.seat} className="row nowrap small">
               <SeatDot seat={b.seat} />
               <strong style={{ minWidth: "6ch" }}>SEAT {b.seat}</strong>
               <AsciiProgress
@@ -612,7 +611,7 @@ const AttributionResult = memo(function AttributionResult({
             {a.quality.perSeat.map((q) => (
               <tr key={q.seat}>
                 <td>
-                  <span className="row nowrap" style={{ gap: "var(--s1)" }}>
+                  <span className="row nowrap gap-1">
                     <SeatDot seat={q.seat} />
                     {q.seat}
                   </span>
@@ -661,12 +660,12 @@ const TimelinePanel = memo(function TimelinePanel({
   const at = (ts: number) => fmtDuration(ts - span.t0);
   return (
     <Panel title={`Speech timeline · ${segments.segments.length} segments`} icon="timeline" nested>
-      <div className="col" style={{ gap: "var(--s1)" }}>
+      <div className="col gap-1">
         <span className="hint">
           Who spoke when, from the latest attribution (times only, no audio). Hover a segment for its times.
         </span>
         {seats.map((seat) => (
-          <div key={seat} className="row nowrap small" style={{ gap: "var(--s2)" }}>
+          <div key={seat} className="row nowrap small">
             <SeatDot seat={seat} />
             <strong style={{ minWidth: "6ch" }}>SEAT {seat}</strong>
             <div
@@ -769,7 +768,7 @@ function PreviousExports({ view }: { view: AudioSessionView }) {
               <td>{x.seats.length ? x.seats.join(", ") : PLACEHOLDER}</td>
               <td>{x.files}</td>
               <td>
-                <span className="row nowrap" style={{ gap: "var(--s1)" }}>
+                <span className="row nowrap gap-1">
                   {x.onDisk ? (
                     <StatusTag tone="warn" icon="warning" tip="The WAV files are still in the exports folder">
                       on disk
@@ -904,7 +903,7 @@ function DeleteAudioForm({
       </p>
       <fieldset className="segmented">
         <legend>What to delete</legend>
-        <div className="col" style={{ gap: "var(--s2)" }}>
+        <div className="col">
           {(["raw", "all"] as const).map((s) => (
             <label key={s} className="check">
               <input

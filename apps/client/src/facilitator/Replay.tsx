@@ -188,7 +188,7 @@ export function Replay({
     .map((s) => s.seat);
 
   return (
-    <div className="col" style={{ gap: "var(--s3)" }}>
+    <div className="col gap-3">
       <Panel
         title={`Replay · ${data.sessionId}`}
         icon="replay"

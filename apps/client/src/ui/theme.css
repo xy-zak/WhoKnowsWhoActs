@@ -167,6 +167,23 @@ code,
   grid-template-columns: 1fr 1fr;
   gap: var(--s3);
 }
+/* live dashboard: main panel left, its companion right */
+.split-3-2 {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  gap: var(--s3);
+  align-items: start;
+}
+/* gap overrides for .row / .col (default --s2; after them, so they win) */
+.gap-1 {
+  gap: var(--s1);
+}
+.gap-3 {
+  gap: var(--s3);
+}
+.gap-4 {
+  gap: var(--s4);
+}
 .icon {
   flex: none;
   vertical-align: -0.2em;

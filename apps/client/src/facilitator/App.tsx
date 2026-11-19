@@ -102,7 +102,7 @@ export function App({ conn }: { conn: FacilitatorConnection }) {
   const mics = st ? micsSummary(st, micStatsOf(fs.dashboard?.stats)) : null;
 
   return (
-    <div className="app-shell col" style={{ gap: "var(--s2)" }}>
+    <div className="app-shell col">
       <header className="topbar">
         <span className="brand">Who Knows, Who Acts?</span>
         <span className="faint">│</span>

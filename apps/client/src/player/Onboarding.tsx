@@ -24,7 +24,7 @@ export function Page({
     <div style={{ maxWidth: 860, margin: "0 auto", padding: "var(--s5) var(--s4)" }} className="col">
       <OnboardingStepper v={view} current={step} />
       <Panel title={title} icon={icon}>
-        <div className="col" style={{ gap: "var(--s3)" }}>
+        <div className="col gap-3">
           {children}
           <div className="row" style={{ borderTop: "1px dashed var(--frame)", paddingTop: "var(--s3)" }}>
             {footer}
@@ -239,7 +239,7 @@ export function ConsentScreen({ conn, view }: { conn: PlayerConnection; view: Pl
           })}
         </div>
       ) : (
-        <div className="col" style={{ gap: "var(--s2)" }}>
+        <div className="col">
           {c.items.map((item) => (
             <div key={item.id}>{statement(item, (v) => setAnswers((a) => ({ ...a, [item.id]: v })))}</div>
           ))}
@@ -313,7 +313,7 @@ export function DemographicsScreen({ conn, view }: { conn: PlayerConnection; vie
       }
     >
       {form.intro && <p className="muted">{form.intro}</p>}
-      <div className="col" style={{ gap: "var(--s4)" }}>
+      <div className="col gap-4">
         {form.questions.map((q, qi) => (
           <fieldset key={q.id} style={{ border: "none", padding: 0, margin: 0 }}>
             <legend className="strong" style={{ marginBottom: "var(--s2)" }}>
