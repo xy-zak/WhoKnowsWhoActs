@@ -8,6 +8,7 @@ import {
   type PlayerAcks,
   type PlayerPayload,
   type PlayerView,
+  STOP_REASON_FOR,
   type TelemetryPayloadOf,
 } from "@wkwa/shared";
 import type {
@@ -29,8 +30,9 @@ import type { RecState } from "../ui/audioMeta";
  * server's PlayerView.audio and wires it to the socket. It lives on the PlayerConnection, not in
  * a component, because screens remount on every screen change (and twice under StrictMode).
  *
- * When recording runs (PlayerView.audio.record, which already folds in the consent hold, the
- * facilitator's pause, the phase, a skipped mic check and withdrawal):
+ * When recording runs (PlayerView.audio.record, the server's recording verdict: it folds in the
+ * consent hold, the facilitator's pause, the phase, a skipped mic check and withdrawal, and
+ * `notRecording` names the reason when it says no):
  *  - at the mic check, only after the participant clicked Start (a user gesture: Safari and
  *    Chrome start audio only from a click); the first track's reason is `mic_check`;
  *  - past the mic check (a reload), at once with reason `reload`; Chrome then usually waits for
@@ -127,22 +129,10 @@ export function atMicCheck(v: PlayerView | null): boolean {
   return !!v && v.phase === "onboarding" && !v.me.withdrawn && v.me.nextStep === "mic_check";
 }
 
-/** Why the running track stops when the server no longer wants recording. */
+/** Why the running track stops when the server no longer wants recording (its verdict's reason). */
 export function stopReasonFor(v: PlayerView | null): AudioStopReason {
-  if (!v) return "client_stop";
-  if (v.me.withdrawn) return "withdrawn";
-  if (v.audio.micCheck === "skipped") return "skipped";
-  if (v.audio.paused) return "paused";
-  switch (v.phase) {
-    case "game_complete":
-      return "game_complete";
-    case "closed":
-      return "closed";
-    case "aborted":
-      return "aborted";
-    default:
-      return "client_stop";
-  }
+  const why = v?.audio.notRecording;
+  return why ? STOP_REASON_FOR[why] : "client_stop";
 }
 
 /** The start reason of a track (falls back to `reload` / `mic_check` when there is no specific one). */
@@ -151,17 +141,17 @@ export function startReasonFor(v: PlayerView | null, next: AudioStartReason | nu
 }
 
 /**
- * What the recording indicator shows (null = the session records no audio). The facilitator's
- * pause and a skipped mic check win over the engine; then the engine's own state.
+ * What the recording indicator shows (null = the session records no audio). While the server's
+ * verdict says no, its reason: `skipped` for a skipped mic check, `paused` when only the
+ * facilitator's pause stops the seat, `off` otherwise. While it says yes, the engine's own state.
  */
 export function recStateFor(
   v: PlayerView | null,
   s: Pick<RecordingSnapshot, "status" | "gesture">,
 ): RecState | null {
   if (!v?.audio.enabled) return null;
-  const a = v.audio;
-  if (a.micCheck === "skipped") return "skipped";
-  if (!a.record) return a.paused ? "paused" : "off";
+  const why = v.audio.notRecording;
+  if (why) return why === "mic_check_skipped" ? "skipped" : why === "paused" ? "paused" : "off";
   const st = s.status.state;
   // idle: waiting for the mic check's Start click, or about to start
   if (st === "idle") return atMicCheck(v) && !s.gesture ? "off" : "requesting";

@@ -75,22 +75,20 @@ function audioSession(opts: { consented?: number[]; checked?: number[]; fake?: n
   );
   for (const seat of opts.consented ?? [1, 2, 3, 4]) {
     if (opts.fake?.includes(seat)) continue;
-    log.push(
-      "ConsentRecorded",
-      {
-        formVersion: "1",
-        textSha256: "x",
-        answers: { participate: true, [AUDIO_CONSENT_ITEM]: true },
-        consented: true,
-        durationMs: 1,
-      },
-      { seat, code: code(seat), actor: "player" },
-    );
+    log.push("ConsentRecorded", fullConsent(), { seat, code: code(seat), actor: "player" });
   }
   for (const seat of opts.checked ?? [])
     log.push("MicCheckCompleted", MIC_OK, { seat, code: code(seat), actor: "player" });
   return log;
 }
+
+const fullConsent = () => ({
+  formVersion: "1",
+  textSha256: "x",
+  answers: { participate: true, [AUDIO_CONSENT_ITEM]: true },
+  consented: true,
+  durationMs: 1,
+});
 
 const mic = (over: Partial<SeatMicStats> = {}): SeatMicStats => ({
   state: "recording",
@@ -154,6 +152,20 @@ describe("mic column state", () => {
     expect(micCell(st, st.seats[3]!, undefined).tip).toMatch(/after consent/);
     expect(micCell(st, st.seats[4]!, mic()).tip).toMatch(/fake/);
     expect(micCell(st, st.seats[2]!, mic()).tip).toMatch(/did not permit audio/);
+  });
+
+  it("names the seat's own reason before a pause: its consent, or the consent hold", () => {
+    const log = audioSession({ consented: [1, 2, 3] });
+    const tip = (seat: number) => micCell(log.state, log.state.seats[seat]!, undefined).tip;
+    expect(tip(1)).toMatch(/wait until every seat has finished consent/);
+    expect(tip(4)).toMatch(/after consent/);
+    // a pause does not hide why a seat would not record anyway
+    log.push("RecordingPaused", {}, { actor: "facilitator" });
+    expect(micCell(log.state, log.state.seats[1]!, mic()).state).toBe("recording");
+    expect(tip(1)).toMatch(/wait until every seat has finished consent/);
+    expect(tip(4)).toMatch(/after consent/);
+    log.push("ConsentRecorded", fullConsent(), { seat: 4, code: code(4), actor: "player" });
+    expect(micCell(log.state, log.state.seats[1]!, mic())).toMatchObject({ state: "paused", db: null });
   });
 
   it("shows the mic check status of consented seats", () => {

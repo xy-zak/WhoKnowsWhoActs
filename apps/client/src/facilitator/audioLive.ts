@@ -8,17 +8,18 @@ import {
   type CalibrationQuality,
   currentCalibrationTurn,
   isParticipant,
+  isRecordedSeat,
   type MicCheckStatus,
   micCheckApplies,
   micHasLevel,
   RECORDING_PHASES,
   type ReadonlyGameState,
   type ReadonlySeatState,
+  recordingVerdict,
   type SeatLiveStats,
   type SeatMicStats,
   type StoredEvent,
   seatList,
-  shouldRecord,
 } from "@wkwa/shared";
 import { fmtSigned, plural } from "../common/format";
 import type { RecState } from "../ui/audioMeta";
@@ -57,14 +58,15 @@ export interface MicCell {
 
 /** Should this seat record if recording were not paused? (The denominator of "mics n/m".) */
 export function recordingExpected(st: ReadonlyGameState, seat: ReadonlySeatState): boolean {
-  return shouldRecord({ ...st, audio: { ...st.audio, recordingPaused: false } }, seat);
+  const v = recordingVerdict(st, seat);
+  return v.record || v.reason === "paused";
 }
 
 /**
- * What the mic column shows for a seat: the browser's reported state, `paused` while the
- * facilitator paused recording, `skipped` when the mic check was skipped, `off` before the mic
- * check, for seats that are never recorded (fake player, agent, no audio consent, withdrawn) and
- * while there is no reading (`idle`, e.g. the browser disconnected).
+ * What the mic column shows for a seat, from its recording verdict: `off` (with why) for seats
+ * that are not recorded or past the game, `skipped` for a skipped mic check, `paused` while only
+ * the facilitator's pause stops the seat. Otherwise the browser's reported state, and `off` while
+ * there is no reading (`idle`, e.g. the browser disconnected, or before the mic check).
  */
 export function micCell(
   st: ReadonlyGameState,
@@ -72,33 +74,55 @@ export function micCell(
   mic: SeatMicStats | undefined,
 ): MicCell {
   const off = (tip: string): MicCell => ({ state: "off", tip, db: null, peakDb: null });
-  if (!st.audio.enabled) return off("This session does not record audio");
-  if (!seat.bound) return off("No client in this seat");
-  if (!isParticipant(seat)) return off("Not recorded: fake player or agent");
-  if (seat.withdrawn) return off("Not recorded: the participant withdrew");
-  if (seat.consent === "declined") return off("Not recorded: consent declined");
-  if (seat.consent === "given" && !seat.audioConsent)
-    return off("Not recorded: the participant did not permit audio recording");
-  if (seat.micCheck === "skipped")
-    return { state: "skipped", tip: "Mic check skipped: this seat is not recorded", db: null, peakDb: null };
-  // past the recording phases (the lobby comes before them)
-  if (st.phase !== "lobby" && !RECORDING_PHASES.has(st.phase))
-    return off("Not recording: the game is complete");
-  if (st.audio.recordingPaused)
-    return {
-      state: "paused",
-      tip: "Recording paused for everyone by the facilitator",
-      db: null,
-      peakDb: null,
-    };
-  if (!mic || mic.state === "idle")
-    return off(
-      seat.consent !== "given"
-        ? "Not recording yet: recording starts at the mic check, after consent"
-        : recordingExpected(st, seat)
-          ? "Not recording: no reading from this browser (disconnected, or the mic check has not opened the microphone yet)"
-          : "Not recording yet: the mic checks wait until every seat has finished consent",
-    );
+  const v = recordingVerdict(st, seat);
+  // why there is no reading to show (the seat is recorded now, or soon)
+  let idleTip =
+    "Not recording: no reading from this browser (disconnected, or the mic check has not opened the microphone yet)";
+  if (!v.record)
+    switch (v.reason) {
+      case "audio_off":
+        return off("This session does not record audio");
+      case "unbound":
+        return off("No client in this seat");
+      case "not_participant":
+        return off("Not recorded: fake player or agent");
+      case "withdrawn":
+        return off("Not recorded: the participant withdrew");
+      case "consent_declined":
+        return off("Not recorded: consent declined");
+      case "no_audio_consent":
+        return off("Not recorded: the participant did not permit audio recording (or was not asked)");
+      case "mic_check_skipped":
+        return {
+          state: "skipped",
+          tip: "Mic check skipped: this seat is not recorded",
+          db: null,
+          peakDb: null,
+        };
+      case "no_mic_check_step":
+        return off("Not recorded: this session's onboarding has no mic check");
+      case "game_complete":
+        return off("Not recording: the game is complete");
+      case "session_closed":
+        return off("Not recording: the session is closed");
+      case "session_aborted":
+        return off("Not recording: the session was aborted");
+      case "paused":
+        return {
+          state: "paused",
+          tip: "Recording paused for everyone by the facilitator",
+          db: null,
+          peakDb: null,
+        };
+      case "consent_pending":
+      case "not_started":
+        idleTip = "Not recording yet: recording starts at the mic check, after consent";
+        break;
+      case "mic_check_held":
+        idleTip = "Not recording yet: the mic checks wait until every seat has finished consent";
+        break;
+    }
+  if (!mic || mic.state === "idle") return off(idleTip);
   const level = micHasLevel(mic.state);
   return {
     state: mic.state,
@@ -346,15 +370,7 @@ export function wrapUpAudioCheck(
         kind: "issue",
         text: `Seat ${s.seat}: ${plural(gaps, "chunk")} missing from the stored audio.`,
       });
-    if (
-      tracks !== null &&
-      mine.length === 0 &&
-      !s.withdrawn &&
-      st.onboardingSteps.includes("mic_check") &&
-      micCheckApplies(st, s) &&
-      s.micCheck !== "skipped" &&
-      s.consent === "given"
-    )
+    if (tracks !== null && mine.length === 0 && isRecordedSeat(recordingVerdict(st, s)))
       lines.push({ seat: s.seat, kind: "issue", text: `Seat ${s.seat}: no audio recorded.` });
   }
   return { uploaded: tracks !== null && !lines.some((l) => l.kind === "upload"), lines };

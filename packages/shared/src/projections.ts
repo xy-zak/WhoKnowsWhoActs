@@ -2,6 +2,7 @@ import { parseCellId, type Scores } from "./board";
 import type { OnboardingContent, RoundSpec, StudyConfig } from "./config";
 import { actorOf, mapScoreOf, rulesFor } from "./game/scoring";
 import { type ActionKind, K_LABELS, type KLabel, type PLabel } from "./labels";
+import { type NotRecordingReason, recordingVerdict } from "./recordingVerdict";
 import { quotaLimit, quotaUsed } from "./rules/roundRules";
 import type { MapGeometry, Scenario } from "./scenario";
 import {
@@ -17,7 +18,6 @@ import {
   type ReadonlyGameState,
   type ReadonlySeatState,
   seatList,
-  shouldRecord,
   visibleActions,
 } from "./state";
 
@@ -113,8 +113,15 @@ export interface PlayerView {
 export interface PlayerAudioView {
   /** The session records audio. */
   enabled: boolean;
-  /** This browser should be capturing and uploading now (see shouldRecord). */
+  /** This browser should be capturing and uploading now (see recordingVerdict). */
   record: boolean;
+  /**
+   * Why this browser does not record now (null while `record` is true): the server's verdict, the
+   * first reason that applies in NOT_RECORDING_REASONS order. `paused` only when the facilitator's
+   * pause is the one thing stopping it. The browser maps it to its stop reason (STOP_REASON_FOR)
+   * and its recording indicator; it never rebuilds the reason from the other fields.
+   */
+  notRecording: NotRecordingReason | null;
   /** The facilitator paused recording for everyone. */
   paused: boolean;
   micCheck: MicCheckStatus;
@@ -163,9 +170,11 @@ function playerAudioView(
   const turn = currentCalibrationTurn(state);
   const myTurn = turn !== null && turn.seat === seat.seat;
   const check = a.enabled && nextStep === "mic_check" ? content?.micCheck : undefined;
+  const verdict = recordingVerdict(state, seat);
   return {
     enabled: a.enabled,
-    record: shouldRecord(state, seat),
+    record: verdict.record,
+    notRecording: verdict.record ? null : verdict.reason,
     paused: a.recordingPaused,
     micCheck: seat.micCheck,
     micCheckHeld: a.enabled && nextStep === "mic_check" && isMicCheckHeld(state),
