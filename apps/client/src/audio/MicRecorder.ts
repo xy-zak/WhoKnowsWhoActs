@@ -1,3 +1,4 @@
+import { AUDIO_CHUNK_SECONDS, AUDIO_MAX_CHUNK_SECONDS, AUDIO_SAMPLE_RATE } from "@wkwa/shared";
 import type { ChunkDraft } from "./chunker";
 import { classifyMicError, MicError, type MicErrorInfo, micSupportProblem } from "./errors";
 import { LevelMeter } from "./levels";
@@ -5,18 +6,15 @@ import { TrackPipeline } from "./pipeline";
 import { SendQueue } from "./queue";
 import { ClockMapper, roundTs, type TimingSample } from "./timing";
 import {
-  type AudioCaptureSettings,
   type AudioChunk,
   type AudioStartInfo,
   type AudioStopInfo,
-  DEFAULT_CHUNK_SECONDS,
   DEFAULT_MAX_PENDING_SECONDS,
-  MAX_CHUNK_SECONDS,
+  type EngineCaptureSettings,
   MIC_CONSTRAINTS,
   type MicLevel,
   type RecorderState,
   type SendResult,
-  TARGET_SAMPLE_RATE,
 } from "./types";
 import { batchFramesFor, CAPTURE_PROCESSOR, loadCaptureWorklet } from "./worklet";
 
@@ -63,7 +61,7 @@ export interface MicRecorderOptions {
   onLevel?(level: MicLevel): void;
   /** every change of state, track, error, needsGesture or muted */
   onState?(state: RecorderState, status: RecorderStatus): void;
-  /** default 5 s (max 30 s, to stay under Socket.IO's 1 MB message limit) */
+  /** default 5 s; at most 6 s (AUDIO_MAX_CHUNK_SECONDS: the server refuses longer chunks) */
   chunkSeconds?: number;
   /** unacked audio kept in memory before the oldest chunks are dropped; default 1800 s */
   maxPendingSeconds?: number;
@@ -145,9 +143,9 @@ function browserEnv(): RecorderEnv {
 }
 
 /** Copies only the processing settings: never deviceId, groupId or label. */
-export function pickSettings(s: MediaTrackSettings): AudioCaptureSettings {
+export function pickSettings(s: MediaTrackSettings): EngineCaptureSettings {
   const src = s as Record<string, unknown>;
-  const out: AudioCaptureSettings = {};
+  const out: EngineCaptureSettings = {};
   for (const k of ["sampleRate", "sampleSize", "channelCount", "latency"] as const) {
     const v = src[k];
     if (typeof v === "number" && Number.isFinite(v)) out[k] = v;
@@ -239,7 +237,7 @@ export class MicRecorder {
   private error: MicErrorInfo | null = null;
   private muted = false;
   private silentMs = 0;
-  private settings: AudioCaptureSettings = {};
+  private settings: EngineCaptureSettings = {};
   private statusKey = "";
   private disposed = false;
   /** frames that arrived for a track that had already been closed */
@@ -252,11 +250,11 @@ export class MicRecorder {
   constructor(options: MicRecorderOptions) {
     this.o = options;
     this.env = { ...browserEnv(), ...options.env };
-    const chunkSeconds = options.chunkSeconds ?? DEFAULT_CHUNK_SECONDS;
-    if (!(chunkSeconds > 0 && chunkSeconds <= MAX_CHUNK_SECONDS)) {
-      throw new RangeError(`MicRecorder: chunkSeconds must be in (0, ${MAX_CHUNK_SECONDS}]`);
+    const chunkSeconds = options.chunkSeconds ?? AUDIO_CHUNK_SECONDS;
+    if (!(chunkSeconds > 0 && chunkSeconds <= AUDIO_MAX_CHUNK_SECONDS)) {
+      throw new RangeError(`MicRecorder: chunkSeconds must be in (0, ${AUDIO_MAX_CHUNK_SECONDS}]`);
     }
-    this.chunkSamples = Math.round(chunkSeconds * TARGET_SAMPLE_RATE);
+    this.chunkSamples = Math.round(chunkSeconds * AUDIO_SAMPLE_RATE);
     if (this.chunkSamples < 1) throw new RangeError("MicRecorder: chunkSeconds is too small");
     this.noSignalMs = options.noSignalMs ?? 3000;
     const maxPendingSeconds = options.maxPendingSeconds ?? DEFAULT_MAX_PENDING_SECONDS;
@@ -271,12 +269,12 @@ export class MicRecorder {
         m.kind === "chunk"
           ? { samples: m.chunk.sampleCount, bytes: m.chunk.pcm.byteLength }
           : { samples: 0, bytes: 0 },
-      maxPendingSamples: Math.max(this.chunkSamples, Math.round(maxPendingSeconds * TARGET_SAMPLE_RATE)),
+      maxPendingSamples: Math.max(this.chunkSamples, Math.round(maxPendingSeconds * AUDIO_SAMPLE_RATE)),
       retryDelaysMs: options.retryDelaysMs,
       ackTimeoutMs: options.ackTimeoutMs,
     });
     this.level = new LevelMeter({
-      sampleRate: TARGET_SAMPLE_RATE,
+      sampleRate: AUDIO_SAMPLE_RATE,
       intervalMs: options.levelIntervalMs ?? 250,
       onLevel: (l, ms) => this.onLevelWindow(l, ms),
     });
@@ -330,7 +328,7 @@ export class MicRecorder {
   }
 
   /** What the browser applied to the current microphone (whitelisted, no device identifiers). */
-  get captureSettings(): AudioCaptureSettings {
+  get captureSettings(): EngineCaptureSettings {
     return { ...this.settings };
   }
 
@@ -817,7 +815,7 @@ export class MicRecorder {
     const info: AudioStartInfo = {
       trackId,
       reason: this.nextReason ?? this.startReason,
-      sampleRate: TARGET_SAMPLE_RATE,
+      sampleRate: AUDIO_SAMPLE_RATE,
       chunkSamples: this.chunkSamples,
       clientTs: roundTs(mapper.captureEpochMs(frame, inputLatencyMs, this.epochMinusPerf())),
       clockOffsetMs: this.o.clockOffsetMs(),
@@ -838,7 +836,7 @@ export class MicRecorder {
   }
 
   private onChunk(t: ActiveTrack, d: ChunkDraft) {
-    const frame = t.startFrame + (d.startSample * t.inputRate) / TARGET_SAMPLE_RATE;
+    const frame = t.startFrame + (d.startSample * t.inputRate) / AUDIO_SAMPLE_RATE;
     const chunk: AudioChunk = {
       trackId: t.trackId,
       seq: d.seq,
@@ -861,7 +859,7 @@ export class MicRecorder {
     this.track = null;
     t.pipeline.finish();
     const samples = t.pipeline.outputSamples;
-    const endFrame = t.startFrame + (samples * t.inputRate) / TARGET_SAMPLE_RATE;
+    const endFrame = t.startFrame + (samples * t.inputRate) / AUDIO_SAMPLE_RATE;
     this.queue.push({
       kind: "stop",
       info: {

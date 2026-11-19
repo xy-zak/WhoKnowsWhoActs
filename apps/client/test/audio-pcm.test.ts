@@ -1,7 +1,8 @@
+import { int16FromLeBytes, int16ToLeBytes } from "@wkwa/shared";
 import { describe, expect, it } from "vitest";
 import { Chunker } from "../src/audio/chunker";
 import { LevelMeter, MIN_DB, peakDb, rmsDb, roundDb, toDb } from "../src/audio/levels";
-import { floatToInt16, int16FromLittleEndian, int16ToLittleEndian, toInt16 } from "../src/audio/pcm";
+import { floatToInt16, toInt16 } from "../src/audio/pcm";
 import { TrackPipeline } from "../src/audio/pipeline";
 import { resampledLength } from "../src/audio/resampler";
 
@@ -24,13 +25,16 @@ describe("Int16 conversion", () => {
     expect(clipped).toBe(4);
   });
 
-  it("writes little-endian s16 bytes into an exact-size buffer", () => {
+  it("writes and reads little-endian s16 bytes", () => {
     const big = new Int16Array([9, 1, -2, 0x1234, -32768, 32767, 9]);
-    const bytes = int16ToLittleEndian(big.subarray(1, 6));
+    const bytes = int16ToLeBytes(big.subarray(1, 6));
     expect(bytes.byteLength).toBe(10);
-    expect(bytes.buffer.byteLength).toBe(10);
     expect(Array.from(bytes.subarray(0, 8))).toEqual([1, 0, 0xfe, 0xff, 0x34, 0x12, 0x00, 0x80]);
-    expect(Array.from(int16FromLittleEndian(bytes))).toEqual([1, -2, 0x1234, -32768, 32767]);
+    expect(Array.from(int16FromLeBytes(bytes))).toEqual([1, -2, 0x1234, -32768, 32767]);
+    // unaligned bytes are copied
+    const odd = new Uint8Array(11);
+    odd.set(bytes, 1);
+    expect(Array.from(int16FromLeBytes(odd.subarray(1)))).toEqual([1, -2, 0x1234, -32768, 32767]);
   });
 });
 
@@ -95,10 +99,11 @@ describe("chunker", () => {
     const [a, b] = c.push([0.5, -0.5, 0.5, -0.5, 1, 0, -1.2, 0]);
     expect(a).toMatchObject({ rmsDb: -6, peakDb: -6, clippedSamples: 0, sampleCount: 4 });
     expect(b).toMatchObject({ peakDb: 0, clippedSamples: 2, startSample: 4 });
-    expect(Array.from(int16FromLittleEndian(b!.pcm))).toEqual([32767, 0, -32768, 0]);
+    expect(Array.from(int16FromLeBytes(b!.pcm))).toEqual([32767, 0, -32768, 0]);
+    expect(b!.pcm.buffer.byteLength).toBe(8); // its own exact-size buffer
     // chunks own their bytes: later pushes do not change them
     c.push([0, 0, 0, 0]);
-    expect(Array.from(int16FromLittleEndian(a!.pcm))).toEqual([16384, -16384, 16384, -16384]);
+    expect(Array.from(int16FromLeBytes(a!.pcm))).toEqual([16384, -16384, 16384, -16384]);
   });
 
   it("rejects a bad chunk size", () => {

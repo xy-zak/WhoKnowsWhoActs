@@ -8,8 +8,6 @@
 
 export const INT16_FULL_SCALE = 32768;
 
-const LITTLE_ENDIAN = new Uint8Array(new Uint16Array([1]).buffer)[0] === 1;
-
 /** Converts one float sample; NaN becomes 0. */
 export function toInt16(x: number): number {
   const s = Math.round(x * INT16_FULL_SCALE);
@@ -19,7 +17,7 @@ export function toInt16(x: number): number {
 }
 
 /** True when the float sample is at or beyond 16-bit full scale. */
-export function isClipped(x: number): boolean {
+function isClipped(x: number): boolean {
   return isClippedInt16(toInt16(x));
 }
 
@@ -38,25 +36,4 @@ export function floatToInt16(input: ArrayLike<number>): { samples: Int16Array; c
     samples[i] = toInt16(x);
   }
   return { samples, clipped };
-}
-
-/** Copies Int16 samples into a new little-endian byte array (exactly samples.length × 2 bytes). */
-export function int16ToLittleEndian(samples: Int16Array): Uint8Array {
-  const out = new Uint8Array(samples.length * 2);
-  if (LITTLE_ENDIAN) {
-    out.set(new Uint8Array(samples.buffer, samples.byteOffset, samples.length * 2));
-  } else {
-    const view = new DataView(out.buffer);
-    for (let i = 0; i < samples.length; i++) view.setInt16(i * 2, samples[i]!, true);
-  }
-  return out;
-}
-
-/** Reads little-endian s16 bytes back into samples (for tests and tools). */
-export function int16FromLittleEndian(bytes: Uint8Array): Int16Array {
-  const n = Math.floor(bytes.length / 2);
-  const view = new DataView(bytes.buffer, bytes.byteOffset, n * 2);
-  const out = new Int16Array(n);
-  for (let i = 0; i < n; i++) out[i] = view.getInt16(i * 2, true);
-  return out;
 }

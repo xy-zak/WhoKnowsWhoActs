@@ -1,6 +1,6 @@
+import { AUDIO_SAMPLE_RATE } from "@wkwa/shared";
 import { type ChunkDraft, Chunker } from "./chunker";
 import { Resampler, type ResamplerOptions } from "./resampler";
-import { TARGET_SAMPLE_RATE } from "./types";
 
 export interface TrackPipelineOptions {
   /** native rate of the captured blocks */
@@ -27,7 +27,7 @@ export class TrackPipeline {
     this.resampler = new Resampler({
       ...o.resampler,
       inputRate: o.inputRate,
-      outputRate: TARGET_SAMPLE_RATE,
+      outputRate: AUDIO_SAMPLE_RATE,
     });
     this.chunker = new Chunker(o.chunkSamples);
   }

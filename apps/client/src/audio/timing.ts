@@ -109,11 +109,6 @@ export class ClockMapper {
     this.jumpMs = o.jumpMs ?? 250;
   }
 
-  /** True once at least one usable sample was observed. */
-  get ready(): boolean {
-    return this.ct.length > 0 || this.ot.length > 0;
-  }
-
   /** The track's method, fixed by its first sample. */
   get method(): TimingMethod {
     return this.locked ?? "current-time";
