@@ -371,12 +371,12 @@ sequenceDiagram
 7. **Key sheet:** strike through the line.
 8. **Confirm** to the participant, and keep a note of the request date and completion date (no reasons needed).
 
-**Why no table is missed.** Which database tables and columns hold participant codes, session ids and references to audio files is written down in one place, the personal-data map (`apps/server/src/db/personalData.ts`). The look-up, the erasure, session deletion and audio deletion all work from that list, and each runs as one database transaction with its register entry, followed by the vacuum and, only after the transaction succeeded, the removal of the audio files. A test checks that every table in the database is classified, that every table with a code, session id or audio-file column is on the list, and that after an erasure no column of any table still contains the code. A table added later without being put on the list makes that test fail.
+**Why no table is missed.** Which database tables and columns hold participant codes, session ids and references to audio files is written down in one place, the personal-data map (`apps/server/src/db/personalData.ts`). The look-up, the erasure, session deletion and audio deletion all work from that list, and each runs as one database transaction with its register entry, followed by the vacuum and, only after the transaction succeeded, the removal of the audio files. A test checks that every table in the database is classified, that every table with a code, session id or audio-file column is on the list, and that after an erasure no column of any table still contains the code. A table added later without being put on the list makes that test fail. When the manager refuses one of these operations is decided in one place too, the session guard (`apps/server/src/session/sessionGuard.ts`): a session counts as running while the server has it attached and it is not yet game complete, closed or aborted.
 
 **Deleting an entire session.** Use this for practice runs, aborted sessions, or a whole group withdrawing. Use *DATABASE → Delete* (type the session id to confirm) or `npm run cli -- delete-session --session S-…`.
 
 - It removes all of the session's events, telemetry (consent and demographics included), audio (rows, keys, then files) and export-register rows, and the session itself.
-- Running sessions are refused: close or abort first. In the manager it is also refused while a speaker attribution of the session is queued or running, or an audio export of it is being written.
+- In the manager, running sessions are refused: close or abort first. It is also refused while a speaker attribution of the session is queued or running, or an audio export of it is being written. The command-line tool cannot see the running server, so it only warns when the session has not ended; delete a session the server has attached from the manager.
 - Optionally it also deletes the session's export folders on this computer. Copies elsewhere must be deleted by hand.
 - An entry in `session_deletions` keeps the session id, row counts and the SHA-256 of its codes, so the deletion can be re-applied after restoring a backup.
 
@@ -385,7 +385,7 @@ sequenceDiagram
 - `--scope raw` deletes the session's raw recordings (keys first, then files) **and every cleaned track**, so no sound of that session remains in the store. It keeps the track rows (marked deleted, with their timing), the chunk rows (times and levels) and the results without sound: speech segments, talk time, quality report and leakage matrix. Attribution cannot be run again afterwards.
 - `--scope all` deletes every audio row of the session (tracks, chunks, all derived results including the speech segments, jobs) and its audio folder. Only the register entry stays, and the game data.
 - Exported WAV files are **not** deleted by either scope. DATABASE and the command list the audio exports still on disk; delete them by hand on every copy.
-- Running sessions are refused: close or abort first.
+- In the manager, running sessions are refused (close or abort first), and so is a session whose speaker attribution is queued or running or whose audio export is being written. The command-line tool only warns when the session has not ended (game complete, closed or aborted), because it cannot see the running server.
 - An entry in `audio_deletions` records the session, scope, date and counts (tracks, recorded time, chunks, derived results, jobs, files, bytes, seats as a bit mask), so the deletion can be re-applied after restoring a backup.
 
 **After restoring a backup.** A backup can predate an erasure or a deletion. After any restore, re-apply the registers:

@@ -4,7 +4,13 @@ History of [DATA-TYPES.md](../DATA-TYPES.md). Newest first. How entries are writ
 
 ## Unreleased
 
-### Not yet committed · documents `07fcc02` and `dc1a59f`
+### Not yet committed · documents `72c5778`
+
+- **Type:** Risk mitigation
+- **Change:** The `audio_tracks` row for `dropped_chunks` says the count is of chunks dropped while the track was recording, which can include an older track's chunks, and links the known limit in AUDIO.md § 13.
+- **Reason:** The per-track figure can be shifted between neighbouring tracks, so analysts should not read it as exact.
+
+### 2026-11-19 · `0126dec` · Docs: personal-data map, recording verdict, audio reason catalogue, seat gate
 
 - **Type:** Risk mitigation
 - **Change:** The hand-written `audio_tracks.status` row adds `track_ended` to the stop reasons shown as `interrupted` and names the audio reason catalogue as their source, pointing to the generated column text.

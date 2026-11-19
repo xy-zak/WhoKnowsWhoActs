@@ -4,7 +4,13 @@ History of [AUDIO.md](../AUDIO.md). Newest first. How entries are written: [READ
 
 ## Unreleased
 
-### Not yet committed · documents `07fcc02`, `088ab40`, `f5bce64` and `dc1a59f`
+### Not yet committed · documents `72c5778`, `07310cf`, `b940672`, `b13d925` and `6b1614b`
+
+- **Type:** Bug fix
+- **Change:** § 4 describes the recording controller as a state machine (idle, running, failed) and says a mic check in progress keeps listening when a detached session comes back. § 11 adds that audio deletion is also refused while an attribution runs, decided by one guard, and § 13 says per-track `dropped_chunks` is approximate.
+- **Reason:** The mic check asked for Start again after a detached session came back although the mic was recording, § 11 left out a refusal the code already made, and a drop can be counted on the wrong track (research validity).
+
+### 2026-11-19 · `0126dec` · Docs: personal-data map, recording verdict, audio reason catalogue, seat gate
 
 - **Type:** Bug fix
 - **Change:** § 8 describes the recording verdict (the fixed order in which the reason for not recording is chosen, and the new `notRecording` field), and the track tables now say that a lost microphone stops with `track_ended`, which counts as interrupted, also for tracks recorded earlier. § 4 and the code map point to the reason catalogue, the verdict and the personal-data map.

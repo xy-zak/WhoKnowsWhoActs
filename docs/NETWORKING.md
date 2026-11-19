@@ -400,11 +400,11 @@ Used by the dashboard's data pages and by scripts. **Localhost-only** unless `AD
 | `GET` | `/api/erasures` | Erasure register |
 | `GET` | `/api/exports` | Export registers of both databases (`players` per entry; audio exports have `kind` `audio`) |
 | `GET` | `/api/sessions/:id/audio` | Everything about a session's audio: tracks (no keys, no file names), cleaned tracks, jobs, deletion register, audio exports, per-seat totals, the attribution summary. A simulated session returns an empty summary. |
-| `POST` | `/api/sessions/:id/audio/attribution` | Queue a speaker attribution (`202` and the job). One queued or running job per session (409 otherwise); refused (409) once the raw audio is deleted. |
+| `POST` | `/api/sessions/:id/audio/attribution` | Queue a speaker attribution (`202` and the job). Refused (409) while the session is still running, once the raw audio is deleted, while an audio export of it is being written, and when a job of it is already queued or running (one per session). |
 | `GET` | `/api/audio/jobs/:jobId` | Job status: progress, the attribution summary when done (engine version, talk time, overlap, grade, and a quality block with the speech detector, calibration status, margin, drift and coverage per seat, ambiguous share and warnings), the error when failed |
 | `GET` | `/api/sessions/:id/audio/segments` | Who spoke when (JSON, timing only); empty until an attribution has run |
-| `POST` | `/api/sessions/:id/audio/export` | **Export audio**, the only way sound leaves the encrypted store. Body: `kind` (`raw`, `clean` or `both`), optional `seats`, optional `note`. Writes WAV files and a manifest to `exports/<sessionId>/audio-AU-….partial/`, registers the export, then renames the folder to `audio-AU-…/` (half-written folders are removed at the next start); no browser download. |
-| `POST` | `/api/sessions/:id/audio/delete` | Delete raw audio (`scope` `raw`) or all audio (`all`). The body must repeat the session id. Refused (409) while the session runs. |
+| `POST` | `/api/sessions/:id/audio/export` | **Export audio**, the only way sound leaves the encrypted store. Body: `kind` (`raw`, `clean` or `both`), optional `seats`, optional `note`. Writes WAV files and a manifest to `exports/<sessionId>/audio-AU-….partial/`, registers the export, then renames the folder to `audio-AU-…/` (half-written folders are removed at the next start); no browser download. Refused (409) while the session is still running and while a speaker attribution of it is queued or running. |
+| `POST` | `/api/sessions/:id/audio/delete` | Delete raw audio (`scope` `raw`) or all audio (`all`). The body must repeat the session id. Refused (409) while the session is still running, while a speaker attribution of it is queued or running, and while an audio export of it is being written. |
 
 ## 11. Security on the LAN
 

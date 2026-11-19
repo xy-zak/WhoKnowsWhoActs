@@ -16,4 +16,4 @@ Each design document in `docs/` has its own change log. An entry records the dat
 
 The logs are maintained with the `/update-docs` Claude Code skill (`.claude/skills/update-docs/SKILL.md`). It reviews new commits, updates the documents and adds the entries.
 
-Reviewed up to: `acb8a09`
+Reviewed up to: `6b1614b`

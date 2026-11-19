@@ -4,7 +4,13 @@ History of [ARCHITECTURE.md](../ARCHITECTURE.md). Newest first. How entries are 
 
 ## Unreleased
 
-### Not yet committed · documents `07fcc02`, `088ab40`, `86effaf`, `f5bce64` and `18f6ee0`
+### Not yet committed · documents `b13d925`, `72c5778`, `07310cf` and `6b1614b`
+
+- **Type:** Risk mitigation
+- **Change:** The code layout names `player/recordingMachine.ts` and `player/micCheckAttempt.ts`. In § 15 the *Busy check* row becomes *Session guard*: the one module that decides when deletion, erasure, attribution and audio export are refused, checking the running session first. The testing table adds the guard, controller-transition and mic-check tests.
+- **Reason:** The "is the session running or busy?" rule was written about five ways, and the recording controller's decisions were spread over many flags; the document must say where each now lives.
+
+### 2026-11-19 · `0126dec` · Docs: personal-data map, recording verdict, audio reason catalogue, seat gate
 
 - **Type:** Risk mitigation
 - **Change:** The glossary adds *recording verdict*, *audio reason catalogue*, *personal-data map* and *delivery policy*. The code layout adds `audioReasons.ts`, `recordingVerdict.ts`, `db/personalData.ts`, `net/delivery.ts` and `player/connection.ts` and drops `player/intents.ts` and the erasure files under `gdpr/`; the § 13 testing table and the § 15 state and projection rows follow.

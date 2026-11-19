@@ -4,7 +4,13 @@ History of [DATA-MANAGEMENT.md](../DATA-MANAGEMENT.md). Newest first. How entrie
 
 ## Unreleased
 
-### Not yet committed · documents `f5bce64`
+### Not yet committed · documents `b13d925` and `6b1614b`
+
+- **Type:** Risk mitigation
+- **Change:** § 10 says one session guard decides when the manager refuses erasure and deletion, and when a session counts as running. Session and audio deletion now say that the command-line tool only warns about a session that has not ended, and audio deletion lists the attribution and export refusals.
+- **Reason:** The text said running sessions are refused for the command-line tool too, which only warns because it cannot see the running server; the document was wrong about a privacy safeguard.
+
+### 2026-11-19 · `0126dec` · Docs: personal-data map, recording verdict, audio reason catalogue, seat gate
 
 - **Type:** Risk mitigation
 - **Change:** § 10 adds *Why no table is missed*: the tables that hold participant codes, session ids and audio files are listed once (the personal-data map), every look-up, erasure and deletion works from that list, and a test fails when a table is missing from it or still holds an erased code.

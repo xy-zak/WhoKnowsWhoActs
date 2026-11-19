@@ -103,7 +103,7 @@ flowchart LR
   EXP --> OUT(["exports/session/audio-AU-…/"])
 ```
 
-The browser side is a pure capture engine (`apps/client/src/audio/`) with no socket, UI or storage code: the clock, the senders and the browser APIs are injected, so it is unit-tested against a fake Web Audio environment. `RecordingController` (`apps/client/src/player/recording.ts`) connects it to the socket and to the facilitator's commands. On the server, `audio/live.ts` receives, `audio/fileStore.ts` stores, and `audio/attribution/` analyses. The analysis is pure functions with no file, database or network access; `audio/service.ts` and `audio/jobWorker.ts` feed it from the encrypted store. The speech model (Silero VAD 6.2.3, MIT licence, `apps/server/models/silero_vad.onnx`, about 2.3 MB) runs on `onnxruntime-node`, which only the job worker loads.
+The browser side is a pure capture engine (`apps/client/src/audio/`) with no socket, UI or storage code: the clock, the senders and the browser APIs are injected, so it is unit-tested against a fake Web Audio environment. `RecordingController` (`apps/client/src/player/recording.ts`) connects it to the socket and to the facilitator's commands; its decisions are a pure state machine (`player/recordingMachine.ts`). On the server, `audio/live.ts` receives, `audio/fileStore.ts` stores, and `audio/attribution/` analyses. The analysis is pure functions with no file, database or network access; `audio/service.ts` and `audio/jobWorker.ts` feed it from the encrypted store. The speech model (Silero VAD 6.2.3, MIT licence, `apps/server/models/silero_vad.onnx`, about 2.3 MB) runs on `onnxruntime-node`, which only the job worker loads.
 
 ## 4. Capture in the browser
 
@@ -131,7 +131,7 @@ flowchart TD
 | Levels | `audio:level` about 4 times a second, volatile, never stored. After a stop and once the queue has emptied, one last `audio:level` with `pendingChunks` 0 is sent, which the facilitator's wrap-up check relies on. |
 | Errors | `classifyMicError` maps browser errors (denied, not found, in use, insecure page, unsupported, over-constrained, ended) to a title and fix steps for the browser and operating system. |
 
-**Recording controller.** The browser starts and stops recording from what the server says (`PlayerView.audio.record`, with the reason in `notRecording`), never on its own:
+**Recording controller.** The browser starts and stops recording from what the server says (`PlayerView.audio.record`, with the reason in `notRecording`), never on its own. The controller is a small state machine with three states, *idle*, *running* and *failed*; the reason the next track will start with is part of the state. Every change of the player's view, the connection or the engine is one transition, which gives the next state and the track start or stop it causes (`player/recordingMachine.ts`):
 
 | Event | Browser action | Track reason |
 | --- | --- | --- |
@@ -142,7 +142,7 @@ flowchart TD
 | The page is reloaded | Starts again (shows **Resume recording** if the browser needs a click) | start `reload` |
 | The mic is lost (unplugged, permission revoked) | Waits for **Try again** or a device change | stop `track_ended`, then start `permission_regained` |
 | Game complete, seat withdrawn, mic check skipped | Stops, drains the queue | stop `game_complete`, `withdrawn` or `skipped` |
-| The session is detached (the facilitator resumes another, an erasure reloads it); the seat is kept | Stops, keeps what is pending; resends it and starts again once the seat is re-claimed | stop `disconnect`, start `reconnect` |
+| The session is detached (the facilitator resumes another, an erasure reloads it); the seat is kept | Stops, keeps what is pending; resends it and starts again once the seat is re-claimed. A mic check in progress keeps listening: the player does not have to click Start again | stop `disconnect`, start `reconnect` |
 | The seat is unbound | Stops and clears what is pending | stop `client_stop` |
 
 Every start and stop reason, and every mic state, is defined once in the audio reason catalogue (`packages/shared/src/audioReasons.ts`), with its label and meaning; the schemas, the codebook and the facilitator's labels take their text from it. The generated lists are in [NETWORKING.md § 9](NETWORKING.md#9-message-catalogue) (`audio:start`, `audio:stop`) and [DATA-TYPES.md](DATA-TYPES.md#audiotrackstarted) (`AudioTrackStarted`, `AudioTrackStopped`).
@@ -504,7 +504,7 @@ flowchart TD
 | **Erase a participant** (`erase`, DATABASE) | That participant's tracks, chunks and own derived results, and every result computed from their tracks: **every seat's cleaned track, talk time, quality report and leakage matrix** | The other seats' raw tracks and speech segments (without the erased seat as overlap partner) | `erasures` |
 | **Delete the session** | All audio rows, jobs and the audio folder, with everything else of the session | – | `session_deletions` |
 
-- Deleting raw audio and deleting all audio are refused while the session is running, and while an audio export is being written. Attribution is refused afterwards, because the source is gone.
+- Deleting raw audio and deleting all audio are refused while the session is running, while an attribution of it is queued or running, and while an audio export of it is being written. One guard decides all these refusals (`apps/server/src/session/sessionGuard.ts`), and every operation checks the running session first. Attribution is refused afterwards, because the source is gone.
 - Erasing a participant and deleting a session from the manager are refused (409) while an attribution of that session is queued or running, or an audio export of it is being written. Try again when it has finished.
 - **Exported WAV files are not deleted by any of these.** The command or popup lists the exports on disk; delete them by hand on every copy.
 - After an erasure, the attribution result of the session is gone, so run the attribution again if it is needed. The other seats' speech segments are kept, but the erased seat is removed from their `overlapWith` (a segment with no partner left is no longer marked as overlap), and the session's job summaries (talk time and warnings per seat) are cleared. The other seats still hear the erased voice in their own raw recordings (crosstalk): see [DATA-MANAGEMENT.md § 10](DATA-MANAGEMENT.md#10-takedown-and-erasure-procedure).
@@ -583,6 +583,7 @@ The stored `audio_tracks.status` is only `recording`, `closed` or `deleted`. The
 - **Coughs, laughter and noises next to a mic.** The speech model ignores most non-speech sounds, but not all; with the energy fallback every loud sound near a mic counts. The 250 ms minimum and the per-segment confidence limit such false speech but do not remove it.
 - **Absolute time** comes from the client timestamps (about ±20 ms, plus each device's input latency of typically 10 to 40 ms). This is below the smoothing and does not change who spoke, but word-level timing across mics is only good to a few tens of milliseconds. Short sessions also give rough absolute drift (about ±25 ppm over five minutes).
 - **Bots and demos send voice-less synthetic audio**, which the speech model does not take for speech. Run the server with `WKWA_SPEECH_MODEL=off` for them ([NETWORKING.md § 4](NETWORKING.md#4-ports-interfaces-and-configuration)); the e2e test server does this already.
+- **`dropped_chunks` is counted per recording time, not per track.** The browser credits a chunk it had to drop to the track that was recording when the drop happened. Drops only happen after more than 30 minutes of unsent audio, and if that backlog spans a track boundary, chunks of an older track are counted on the newer one (capped at the newer track's own chunk count). Treat per-track drop counts as approximate.
 - **The wrap-up audio check** relies on the browser's final `audio:level` with `pendingChunks` 0. A browser that is closed before it sends it leaves the last reported backlog on screen.
 - **Quality figures are from synthetic mixes.** A pilot with real participants is needed before results are relied on.
 - **Retention and consent wording are placeholders.** `[placeholder: …]` entries in [DATA-MANAGEMENT.md](DATA-MANAGEMENT.md) and the audio section of `config/consent.md` wait for decisions by the researcher, the ethics committee and the data protection officer.
@@ -594,13 +595,13 @@ The stored `audio_tracks.status` is only `recording`, `closed` or `deleted`. The
 | Shared contracts (config, events, messages, state, projections, REST types) | `packages/shared/src/audio.ts`, `state.ts`, `events.ts`, `protocol.ts`, `projections.ts`, `config.ts` |
 | Recording verdict and reason catalogue | `packages/shared/src/recordingVerdict.ts`, `audioReasons.ts` |
 | Browser capture engine | `apps/client/src/audio/` (`MicRecorder`, worklet, resampler, chunker, queue, speech detector, timing, errors) |
-| Browser recording flow and screens | `apps/client/src/player/recording.ts`, `MicCheckScreen.tsx`, `CalibrationScreen.tsx`, `RecordingIndicator.tsx` |
+| Browser recording flow and screens | `apps/client/src/player/recording.ts`, `recordingMachine.ts` (the controller's states and transitions), `micCheckAttempt.ts` (one mic-check attempt), `MicCheckScreen.tsx`, `CalibrationScreen.tsx`, `RecordingIndicator.tsx` |
 | Live ingest, consent hold, calibration, pause | `apps/server/src/audio/live.ts`, `calibration.ts`, `session/CalibrationRunner.ts` (timed turns, quick check), `session/SessionManager.ts` |
 | Encrypted store | `apps/server/src/audio/crypto.ts`, `fileStore.ts`, `verify.ts`, `db/database.ts` (migrations 6 and 7) |
 | Attribution | `apps/server/src/audio/attribution/` (overview in the header of `index.ts`; `features.ts`, `vad.ts`, `clock.ts`, `analyse.ts`, `smooth.ts`, `render.ts`, `annotate.ts`), `service.ts`, `jobs.ts`, `jobWorker.ts`, `wav.ts` |
 | Speech model | `apps/server/models/silero_vad.onnx` (Silero VAD 6.2.3, MIT), checked against its SHA-256 in `vad.ts`; runtime `onnxruntime-node` |
 | REST routes | `apps/server/src/api/audioRoutes.ts` (`GET /api/sessions/:id/audio`, `POST …/audio/attribution`, `GET /api/audio/jobs/:jobId`, `GET …/audio/segments`, `POST …/audio/export`, `POST …/audio/delete`) |
-| Erasure and deletion | `apps/server/src/db/personalData.ts` (the personal-data map), `audio/service.ts` (the running and busy checks), `cli.ts` |
+| Erasure and deletion | `apps/server/src/db/personalData.ts` (the personal-data map), `session/sessionGuard.ts` (when each operation is refused), `cli.ts` |
 | Facilitator screens | `apps/client/src/facilitator/live/AudioPanels.tsx`, `AudioControls.tsx`, `seats.tsx`, `database/AudioPopup.tsx`, `setup/ConfigSteps.tsx` (step 04) |
 | UI primitives | `apps/client/src/ui/audio.tsx`, `audioMeta.ts` ([AESTHETIC-RULES.md § 8.1](AESTHETIC-RULES.md#81-audio-indicators)) |
 | Test bots | `npm run bots -- --count 4 --auto --audio` ([ARCHITECTURE.md § 13](ARCHITECTURE.md#13-testing-strategy-and-bots)) |

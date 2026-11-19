@@ -4,7 +4,13 @@ History of [NETWORKING.md](../NETWORKING.md). Newest first. How entries are writ
 
 ## Unreleased
 
-### Not yet committed · documents `86effaf` and `18f6ee0`
+### Not yet committed · documents `b13d925` and `6b1614b`
+
+- **Type:** Bug fix
+- **Change:** The REST table now gives every 409 refusal of the audio routes: starting an attribution is also refused while the session runs or an audio export is written, exporting audio while the session runs or an attribution is queued or running, and deleting audio while an attribution or export is in progress.
+- **Reason:** The routes already refused these cases, but the table listed only some of them; the session guard now holds all of them in one rule table, which the text follows.
+
+### 2026-11-19 · `0126dec` · Docs: personal-data map, recording verdict, audio reason catalogue, seat gate
 
 - **Type:** Bug fix
 - **Change:** § 7 adds the seat gate with a table of the five delivery policies (`once`, `whileSeated`, `attempt`, `retry`, `resend`) and the messages that use them, and states that telemetry waits for the seat and that an onboarding request refused as "Not seated" is sent again once seated, while an unanswered one is still never resent.
