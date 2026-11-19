@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import type { AddressInfo } from "node:net";
 import path from "node:path";
 import fastifyStatic from "@fastify/static";
+import type { LandingStatus } from "@wkwa/shared";
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 import type { Logger } from "pino";
 import { Server } from "socket.io";
@@ -11,6 +12,7 @@ import { ScenarioLibrary } from "./content";
 import { type DB, openDatabase, WrongPassphraseError } from "./db/database";
 import { Store } from "./db/store";
 import { DB_FILES, dbFile, SessionStores } from "./db/stores";
+import { landingStatus } from "./landing";
 import { createLogger } from "./logger";
 import { Hub, isLoopback, tokenMatches } from "./net/hub";
 import type { RuntimeOptions } from "./runtime";
@@ -154,12 +156,16 @@ export async function createApp(
   });
 
   registerApi(ctx, requireFacilitator);
+  // the welcome page's status on this server: its join link is this server's own game page
+  app.get("/api/landing", async (): Promise<LandingStatus> => landingStatus(hub, tls.info, "/"));
 
   // ── Static client (built with `npm run build`) ──
   const dist = runtime.clientDist;
   if (existsSync(path.join(dist, "index.html"))) {
     await app.register(fastifyStatic, { root: dist, prefix: "/", index: false, wildcard: true });
     app.get("/", (_req, reply) => reply.sendFile("index.html"));
+    // the welcome page here too (e.g. https://…/landing); participants normally open it on LANDING_PORT
+    app.get("/landing", (_req, reply) => reply.sendFile("landing.html"));
     app.get("/facilitator", { preHandler: requireFacilitator }, (_req, reply) =>
       reply.sendFile("facilitator.html"),
     );

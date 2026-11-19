@@ -2,8 +2,6 @@ import {
   AUDIO_CHUNK_SECONDS,
   type DashboardMsg,
   DISSOCIATED_PAIRINGS,
-  FAKE_PLAYER_PACES,
-  type FakePlayerPace,
   fakeSeats,
   isOnboardingComplete,
   isSimulated,
@@ -87,7 +85,7 @@ export function OccupantTags({ seat: s }: { seat: ReadonlySeatState }) {
   );
 }
 
-/* ─────────────────────────── Bind clients → seats (setup step 7) ─────────────────────────── */
+/* ─────────────────────────── Bind clients → seats (setup step 08) ─────────────────────────── */
 
 export function BindEditor({ conn, dash }: { conn: FacilitatorConnection; dash: DashboardMsg }) {
   const st = dash.state!;
@@ -95,15 +93,14 @@ export function BindEditor({ conn, dash }: { conn: FacilitatorConnection; dash: 
   const free = dash.terminals.filter((t) => t.connected && t.seat === null);
   const bound = seats.filter((s) => s.bound).length;
   const fakes = fakeSeats(st).length;
-  const unbound = seats.filter((s) => !s.bound).length;
-  const [pace, setPace] = useState<FakePlayerPace>("normal");
   const [busy, setBusy] = useState(false);
-  const addFakes = (seatsToFill: number[] | null) => {
+  /** A fake player (test client) for one seat, at the normal pace. */
+  const addFake = (seat: number) => {
     setBusy(true);
     void conn
-      .cmd("fake:add", { seats: seatsToFill, pace })
+      .cmd("fake:add", { seats: [seat], pace: "normal" })
       .then(
-        (r) => conn.toast(`Fake player${r.seats.length === 1 ? "" : "s"} in seat ${r.seats.join(", ")}`),
+        (r) => conn.toast(`Fake player in seat ${r.seats.join(", ")}`),
         () => {},
       )
       .finally(() => setBusy(false));
@@ -178,7 +175,7 @@ export function BindEditor({ conn, dash }: { conn: FacilitatorConnection; dash: 
                       icon="fake"
                       disabled={busy}
                       tip={`Let the server create a fake player for seat ${s.seat}: a test client that connects like a browser, skips consent and the questionnaire, gets no participant code and proposes/decides at random.`}
-                      onClick={() => addFakes([s.seat])}
+                      onClick={() => addFake(s.seat)}
                     >
                       Fake player
                     </Button>
@@ -218,38 +215,11 @@ export function BindEditor({ conn, dash }: { conn: FacilitatorConnection; dash: 
           then appears here.
         </Callout>
       )}
-      <div className="row">
-        <Icon name="fake" />
-        <span className="small upper muted">Testing without people</span>
-        <select
-          aria-label="Fake player pace"
-          value={pace}
-          onChange={(e) => setPace(e.target.value as FakePlayerPace)}
-        >
-          {(Object.keys(FAKE_PLAYER_PACES) as FakePlayerPace[]).map((p) => (
-            <option key={p} value={p}>
-              {FAKE_PLAYER_PACES[p].label}
-            </option>
-          ))}
-        </select>
-        <Button
-          icon="fake"
-          disabled={busy || unbound === 0}
-          tip="Fill every unbound seat with a fake player (test client). They are logged as fake and stored with this session in the participant database."
-          onClick={() => addFakes(null)}
-        >
-          Fill empty seats with fake players
-        </Button>
-        <span className="hint">
-          Fake players are test clients the server creates: they connect like a browser, skip consent and the
-          questionnaire, get no participant code and are marked fake in the log and the exports.
-        </span>
-      </div>
     </div>
   );
 }
 
-/* ─────────────────────────── Agents (setup step 7 of a simulated session) ─────────────────────────── */
+/* ─────────────────────────── Agents (setup step 08 of a simulated session) ─────────────────────────── */
 
 export function AgentsTable({ st }: { st: ReadonlyGameState }) {
   return (
@@ -288,281 +258,256 @@ export function AgentsTable({ st }: { st: ReadonlyGameState }) {
   );
 }
 
-/* ─────────────────────────── Labels (setup step 8, and between rounds) ─────────────────────────── */
+/* ─────────────────────────── Labels (setup step 09, and between rounds) ─────────────────────────── */
 
-type Draft = Record<number, { k: KLabel | ""; view: string }>;
 type PairingChoice = { mode: PairingMode; id: number | null };
 
 export function labelsComplete(st: ReadonlyGameState): boolean {
   return seatList(st).every((s) => s.k && s.p && s.view) && st.labelPairing !== null;
 }
 
-/** 4×4 K×P matrix of a pairing; ■ = held by the same seat. Highlights the K labels in use. */
-export function PairingMatrix({ pairing, usedK }: { pairing: LabelPairing | null; usedK?: Set<string> }) {
+/** The K label a seat holds by default: seat 1 → Ka, seat 2 → Kb, … (seat order). */
+function defaultK(seat: number): KLabel {
+  return K_LABELS[(seat - 1) % K_LABELS.length]!;
+}
+
+/**
+ * The K×P matrix of a pairing: one row per K label, with the seat that holds it (and its map view);
+ * ■ marks the P that K is paired with. `views` is the manual view choice per seat, when the session
+ * chooses views per seat.
+ */
+export function PairingMatrix({
+  pairing,
+  seats,
+  scenario,
+  views,
+}: {
+  pairing: LabelPairing | null;
+  seats: Array<{ seat: number; k: KLabel; view: string }>;
+  scenario: Scenario | null;
+  views?: { set: (seat: number, view: string) => void };
+}) {
   return (
     <table className="grid" style={{ width: "auto" }} aria-label="K–P pairing matrix">
       <thead>
         <tr>
-          <th>{pairing ? pairingName(pairing) : "—"}</th>
+          <th>Seat · knowledge (K)</th>
           {P_LABELS.map((p) => (
-            <th key={p}>
+            <th key={p} style={{ textAlign: "center" }}>
               <LabelTag label={p} filled />
             </th>
           ))}
+          <th>Map view</th>
         </tr>
       </thead>
       <tbody>
-        {K_LABELS.map((k) => (
-          <tr key={k}>
-            <td className={usedK && !usedK.has(k) ? "faint" : "strong"}>
-              <LabelTag label={k} />
-            </td>
-            {P_LABELS.map((p) => {
-              const on = pairing ? pairedP(k, pairing) === p : false;
-              return (
-                <td key={p} className={on ? "t-primary strong" : "faint"} style={{ textAlign: "center" }}>
-                  {on ? "■" : "·"}
-                </td>
-              );
-            })}
-          </tr>
-        ))}
+        {K_LABELS.map((k) => {
+          const holder = seats.find((s) => s.k === k);
+          const paired = pairing ? pairedP(k, pairing) : null;
+          return (
+            <tr key={k}>
+              <td className={holder ? "strong" : "faint"}>
+                <span className="row nowrap">
+                  {holder ? (
+                    <>
+                      <SeatDot seat={holder.seat} /> SEAT {holder.seat}
+                    </>
+                  ) : (
+                    <span className="faint">no seat</span>
+                  )}
+                  <LabelTag
+                    label={k}
+                    tip={
+                      holder
+                        ? `Seat ${holder.seat} knows ${k}: on the map it sees the scores of the ${k} sub-squares`
+                        : undefined
+                    }
+                  />
+                </span>
+              </td>
+              {P_LABELS.map((p) => {
+                const on = paired === p;
+                return (
+                  <td
+                    key={p}
+                    className={on && holder ? "t-primary strong" : "faint"}
+                    style={{ textAlign: "center" }}
+                    data-tip={
+                      on && holder
+                        ? `Seat ${holder.seat} acts as ${p}: its proposals and decisions land on the K${p[1]} sub-squares`
+                        : undefined
+                    }
+                  >
+                    {on ? "■" : "·"}
+                  </td>
+                );
+              })}
+              <td className="small">
+                {!holder ? null : views ? (
+                  <select
+                    aria-label={`View of seat ${holder.seat}`}
+                    value={holder.view}
+                    onChange={(e) => views.set(holder.seat, e.target.value)}
+                  >
+                    <option value="">–</option>
+                    {Object.keys(scenario?.views ?? {}).map((v) => (
+                      <option key={v}>{v}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <span className="muted">
+                    {k} · {scenario?.views[k]?.name ?? ""}
+                  </span>
+                )}
+              </td>
+            </tr>
+          );
+        })}
       </tbody>
     </table>
   );
 }
 
 /**
- * K per seat + one of two pairing kinds. P is never chosen: it follows from
- * the pairing — aligned (Ka–Pa …) or fully dissociated D1–D6 (see
- * docs/DATA-TYPES.md § Label pairings).
+ * The K–P pairing of the seats: aligned or one of the fully dissociated D1–D6 (see
+ * docs/DATA-TYPES.md § Label pairings). Each seat keeps the K it holds (seat order, seat 1 → Ka,
+ * for a session without labels yet); P is never chosen but follows from the pairing. Every choice
+ * is saved at once (LabelsAssigned): there is no save button.
  */
 export function LabelsEditor({
   conn,
   st,
   scenario,
-  onSaved,
 }: {
   conn: FacilitatorConnection;
   st: ReadonlyGameState;
   scenario: Scenario | null;
-  onSaved?: () => void;
 }) {
   const seats = seatList(st);
   const manualView = st.config.viewAssignment === "manual";
-  const fromState = (): Draft =>
-    Object.fromEntries(
-      seats.map((s, i) => [s.seat, { k: s.k ?? K_LABELS[i % K_LABELS.length]!, view: s.view ?? "" }]),
-    );
-  const [draft, setDraft] = useState<Draft>(fromState);
-  const [pairing, setPairing] = useState<PairingChoice>(st.labelPairing ?? { mode: "aligned", id: null });
-  const [dirty, setDirty] = useState(st.labelPairing === null);
-  const key = `${seats.map((s) => `${s.k}${s.view}`).join("|")}|${pairingName(st.labelPairing)}`;
-  // biome-ignore lint/correctness/useExhaustiveDependencies: re-sync when labels change on the server
-  useEffect(() => {
-    if (!dirty) {
-      setDraft(fromState());
-      if (st.labelPairing) setPairing(st.labelPairing);
-    }
-  }, [key, dirty]);
-
-  const setK = (seat: number, field: "k" | "view", v: string) => {
-    setDirty(true);
-    setDraft((d) => ({ ...d, [seat]: { ...d[seat]!, [field]: v } }));
-  };
-  const setPair = (p: PairingChoice) => {
-    setDirty(true);
-    setPairing(p);
-  };
-  const ks = seats.map((s) => draft[s.seat]?.k).filter(Boolean) as string[];
-  const dupes = new Set(ks.filter((v, i) => ks.indexOf(v) !== i));
-  const complete = seats.every((s) => draft[s.seat]?.k && (!manualView || draft[s.seat]?.view));
-  const valid = complete && dupes.size === 0;
-  const preview: LabelPairing | null =
-    pairing.mode === "aligned"
-      ? { mode: "aligned", id: null }
-      : pairing.id
-        ? { mode: "dissociated", id: pairing.id }
+  const fromState = () => Object.fromEntries(seats.map((s) => [s.seat, s.view ?? ""]));
+  const [views, setViews] = useState<Record<number, string>>(fromState);
+  const viewsKey = seats.map((s) => s.view).join("|");
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-sync when the views change on the server
+  useEffect(() => setViews(fromState()), [viewsKey]);
+  const held = seats.map((s) => ({ seat: s.seat, k: s.k ?? defaultK(s.seat), view: views[s.seat] ?? "" }));
+  // the choice shows at once; the pairing in force (the server's, e.g. the drawn D-number) replaces it
+  const [chosen, setChosen] = useState<PairingChoice | null>(st.labelPairing);
+  const inForce = st.labelPairing ? pairingName(st.labelPairing) : "";
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-sync when the pairing changes on the server
+  useEffect(() => setChosen(st.labelPairing), [inForce]);
+  const pairing = chosen;
+  // the matrix shows the pairing in force, or the aligned one just chosen (a drawn D-number is known once saved)
+  const shown: LabelPairing | null =
+    st.labelPairing && (!chosen || chosen.mode === st.labelPairing.mode)
+      ? st.labelPairing
+      : chosen?.mode === "aligned"
+        ? { mode: "aligned", id: null }
         : null;
+  const viewsMissing = manualView && held.some((h) => !h.view);
 
-  const done = () => {
-    setDirty(false);
-    onSaved?.();
+  const save = (next: PairingChoice, nextViews = views) => {
+    setChosen(next);
+    if (manualView && seats.some((s) => !nextViews[s.seat])) return;
+    const assignments = held.map((h) => ({
+      seat: h.seat,
+      k: h.k,
+      ...(manualView ? { view: nextViews[h.seat] } : {}),
+    }));
+    void conn
+      .cmd(
+        "labels:set",
+        { assignments, pairing: next },
+        next.mode === "aligned"
+          ? "Pairing: aligned"
+          : `Pairing: ${next.id ? `D${next.id}` : "dissociated, drawn at random"}`,
+      )
+      .catch(() => {});
   };
-  const save = () => {
-    if (!valid) return;
-    // every seat has a K once `valid`; a seat without one is never sent as ""
-    const assignments = seats.flatMap((s) => {
-      const d = draft[s.seat];
-      return d?.k ? [{ seat: s.seat, k: d.k, ...(manualView ? { view: d.view } : {}) }] : [];
-    });
-    conn.cmd("labels:set", { assignments, pairing }, "Labels saved").then(done, () => {});
+  const setView = (seat: number, view: string) => {
+    const next = { ...views, [seat]: view };
+    setViews(next);
+    if (pairing) save(pairing, next);
   };
-  const shuffle = () =>
-    conn
-      .cmd("labels:randomise", { pairing, shuffleK: true }, "K shuffled across seats (seed logged)")
-      .then(done, () => {});
 
   return (
-    <div className="col">
-      <div className="grid-2" style={{ alignItems: "start" }}>
-        <div className="col">
-          <span className="small upper muted">1 · K–P pairing</span>
-          <label className="check" style={{ alignItems: "center" }}>
-            <input
-              type="radio"
-              name="pairing-mode"
-              checked={pairing.mode === "aligned"}
-              onChange={() => setPair({ mode: "aligned", id: null })}
-            />
-            <span>
-              <strong>Aligned</strong> <span className="muted">— Ka–Pa · Kb–Pb · Kc–Pc · Kd–Pd</span>
-            </span>
-          </label>
-          <label className="check" style={{ alignItems: "center" }}>
-            <input
-              type="radio"
-              name="pairing-mode"
-              checked={pairing.mode === "dissociated"}
-              onChange={() => setPair({ mode: "dissociated", id: pairing.id ?? null })}
-            />
-            <span>
-              <strong>Dissociated</strong>{" "}
-              <span className="muted">— no seat holds the same letter, no two seats mirror each other</span>
-            </span>
-          </label>
-          {pairing.mode === "dissociated" && (
-            <Field
-              label="Which dissociative pairing (D1–D6)"
-              hint="The number is stored with the labels and in the exports."
+    <div className="grid-2" style={{ alignItems: "start" }}>
+      <div className="col">
+        <span className="small upper muted">K–P pairing</span>
+        <label className="check" style={{ alignItems: "center" }}>
+          <input
+            type="radio"
+            name="pairing-mode"
+            checked={pairing?.mode === "aligned"}
+            onChange={() => save({ mode: "aligned", id: null })}
+          />
+          <span>
+            <strong>Aligned</strong> <span className="muted">— Ka–Pa · Kb–Pb · Kc–Pc · Kd–Pd</span>
+          </span>
+        </label>
+        <label className="check" style={{ alignItems: "center" }}>
+          <input
+            type="radio"
+            name="pairing-mode"
+            checked={pairing?.mode === "dissociated"}
+            onChange={() => save({ mode: "dissociated", id: null })}
+          />
+          <span>
+            <strong>Dissociated</strong>{" "}
+            <span className="muted">— no seat holds the same letter, no two seats mirror each other</span>
+          </span>
+        </label>
+        {pairing?.mode === "dissociated" && st.labelPairing?.mode === "dissociated" && (
+          <Field
+            label="Which dissociative pairing (D1–D6)"
+            hint="Choosing Dissociated draws one at random (seed logged). The number is stored with the labels and in the exports."
+          >
+            <select
+              aria-label="Dissociative pairing"
+              value={pairing.id ?? ""}
+              onChange={(e) =>
+                save({ mode: "dissociated", id: e.target.value ? Number(e.target.value) : null })
+              }
             >
-              <select
-                aria-label="Dissociative pairing"
-                value={pairing.id ?? ""}
-                onChange={(e) =>
-                  setPair({ mode: "dissociated", id: e.target.value ? Number(e.target.value) : null })
-                }
-              >
-                <option value="">random (D1–D6, seed logged)</option>
-                {DISSOCIATED_PAIRINGS.map((_, i) => {
-                  const p: LabelPairing = { mode: "dissociated", id: i + 1 };
-                  return (
-                    <option key={pairingText(p)} value={i + 1}>
-                      D{i + 1} · {pairingText(p)}
-                    </option>
-                  );
-                })}
-              </select>
-            </Field>
-          )}
-          {st.labelPairing && (
-            <span className="hint">
-              In force: <strong>{pairingName(st.labelPairing)}</strong> · {pairingText(st.labelPairing)}
-            </span>
-          )}
-        </div>
-        <div className="col">
-          <span className="small upper muted">Matrix {preview ? "" : "(chosen when saved)"}</span>
-          <PairingMatrix pairing={preview} usedK={new Set(ks)} />
-        </div>
+              {DISSOCIATED_PAIRINGS.map((_, i) => {
+                const p: LabelPairing = { mode: "dissociated", id: i + 1 };
+                return (
+                  <option key={pairingText(p)} value={i + 1}>
+                    D{i + 1} · {pairingText(p)}
+                  </option>
+                );
+              })}
+            </select>
+          </Field>
+        )}
+        {st.labelPairing ? (
+          <span className="hint">
+            In force: <strong>{pairingName(st.labelPairing)}</strong> · {pairingText(st.labelPairing)}. Saved;
+            logged as <code>LabelsAssigned</code>.
+          </span>
+        ) : (
+          <span className="hint">Choose a pairing: it is saved at once.</span>
+        )}
+        {viewsMissing && (
+          <Callout tone="warn" icon="warning">
+            Choose a map view for every seat (right): the labels are saved once each seat has one.
+          </Callout>
+        )}
       </div>
-
-      <span className="small upper muted">2 · Knowledge type per seat</span>
-      <table className="grid">
-        <thead>
-          <tr>
-            <th>Seat</th>
-            <th>Knowledge (K)</th>
-            <th>Power (P) — from the pairing</th>
-            <th>Map view</th>
-          </tr>
-        </thead>
-        <tbody>
-          {seats.map((s) => {
-            const d = draft[s.seat] ?? { k: "", view: "" };
-            const view = manualView ? d.view : d.k;
-            const p = d.k && preview ? pairedP(d.k as KLabel, preview) : null;
-            return (
-              <tr key={s.seat}>
-                <td>
-                  <span className="row nowrap">
-                    <SeatDot seat={s.seat} /> <strong>SEAT {s.seat}</strong>
-                  </span>
-                </td>
-                <td>
-                  <select
-                    aria-label={`K label of seat ${s.seat}`}
-                    value={d.k}
-                    onChange={(e) => setK(s.seat, "k", e.target.value)}
-                    style={dupes.has(d.k) ? { borderColor: "var(--danger)" } : undefined}
-                  >
-                    {K_LABELS.map((k) => (
-                      <option key={k}>{k}</option>
-                    ))}
-                  </select>
-                </td>
-                <td className="strong">
-                  {p ? (
-                    <LabelTag
-                      label={p}
-                      filled
-                      tip={`Power type ${p}: seat ${s.seat}'s proposals and decisions land on the K${p[1]} sub-squares`}
-                    />
-                  ) : (
-                    <span className="faint">random D1–D6</span>
-                  )}
-                </td>
-                <td className="small">
-                  {manualView ? (
-                    <select
-                      aria-label={`View of seat ${s.seat}`}
-                      value={d.view}
-                      onChange={(e) => setK(s.seat, "view", e.target.value)}
-                    >
-                      <option value="">–</option>
-                      {Object.keys(scenario?.views ?? {}).map((v) => (
-                        <option key={v}>{v}</option>
-                      ))}
-                    </select>
-                  ) : view ? (
-                    <span data-tip={`Seat ${s.seat} sees the scores of the ${view} sub-squares`}>
-                      {view} · {scenario?.views[view]?.name ?? ""}
-                    </span>
-                  ) : (
-                    <span className="faint">follows K</span>
-                  )}
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-      {dupes.size > 0 && (
-        <Callout tone="danger" icon="warning">
-          Each K label can only be held by one seat: {[...dupes].join(", ")}
-        </Callout>
-      )}
-      <div className="row">
-        <Button
-          icon="randomise"
-          onClick={shuffle}
-          tip="Deal the K labels to the seats at random (the seed is logged); the pairing then sets each P"
-        >
-          Shuffle K across seats
-        </Button>
+      <div className="col">
+        <span className="small upper muted">
+          Matrix {shown ? `· ${pairingName(shown)}` : "· no pairing yet"}
+        </span>
+        <PairingMatrix
+          pairing={shown}
+          seats={held}
+          scenario={scenario}
+          views={manualView ? { set: setView } : undefined}
+        />
         <span className="hint">
+          Each seat keeps its K (seat 1 → Ka, seat 2 → Kb …).{" "}
           {manualView ? "Views are chosen per seat." : "The K label also selects the seat's map view."}
         </span>
-        <span className="spacer" />
-        <Button
-          variant={dirty ? "primary" : "secondary"}
-          icon="ok"
-          disabled={!dirty || !valid}
-          onClick={save}
-          tip="Assign these labels and views to the seats (logged)"
-        >
-          Save labels
-        </Button>
       </div>
     </div>
   );

@@ -51,21 +51,21 @@ export const GROUPS = [
     id: "setup",
     title: "Setting up a session",
     intro:
-      "Facilitator, SETUP tab: a ten-step wizard. Steps 01–06 configure the session, 07–10 prepare the room (step 07 is in § 2).",
+      "Facilitator, SETUP tab: an eleven-step wizard. Steps 01–07 configure and create the session, 08–11 prepare the room (step 08 is in § 2).",
     sources: [`${C}/facilitator/setup/**`, "packages/shared/src/config.ts"],
   },
   {
     id: "connect",
     title: "Connecting the player PCs",
     intro:
-      "Each player PC opens the game page and shows a client number; the facilitator binds every client to a seat in step 07.",
+      "Each player PC opens the game page and shows a client number; the facilitator binds every client to a seat in step 08.",
     sources: [`${C}/facilitator/seats.tsx`, `${C}/facilitator/setup/**`, `${C}/player/App.tsx`],
   },
   {
     id: "onboarding",
     title: "Onboarding",
     intro:
-      "Players go through consent → about you → briefing; the facilitator sees which step each seat is on.",
+      "Players go through consent (one section at a time, each confirmed by its own box) → about you → briefing; the facilitator sees which step each seat is on.",
     sources: [`${C}/player/Onboarding.tsx`, `${C}/player/chrome.tsx`, "config/**"],
   },
   {
@@ -142,7 +142,7 @@ export const GROUPS = [
     id: "audio",
     title: "Recording audio",
     intro:
-      "Optional microphone recording (setup step 04, \"Record audio\"): each player's own mic check, the facilitator-led calibration, the recording indicator, and the facilitator's controls and audio tools.",
+      "Optional microphone recording (setup step 05, \"Record audio\"): each player's own mic check, the facilitator-led calibration, the recording indicator, and the facilitator's controls and audio tools.",
     sources: [
       `${C}/audio/**`,
       `${C}/player/MicCheckScreen.tsx`,
@@ -174,18 +174,18 @@ export const SHOTS = [
   // 1. setup
   { id: "server/setup-01-scenario", group: "setup", title: "Step 01 · Scenario", size: "half" },
   { id: "server/setup-02-rounds", group: "setup", title: "Step 02 · Rounds", size: "half" },
-  { id: "server/setup-03-players", group: "setup", title: "Step 03 · Players", size: "half" },
-  { id: "server/setup-04-onboarding", group: "setup", title: "Step 04 · Onboarding", size: "half" },
-  { id: "server/setup-05-tags", group: "setup", title: "Step 05 · Tags", size: "half" },
-  { id: "server/setup-06-review", group: "setup", title: "Step 06 · Review", size: "half" },
-  { id: "server/setup-08-labels", group: "setup", title: "Step 08 · Labels", size: "half" },
-  { id: "server/setup-09-key-sheet", group: "setup", title: "Step 09 · Key sheet", size: "half" },
-  { id: "server/setup-10-start", group: "setup", title: "Step 10 · Start", size: "half" },
+  { id: "server/setup-03-players", group: "setup", title: "Step 03 · Who plays", size: "half" },
+  { id: "server/setup-04-onboarding", group: "setup", title: "Step 05 · Onboarding", size: "half" },
+  { id: "server/setup-05-tags", group: "setup", title: "Step 06 · Tags", size: "half" },
+  { id: "server/setup-06-review", group: "setup", title: "Step 07 · Create session", size: "half" },
+  { id: "server/setup-08-labels", group: "setup", title: "Step 09 · Labels", size: "half" },
+  { id: "server/setup-09-key-sheet", group: "setup", title: "Step 10 · Key sheet", size: "half" },
+  { id: "server/setup-10-start", group: "setup", title: "Step 11 · Start", size: "half" },
 
   // 2. connect
   { id: "client/01-waiting-for-seat", group: "connect", title: "Waiting for a seat", size: "half" },
-  { id: "server/setup-07-connect", group: "connect", title: "Step 07 · Connect", size: "half" },
-  { id: "server/setup-07-connect-bound", group: "connect", title: "Step 07 · All seats bound", size: "half" },
+  { id: "server/setup-07-connect", group: "connect", title: "Step 08 · Connect", size: "half" },
+  { id: "server/setup-07-connect-bound", group: "connect", title: "Step 08 · All seats bound", size: "half" },
   { id: "client/02-seat-assigned", group: "connect", title: "Seat assigned", size: "half" },
 
   // 3. onboarding
@@ -375,7 +375,7 @@ export const SHOTS = [
     id: "client/audio-01-mic-check-held",
     group: "audio",
     subgroup: "Player: mic check",
-    title: "Mic check held until everyone agreed",
+    title: "Mic check held until everyone finished the briefing",
     size: "half",
   },
   {
@@ -411,7 +411,7 @@ export const SHOTS = [
     id: "client/audio-06-calibration-waiting",
     group: "audio",
     subgroup: "Player: calibration",
-    title: "Calibration: waiting",
+    title: "Calibration: ready? (part 2)",
     size: "half",
   },
   {
@@ -574,7 +574,7 @@ export const SHOTS = [
   {
     id: "server/simulation-01-agents",
     group: "testing",
-    title: "Simulated players · Step 07",
+    title: "Simulated players · Step 08",
     size: "half",
     scenario: "simulation",
   },

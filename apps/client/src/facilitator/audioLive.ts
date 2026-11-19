@@ -6,6 +6,9 @@ import {
   type AudioTrackSummary,
   CALIBRATION_MIN_MARGIN_DB,
   type CalibrationQuality,
+  calibrationNotReadySeats,
+  calibrationWaitingSeats,
+  calibrationWaitsIn,
   currentCalibrationTurn,
   isParticipant,
   isRecordedSeat,
@@ -273,14 +276,32 @@ export function calibrationSummary(st: ReadonlyGameState): CalibrationSummary {
         label: "skipped",
         tip: "Skipped: attribution assumes a conservative leakage between the microphones (overlapping speech is missed more often)",
       };
-    default:
+    default: {
+      if (!calibrationWaitsIn(st))
+        return {
+          tone: "warn",
+          icon: "idle",
+          text: "not run yet",
+          label: "not run yet",
+          tip: "Each seat reads a sentence in turn, before round 1",
+        };
+      const onboarding = calibrationWaitingSeats(st).map((s) => s.seat);
+      const notReady = calibrationNotReadySeats(st);
+      const text = onboarding.length
+        ? `waiting · seat ${onboarding.join(", ")} still in the onboarding`
+        : notReady.length
+          ? `waiting · seat ${notReady.join(", ")} not ready yet`
+          : st.audio.recordingPaused
+            ? "waiting · recording paused"
+            : "starting";
       return {
         tone: "warn",
         icon: "idle",
-        text: "not run yet",
-        label: "not run yet",
-        tip: "Each seat reads a sentence in turn, before round 1",
+        text,
+        label: "waiting for ready",
+        tip: "It starts by itself once every seat is through its mic check and every recorded seat has said it is ready",
       };
+    }
   }
 }
 

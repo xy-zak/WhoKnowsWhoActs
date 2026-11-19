@@ -297,6 +297,12 @@ export class Bot {
 
   private async decide(v: PlayerView): Promise<boolean> {
     if (v.phase === "onboarding" && this.opts.autoOnboard === false) return false;
+    // part 2 of "Mic check & calibration" (also after a redo between rounds): say it is ready
+    if (v.audio.calibration.canSayReady && this.opts.autoOnboard !== false) {
+      const ack = await this.emit("calibration:ready", { clientTs: Date.now() });
+      this.recordAck(ack);
+      return (ack as { ok?: boolean }).ok === true;
+    }
     if (v.phase === "onboarding" && v.onboarding && v.me.nextStep) {
       const o = v.onboarding;
       let ack: unknown = null;
@@ -321,7 +327,7 @@ export class Bot {
           clientTs: Date.now(),
         });
       } else if (v.me.nextStep === "mic_check") {
-        // held while another seat is still in consent: wait for the next state push
+        // held while another seat has not finished the briefing: wait for the next state push
         if (v.audio.micCheckHeld || !this.opts.audio) return false;
         ack = await this.emit("mic:check", {
           passed: true,

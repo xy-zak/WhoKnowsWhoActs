@@ -1,6 +1,9 @@
 import type { AudioStopReason } from "./audioReasons";
 import {
+  activeSeats,
+  calibrationWaitingSeats,
   isMicCheckHeld,
+  isOnboardingComplete,
   isParticipant,
   type Phase,
   RECORDING_PHASES,
@@ -34,7 +37,7 @@ import {
  * Moment reasons follow (the seat takes part in the recording, just not now; see isRecordedSeat):
  *  - `not_started`: still in the lobby;
  *  - `game_complete` / `session_closed` / `session_aborted`: past the recording phases;
- *  - `mic_check_held`: another seat is still in consent (micCheckHoldSeats);
+ *  - `mic_check_held`: a seat has not finished the steps before the mic check yet (micCheckHoldSeats);
  *  - `paused`: the facilitator paused recording. Always last: a verdict says `paused` only when the
  *    pause is the one thing stopping the seat, so it answers "would it record if not paused?".
  */
@@ -88,8 +91,9 @@ export function recordingVerdict(state: ReadonlyGameState, seat: ReadonlySeatSta
     return no("no_audio_consent");
   if (seat.consent !== "given") return no("consent_pending");
   if (seat.micCheck === "skipped") return no("mic_check_skipped");
-  // Recording starts at the mic check, so a session without that step never records. Consent is
-  // the only step before it: with consent given, the seat has reached the mic check or is past it.
+  // Recording starts at the mic check, so a session without that step never records. The steps
+  // before it hold every mic (micCheckHoldSeats) until each seat has done them, so with no hold the
+  // seat has reached its mic check or is past it.
   if (!state.onboardingSteps.includes("mic_check")) return no("no_mic_check_step");
   if (!RECORDING_PHASES.has(state.phase)) return no(ENDED[state.phase] ?? "not_started");
   if (isMicCheckHeld(state)) return no("mic_check_held");
@@ -100,6 +104,55 @@ export function recordingVerdict(state: ReadonlyGameState, seat: ReadonlySeatSta
 /** Should this seat's microphone be recording now? (The boolean of recordingVerdict.) */
 export function shouldRecord(state: ReadonlyGameState, seat: ReadonlySeatState): boolean {
   return recordingVerdict(state, seat).record;
+}
+
+/** Seats the next calibration run reads in: the active seats that are recorded now, in seat order. */
+export function calibrationSeats(state: ReadonlyGameState): number[] {
+  return activeSeats(state)
+    .filter((s) => shouldRecord(state, s))
+    .map((s) => s.seat);
+}
+
+/** Recorded seats that have not said yet that they are ready for the next calibration run. */
+export function calibrationNotReadySeats(state: ReadonlyGameState): number[] {
+  const ready = new Set(state.audio.calibration.ready);
+  return calibrationSeats(state).filter((seat) => !ready.has(seat));
+}
+
+/**
+ * Does the calibration wait for the room in this phase? Always in the onboarding (before round 1);
+ * in a round break only when a run was asked for again (a redo, or the server's cancel).
+ */
+export function calibrationWaitsIn(state: ReadonlyGameState): boolean {
+  if (state.phase === "onboarding") return true;
+  return state.phase === "round_complete" && state.audio.calibration.requested;
+}
+
+/**
+ * Is the room ready for the calibration's turns? It is waiting (pending; in a round break only
+ * after a redo, see calibrationWaitsIn), recording is not paused, every seat is through its onboarding (calibrationWaitingSeats)
+ * and every recorded seat has said it is ready. The server then starts it at once.
+ */
+export function calibrationReadyToStart(state: ReadonlyGameState): boolean {
+  const a = state.audio;
+  if (!a.enabled || a.calibration.status !== "pending" || a.recordingPaused) return false;
+  if (!calibrationWaitsIn(state)) return false;
+  if (calibrationWaitingSeats(state).length > 0) return false;
+  return calibrationSeats(state).length > 0 && calibrationNotReadySeats(state).length === 0;
+}
+
+/**
+ * May this seat say it is ready for the calibration now? It is recorded, the calibration is waiting
+ * (pending, see calibrationWaitsIn), and it has not said so yet. In the onboarding, the
+ * seat is through it (its mic check passed).
+ */
+export function canSayCalibrationReady(state: ReadonlyGameState, seat: ReadonlySeatState): boolean {
+  const a = state.audio;
+  if (!a.enabled || a.calibration.status !== "pending" || a.calibration.ready.includes(seat.seat))
+    return false;
+  if (!calibrationWaitsIn(state)) return false;
+  if (state.phase === "onboarding" && !isOnboardingComplete(state, seat)) return false;
+  return shouldRecord(state, seat);
 }
 
 const MOMENT_REASONS: ReadonlySet<NotRecordingReason> = new Set([

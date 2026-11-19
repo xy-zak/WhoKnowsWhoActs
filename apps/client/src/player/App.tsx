@@ -60,8 +60,11 @@ function screenFor(seat: number | null, v: PlayerView | null): Screen {
  * would not hide; between rounds it only loses the tool and the selected square.
  */
 const KEEP_UNDER_CALIBRATION: ReadonlySet<Screen> = new Set(["demographics", "briefing"]);
-/** Onboarding screens with the recording line on top (the mic check shows its own state). */
-const RECORDING_LINE: ReadonlySet<Screen> = new Set(["demographics", "briefing", "ready", "calibration"]);
+/**
+ * Onboarding screens with the recording line on top (the mic check shows its own state). Recording
+ * starts at the mic check, the last onboarding step, so only the screens after it have one.
+ */
+const RECORDING_LINE: ReadonlySet<Screen> = new Set(["ready", "calibration"]);
 
 export function App({ conn }: { conn: PlayerConnection }) {
   const st = useStore(conn.store);
@@ -119,9 +122,9 @@ export function App({ conn }: { conn: PlayerConnection }) {
       case "calibration":
         return <CalibrationScreen conn={conn} view={v} />;
       case "ready":
-        // audio sessions: the waiting state of the calibration, until the facilitator runs or skips it
+        // audio sessions: part 2 of "Mic check & calibration" (ready for it?), until it runs or is skipped
         return v.audio.enabled && v.audio.calibration.status === "pending" ? (
-          <CalibrationPendingScreen view={v} />
+          <CalibrationPendingScreen conn={conn} view={v} />
         ) : (
           <ReadyScreen view={v} waitingFor="round 1" />
         );

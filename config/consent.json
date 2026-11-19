@@ -1,35 +1,41 @@
 {
-  "version": "PLACEHOLDER-v1",
+  "version": "PLACEHOLDER-v2",
   "markdownFile": "consent.md",
   "items": [
     {
       "id": "read_information",
-      "text": "I have read the information above and had the opportunity to ask questions.",
-      "required": true
-    },
-    {
-      "id": "voluntary",
-      "text": "I understand that participation is voluntary and that I can stop at any moment without giving a reason.",
+      "section": "What is this study about?",
+      "text": "I have read the information about the study and had the opportunity to ask questions.",
       "required": true
     },
     {
       "id": "data_collection",
+      "section": "What data is collected?",
       "text": "I agree that my in-game actions, timings and interface use are recorded under a pseudonymous code.",
       "required": true
     },
     {
       "id": "demographics",
+      "section": "Background questions",
       "text": "I agree that my answers to the short background questionnaire are stored under the same code.",
       "required": true
     },
     {
       "id": "audio_recording",
+      "section": "Audio recording",
       "text": "[Placeholder: approved wording] I agree that my microphone records my voice, and what is said around me, from the microphone check until the end of the game, and that the recordings are stored encrypted under my code.",
       "required": true,
       "when": "audio"
     },
     {
+      "id": "voluntary",
+      "section": "Taking part and withdrawal",
+      "text": "I understand that participation is voluntary and that I can stop at any moment without giving a reason.",
+      "required": true
+    },
+    {
       "id": "future_research",
+      "section": "Future research",
       "text": "I agree that my pseudonymised data may be reused in future research by the same research group. (optional)",
       "required": false
     }

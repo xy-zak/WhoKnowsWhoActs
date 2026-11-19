@@ -1,5 +1,8 @@
 import {
+  calibrationNotReadySeats,
+  calibrationSeats,
   calibrationWaitingSeats,
+  calibrationWaitsIn,
   type FacilitatorCommand,
   type FacilitatorPayload,
   micCheckHoldSeats,
@@ -11,9 +14,10 @@ import { calibrationSummary } from "../audioLive";
 import type { FacilitatorConnection } from "../connection";
 
 /*
- * The NEXT panel's audio block (sessions that record audio): the calibration (start / redo /
- * skip) and the seats stuck in their mic check (skip, with a logged reason). Every refusal of the
- * server (e.g. "Waiting for the mic check of seat 3", "Recording is paused") shows as a toast.
+ * The NEXT panel's audio block (sessions that record audio): the calibration (who is ready, redo,
+ * skip) and the seats stuck in their mic check (skip, with a logged reason). The calibration starts
+ * by itself once every recorded seat has said it is ready, so there is no start button. Every
+ * refusal of the server (e.g. "Recording is paused") shows as a toast.
  */
 
 /** The reason field of the skip confirmations (a reason is required: it is logged with the event). */
@@ -33,19 +37,8 @@ export function CalibrationTag({ st, short = false }: { st: ReadonlyGameState; s
   );
 }
 
-/**
- * The calibration and mic-check block of the NEXT panel. `primary` makes Start calibration the
- * view's primary button (when it is the next thing to do).
- */
-export function AudioNext({
-  conn,
-  st,
-  primary,
-}: {
-  conn: FacilitatorConnection;
-  st: ReadonlyGameState;
-  primary: boolean;
-}) {
+/** The calibration and mic-check block of the NEXT panel. */
+export function AudioNext({ conn, st }: { conn: FacilitatorConnection; st: ReadonlyGameState }) {
   const promptReason = usePromptReason();
   const run = <K extends FacilitatorCommand>(name: K, payload: FacilitatorPayload<K>, ok: string) =>
     void conn.cmd(name, payload, ok).catch(() => {});
@@ -90,7 +83,10 @@ export function AudioNext({
   };
   const held = micCheckHoldSeats(st);
   const inCheck = seatsInMicCheck(st);
-  const startable = c.status === "pending" && waiting.length === 0 && !a.recordingPaused;
+  // who the waiting calibration reads in, and who of them said they are ready
+  const waitsHere = c.status === "pending" && calibrationWaitsIn(st);
+  const notReady = new Set(calibrationNotReadySeats(st));
+  const readers = waitsHere && waiting.length === 0 ? calibrationSeats(st) : [];
 
   return (
     <div
@@ -103,25 +99,11 @@ export function AudioNext({
         </span>
         <CalibrationTag st={st} />
         <span className="spacer" />
-        {canCalibrate && c.status === "pending" && (
-          <Button
-            variant={primary && startable ? "primary" : "secondary"}
-            icon="voice"
-            onClick={() => run("calibration:start", {}, "Calibration started")}
-            tip={
-              waiting.length
-                ? `Waiting for the mic check of seat ${waiting.map((s) => s.seat).join(", ")}`
-                : "Each seat in turn reads a sentence aloud while the others stay quiet (about 7 s per seat)"
-            }
-          >
-            Start calibration
-          </Button>
-        )}
         {canCalibrate && (c.status === "running" || c.status === "done" || c.status === "skipped") && (
           <Button
             icon="refresh"
-            onClick={() => run("calibration:redo", {}, "Calibration started again")}
-            tip="Run the calibration again from the first seat (e.g. after a seat moved closer to its microphone)"
+            onClick={() => run("calibration:redo", {}, "Calibration asked for again")}
+            tip="Run the calibration again (e.g. after a seat moved closer to its microphone): every seat says again that it is ready, then it starts by itself"
           >
             Redo
           </Button>
@@ -145,11 +127,29 @@ export function AudioNext({
           Recording is paused: resume recording to run the calibration.
         </Callout>
       )}
+      {readers.length > 0 && (
+        <div className="row small" style={{ gap: "var(--s2)" }}>
+          <span className="muted">Ready for the calibration:</span>
+          {readers.map((seat) => (
+            <span key={seat} className="row nowrap" style={{ gap: 4 }}>
+              <SeatDot seat={seat} /> {seat}{" "}
+              {notReady.has(seat) ? (
+                <span className="faint">waiting</span>
+              ) : (
+                <span className="t-live">
+                  <Icon name="ok" /> ready
+                </span>
+              )}
+            </span>
+          ))}
+          <span className="hint">It starts by itself once every seat is ready.</span>
+        </div>
+      )}
       {held.length > 0 && st.phase === "onboarding" && (
         <span className="hint">
           <Icon name="idle" /> Mic checks are held until seat {held.join(", ")}{" "}
-          {held.length > 1 ? "have" : "has"} finished the consent form (no microphone opens before everyone
-          agreed).
+          {held.length > 1 ? "have" : "has"} finished the briefing (no microphone opens before everyone has
+          agreed and is ready).
         </span>
       )}
       {inCheck.length > 0 && !held.length && (

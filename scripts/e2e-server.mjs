@@ -21,6 +21,8 @@ const child = spawn("npx", ["tsx", "apps/server/src/index.ts"], {
     WKWA_SPEECH_MODEL: "off",
     TLS_CERT: "",
     TLS_KEY: "",
+    // the welcome page is tested at /landing of this server; no extra port
+    LANDING_PORT: "off",
   },
 });
 const stop = () => child.kill("SIGTERM");

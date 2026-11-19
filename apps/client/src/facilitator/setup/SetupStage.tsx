@@ -34,14 +34,15 @@ import { AgentsTable, BindEditor, LabelsEditor, labelsComplete } from "../seats"
 import { paceText, policySummary } from "../simulation";
 import { inLobby } from "../stage";
 import {
+  CreateStep,
   OnboardingStep,
   onboardingStepsText,
   PlayersStep,
-  ReviewStep,
   RoundsStep,
   type ScenarioInfo,
   ScenarioStep,
   TagsStep,
+  WhoPlaysStep,
 } from "./ConfigSteps";
 import {
   clearDraft,
@@ -54,7 +55,7 @@ import {
   setKeySheetConfirmed,
 } from "./draft";
 
-/** Step 07: what participants see when they open the HTTPS address, and the fingerprint to compare. */
+/** Connect step: what participants see when they open the HTTPS address, and the fingerprint to compare. */
 function TlsNote({ tls }: { tls: ServerInfo["tls"] }) {
   if (!tls.enabled)
     return (
@@ -68,7 +69,7 @@ function TlsNote({ tls }: { tls: ServerInfo["tls"] }) {
       {tls.mode === "auto" ? (
         <>
           HTTPS with this laptop's own <strong>self-signed certificate</strong>: each browser shows a security
-          warning once; accept it (SESSION-RUNBOOK § 10).{" "}
+          warning once; accept it (SESSION-RUNBOOK § 10). The welcome page tells participants beforehand.{" "}
         </>
       ) : (
         "HTTPS with your own certificate (TLS_CERT). "
@@ -81,27 +82,62 @@ function TlsNote({ tls }: { tls: ServerInfo["tls"] }) {
   );
 }
 
-/** The ten setup steps. 01–06 configure (no session yet); 07–10 prepare the created session (lobby). */
-export const SETUP_STEPS: Array<StepDef & { icon: IconName; title: string }> = [
+/** Addresses for the player PCs, one per LAN interface: `https://… (wlan0) or https://… (eth0)`. */
+function UrlList({ urls }: { urls: ServerInfo["playerUrls"] }) {
+  return (
+    <>
+      {urls.map((u, k) => (
+        <span key={u.url}>
+          {k > 0 && " or "}
+          <strong className="mono">{u.url}</strong> <span className="faint">({u.iface})</span>
+        </span>
+      ))}
+    </>
+  );
+}
+
+type SetupStepDef = StepDef & { icon: IconName; title: string };
+
+/**
+ * The eleven setup steps. 01–07 configure (no session yet; 07 creates it); 08–11 prepare the
+ * created session (lobby).
+ */
+export const SETUP_STEPS: SetupStepDef[] = [
   { key: "scenario", label: "Scenario", title: "Scenario", icon: "scenario" },
   { key: "rounds", label: "Rounds", title: "Rounds", icon: "rounds" },
-  { key: "players", label: "Players", title: "Players & visibility", icon: "visibility" },
+  { key: "who", label: "Who plays", title: "Who plays", icon: "seats" },
+  { key: "players", label: "Seats", title: "Seats & visibility", icon: "visibility" },
   { key: "onboarding", label: "Onboarding", title: "Onboarding", icon: "onboarding" },
   { key: "tags", label: "Tags", title: "Tags & notes", icon: "tag" },
-  { key: "review", label: "Review", title: "Review & create", icon: "review" },
+  { key: "create", label: "Create", title: "Create session", icon: "create" },
   { key: "connect", label: "Connect", title: "Connect & bind clients", icon: "client" },
   { key: "labels", label: "Labels", title: "Assign labels", icon: "labels" },
   { key: "keysheet", label: "Key sheet", title: "Print the key sheet", icon: "keysheet" },
   { key: "start", label: "Start", title: "Start onboarding", icon: "start" },
 ];
-/** How steps 07, 09 and 10 read when the players are simulated (agents); keys are 0-based step indexes. */
-const SIMULATED_STEPS: Record<number, Partial<StepDef & { icon: IconName; title: string }>> = {
-  6: { label: "Agents", title: "Simulated players", icon: "agent" },
-  8: { label: "Key sheet", title: "Key sheet (not needed)" },
-  9: { label: "Start", title: "Start simulation", icon: "simulation" },
+const stepIndex = (key: string) => SETUP_STEPS.findIndex((s) => s.key === key);
+const WHO = stepIndex("who");
+const PLAYERS = stepIndex("players");
+const ONBOARDING = stepIndex("onboarding");
+const TAGS = stepIndex("tags");
+/** Creates the session: the last configuration step. */
+const CREATE = stepIndex("create");
+const CONNECT = stepIndex("connect");
+const LABELS = stepIndex("labels");
+const KEYSHEET = stepIndex("keysheet");
+const START = stepIndex("start");
+const STEP_COUNT = SETUP_STEPS.length;
+/** "07": a step's number as shown. */
+const num = (i: number) => String(i + 1).padStart(2, "0");
+
+/** How the lobby steps read when the players are simulated (agents); keys are 0-based step indexes. */
+const SIMULATED_STEPS: Record<number, Partial<SetupStepDef>> = {
+  [CONNECT]: { label: "Agents", title: "Simulated players", icon: "agent" },
+  [KEYSHEET]: { label: "Key sheet", title: "Key sheet (not needed)" },
+  [START]: { label: "Start", title: "Start simulation", icon: "simulation" },
 };
 /** Steps a simulated session skips (shown with the – glyph). */
-const SKIPPED_WHEN_SIMULATED = new Set([3, 8]);
+const SKIPPED_WHEN_SIMULATED = new Set([ONBOARDING, KEYSHEET]);
 
 type ChecklistRow = [label: string, ok: boolean, value: string | null];
 
@@ -126,34 +162,32 @@ export function setupSteps(simulated: boolean) {
   return SETUP_STEPS.map((d, i) => (simulated ? { ...d, ...SIMULATED_STEPS[i] } : d));
 }
 
-const LAST_CONFIG = 5;
-const REVIEW = 5;
-const START = 9;
 /** Steps drawn in the accent (review) colour: the two "commit" points of the setup. */
-const ACCENT_STEPS = new Set([REVIEW, START]);
+const ACCENT_STEPS = new Set([CREATE, START]);
 
 /**
- * SETUP: the ten steps as a vertical accordion. Exactly one step (the current
+ * SETUP: the eleven steps as a vertical accordion. Exactly one step (the current
  * one) is expanded; finished steps collapse into a one-line summary and can
- * be reopened; steps 01–06 lock (■) once the session has been created.
+ * be reopened; steps 01–07 lock (■) once the session has been created.
  */
 export function SetupStage({ conn }: { conn: FacilitatorConnection }) {
   const fs = useStore(conn.store);
   const confirm = useConfirm();
   const dash = fs.dashboard;
   const st = dash?.state ?? null;
-  /** the attached session while it is in its lobby (steps 7–10), else null */
+  /** the attached session while it is in its lobby (steps 08–11), else null */
   const ls = st && inLobby(st) ? st : null;
   const lobby = ls !== null;
   const sessionId = ls?.sessionId ?? null;
 
   const [scenarios, setScenarios] = useState<ScenarioInfo[]>([]);
   const [draft, setDraftState] = useState<Draft | null>(loadDraft);
-  const [step, setStep] = useState<number>(() => (lobby ? 6 : (loadDraft()?.reached ?? 0)));
+  const [step, setStep] = useState<number>(() => (lobby ? CONNECT : (loadDraft()?.reached ?? 0)));
   const [busy, setBusy] = useState(false);
   const [keySheet, setKeySheet] = useState(false);
   const [info, setInfo] = useState<ServerInfo | null>(null);
   const urls = info?.playerUrls ?? [];
+  const landing = info?.landingUrls ?? [];
   const stepRefs = useRef<Array<HTMLElement | null>>([]);
   const didMount = useRef(false);
   const wayRef = useRef<HTMLElement | null>(null);
@@ -204,7 +238,8 @@ export function SetupStage({ conn }: { conn: FacilitatorConnection }) {
   const fakes = lobby ? fakeSeats(ls) : [];
   // all seats taken by agents or fake players: nobody to write on a key sheet
   const noParticipants = allBound && !hasParticipants(ls);
-  const skipped = (i: number) => (simulated && SKIPPED_WHEN_SIMULATED.has(i)) || (noParticipants && i === 8);
+  const skipped = (i: number) =>
+    (simulated && SKIPPED_WHEN_SIMULATED.has(i)) || (noParticipants && i === KEYSHEET);
   const labelled = lobby && labelsComplete(ls);
   const labelsRow: ChecklistRow = [
     `Labels assigned (${lobby ? pairingName(ls.labelPairing) : "—"})`,
@@ -217,42 +252,42 @@ export function SetupStage({ conn }: { conn: FacilitatorConnection }) {
   ];
   const keySheetDone = keySheet || simulated || noParticipants;
   const done = (i: number): boolean => {
-    if (i <= LAST_CONFIG) return lobby || i < (draft?.reached ?? 0);
+    if (i <= CREATE) return lobby || i < (draft?.reached ?? 0);
     if (!lobby) return false;
-    if (i === 6) return allBound;
-    if (i === 7) return labelled;
-    if (i === 8) return keySheetDone;
+    if (i === CONNECT) return allBound;
+    if (i === LABELS) return labelled;
+    if (i === KEYSHEET) return keySheetDone;
     return false;
   };
-  const locked = (i: number) => lobby && i <= LAST_CONFIG;
-  const firstOpenLobbyStep = !allBound ? 6 : !labelled ? 7 : !keySheetDone ? 8 : 9;
+  const locked = (i: number) => lobby && i <= CREATE;
+  const firstOpenLobbyStep = !allBound ? CONNECT : !labelled ? LABELS : !keySheetDone ? KEYSHEET : START;
   const reachable = (i: number) =>
     !locked(i) &&
     ((i !== step && done(i)) ||
       (!lobby && i <= (draft?.reached ?? 0)) ||
-      (lobby && i >= 6 && i <= firstOpenLobbyStep));
+      (lobby && i >= CONNECT && i <= firstOpenLobbyStep));
   const glyphOf = (i: number) =>
     i === step ? "▶" : locked(i) ? "■" : skipped(i) && done(i) ? "–" : done(i) ? "✓" : "·";
   // when a session appears (created or resumed) jump to the lobby steps
   // biome-ignore lint/correctness/useExhaustiveDependencies: only when the attached lobby session changes
   useEffect(() => {
-    if (lobby) setStep((s) => (s <= LAST_CONFIG ? firstOpenLobbyStep : s));
-    else setStep((s) => (s > LAST_CONFIG ? (draft?.reached ?? 0) : s));
+    if (lobby) setStep((s) => (s <= CREATE ? firstOpenLobbyStep : s));
+    else setStep((s) => (s > CREATE ? (draft?.reached ?? 0) : s));
   }, [sessionId]);
 
   const final = useMemo(() => (draft ? finalConfig(draft) : { error: "loading" }), [draft]);
   const canNext = (i: number): boolean => {
-    if (!draft && i <= LAST_CONFIG) return false;
+    if (!draft && i <= CREATE) return false;
     switch (i) {
       case 0:
         return Boolean(draft?.scenarioId);
-      case REVIEW:
+      case CREATE:
         return "config" in final;
-      case 6:
+      case CONNECT:
         return allBound;
-      case 7:
+      case LABELS:
         return labelled;
-      case 8:
+      case KEYSHEET:
         return keySheetDone;
       default:
         return true;
@@ -262,7 +297,7 @@ export function SetupStage({ conn }: { conn: FacilitatorConnection }) {
   const goTo = (i: number) => {
     if (locked(i)) return;
     setStep(i);
-    if (draft && i <= LAST_CONFIG && i > draft.reached) upd({ reached: i });
+    if (draft && i <= CREATE && i > draft.reached) upd({ reached: i });
   };
 
   // bring the expanded step into view and focus its first field (not on the first render)
@@ -291,7 +326,7 @@ export function SetupStage({ conn }: { conn: FacilitatorConnection }) {
       );
       clearDraft();
       setDraftState(emptyDraft(final.config));
-      setStep(6);
+      setStep(CONNECT);
     } catch {
     } finally {
       setBusy(false);
@@ -311,12 +346,12 @@ export function SetupStage({ conn }: { conn: FacilitatorConnection }) {
 
   const next = () => {
     if (!canNext(step) || busy) return;
-    if (step === REVIEW) return void create();
+    if (step === CREATE) return void create();
     if (step === START) return void startOnboarding();
     goTo(step + 1);
   };
   const back = () => {
-    const minStep = lobby ? 6 : 0;
+    const minStep = lobby ? CONNECT : 0;
     if (step > minStep) goTo(step - 1);
   };
   const onBodyKey = (e: KeyboardEvent<HTMLDivElement>) => {
@@ -371,29 +406,31 @@ export function SetupStage({ conn }: { conn: FacilitatorConnection }) {
           : "not chosen";
       case 1:
         return `${cfg.roundCount} rounds · propose ${r.quota.propose ?? "∞"} · decide ${r.quota.decide ?? "∞"}${r.timeLimitSec ? ` · ${r.timeLimitSec}s` : ""}`;
-      case 2:
+      case WHO:
+        return "real participants · participant database";
+      case PLAYERS:
         return `${cfg.seatCount} seats · view ${cfg.viewAssignment === "byKnowledgeType" ? "follows K" : "manual"}`;
-      case 3:
-        return onboardingStepsText(cfg, { mic_check: "mic check (audio)" }) || "no onboarding";
-      case 4: {
+      case ONBOARDING:
+        return onboardingStepsText(cfg, { mic_check: "mic check & calibration (audio)" }) || "no onboarding";
+      case TAGS: {
         const tags = lobby ? cfg.tags : normaliseTags(draft?.tagsText ?? "");
         return tags.length ? `tags: ${tags.join(", ")}` : "no tags";
       }
-      case REVIEW:
-        return lobby ? `created · ${sessionId}` : "check everything, then create the session";
-      case 6:
+      case CREATE:
+        return lobby ? `created · ${sessionId}` : `creates the session and locks steps 01–${num(CREATE)}`;
+      case CONNECT:
         return lobby
           ? `${seatList(ls).filter((s) => s.bound).length}/${cfg.seatCount} seats bound${fakes.length ? ` (${fakes.length} fake)` : ""}`
           : "after the session is created";
-      case 7:
+      case LABELS:
         return lobby && labelled
           ? `${pairingName(ls.labelPairing)} · ${seatList(ls)
               .map((s) => `${s.seat}:${s.k}/${s.p}`)
               .join("  ")}`
-          : "K per seat; P from the pairing (aligned or dissociated D1–D6)";
-      case 8:
+          : "the K–P pairing: aligned or dissociated D1–D6";
+      case KEYSHEET:
         return keySheet ? "printed ✓" : "print, fill in names by hand, store separately";
-      case 9:
+      case START:
         return "locks the seats and flips this tab to LIVE";
       default:
         return "";
@@ -404,17 +441,19 @@ export function SetupStage({ conn }: { conn: FacilitatorConnection }) {
   function simulatedSummary(i: number): string | null {
     if (!cfg) return null;
     switch (i) {
-      case 2:
-        return `${cfg.seatCount} simulated seats · ${policySummary(cfg.simulation, cfg.seatCount)} · pause ${paceText(cfg.simulation)}`;
-      case 3:
+      case WHO:
+        return `simulated · ${policySummary(cfg.simulation, cfg.seatCount)} · pause ${paceText(cfg.simulation)}`;
+      case PLAYERS:
+        return `${cfg.seatCount} simulated seats · view ${cfg.viewAssignment === "byKnowledgeType" ? "follows K" : "manual"}`;
+      case ONBOARDING:
         return "skipped: agents have no onboarding";
-      case 6:
+      case CONNECT:
         return lobby
           ? `${seatList(ls).filter((s) => s.agent).length} agents · seed ${cfg.simulation.seed}`
           : "every seat gets an agent when the session is created";
-      case 8:
+      case KEYSHEET:
         return "skipped: no participants, so no names or codes";
-      case 9:
+      case START:
         return "locks the seats, starts round 1 with the agents and flips this tab to LIVE";
       default:
         return null;
@@ -423,55 +462,54 @@ export function SetupStage({ conn }: { conn: FacilitatorConnection }) {
 
   /* step bodies */
   const body = (i: number) => {
-    if (simulated && lobby && (i === 6 || i === 8 || i === 9)) return simulatedBody(i);
-    if (i <= LAST_CONFIG && !draft) return <span className="muted cursor">Loading defaults</span>;
+    if (simulated && lobby && (i === CONNECT || i === KEYSHEET || i === START)) return simulatedBody(i);
+    if (i <= CREATE && !draft) return <span className="muted cursor">Loading defaults</span>;
     const d = draft!;
     switch (i) {
       case 0:
         return <ScenarioStep conn={conn} d={d} upd={upd} scenarios={scenarios} />;
       case 1:
         return <RoundsStep d={d} upd={upd} />;
-      case 2:
+      case WHO:
+        return <WhoPlaysStep d={d} upd={upd} />;
+      case PLAYERS:
         return <PlayersStep d={d} upd={upd} />;
-      case 3:
+      case ONBOARDING:
         return <OnboardingStep d={d} upd={upd} httpsEnabled={info ? info.tls.enabled : null} />;
-      case 4:
+      case TAGS:
         return <TagsStep d={d} upd={upd} />;
-      case REVIEW:
-        return (
-          <ReviewStep
-            d={d}
-            scenarios={scenarios}
-            config={"config" in final ? final.config : null}
-            error={"error" in final ? final.error : null}
-            goTo={goTo}
-          />
-        );
-      case 6:
+      case CREATE:
+        return <CreateStep lastStep={num(CREATE)} error={"error" in final ? final.error : null} />;
+      case CONNECT:
         return dash && lobby ? (
           <div className="col">
             <Callout icon="client">
-              On each player PC, open{" "}
-              {urls.length ? (
-                urls.map((u, k) => (
-                  <span key={u.url}>
-                    {k > 0 && " or "}
-                    <strong className="mono">{u.url}</strong> <span className="faint">({u.iface})</span>
-                  </span>
-                ))
+              {landing.length ? (
+                <>
+                  On each player PC, open the welcome page <UrlList urls={landing} /> in full-screen (F11) and
+                  click <strong>Join live session</strong> (it appears now that the session exists). It leads
+                  to the game page <UrlList urls={urls} />.
+                </>
               ) : (
-                <strong>the player URL printed when the server started</strong>
+                <>
+                  On each player PC, open{" "}
+                  {urls.length ? (
+                    <UrlList urls={urls} />
+                  ) : (
+                    <strong>the player URL printed when the server started</strong>
+                  )}{" "}
+                  in full-screen (F11).
+                </>
               )}{" "}
-              in full-screen (F11). Each one appears here as a numbered <strong>client</strong>; bind each
-              client to a seat.
+              Each one appears here as a numbered <strong>client</strong>; bind each client to a seat.
             </Callout>
             {info && <TlsNote tls={info.tls} />}
             <BindEditor conn={conn} dash={dash} />
           </div>
         ) : null;
-      case 7:
+      case LABELS:
         return lobby ? <LabelsEditor conn={conn} st={ls} scenario={fs.scenario} /> : null;
-      case 8:
+      case KEYSHEET:
         if (lobby && noParticipants) {
           return (
             <Callout icon="fake">
@@ -514,7 +552,7 @@ export function SetupStage({ conn }: { conn: FacilitatorConnection }) {
             />
           </div>
         ) : null;
-      case 9:
+      case START:
         return lobby ? (
           <div className="col">
             <Checklist
@@ -553,27 +591,27 @@ export function SetupStage({ conn }: { conn: FacilitatorConnection }) {
     }
   };
 
-  /** Steps 07, 09 and 10 of a simulated session. */
+  /** The connect, key sheet and start steps of a simulated session. */
   function simulatedBody(i: number) {
-    if (!ls) return null; // steps 7–10: only reachable in the lobby
+    if (!ls) return null; // lobby steps: only reachable in the lobby
     switch (i) {
-      case 6:
+      case CONNECT:
         return (
           <div className="col">
             <Callout icon="agent">
               Every seat is taken by an <strong>agent</strong>: no player PCs, client binding or participant
-              codes. The agents act once the simulation starts (step 10).
+              codes. The agents act once the simulation starts (step {num(START)}).
             </Callout>
             <AgentsTable st={ls} />
           </div>
         );
-      case 8:
+      case KEYSHEET:
         return (
           <Callout icon="keysheet">
             Not needed. A simulated session has no participants, so there are no names or codes to keep apart.
           </Callout>
         );
-      case 9:
+      case START:
         return (
           <div className="col">
             <Checklist
@@ -604,11 +642,11 @@ export function SetupStage({ conn }: { conn: FacilitatorConnection }) {
   }
 
   const primary = (i: number): { label: string; icon: IconName; tip?: string } =>
-    i === REVIEW
+    i === CREATE
       ? {
           label: "Create session",
           icon: "create",
-          tip: "Create the session with these settings; steps 01–06 are then locked",
+          tip: `Create the session with these settings; steps 01–${num(CREATE)} are then locked`,
         }
       : i === START
         ? simulated
@@ -620,9 +658,9 @@ export function SetupStage({ conn }: { conn: FacilitatorConnection }) {
             }
         : { label: "Next", icon: "next" };
   const blockedHint: Record<number, string> = {
-    6: "Bind every seat to continue.",
-    7: "Choose the pairing and save the labels to continue.",
-    8: "Tick the box to continue.",
+    [CONNECT]: "Bind every seat to continue.",
+    [LABELS]: "Choose the pairing to continue.",
+    [KEYSHEET]: "Tick the box to continue.",
   };
 
   return (
@@ -632,13 +670,14 @@ export function SetupStage({ conn }: { conn: FacilitatorConnection }) {
           <Icon name="setup" />
           <span className="strong upper">Session setup</span>
           <span className="strong">
-            ▶ STEP {String(step + 1).padStart(2, "0")}/10 · {steps[step]!.title.toUpperCase()}
+            ▶ STEP {num(step)}/{STEP_COUNT} · {steps[step]!.title.toUpperCase()}
           </span>
           {simulated && <StatusTag icon="simulation">simulated players</StatusTag>}
           <span className="spacer" />
           <span className="hint">
-            01–06 configure · 07–10 {simulated ? "prepare the agents" : "prepare the room"} · <kbd>Enter</kbd>{" "}
-            next · <kbd>N</kbd> current step
+            01–{num(CREATE)} configure · {num(CONNECT)}–{num(START)}{" "}
+            {simulated ? "prepare the agents" : "prepare the room"} · <kbd>Enter</kbd> next · <kbd>N</kbd>{" "}
+            current step
           </span>
           {lobby && (
             <Button
@@ -670,9 +709,9 @@ export function SetupStage({ conn }: { conn: FacilitatorConnection }) {
                 aria-current={i === step ? "step" : undefined}
                 disabled={i === step || !reachable(i)}
                 onClick={() => goTo(i)}
-                title={`${String(i + 1).padStart(2, "0")} ${def.title}${locked(i) ? " (locked)" : skipped(i) ? " (skipped)" : ""}`}
+                title={`${num(i)} ${def.title}${locked(i) ? " (locked)" : skipped(i) ? " (skipped)" : ""}`}
               >
-                {glyphOf(i)} {String(i + 1).padStart(2, "0")} {def.label}
+                {glyphOf(i)} {num(i)} {def.label}
               </button>
             );
           })}
@@ -711,12 +750,14 @@ export function SetupStage({ conn }: { conn: FacilitatorConnection }) {
                 title={isLocked ? "Locked: the session has been created" : undefined}
               >
                 <span className="glyph">{glyph}</span>
-                <span className="num">{String(i + 1).padStart(2, "0")}</span>
+                <span className="num">{num(i)}</span>
                 <Icon name={isLocked ? "lock" : def.icon} />
                 <span className="title">{def.title}</span>
                 <span className="summary">{isCurrent ? "" : summary(i)}</span>
                 {isCurrent && (
-                  <StatusTag tone={ACCENT_STEPS.has(i) ? "neutral" : "primary"}>step {i + 1}/10</StatusTag>
+                  <StatusTag tone={ACCENT_STEPS.has(i) ? "neutral" : "primary"}>
+                    step {i + 1}/{STEP_COUNT}
+                  </StatusTag>
                 )}
                 {isLocked && <StatusTag>locked</StatusTag>}
               </button>
@@ -724,7 +765,7 @@ export function SetupStage({ conn }: { conn: FacilitatorConnection }) {
                 <div className="acc-body" onKeyDown={onBodyKey}>
                   {body(i)}
                   <div className="acc-foot">
-                    <Button icon="back" disabled={i === 0 || (lobby && i === 6)} onClick={back}>
+                    <Button icon="back" disabled={i === 0 || (lobby && i === CONNECT)} onClick={back}>
                       Back
                     </Button>
                     <span className="spacer" />

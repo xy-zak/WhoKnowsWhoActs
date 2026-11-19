@@ -31,6 +31,7 @@ import {
   ROUND,
   SCENARIOS,
   SETTINGS,
+  toMicCheck,
 } from "./direct";
 import { cleanup, setupSession, startTestServer, type TestServer } from "./harness";
 
@@ -160,21 +161,29 @@ describe("onboarding with audio: consent hold and mic check", () => {
   let d: Direct;
   afterEach(() => d.close());
 
-  it("adds the mic check after consent and holds it until every real seat has consented", async () => {
-    d = direct({ audio: { enabled: true }, seatCount: 3 });
-    onboard(d.m, [3]); // seat 3: a fake player, which never holds anybody
-    expect(d.m.state.onboardingSteps).toEqual(["consent", "mic_check", "demographics", "briefing"]);
-    consent(d.m, 1);
+  it("adds the mic check last and holds it until every real seat has finished the briefing", async () => {
+    d = direct({ audio: { enabled: true }, seatCount: 4 });
+    onboard(d.m, [4]); // seat 4: a fake player, which never holds anybody
+    expect(d.m.state.onboardingSteps).toEqual(["consent", "demographics", "briefing", "mic_check"]);
+    toMicCheck(d.m, 1);
     expect(d.m.state.seats[1]!.audioConsent).toBe(true);
-    // seat 2 is still reading the consent form: seat 1 may not open its mic
-    expect(() => d.m.submitMicCheck(1, MIC_OK)).toThrow(/consent/);
+    expect(view(d.m, 1).me.nextStep).toBe("mic_check");
+    // seats 2 and 3 are still reading the consent form: seat 1 may not open its mic
+    expect(() => d.m.submitMicCheck(1, MIC_OK)).toThrow(/briefing/);
+    expect(view(d.m, 1).audio.micCheckHeld).toBe(true);
     const held = await d.m.submitAudioStart(1, startMsg());
     expect(refused(held)).toBe(true);
-    // a decline holds as well, until the facilitator withdraws that seat
-    consent(d.m, 2, false);
-    expect(d.m.state.seats[2]!.consent).toBe("declined");
+    // seat 2 agreed but is still in the questionnaire and the briefing: still held
+    consent(d.m, 2);
     expect(refused(await d.m.submitAudioStart(1, startMsg()))).toBe(true);
-    d.m.withdraw(2);
+    expect(refused(await d.m.submitAudioStart(2, startMsg()))).toBe(true);
+    finishOnboarding(d.m, 2);
+    // a decline holds as well, until the facilitator withdraws that seat
+    consent(d.m, 3, false);
+    expect(d.m.state.seats[3]!.consent).toBe("declined");
+    expect(refused(await d.m.submitAudioStart(1, startMsg()))).toBe(true);
+    d.m.withdraw(3);
+    expect(view(d.m, 1).audio.micCheckHeld).toBe(false);
     const t = randomUUID();
     expect(await d.m.submitAudioStart(1, startMsg(t))).toEqual({ ok: true });
     d.m.submitMicCheck(1, MIC_OK);
@@ -188,8 +197,8 @@ describe("onboarding with audio: consent hold and mic check", () => {
   it("lets the facilitator skip a mic check: the seat continues and is not recorded", async () => {
     d = direct();
     onboard(d.m);
-    consent(d.m, 1);
-    consent(d.m, 2);
+    toMicCheck(d.m, 1);
+    toMicCheck(d.m, 2);
     const t = randomUUID();
     expect((await d.m.submitAudioStart(2, startMsg(t))).ok).toBe(true);
     d.m.skipMicCheck(2, "no working microphone");
@@ -199,8 +208,7 @@ describe("onboarding with audio: consent hold and mic check", () => {
     expect(refused(await d.m.submitAudioStart(2, startMsg()))).toBe(true);
     expect(refused(await d.m.submitAudioChunk(2, chunkMsg(t, 0, 1600, Date.now())))).toBe(true);
     expect(() => d.m.skipMicCheck(2, "again")).toThrow(/already/);
-    finishOnboarding(d.m, 2);
-    expect(d.m.state.seats[2]!.briefing).toBe(true);
+    expect(view(d.m, 2).me.nextStep).toBeNull();
   });
 
   it("never records without the audio item, fake players, or sessions without audio", async () => {
@@ -247,8 +255,8 @@ describe("chunk ingest", () => {
   async function recording(): Promise<string> {
     d = direct({ audio: { enabled: true } }, { clock });
     onboard(d.m);
-    consent(d.m, 1);
-    consent(d.m, 2);
+    toMicCheck(d.m, 1);
+    toMicCheck(d.m, 2);
     const t = randomUUID();
     expect(await d.m.submitAudioStart(1, startMsg(t, now))).toEqual({ ok: true });
     return t;
@@ -382,9 +390,7 @@ describe("chunk ingest", () => {
   it("game complete cuts the recording; close and abort leave nothing open", async () => {
     const t = await recording();
     d.m.submitMicCheck(1, MIC_OK);
-    finishOnboarding(d.m, 1);
     d.m.skipMicCheck(2, "test");
-    finishOnboarding(d.m, 2);
     expect(d.m.canStartRound()).toMatch(/calibration/);
     expect(() => d.m.startRound()).toThrow(/calibration/);
     d.m.skipCalibration("everyone uses a headset");
@@ -513,22 +519,46 @@ describe("calibration state machine", () => {
     d = direct({ audio: { enabled: true } }, { clock: () => Date.now() });
     onboard(d.m);
     const tracks: string[] = [];
-    for (const s of [1, 2]) consent(d.m, s);
-    expect(() => d.m.startCalibration()).toThrow(/mic check of seat 1, 2/);
+    toMicCheck(d.m, 1);
+    expect(() => d.m.startCalibration()).toThrow(/onboarding \(mic check\) of seat 1, 2/);
+    toMicCheck(d.m, 2);
     for (const s of [1, 2]) {
       const t = randomUUID();
       tracks.push(t);
       expect((await d.m.submitAudioStart(s, startMsg(t, Date.now() - 2000))).ok).toBe(true);
+      // nobody may say ready before the room is through its mic checks
+      expect(() => d.m.sayCalibrationReady(s, { clientTs: 0 })).toThrow(/not waiting/);
       d.m.submitMicCheck(s, MIC_OK);
-      finishOnboarding(d.m, s);
     }
     return tracks;
+  }
+
+  /** Both seats say they are ready: the second one starts the calibration (never by surprise). */
+  function allReady() {
+    expect(view(d.m, 1).audio.calibration).toMatchObject({
+      canSayReady: true,
+      ready: false,
+      waitingFor: [1, 2],
+    });
+    d.m.sayCalibrationReady(1, { clientTs: 0 });
+    expect(d.m.state.audio.calibration.status).toBe("pending");
+    expect(view(d.m, 2).audio.calibration).toMatchObject({ canSayReady: true, waitingFor: [2] });
+    expect(view(d.m, 1).audio.calibration).toMatchObject({ canSayReady: false, ready: true });
+    expect(() => d.m.startCalibration()).toThrow(/seat 2 to say/);
+    // a resend is harmless
+    d.m.sayCalibrationReady(1, { clientTs: 0 });
+    d.m.sayCalibrationReady(2, { clientTs: 0 });
+    expect(d.m.state.audio.calibration.status).toBe("running");
+    expect(d.events.filter((e) => e.type === "CalibrationReady").map((e) => e.seat)).toEqual(
+      expect.arrayContaining([1, 2]),
+    );
+    expect(d.events.findLast((e) => e.type === "CalibrationStarted")?.actorKind).toBe("system");
   }
 
   it("times one turn per seat, completes, and checks the leakage from the turns' audio", async () => {
     const tracks = await ready();
     const T0 = Date.now() - 2000;
-    d.m.startCalibration();
+    allReady();
     const c = () => d.m.state.audio.calibration;
     expect(c()).toMatchObject({ status: "running", order: [1, 2], turnMs: 6000, gapMs: 1000, turnIndex: 0 });
     expect(view(d.m, 1).audio.calibration).toMatchObject({ myTurn: true, turnSeat: 1 });
@@ -575,11 +605,15 @@ describe("calibration state machine", () => {
 
   it("reports missing audio after the wait, and a redo restarts cleanly with new sentences", async () => {
     await ready();
-    d.m.startCalibration();
+    allReady();
     const first = d.m.state.audio.calibration.sentenceIds;
     await vi.advanceTimersByTimeAsync(3000);
-    // redo in the middle of the first run: the old run's timers no longer count
-    d.m.startCalibration(true);
+    // redo in the middle of the first run: the old run's timers no longer count, and everyone
+    // says again that they are ready
+    d.m.redoCalibration();
+    expect(d.m.state.audio.calibration).toMatchObject({ status: "pending", ready: [] });
+    expect(() => d.m.redoCalibration()).toThrow(/not run yet/);
+    allReady();
     expect(d.m.state.audio.calibration.sentenceIds).not.toEqual(first);
     await vi.advanceTimersByTimeAsync(4000 + 1); // the old run's next turn would have fired here
     expect(d.events.filter((e) => e.type === "CalibrationTurn")).toHaveLength(2); // run 1 turn 0, run 2 turn 0
@@ -601,20 +635,23 @@ describe("calibration state machine", () => {
 
   it("skip cancels a running calibration; pausing recording ends it; abort clears the timers", async () => {
     await ready();
-    d.m.startCalibration();
+    allReady();
     d.m.skipCalibration("headsets");
     expect(d.m.state.audio.calibration.status).toBe("skipped");
     await vi.advanceTimersByTimeAsync(60_000);
     expect(d.events.filter((e) => e.type === "CalibrationTurn")).toHaveLength(1);
-    d.m.startCalibration(true);
+    d.m.redoCalibration();
+    allReady();
     d.m.pauseRecording();
     // stopped by the server: back to pending, so round 1 still waits for a calibration
-    expect(d.m.state.audio.calibration.status).toBe("pending");
+    expect(d.m.state.audio.calibration).toMatchObject({ status: "pending", ready: [] });
     expect(d.events.at(-1)).toMatchObject({ type: "CalibrationSkipped", payload: { cancelled: true } });
     expect(d.m.canStartRound()).toMatch(/calibration/);
-    expect(() => d.m.startCalibration(true)).toThrow(/paused/);
+    expect(() => d.m.startCalibration()).toThrow(/paused/);
+    // nobody can say ready while the recording is paused
+    expect(() => d.m.sayCalibrationReady(1, { clientTs: 0 })).toThrow(/not waiting/);
     d.m.resumeRecording();
-    d.m.startCalibration(true);
+    allReady();
     d.m.abort("test");
     const n = d.events.length;
     await vi.advanceTimersByTimeAsync(60_000);
@@ -656,11 +693,16 @@ describe("live recording with audio bots (sockets)", () => {
     cleanup(cfgDir);
   });
 
-  it("gates round 1 on the calibration, runs it and shows the quality check", async () => {
-    const { fac } = result;
+  it("gates round 1 on the calibration, starts it once every seat is ready and shows the quality check", async () => {
+    const { fac, sessionId } = result;
     await expect(fac.cmd("round:start")).rejects.toThrow(/calibration/);
-    await fac.cmd("calibration:start");
+    // the bots say they are ready (part 2 of "Mic check & calibration"): the server starts it
     const d = await fac.waitForDashboard((x) => x.state?.audio.calibration.quality !== null, 25_000);
+    const events = srv.ctx.store.listEvents(sessionId);
+    expect(events.filter((e) => e.type === "CalibrationReady").map((e) => e.seat)).toEqual(
+      expect.arrayContaining([1, 2]),
+    );
+    expect(events.find((e) => e.type === "CalibrationStarted")?.actorKind).toBe("system");
     expect(d.state?.audio.calibration.status).toBe("done");
     const q = d.state!.audio.calibration.quality!;
     expect(q.perSeat.map((s) => s.seat)).toEqual([1, 2]);

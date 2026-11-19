@@ -327,7 +327,7 @@ export function themeCss(): string {
     const vars = Object.entries(THEMES[t])
       .map(([k, v]) => `--${k}:${v};`)
       .join("");
-    // also on any element, so a block can preview the other theme (setup step 03)
+    // also on any element, so a block can preview the other theme (setup step 04)
     return `:root[data-theme="${t}"],[data-theme="${t}"]{${vars}color-scheme:${t === "latte" ? "light" : "dark"};}`;
   }).join("\n");
 }

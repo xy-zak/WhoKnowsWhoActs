@@ -7,6 +7,8 @@ import {
   afterReplay,
   agentSeed,
   applyEvent,
+  calibrationReadyToStart,
+  canSayCalibrationReady,
   canStartFirstRound,
   checkSimulationConfig,
   DEFAULT_VALIDATORS,
@@ -354,11 +356,16 @@ export class SessionManager {
 
   /* ═════════════════════════ internals ═════════════════════════ */
 
-  /** Run a command; all events appended inside are delivered to onEvents in one batch. */
+  /**
+   * Run a command; all events appended inside are delivered to onEvents in one batch. At the end of
+   * the outermost command, a calibration the room is now ready for starts (autoStartCalibration).
+   */
   private run<T>(fn: () => T): T {
     this.depth++;
     try {
-      return fn();
+      const out = fn();
+      if (this.depth === 1) this.autoStartCalibration();
+      return out;
     } finally {
       this.depth--;
       if (this.depth === 0 && this.pending.length > 0) {
@@ -452,7 +459,7 @@ export class SessionManager {
     if (this.simulated)
       return "Fake players are for sessions with real players; a simulated session already has an agent in every seat";
     if (this.state.phase !== "lobby")
-      return "Fake players can only be added in the lobby (setup step 07), before onboarding";
+      return "Fake players can only be added in the lobby (setup step 08), before onboarding";
     return null;
   }
 
@@ -986,15 +993,16 @@ export class SessionManager {
   }
 
   /**
-   * The player's own mic check (the step after consent). Held while any real seat is still in
-   * consent (see micCheckHoldSeats): no microphone opens before everyone has agreed.
+   * The player's own mic check (the last onboarding step, part 1 of "Mic check & calibration").
+   * Held while any real seat has not finished the steps before it (see micCheckHoldSeats): no
+   * microphone opens before everyone has agreed and is ready.
    */
   submitMicCheck(seat: number, msg: MicCheckResult) {
     this.run(() => {
       this.requireAudio();
       const s = this.requireStep(seat, "mic_check");
       if (isMicCheckHeld(this.state))
-        throw new CommandError("Please wait: the others are still reading the consent form");
+        throw new CommandError("Please wait: the others have not finished the briefing yet");
       this.append({
         type: "MicCheckCompleted",
         actorKind: "player",
@@ -1097,15 +1105,63 @@ export class SessionManager {
   /* ═════════════════════════ audio: calibration ═════════════════════════ */
 
   /**
-   * Facilitator: start the calibration (or run it again with `redo`), in the onboarding or between
-   * rounds. The turns, their timing and the quick check: see CalibrationRunner.
+   * Player: ready for the calibration (part 2 of "Mic check & calibration"), so its turns never start
+   * by surprise. When this was the last recorded seat, the calibration starts (see run).
    */
-  startCalibration(redo = false) {
+  sayCalibrationReady(seat: number, msg: { clientTs: number }) {
+    this.run(() => {
+      this.requireAudio();
+      const s = this.requireSeat(seat);
+      if (!canSayCalibrationReady(this.state, s)) {
+        if (this.state.audio.calibration.ready.includes(seat)) return; // a resend: already ready
+        throw new CommandError("The calibration is not waiting for you now");
+      }
+      this.append({
+        type: "CalibrationReady",
+        actorKind: "player",
+        seat,
+        participantCode: s.participantCode,
+        clientTs: msg.clientTs,
+        payload: {},
+      });
+    });
+  }
+
+  /**
+   * Facilitator: start the waiting calibration now, in the onboarding or between rounds. It also
+   * starts by itself (autoStartCalibration); either way only once every recorded seat is ready.
+   * The turns, their timing and the quick check: see CalibrationRunner.
+   */
+  startCalibration() {
     this.run(() => {
       this.requireAudio();
       this.requirePhase("onboarding", "round_complete");
-      this.calibrationCommand(() => this.calibration.start(redo));
+      this.calibrationCommand(() => this.calibration.start("facilitator"));
     });
+  }
+
+  /** Facilitator: run the calibration again; everyone says again that they are ready (see CalibrationRunner.redo). */
+  redoCalibration() {
+    this.run(() => {
+      this.requireAudio();
+      this.requirePhase("onboarding", "round_complete");
+      this.calibrationCommand(() => this.calibration.redo());
+    });
+  }
+
+  /**
+   * Start the calibration once the room is ready for it (calibrationReadyToStart): the last seat
+   * said it is ready, or what it waited for went away (a seat withdrew, its mic check was skipped,
+   * recording resumed). Inside the outermost command, so its events go out in the same batch.
+   */
+  private autoStartCalibration() {
+    if (this.isFinal || !calibrationReadyToStart(this.state)) return;
+    try {
+      this.calibration.start("system");
+    } catch (e) {
+      if (!(e instanceof CalibrationError)) throw e;
+      this.deps.log.warn({ sessionId: this.sessionId, reason: e.message }, "calibration did not start");
+    }
   }
 
   /** Facilitator: skip the calibration, or cancel a running one (round 1 may then start without it). */

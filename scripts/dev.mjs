@@ -12,6 +12,8 @@ const env = {
   WKWA_TLS: "off",
   TLS_CERT: "",
   TLS_KEY: "",
+  // the welcome page is at http://localhost:5173/landing in dev (Vite); no extra port
+  LANDING_PORT: process.env.LANDING_PORT ?? "off",
 };
 
 const procs = [
@@ -21,7 +23,9 @@ const procs = [
   }),
   spawn("npm", ["run", "dev", "-w", "@wkwa/client"], { stdio: "inherit", env }),
 ];
-console.log("\n  Dev mode: open http://localhost:5173 (player) and http://localhost:5173/facilitator\n");
+console.log(
+  "\n  Dev mode: open http://localhost:5173/landing (welcome), http://localhost:5173 (player) and http://localhost:5173/facilitator\n",
+);
 const stop = () => {
   for (const p of procs) p.kill("SIGTERM");
   process.exit(0);

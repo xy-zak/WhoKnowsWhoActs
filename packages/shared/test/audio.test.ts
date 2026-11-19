@@ -12,9 +12,13 @@ import {
   AudioStop,
   audioSendResult,
   ConsentItemSchema,
+  calibrationNotReadySeats,
+  calibrationReadyToStart,
   calibrationWaitingSeats,
+  canSayCalibrationReady,
   canStartFirstRound,
   composeConsent,
+  consentSections,
   isMicCheckHeld,
   isOnboardingComplete,
   MicCheckSubmit,
@@ -39,7 +43,9 @@ import { EventLog, readySession, TEST_MAP, testScenario } from "./helpers";
 const root = fileURLToPath(new URL("../../../", import.meta.url));
 const readConfig = (f: string) => JSON.parse(readFileSync(`${root}config/${f}`, "utf8"));
 
-const AUDIO_STEPS: OnboardingStep[] = ["consent", "mic_check", "demographics", "briefing"];
+const AUDIO_STEPS: OnboardingStep[] = ["consent", "demographics", "briefing", "mic_check"];
+/** The order sessions logged before the mic check moved to the end of the onboarding. */
+const LEGACY_AUDIO_STEPS: OnboardingStep[] = ["consent", "mic_check", "demographics", "briefing"];
 const SETTINGS = {
   sampleRate: 48000,
   echoCancellation: false,
@@ -125,9 +131,13 @@ function finishOnboarding(log: EventLog, seat: number) {
   afterConsent(log, seat);
 }
 
-/** Mic check (if used), demographics and briefing. */
+/** Demographics, briefing and the mic check (if used). */
 function afterConsent(log: EventLog, seat: number) {
+  questionnaireAndBriefing(log, seat);
   if (log.state.onboardingSteps.includes("mic_check")) micCheck(log, seat);
+}
+
+function questionnaireAndBriefing(log: EventLog, seat: number) {
   log.push(
     "DemographicsSubmitted",
     { formVersion: "1", answers: { age: "25_34" }, durationMs: 1 },
@@ -138,6 +148,12 @@ function afterConsent(log: EventLog, seat: number) {
     { textSha256: "y", durationMs: 1 },
     { seat, code: code(seat), actor: "player" },
   );
+}
+
+/** Consent, questionnaire and briefing: the seat is at its mic check (held until every seat is). */
+function toMicCheck(log: EventLog, seat: number) {
+  consent(log, seat, fullConsent);
+  questionnaireAndBriefing(log, seat);
 }
 
 const seat = (log: EventLog, n: number) => log.state.seats[n]!;
@@ -322,22 +338,36 @@ describe("onboarding steps with audio", () => {
     expect(onboardingStepsFor({ ...simulated, players: "simulated" })).not.toContain("mic_check");
   });
 
-  it("orders consent → mic_check → demographics → briefing", () => {
+  it("orders consent → demographics → briefing → mic_check", () => {
     const log = onboardingSession();
     const s = () => seat(log, 1);
     expect(log.state.onboardingSteps).toEqual(AUDIO_STEPS);
     expect(nextOnboardingStep(log.state, s())).toBe("consent");
     consent(log, 1, fullConsent);
+    expect(nextOnboardingStep(log.state, s())).toBe("demographics");
+    questionnaireAndBriefing(log, 1);
     expect(nextOnboardingStep(log.state, s())).toBe("mic_check");
     micCheck(log, 1, false);
     expect(s().micCheck).toBe("pending");
     expect(nextOnboardingStep(log.state, s())).toBe("mic_check");
+    expect(isOnboardingComplete(log.state, s())).toBe(false);
     micCheck(log, 1);
     expect(s().micCheck).toBe("passed");
-    expect(nextOnboardingStep(log.state, s())).toBe("demographics");
-    expect(isOnboardingComplete(log.state, s())).toBe(false);
+    expect(isOnboardingComplete(log.state, s())).toBe(true);
     finishOnboarding(log, 2);
     expect(isOnboardingComplete(log.state, seat(log, 2))).toBe(true);
+  });
+
+  it("keeps the order a session logged: an old session has the mic check after consent, held by consent only", () => {
+    const log = onboardingSession(undefined, { steps: LEGACY_AUDIO_STEPS });
+    for (const n of [1, 2, 3]) consent(log, n, fullConsent);
+    expect(nextOnboardingStep(log.state, seat(log, 1))).toBe("mic_check");
+    expect(micCheckHoldSeats(log.state)).toEqual([4]);
+    consent(log, 4, fullConsent);
+    expect(isMicCheckHeld(log.state)).toBe(false);
+    expect(why(log, 1)).toBeNull();
+    micCheck(log, 1);
+    expect(nextOnboardingStep(log.state, seat(log, 1))).toBe("demographics");
   });
 
   it("counts a mic check skipped by the facilitator as done", () => {
@@ -349,7 +379,8 @@ describe("onboarding steps with audio", () => {
       { seat: 3, code: code(3), actor: "facilitator" },
     );
     expect(seat(log, 3).micCheck).toBe("skipped");
-    expect(nextOnboardingStep(log.state, seat(log, 3))).toBe("demographics");
+    questionnaireAndBriefing(log, 3);
+    expect(nextOnboardingStep(log.state, seat(log, 3))).toBeNull();
     // a late "passed" does not undo the skip
     micCheck(log, 3);
     expect(seat(log, 3).micCheck).toBe("skipped");
@@ -374,9 +405,10 @@ describe("onboarding steps with audio", () => {
     expect([1, 2, 3, 4].map((n) => seat(log, n).audioConsent)).toEqual([true, false, false, false]);
     expect(seat(log, 4).consent).toBe("declined");
     // without audio consent nobody is asked to speak into the mic: the step does not apply
+    for (const n of [1, 2, 3]) questionnaireAndBriefing(log, n);
     expect(nextOnboardingStep(log.state, seat(log, 1))).toBe("mic_check");
-    expect(nextOnboardingStep(log.state, seat(log, 2))).toBe("demographics");
-    expect(nextOnboardingStep(log.state, seat(log, 3))).toBe("demographics");
+    expect(nextOnboardingStep(log.state, seat(log, 2))).toBeNull();
+    expect(nextOnboardingStep(log.state, seat(log, 3))).toBeNull();
   });
 });
 
@@ -385,15 +417,20 @@ describe("recording verdict through the event log", () => {
     const log = onboardingSession();
     expect(why(log, 1)).toBe("consent_pending");
     consent(log, 1, fullConsent);
+    // in the questionnaire: held, nobody's microphone opens before everyone is ready
+    expect(why(log, 1)).toBe("mic_check_held");
+    questionnaireAndBriefing(log, 1);
     // at the mic check, but held: the others are still reading the consent form
     expect(micCheckHoldSeats(log.state)).toEqual([2, 3, 4]);
     expect(why(log, 1)).toBe("mic_check_held");
     for (const n of [2, 3, 4]) consent(log, n, fullConsent);
+    // and then still in the questionnaire and the briefing
+    expect(micCheckHoldSeats(log.state)).toEqual([2, 3, 4]);
+    for (const n of [2, 3, 4]) questionnaireAndBriefing(log, n);
     expect(isMicCheckHeld(log.state)).toBe(false);
     expect(why(log, 1)).toBeNull(); // at the mic check
-    afterConsent(log, 1);
-    for (const n of [2, 3, 4]) afterConsent(log, n);
-    expect(why(log, 1)).toBeNull(); // ready, waiting for round 1
+    for (const n of [1, 2, 3, 4]) micCheck(log, n);
+    expect(why(log, 1)).toBeNull(); // ready, waiting for the calibration
     log.push("CalibrationSkipped", { reason: "test" }, { actor: "facilitator" });
     log.push(
       "RoundStarted",
@@ -452,7 +489,7 @@ describe("recording verdict through the event log", () => {
 
   it("stops for a withdrawn seat, a skipped mic check and while recording is paused", () => {
     const log = onboardingSession();
-    for (const n of [1, 2, 3, 4]) consent(log, n, fullConsent);
+    for (const n of [1, 2, 3, 4]) toMicCheck(log, n);
     log.push(
       "ParticipantWithdrawn",
       { seat: 1, by: "facilitator", phase: "onboarding" },
@@ -478,9 +515,9 @@ describe("recording verdict through the event log", () => {
     expect(why(log, 3)).toBeNull();
   });
 
-  it("holds every mic check until each real seat has consented; a decliner holds until withdrawn", () => {
+  it("holds every mic check until each real seat has finished the briefing; a decliner holds until withdrawn", () => {
     const log = onboardingSession(undefined, { fakeSeats: [4] });
-    for (const n of [1, 2]) consent(log, n, fullConsent);
+    for (const n of [1, 2]) toMicCheck(log, n);
     // the fake seat never holds; seat 3 is still reading
     expect(micCheckHoldSeats(log.state)).toEqual([3]);
     expect(playerView(log.state, testScenario, 1, content, 0).audio).toMatchObject({
@@ -701,11 +738,60 @@ describe("calibration", () => {
     const seats = (list: Array<{ seat: number }>) => list.map((s) => s.seat);
     expect(seats(calibrationWaitingSeats(log.state))).toEqual([1, 2, 3]);
     expect(seats(seatsInMicCheck(log.state))).toEqual([]);
-    for (const n of [1, 2, 3]) consent(log, n, fullConsent);
+    for (const n of [1, 2, 3]) toMicCheck(log, n);
+    // through the briefing: every seat in its mic check, the calibration still waits for them
+    expect(seats(calibrationWaitingSeats(log.state))).toEqual([1, 2, 3]);
     expect(seats(seatsInMicCheck(log.state))).toEqual([1, 2, 3]);
     micCheck(log, 1);
     expect(seats(calibrationWaitingSeats(log.state))).toEqual([2, 3]);
     expect(seats(seatsInMicCheck(log.state))).toEqual([2, 3]);
+  });
+
+  it("waits for every recorded seat to say it is ready; a redo asks again", () => {
+    const log = onboardingSession(undefined, { fakeSeats: [4] });
+    const ready = (n: number) =>
+      log.push("CalibrationReady", {}, { seat: n, code: code(n), actor: "player" });
+    for (const n of [1, 2]) finishOnboarding(log, n);
+    // seat 3 still in its mic check: it may not say ready yet, and the calibration cannot start
+    toMicCheck(log, 3);
+    expect(canSayCalibrationReady(log.state, seat(log, 3))).toBe(false);
+    expect(canSayCalibrationReady(log.state, seat(log, 1))).toBe(true);
+    expect(calibrationReadyToStart(log.state)).toBe(false);
+    micCheck(log, 3);
+    expect([1, 2, 3].map((n) => canSayCalibrationReady(log.state, seat(log, n)))).toEqual([true, true, true]);
+    expect(canSayCalibrationReady(log.state, seat(log, 4))).toBe(false); // a fake player is never recorded
+    ready(1);
+    ready(1); // a second one changes nothing
+    ready(3);
+    expect(log.state.audio.calibration.ready).toEqual([1, 3]);
+    expect(canSayCalibrationReady(log.state, seat(log, 1))).toBe(false);
+    expect(calibrationNotReadySeats(log.state)).toEqual([2]);
+    expect(calibrationReadyToStart(log.state)).toBe(false);
+    expect(playerView(log.state, testScenario, 1, content, 0).audio.calibration).toMatchObject({
+      ready: true,
+      canSayReady: false,
+      waitingFor: [2],
+    });
+    // a paused recording holds the start
+    log.push("RecordingPaused", {}, { actor: "facilitator" });
+    ready(2);
+    expect(log.state.audio.calibration.ready).toEqual([1, 3, 2]);
+    expect(calibrationReadyToStart(log.state)).toBe(false);
+    log.push("RecordingResumed", {}, { actor: "facilitator" });
+    expect(calibrationReadyToStart(log.state)).toBe(true);
+    // a run empties the list; a redo asks everyone again
+    log.push(
+      "CalibrationStarted",
+      { order: [1, 2, 3], sentenceIds: ["a", "b", "c"], turnMs: 6000, gapMs: 1000 },
+      { actor: "system" },
+    );
+    expect(log.state.audio.calibration).toMatchObject({ status: "running", ready: [] });
+    ready(1); // too late: not waiting
+    expect(log.state.audio.calibration.ready).toEqual([]);
+    log.push("CalibrationRequested", {}, { actor: "facilitator" });
+    expect(log.state.audio.calibration).toMatchObject({ status: "pending", ready: [], order: [] });
+    expect(calibrationNotReadySeats(log.state)).toEqual([1, 2, 3]);
+    expect(reduceEvents(log.events).audio).toEqual(log.state.audio);
   });
 
   it("does not gate round 1 when calibration is not required or audio is off", () => {
@@ -733,13 +819,16 @@ describe("player view: audio", () => {
         sentence: null,
         turnEndsAt: null,
         order: [],
+        ready: false,
+        canSayReady: false,
+        waitingFor: [],
       },
     });
   });
 
   it("tells the browser to record and shows the mic check phrase at the mic check", () => {
     const log = onboardingSession();
-    for (const n of [1, 2, 3, 4]) consent(log, n, fullConsent);
+    for (const n of [1, 2, 3, 4]) toMicCheck(log, n);
     const v = playerView(log.state, testScenario, 1, content, 0);
     expect(v.me.nextStep).toBe("mic_check");
     expect(v.audio).toMatchObject({ enabled: true, record: true, paused: false, micCheck: "pending" });
@@ -915,5 +1004,43 @@ describe("recording windows and calibration runs (reducer)", () => {
     expect(log.state.audio.calibrationRuns).toBe(runs);
     // the same log folded again gives the same figures (a session loaded after a restart)
     expect(reduceEvents(log.events).audio).toEqual(log.state.audio);
+  });
+});
+
+describe("consent sections", () => {
+  const md = "# Title\n\nIntro.\n\n## About\nText A.\n\n## Data\n- one\n- two\n";
+  const items = [
+    { id: "a", section: "About" },
+    { id: "d", section: "Data" },
+  ];
+
+  it("splits the text into its sections, each with the one statement that confirms it", () => {
+    const { intro, sections } = consentSections(md, items);
+    expect(intro).toBe("# Title\n\nIntro.");
+    expect(sections.map((x) => [x.title, x.markdown, x.item.id])).toEqual([
+      ["About", "Text A.", "a"],
+      ["Data", "- one\n- two", "d"],
+    ]);
+  });
+
+  it("refuses a section without its statement, two statements for one section, or a statement without a section", () => {
+    expect(() => consentSections(md, [items[0]!])).toThrow(/'Data' needs exactly one/);
+    expect(() => consentSections(md, [...items, { id: "x", section: "Data" }])).toThrow(/has 2/);
+    expect(() => consentSections(md, [...items, { id: "x" }])).toThrow(/'x'/);
+    expect(() => consentSections(md, [...items, { id: "x", section: "Nope" }])).toThrow(/'Nope' is not one/);
+  });
+
+  it("fits the shipped consent form, with and without audio", () => {
+    const form = readConfig("consent.json") as {
+      markdownFile: string;
+      items: Array<{ id: string; section?: string; when?: "audio" }>;
+    };
+    const text = readFileSync(`${root}config/${form.markdownFile}`, "utf8");
+    for (const audio of [false, true]) {
+      const c = composeConsent({ markdown: text, items: form.items }, { audio });
+      const { sections } = consentSections(c.markdown, c.items);
+      expect(sections.length).toBe(c.items.length);
+      expect(sections.some((x) => x.item.id === AUDIO_CONSENT_ITEM)).toBe(audio);
+    }
   });
 });

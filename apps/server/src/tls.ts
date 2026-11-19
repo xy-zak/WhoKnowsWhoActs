@@ -1,6 +1,5 @@
 import { createPrivateKey, X509Certificate } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import type { TlsInfo } from "@wkwa/shared";
@@ -15,8 +14,8 @@ import type { RuntimeOptions } from "./runtime";
  * so the server speaks HTTPS. Without an internet connection there is no
  * publicly trusted certificate, so the server makes its own self-signed one
  * (WKWA_TLS=auto, the default). Each participant's browser shows a warning
- * once; the facilitator can compare the SHA-256 fingerprint shown in setup
- * step 07 with the one the browser shows.
+ * once (the welcome page, landing.ts, tells them beforehand); the facilitator can
+ * compare the SHA-256 fingerprint shown in the Connect step with the one the browser shows.
  *
  * The certificate is kept in data/tls/ and reused across restarts, so the
  * exceptions browsers have accepted stay valid. It is only made again when
@@ -416,9 +415,10 @@ const HOST_NAME = /^[A-Za-z0-9.-]+$/;
 const IPV6_HOST = /^\[[0-9A-Fa-f:.]+\]$/;
 
 /**
- * Where a plain-HTTP request should go: the same host (from the Host header,
- * port dropped) on the HTTPS port, same path and query. Null if the Host header
- * is missing or not a plain host name or address.
+ * The HTTPS address of a plain-HTTP request: the same host (from the Host header,
+ * port dropped) on the HTTPS port, same path and query (the welcome page's
+ * "Join live session" link). Null if the Host header is missing or not a plain
+ * host name or address.
  */
 export function redirectLocation(hostHeader: string | undefined, url: string | undefined, httpsPort: number) {
   if (!hostHeader) return null;
@@ -431,34 +431,4 @@ export function redirectLocation(hostHeader: string | undefined, url: string | u
     rest = `${u.pathname}${u.search}`;
   } catch {}
   return `https://${host}:${httpsPort}${rest}`;
-}
-
-/** HTTP_REDIRECT_PORT: a plain-HTTP listener that answers every request with 301 → HTTPS. */
-export function startHttpRedirect(opts: {
-  host: string;
-  port: number;
-  httpsPort: number;
-}): Promise<http.Server> {
-  const server = http.createServer((req, res) => {
-    const location = redirectLocation(req.headers.host, req.url, opts.httpsPort);
-    if (!location) {
-      res.writeHead(400, { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" });
-      res.end(`Open https://<laptop address>:${opts.httpsPort}/ instead.\n`);
-      return;
-    }
-    res.writeHead(301, {
-      location,
-      "content-type": "text/plain; charset=utf-8",
-      "cache-control": "no-store",
-      connection: "close",
-    });
-    res.end(`Moved to ${location}\n`);
-  });
-  return new Promise((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(opts.port, opts.host, () => {
-      server.off("error", reject);
-      resolve(server);
-    });
-  });
 }

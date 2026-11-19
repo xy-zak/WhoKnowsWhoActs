@@ -76,16 +76,23 @@ export async function fillRounds(
     await fac.getByRole("spinbutton", { name: "Time limit (seconds)" }).fill(String(r.timeLimitSec));
 }
 
-/** Step 07: bind a player PC (by its client number) to a seat. */
+/** Step 08: bind a player PC (by its client number) to a seat. */
 export async function bind(fac: Page, seat: number, terminal: number) {
   await fac
     .getByRole("combobox", { name: `Bind a client to seat ${seat}` })
     .selectOption({ label: `Client ${terminal}` });
 }
 
+/** Step 08: a fake player (a test client the server creates, at the normal pace) for a seat. */
+export async function addFake(fac: Page, seat: number) {
+  const row = fac.locator(".acc-step.current tr", { hasText: `SEAT ${seat}` });
+  await row.getByRole("button", { name: "Fake player" }).click();
+  await expect(row).toContainText("none (fake player)");
+}
+
 /**
- * Step 08: save a fixed K–P pairing, aligned (Ka–Pa …) or dissociated D1–D6,
- * with the default K per seat (Ka, Kb, Kc, Kd). Repeatable, unlike a shuffle.
+ * Step 09: choose the K–P pairing, aligned (Ka–Pa …) or dissociated D1–D6; each seat keeps its K
+ * (seat 1 → Ka …). Every choice is saved at once (no save button).
  */
 export async function saveLabels(fac: Page, pairing: "aligned" | { dissociated: number } = "aligned") {
   await current(fac, "labels");
@@ -93,25 +100,15 @@ export async function saveLabels(fac: Page, pairing: "aligned" | { dissociated: 
   if (pairing === "aligned") await step.getByRole("radio", { name: /Aligned/ }).check();
   else {
     await step.getByRole("radio", { name: /Dissociated/ }).check();
-    await step
-      .getByRole("combobox", { name: "Dissociative pairing" })
-      .selectOption(String(pairing.dissociated));
+    const pick = step.getByRole("combobox", { name: "Dissociative pairing" });
+    await expect(pick).toBeVisible(); // shown once the drawn pairing is in force
+    await pick.selectOption(String(pairing.dissociated));
+    await expect(step).toContainText(`In force: D${pairing.dissociated}`);
   }
-  await step.getByRole("button", { name: /Save labels/ }).click();
   await expect(next(fac)).toBeEnabled();
 }
 
-/** Step 08: shuffle the K labels (a valid assignment in one click, but random: not for screenshots). */
-export async function shuffleLabels(fac: Page) {
-  await current(fac, "labels");
-  await fac
-    .locator(".acc-step.current")
-    .getByRole("button", { name: /Shuffle K across seats/ })
-    .click();
-  await expect(next(fac)).toBeEnabled();
-}
-
-/** Step 09: confirm the key sheet is printed. */
+/** Step 10: confirm the key sheet is printed. */
 export async function confirmKeySheet(fac: Page) {
   await current(fac, "keysheet");
   await fac.getByRole("checkbox", { name: /key sheet is printed/ }).check();
@@ -129,30 +126,49 @@ export async function newPlayer(browser: Browser): Promise<{ page: Page; termina
   return { page, terminal: Number(await page.locator(".client-number").textContent()) };
 }
 
-/** Consent, ticking every item (in a session that records audio, also the audio item). */
+/**
+ * Consent: each sub-section of the accordion in turn, ticking its one statement (which confirms it
+ * and opens the next; in a session that records audio, also the audio section), then "I agree".
+ */
 export async function consent(page: Page) {
   await expect(page.getByText("Information and consent").first()).toBeVisible({ timeout: 20_000 });
-  for (const cb of await page.locator("input[type=checkbox]").all()) await cb.check();
+  const sections = page.locator(".accordion .acc-step");
+  const n = await sections.count();
+  for (let i = 0; i < n; i++) {
+    // ticking confirms the section: it closes (its box goes with it) and the next one opens
+    await sections.nth(i).locator("input[type=checkbox]").click();
+    await expect(sections.nth(i)).toHaveClass(/\bdone\b/);
+  }
   await page.getByRole("button", { name: /I agree/ }).click();
-  await expect(page.locator(".panel-title", { hasText: /About you|Mic check/ })).toBeVisible();
+  await expect(page.locator(".panel-title", { hasText: /About you|Briefing/ })).toBeVisible();
 }
 
-/** The mic check's panel title (sessions that record audio). */
-export const onMicCheck = (page: Page) => page.locator(".panel-title", { hasText: "Mic check" });
+/** Part 1 of "Mic check & calibration": the mic check, held or not (sessions that record audio). */
+export const onMicCheck = (page: Page) => page.locator(".panel-title", { hasText: "part 1 of 2" });
 
 /**
  * Sessions that record audio: the player's own mic check, the real way. Waits while it is held
- * (another seat still in consent), clicks Start (Playwright's Chromium has a fake microphone that
- * plays a synthetic voice: playwright.config.ts, e2e/fakeVoice.ts) and waits until it passes and
- * the player has moved on.
+ * (another seat not through the briefing yet), clicks Start (Playwright's Chromium has a fake
+ * microphone that plays a synthetic voice: playwright.config.ts, e2e/fakeVoice.ts) and waits until
+ * it passes and the player is on part 2 (ready for the calibration?).
  */
 export async function micCheck(page: Page) {
   await expect(onMicCheck(page)).toBeVisible();
   const start = page.getByRole("button", { name: /Start mic check/ });
-  await expect(start).toBeVisible({ timeout: 60_000 }); // shown once the consent hold is lifted
+  await expect(start).toBeVisible({ timeout: 60_000 }); // shown once the hold is lifted
   await start.click();
   await expect(page.getByText("Mic check passed")).toBeVisible({ timeout: 30_000 });
   await expect(onMicCheck(page)).toHaveCount(0, { timeout: 10_000 });
+  await expect(page.getByText("Part 2: the calibration")).toBeVisible();
+}
+
+/** Part 2 of "Mic check & calibration": the player says they are ready for the calibration. */
+export async function readyForCalibration(page: Page) {
+  await page.getByRole("button", { name: "I'm ready for the calibration" }).click();
+  // the last one to say so starts the calibration at once
+  await expect(
+    page.getByText("You are ready.").or(page.getByText(/Your turn: read this sentence aloud|Stay quiet/)),
+  ).toBeVisible();
 }
 
 export async function aboutYou(page: Page) {
@@ -162,26 +178,27 @@ export async function aboutYou(page: Page) {
   await expect(page.locator(".panel-title", { hasText: "Briefing" })).toBeVisible();
 }
 
+/** The briefing's "I'm ready": then READY, or (sessions that record audio) part 1, the mic check. */
 export async function briefing(page: Page) {
-  await page.getByRole("button", { name: /I'm ready/ }).click();
-  await expect(page.getByText("You're all set")).toBeVisible();
+  await page.getByRole("button", { name: /I'm ready$/ }).click();
+  await expect(page.getByText("You're all set").or(onMicCheck(page))).toBeVisible();
 }
 
-/** Consent → (mic check, in a session that records audio) → about you → briefing. */
+/** Consent → about you → briefing (→ mic check, in a session that records audio). */
 export async function onboard(page: Page) {
   await consent(page);
-  if (await onMicCheck(page).count()) await micCheck(page);
-  await expect(page.locator(".panel-title", { hasText: "About you" })).toBeVisible();
   await aboutYou(page);
   await briefing(page);
+  if (await onMicCheck(page).count()) await micCheck(page);
 }
 
 /**
- * NEXT panel (sessions that record audio): start the calibration and wait until every seat had its
- * turn. `players` (in seat order) are checked to show "Your turn" in turn; each turn takes ~7 s.
+ * Sessions that record audio: every recorded player (in seat order) says they are ready for the
+ * calibration, which then starts by itself; waits until every seat had its turn ("Your turn" on
+ * each `players` page in turn; each turn takes ~7 s).
  */
-export async function calibrate(fac: Page, players: Page[] = []) {
-  await fac.getByRole("button", { name: "Start calibration" }).click();
+export async function calibrate(fac: Page, players: Page[]) {
+  for (const p of players) await readyForCalibration(p);
   for (const p of players)
     await expect(p.getByText("Your turn: read this sentence aloud")).toBeVisible({ timeout: 60_000 });
   await expect(fac.getByText(/done · (separation ok|weak separation|checking)/)).toBeVisible({
@@ -201,7 +218,7 @@ export async function skipMicCheck(fac: Page, seat: number, reason = "no working
     .click();
 }
 
-/** Step 04: switch audio recording on (needs the consent screen, which is on by default). */
+/** Step 05: switch audio recording on (needs the consent screen, which is on by default). */
 export async function enableAudio(fac: Page) {
   await current(fac, "onboarding");
   await fac.getByRole("checkbox", { name: /Record audio/ }).check();

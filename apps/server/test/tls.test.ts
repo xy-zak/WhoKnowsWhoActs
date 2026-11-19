@@ -6,7 +6,8 @@ import type { AddressInfo } from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { runtimeFromEnv } from "../src/runtime";
+import { joinUrlFor, startLandingServer } from "../src/landing";
+import { DEFAULT_LANDING_PORT, runtimeFromEnv } from "../src/runtime";
 import {
   CERT_FILE,
   ensureSelfSignedCert,
@@ -16,7 +17,6 @@ import {
   RENEW_WITHIN_DAYS,
   redirectLocation,
   resolveTls,
-  startHttpRedirect,
   TLS_DIR,
   TLS_OFF,
   VALIDITY_DAYS,
@@ -265,26 +265,27 @@ describe("resolveTls: provided, auto, off", () => {
     ).rejects.toThrow(/does not belong/);
   });
 
-  it("reads WKWA_TLS (default auto) and HTTP_REDIRECT_PORT from the environment", () => {
+  it("reads WKWA_TLS (default auto) and LANDING_PORT (default 8080, or off) from the environment", () => {
     expect(runtimeFromEnv({}).tlsMode).toBe("auto");
     expect(runtimeFromEnv({}).configErrors).toEqual([]);
     expect(runtimeFromEnv({ WKWA_TLS: "off" }).tlsMode).toBe("off");
     expect(runtimeFromEnv({ WKWA_TLS: " OFF " }).tlsMode).toBe("off");
-    expect(runtimeFromEnv({}).httpRedirectPort).toBeNull();
-    expect(runtimeFromEnv({ HTTP_REDIRECT_PORT: "8080" }).httpRedirectPort).toBe(8080);
+    expect(runtimeFromEnv({}).landingPort).toBe(DEFAULT_LANDING_PORT);
+    expect(runtimeFromEnv({ LANDING_PORT: "8081" }).landingPort).toBe(8081);
+    expect(runtimeFromEnv({ LANDING_PORT: " Off " }).landingPort).toBeNull();
     // bad values stop the server (index.ts), but never the data CLI (an erasure must always work)
-    const bad = runtimeFromEnv({ WKWA_TLS: "on", HTTP_REDIRECT_PORT: "http" });
+    const bad = runtimeFromEnv({ WKWA_TLS: "on", LANDING_PORT: "http" });
     expect(bad.configErrors).toEqual([
       expect.stringMatching(/WKWA_TLS must be "auto" or "off"/),
-      expect.stringMatching(/HTTP_REDIRECT_PORT must be a TCP port/),
+      expect.stringMatching(/LANDING_PORT must be a TCP port/),
     ]);
     expect(runtimeFromEnv({ TLS_CERT: "" }).tlsCert).toBeNull();
     expect(path.isAbsolute(runtimeFromEnv({ TLS_CERT: "data/own.pem" }).tlsCert!)).toBe(true);
   });
 });
 
-describe("HTTP → HTTPS redirect (HTTP_REDIRECT_PORT)", () => {
-  it("keeps host, path and query, and swaps in the HTTPS port", () => {
+describe("welcome page (LANDING_PORT)", () => {
+  it("links to the game page on the host the browser used, with the game's port and scheme", () => {
     expect(redirectLocation("192.168.1.10:8080", "/facilitator?token=x", 3000)).toBe(
       "https://192.168.1.10:3000/facilitator?token=x",
     );
@@ -294,17 +295,61 @@ describe("HTTP → HTTPS redirect (HTTP_REDIRECT_PORT)", () => {
     expect(redirectLocation(undefined, "/", 3000)).toBeNull();
     expect(redirectLocation("evil.example/path", "/", 3000)).toBeNull();
     expect(redirectLocation("a b", "/", 3000)).toBeNull();
+    expect(joinUrlFor("192.168.1.10:8080", 3000, true, "x")).toBe("https://192.168.1.10:3000/");
+    expect(joinUrlFor("192.168.1.10:8080", 3000, false, "x")).toBe("http://192.168.1.10:3000/");
+    expect(joinUrlFor("evil.example/path", 3000, true, "https://10.0.0.2:3000/")).toBe(
+      "https://10.0.0.2:3000/",
+    );
   });
 
-  it("answers plain HTTP with 301 to the HTTPS address", async () => {
-    const server = await startHttpRedirect({ host: "127.0.0.1", port: 0, httpsPort: 3443 });
+  it("serves the page and its status over plain HTTP: live only while a session takes participants", async () => {
+    const srv = await startTestServer({ tlsMode: "auto" });
+    const gamePort = Number(new URL(srv.url).port);
+    const landing = await startLandingServer({
+      host: "127.0.0.1",
+      port: 0,
+      gamePort,
+      tls: srv.ctx.tls.info,
+      hub: srv.ctx.hub,
+      clientDist: srv.runtime.clientDist,
+      fallbackJoinUrl: srv.url,
+    });
+    const fac = new FacilitatorClient(srv.url);
     try {
-      const port = (server.address() as AddressInfo).port;
-      const r = await get(`http://127.0.0.1:${port}/play?x=1`);
-      expect(r.status).toBe(301);
-      expect(r.headers).toMatchObject({ location: "https://127.0.0.1:3443/play?x=1" });
+      const base = `http://127.0.0.1:${(landing.server.address() as AddressInfo).port}`;
+      const status = async () => JSON.parse((await get(`${base}/api/landing`)).body);
+      expect(await status()).toEqual({
+        live: false,
+        joinUrl: `https://127.0.0.1:${gamePort}/`,
+        certificate: "self-signed",
+        fingerprintSha256: srv.ctx.tls.info.fingerprintSha256,
+      });
+      // the client is not built in tests: a plain note instead of the page
+      const page = await get(`${base}/`);
+      expect(page.status).toBe(200);
+      expect(page.body).toMatch(/npm run build/);
+      // nothing else is served over plain HTTP
+      const other = await get(`${base}/facilitator`);
+      expect(other.status).toBe(302);
+      expect(other.headers).toMatchObject({ location: "/" });
+      expect((await get(`${base}/api/sessions`)).status).toBe(302);
+      await fac.connected();
+      await fac.cmd("session:create", { scenarioId: "demo", config: { seatCount: 2 }, notes: "" });
+      expect((await status()).live).toBe(true);
+      // the status says nothing about the session itself
+      expect(Object.keys(await status()).sort()).toEqual([
+        "certificate",
+        "fingerprintSha256",
+        "joinUrl",
+        "live",
+      ]);
+      await fac.cmd("session:abort", { reason: "test" });
+      expect((await status()).live).toBe(false);
     } finally {
-      server.close();
+      fac.close();
+      await landing.close();
+      await srv.close();
+      cleanup(srv.dir);
     }
   });
 });

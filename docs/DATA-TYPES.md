@@ -225,7 +225,7 @@ Columns shared by every event row:
 | --- | --- | --- | --- |
 | `session_id` | `sessionId` | `string` | Session id, e.g. S-20261116-7KQ2 |
 | `seq` | `seq` | `integer ≥ 1` | Position in the session's event log (1, 2, 3, …; gaps only after erasure) |
-| `type` | `type` | `"SessionCreated" \| "SessionNote" \| "SeatBound" \| "SeatUnbound" \| "AgentBound" \| "LabelsAssigned" \| "OnboardingStarted" \| "ConsentRecorded" \| "MicCheckCompleted" \| "MicCheckSkipped" \| "DemographicsSubmitted" \| "BriefingAcknowledged" \| "PlayerConnected" \| "PlayerDisconnected" \| "AudioTrackStarted" \| "AudioTrackStopped" \| "CalibrationStarted" \| "CalibrationTurn" \| "CalibrationCompleted" \| "CalibrationChecked" \| "CalibrationSkipped" \| "RoundStarted" \| "ProposalMade" \| "DecisionMade" \| "IntentRejected" \| "ActionRevoked" \| "RoundCompleted" \| "GamePaused" \| "GameResumed" \| "RecordingPaused" \| "RecordingResumed" \| "FacilitatorBroadcast" \| "ParticipantWithdrawn" \| "GameCompleted" \| "SessionClosed" \| "SessionAborted"` | Event type |
+| `type` | `type` | `"SessionCreated" \| "SessionNote" \| "SeatBound" \| "SeatUnbound" \| "AgentBound" \| "LabelsAssigned" \| "OnboardingStarted" \| "ConsentRecorded" \| "MicCheckCompleted" \| "MicCheckSkipped" \| "DemographicsSubmitted" \| "BriefingAcknowledged" \| "PlayerConnected" \| "PlayerDisconnected" \| "AudioTrackStarted" \| "AudioTrackStopped" \| "CalibrationRequested" \| "CalibrationReady" \| "CalibrationStarted" \| "CalibrationTurn" \| "CalibrationCompleted" \| "CalibrationChecked" \| "CalibrationSkipped" \| "RoundStarted" \| "ProposalMade" \| "DecisionMade" \| "IntentRejected" \| "ActionRevoked" \| "RoundCompleted" \| "GamePaused" \| "GameResumed" \| "RecordingPaused" \| "RecordingResumed" \| "FacilitatorBroadcast" \| "ParticipantWithdrawn" \| "GameCompleted" \| "SessionClosed" \| "SessionAborted"` | Event type |
 | `actor_kind` | `actorKind` | `"player" \| "facilitator" \| "system"` | Who caused the event |
 | `seat` | `seat` | `integer 1–4 \| null` | Seat the event is about/caused by (null for session-level events) |
 | `participant_code` | `participantCode` | `string \| null` | Pseudonymous participant code of that seat — the ONLY place codes are stored |
@@ -251,7 +251,7 @@ Columns shared by every event row:
 | [`SeatUnbound`](#seatunbound) | A seat binding was removed before the game started. | facilitator | yes | pseudonymous | rare |
 | [`AgentBound`](#agentbound) | A simulated player (agent) took a seat. Simulated sessions only: the seat gets no participant code and no client. | system | yes | non-personal | 1 per seat (simulated sessions only) |
 | [`LabelsAssigned`](#labelsassigned) | Knowledge-type, power-type and map view were (re)assigned to seats, with the K–P pairing used. | facilitator | yes | pseudonymous | 1–n per session |
-| [`OnboardingStarted`](#onboardingstarted) | Seats are locked; players move to the consent / mic check / demographics / briefing screens. | facilitator | yes | non-personal | 1 per session |
+| [`OnboardingStarted`](#onboardingstarted) | Seats are locked; players move to the consent / demographics / briefing / mic check screens. | facilitator | yes | non-personal | 1 per session |
 | [`ConsentRecorded`](#consentrecorded) | Participant answered the in-game consent form. | player | yes | pseudonymous · sensitive | 1 per seat |
 | [`MicCheckCompleted`](#miccheckcompleted) | A player finished their own mic check (sessions that record audio): how loud the room and their voice were, and whether it passed. | player | yes | pseudonymous | 1 per seat (audio sessions only; more if failed checks are logged) |
 | [`MicCheckSkipped`](#miccheckskipped) | The facilitator skipped a seat's mic check: the player continues onboarding, but the seat is NOT recorded. | facilitator | yes | pseudonymous | rare (audio sessions only) |
@@ -261,7 +261,9 @@ Columns shared by every event row:
 | [`PlayerDisconnected`](#playerdisconnected) | A bound player's browser disconnected. | system | yes | pseudonymous | 0–n per seat |
 | [`AudioTrackStarted`](#audiotrackstarted) | A seat's browser started a new audio track: one continuous capture run of its microphone, uploaded in 5 s chunks of 16 kHz mono audio. | player | no | pseudonymous | 1 per seat, plus 1 per reconnect, reload and recording pause (audio sessions only) |
 | [`AudioTrackStopped`](#audiotrackstopped) | A seat's audio track ended. The audio itself is stored separately, encrypted (never in the event log). | player, system | no | pseudonymous | 1 per AudioTrackStarted |
-| [`CalibrationStarted`](#calibrationstarted) | The calibration started: each seat in turn reads a sentence aloud while the others stay quiet, which measures how much each voice leaks into the other microphones. | facilitator | yes | non-personal | 0–1 per session, plus 1 per redo (audio sessions only) |
+| [`CalibrationRequested`](#calibrationrequested) | The facilitator asked for the calibration to be run again: every recorded seat is asked again to say it is ready, and the turns start once all are. | facilitator | yes | non-personal | 0–1 per redo (audio sessions only) |
+| [`CalibrationReady`](#calibrationready) | A player said they are ready for the calibration (part 2 of 'Mic check & calibration', after their mic check), so the turns never start by surprise. | player | yes | pseudonymous | 1 per recorded seat per calibration run (audio sessions only) |
+| [`CalibrationStarted`](#calibrationstarted) | The calibration started: each seat in turn reads a sentence aloud while the others stay quiet, which measures how much each voice leaks into the other microphones. | system, facilitator | yes | non-personal | 0–1 per session, plus 1 per redo (audio sessions only) |
 | [`CalibrationTurn`](#calibrationturn) | A seat's calibration turn began (the event's serverTs is the start of the turn): that seat reads its sentence aloud, the others stay quiet. | system | yes | pseudonymous | 1 per seat per calibration |
 | [`CalibrationCompleted`](#calibrationcompleted) | Every calibration turn has run; the turn windows are used to measure the leakage between microphones. | system | yes | non-personal | 0–1 per calibration |
 | [`CalibrationChecked`](#calibrationchecked) | Quick quality check of the calibration: per seat, how much louder its own voice was on its own microphone than on the loudest other one. | system | yes | pseudonymous | 1 per CalibrationCompleted |
@@ -477,7 +479,7 @@ A client (player browser) was assigned to a seat and a participant code was gene
 
 |  |  |
 | --- | --- |
-| **Trigger** | Facilitator binds a connected client to a seat in the lobby (setup step 07), or adds a fake player to a seat there. |
+| **Trigger** | Facilitator binds a connected client to a seat in the lobby (setup step 08), or adds a fake player to a seat there. |
 | **Caused by** | facilitator |
 | **Changes game state** | yes |
 | **Visible to** | Facilitator; the bound player sees their seat |
@@ -622,7 +624,7 @@ Knowledge-type, power-type and map view were (re)assigned to seats, with the K�
 
 |  |  |
 | --- | --- |
-| **Trigger** | Facilitator saves labels (K per seat + pairing) or shuffles K across seats, in setup step 08 or between rounds. P always follows from the pairing. Not allowed during an active round. |
+| **Trigger** | Facilitator chooses the K–P pairing (each seat keeps its K; seat n holds the n-th K by default), in setup step 09 or between rounds; the bots and tests may also shuffle K across seats. P always follows from the pairing. Not allowed during an active round. |
 | **Caused by** | facilitator |
 | **Changes game state** | yes |
 | **Visible to** | Facilitator; each player sees own labels (configurable) |
@@ -688,7 +690,7 @@ Knowledge-type, power-type and map view were (re)assigned to seats, with the K�
 
 ### `OnboardingStarted`
 
-Seats are locked; players move to the consent / mic check / demographics / briefing screens.
+Seats are locked; players move to the consent / demographics / briefing / mic check screens.
 
 |  |  |
 | --- | --- |
@@ -703,7 +705,7 @@ Seats are locked; players move to the consent / mic check / demographics / brief
 
 | Field | Type | Description |
 | --- | --- | --- |
-| `steps` | `array<"consent" \| "mic_check" \| "demographics" \| "briefing">` | Onboarding steps enabled for this session, in order ('mic_check' only when the session records audio) |
+| `steps` | `array<"consent" \| "demographics" \| "briefing" \| "mic_check">` | Onboarding steps enabled for this session, in order ('mic_check' only when the session records audio) |
 
 <details><summary>Example row</summary>
 
@@ -792,7 +794,7 @@ A player finished their own mic check (sessions that record audio): how loud the
 
 |  |  |
 | --- | --- |
-| **Trigger** | The player's browser ends the mic check (the onboarding step after consent). Passed: it heard enough speech above the background noise, and the step is done. Not passed: the step stays open (the player tries again, or the facilitator skips the check). Recording starts with the mic check. |
+| **Trigger** | The player's browser ends the mic check (the last onboarding step, part 1 of 'Mic check & calibration'; it opens once every seat has finished the briefing). Passed: it heard enough speech above the background noise, and the step is done. Not passed: the step stays open (the player tries again, or the facilitator skips the check). Recording starts with the mic check. |
 | **Caused by** | player |
 | **Changes game state** | yes |
 | **Visible to** | Facilitator (mic check status and levels) |
@@ -1186,14 +1188,90 @@ A seat's audio track ended. The audio itself is stored separately, encrypted (ne
 
 </details>
 
+### `CalibrationRequested`
+
+The facilitator asked for the calibration to be run again: every recorded seat is asked again to say it is ready, and the turns start once all are.
+
+|  |  |
+| --- | --- |
+| **Trigger** | Facilitator clicks 'Redo calibration' (in the onboarding or between rounds); a running calibration ends with it (its turns so far are not used). |
+| **Caused by** | facilitator |
+| **Changes game state** | yes |
+| **Visible to** | Everyone (players see the 'ready for the calibration' button again) |
+| **Data class** | non-personal |
+| **Typical frequency** | 0–1 per redo (audio sessions only) |
+
+**Payload**
+
+_No payload fields._
+
+<details><summary>Example row</summary>
+
+```json
+{
+  "sessionId": "S-20261116-7KQ2",
+  "seq": 42,
+  "type": "CalibrationRequested",
+  "actorKind": "facilitator",
+  "seat": null,
+  "participantCode": null,
+  "round": 0,
+  "serverTs": 1794826000000.512,
+  "serverWall": "2026-11-16T10:46:40.000Z",
+  "clientTs": null,
+  "clientSeq": null,
+  "payload": {}
+}
+```
+
+</details>
+
+### `CalibrationReady`
+
+A player said they are ready for the calibration (part 2 of 'Mic check & calibration', after their mic check), so the turns never start by surprise.
+
+|  |  |
+| --- | --- |
+| **Trigger** | Player clicks 'I'm ready for the calibration'. Once every recorded seat is ready, the server starts the calibration (CalibrationStarted). |
+| **Caused by** | player |
+| **Changes game state** | yes |
+| **Visible to** | Facilitator (who is ready); players see who they wait for |
+| **Data class** | pseudonymous |
+| **Typical frequency** | 1 per recorded seat per calibration run (audio sessions only) |
+
+**Payload**
+
+_No payload fields._
+
+<details><summary>Example row</summary>
+
+```json
+{
+  "sessionId": "S-20261116-7KQ2",
+  "seq": 42,
+  "type": "CalibrationReady",
+  "actorKind": "player",
+  "seat": 2,
+  "participantCode": "WK-7F3K-Q9XM-Z",
+  "round": 0,
+  "serverTs": 1794826000000.512,
+  "serverWall": "2026-11-16T10:46:40.000Z",
+  "clientTs": 1794825999995.8,
+  "clientSeq": null,
+  "payload": {}
+}
+```
+
+</details>
+
 ### `CalibrationStarted`
 
 The calibration started: each seat in turn reads a sentence aloud while the others stay quiet, which measures how much each voice leaks into the other microphones.
 
 |  |  |
 | --- | --- |
-| **Trigger** | Facilitator clicks 'Start calibration' (or 'Redo calibration') in the NEXT panel once every seat is ready (sessions that record audio). |
-| **Caused by** | facilitator |
+| **Trigger** | The server, as soon as every recorded seat has said it is ready (CalibrationReady) and every seat is past its mic check; or the facilitator's 'Start calibration' then (sessions that record audio). |
+| **Caused by** | system, facilitator |
 | **Changes game state** | yes |
 | **Visible to** | Everyone (players see whose turn it is) |
 | **Data class** | non-personal |
@@ -1215,7 +1293,7 @@ The calibration started: each seat in turn reads a sentence aloud while the othe
   "sessionId": "S-20261116-7KQ2",
   "seq": 42,
   "type": "CalibrationStarted",
-  "actorKind": "facilitator",
+  "actorKind": "system",
   "seat": null,
   "participantCode": null,
   "round": 0,

@@ -45,7 +45,9 @@ function stateOf(c: Case): GameState {
   st.audio.recordingPaused = c.paused ?? false;
   st.phase = c.phase ?? "round_active";
   st.onboardingSteps = (c.micCheckStep ?? true) ? [...ONBOARDING_STEPS] : ["consent", "demographics"];
-  st.seats[1] = { ...emptySeat(1), bound: true, consent: "given", audioConsent: true, ...c.seat };
+  // through the steps before the mic check (they hold every mic until each seat is)
+  const before = { demographics: true, briefing: true };
+  st.seats[1] = { ...emptySeat(1), bound: true, consent: "given", audioConsent: true, ...before, ...c.seat };
   const other = c.other ?? "consented";
   st.seats[2] =
     other === "unbound"
@@ -55,6 +57,7 @@ function stateOf(c: Case): GameState {
           bound: true,
           consent: other === "consented" ? "given" : "pending",
           audioConsent: other === "consented",
+          ...(other === "consented" ? before : {}),
         };
   return st;
 }

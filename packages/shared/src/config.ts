@@ -123,7 +123,7 @@ export const FakePaceSchema = z
 
 /* ─────────────────────────── Session config ─────────────────────────── */
 
-/** Audio recording is off unless a session switches it on (setup step 04). */
+/** Audio recording is off unless a session switches it on (setup step 05). */
 export const AUDIO_CONFIG_DEFAULTS = { enabled: false, requireCalibration: true };
 
 export const MAX_TAGS = 20;
@@ -339,6 +339,12 @@ export const ConsentItemSchema = z.object({
     .enum(["audio"])
     .optional()
     .describe("Shown only when the session records audio ('audio'); absent = always shown"),
+  section: z
+    .string()
+    .optional()
+    .describe(
+      "The '## ' heading of the consent text this statement confirms: the consent screen shows each section with its one statement",
+    ),
 });
 export type ConsentItem = z.infer<typeof ConsentItemSchema>;
 
@@ -381,6 +387,46 @@ export function composeConsent<I extends { when?: "audio" | undefined }>(
     markdown: composeConditionalMarkdown(consent.markdown, opts.audio),
     items: consent.items.filter((i) => opts.audio || i.when !== "audio"),
   };
+}
+
+/** One sub-section of the consent screen: a `## ` section of the text and the one statement that confirms it. */
+export interface ConsentSection<I> {
+  title: string;
+  /** The section's text, without its heading. */
+  markdown: string;
+  item: I;
+}
+
+/**
+ * Split a composed consent text into its `## ` sections, each with the one statement (item) whose
+ * `section` names its heading, in the order of the text. `intro` is the text before the first
+ * section (the title). Throws unless every section has exactly one statement and every statement
+ * names a section of the text, so no information is shown without its confirmation, and no
+ * statement without its information.
+ */
+export function consentSections<I extends { id: string; section?: string | undefined }>(
+  markdown: string,
+  items: readonly I[],
+): { intro: string; sections: ConsentSection<I>[] } {
+  const parts = markdown.split(/^## +/m);
+  const intro = parts.shift()!.trim();
+  const sections = parts.map((part) => {
+    const nl = part.indexOf("\n");
+    const title = (nl < 0 ? part : part.slice(0, nl)).trim();
+    const linked = items.filter((i) => i.section?.trim() === title);
+    if (linked.length !== 1)
+      throw new Error(
+        `Consent text: section '${title}' needs exactly one consent statement with "section": "${title}" (has ${linked.length})`,
+      );
+    return { title, markdown: nl < 0 ? "" : part.slice(nl + 1).trim(), item: linked[0]! };
+  });
+  const titles = new Set(sections.map((sec) => sec.title));
+  const orphan = items.find((i) => !i.section || !titles.has(i.section.trim()));
+  if (orphan)
+    throw new Error(
+      `Consent statement '${orphan.id}': "section" must name a '## ' heading of the consent text${orphan.section ? ` ('${orphan.section}' is not one)` : ""}`,
+    );
+  return { intro, sections };
 }
 
 const AUDIO_BLOCK = /<!--\s*if\s+audio\s*-->([\s\S]*?)<!--\s*end\s*if\s*-->/gi;

@@ -1,12 +1,13 @@
 import react from "@vitejs/plugin-react";
 import { defineConfig, type Plugin } from "vite";
 
-/** In dev, serve /facilitator like the production server does. */
-const facilitatorRoute: Plugin = {
-  name: "wkwa-facilitator-route",
+/** In dev, serve /facilitator and /landing (the welcome page) like the production server does. */
+const pageRoutes: Plugin = {
+  name: "wkwa-page-routes",
   configureServer(server) {
     server.middlewares.use((req, _res, next) => {
-      if (req.url === "/facilitator" || req.url?.startsWith("/facilitator?")) req.url = "/facilitator.html";
+      for (const page of ["facilitator", "landing"])
+        if (req.url === `/${page}` || req.url?.startsWith(`/${page}?`)) req.url = `/${page}.html`;
       next();
     });
   },
@@ -15,12 +16,12 @@ const facilitatorRoute: Plugin = {
 const SERVER = `http://localhost:${process.env.PORT ?? 3000}`;
 
 export default defineConfig({
-  plugins: [react(), facilitatorRoute],
+  plugins: [react(), pageRoutes],
   build: {
     outDir: "dist",
     emptyOutDir: true,
     rolldownOptions: {
-      input: { index: "index.html", facilitator: "facilitator.html" },
+      input: { index: "index.html", facilitator: "facilitator.html", landing: "landing.html" },
     },
   },
   server: {

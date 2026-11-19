@@ -7,6 +7,7 @@ import {
   ConsentFormSchema,
   checkInitialScores,
   composeConsent,
+  consentSections,
   DemographicsFormSchema,
   K_LABELS,
   type OnboardingContent,
@@ -156,6 +157,8 @@ export function loadOnboardingContent(configDir: string, opts: { audio?: boolean
       `Recording audio needs the required consent item '${AUDIO_CONSENT_ITEM}' (with "when": "audio") in consent.json`,
     );
   }
+  // one sub-section per '## ' heading, each with its one statement: checked here, so a mismatch stops the session's creation
+  consentSections(consent.markdown, consent.items);
   const briefingMd = read(study.briefingMarkdownFile);
   return {
     study,

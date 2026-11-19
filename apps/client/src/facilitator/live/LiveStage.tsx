@@ -1,4 +1,5 @@
 import {
+  calibrationNotReadySeats,
   calibrationWaitingSeats,
   canStartFirstRound,
   type FacilitatorCommand,
@@ -101,9 +102,10 @@ function NextPanel({
   let secondary: React.ReactNode = null;
   let action: (() => void) | null = null;
 
-  // sessions that record audio: the calibration runs between the mic checks and round 1
+  // sessions that record audio: the calibration runs after the mic checks, before round 1; it
+  // starts by itself once every recorded seat has said it is ready
   const calStatus = st.audio.calibration.status;
-  const calPrimary =
+  const calWaiting =
     st.phase === "onboarding" &&
     !canStartFirstRound(st) &&
     calStatus === "pending" &&
@@ -114,12 +116,11 @@ function NextPanel({
   if (st.phase === "onboarding") {
     const waiting = active.filter((s) => !isOnboardingComplete(st, s));
     const declined = waiting.filter((s) => s.consent === "declined");
-    if (calPrimary) {
-      prompt =
-        waiting.length === 0
-          ? "Everyone is ready. Run the calibration: each seat reads a sentence aloud in turn while the others stay quiet."
-          : `Every mic check is done: run the calibration now (still onboarding: ${waiting.map((s) => `seat ${s.seat}`).join(", ")}).`;
-      action = () => run("calibration:start", {}, "Calibration started");
+    if (calWaiting) {
+      const notReady = calibrationNotReadySeats(st);
+      prompt = notReady.length
+        ? `Every mic check is done. Waiting for seat ${notReady.join(", ")} to say they are ready for the calibration; it then starts by itself.`
+        : "Everyone is ready: the calibration is starting.";
     } else if (waiting.length === 0 && calStatus === "running") {
       prompt = "Calibration running: each seat reads its sentence in turn. Keep the room quiet.";
     } else if (waiting.length === 0 && !canStartFirstRound(st)) {
@@ -268,7 +269,7 @@ function NextPanel({
           {primary}
         </div>
         {secondary && <div className="row">{secondary}</div>}
-        {showAudio && <AudioNext conn={conn} st={st} primary={calPrimary} />}
+        {showAudio && <AudioNext conn={conn} st={st} />}
       </div>
     </Panel>
   );
@@ -720,10 +721,10 @@ export function LiveStage({ conn }: { conn: FacilitatorConnection }) {
           }
         >
           <Callout tone="warn" icon="warning">
-            Changing labels mid-session is logged (<code>LabelsAssigned</code>) and changes what players see
-            from now on.
+            Each change of the pairing is saved at once, logged (<code>LabelsAssigned</code>) and changes what
+            players see from now on.
           </Callout>
-          <LabelsEditor conn={conn} st={st} scenario={scenario} onSaved={() => setLabels(false)} />
+          <LabelsEditor conn={conn} st={st} scenario={scenario} />
         </Popup>
       )}
     </div>

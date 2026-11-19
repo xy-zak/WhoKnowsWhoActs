@@ -5,6 +5,7 @@ import { CONTEXT, crop, prime, scenario, shot, writeReport } from "./screenshots
 import {
   aboutYou,
   acts,
+  addFake,
   bind,
   blur,
   briefing,
@@ -25,6 +26,7 @@ import {
   panel,
   playerDisplay,
   popupFoot,
+  readyForCalibration,
   saveLabels,
   square,
   wrapUp,
@@ -57,7 +59,7 @@ scenario(
   async ({ page: fac, browser }) => {
     await fac.goto("/facilitator");
 
-    /* ── setup 01–06 ── */
+    /* ── setup 01–07 ── */
     await chooseScenario(fac, "Demo grid");
     await shot(fac, "server/setup-01-scenario");
     await next(fac).click();
@@ -66,12 +68,13 @@ scenario(
     await shot(fac, "server/setup-02-rounds");
     await next(fac).click();
 
-    await current(fac, "players");
+    await current(fac, "who");
     await shot(fac, "server/setup-03-players");
     await fac.getByRole("radio", { name: "Simulated players" }).check();
     await shot(fac, "server/setup-03-players-simulated");
     await fac.getByRole("radio", { name: "Real participants" }).check();
     await next(fac).click();
+    await nextThrough(fac, ["players"]);
 
     await current(fac, "onboarding");
     await enableAudio(fac);
@@ -86,11 +89,11 @@ scenario(
     await shot(fac, "server/setup-05-tags");
     await next(fac).click();
 
-    await current(fac, "review");
+    await current(fac, "create");
     await shot(fac, "server/setup-06-review");
     await next(fac).click();
 
-    /* ── 07 connect: four player PCs ── */
+    /* ── 08 connect: four player PCs ── */
     await current(fac, "connect");
     const players = [];
     for (let i = 0; i < 4; i++) players.push(await newPlayer(browser));
@@ -110,7 +113,7 @@ scenario(
     await shot(p1, "client/02-seat-assigned");
     await next(fac).click();
 
-    /* ── 08 labels: fully dissociated pairing D6 (Ka–Pd, Kb–Pc, Kc–Pa, Kd–Pb) ── */
+    /* ── 09 labels: fully dissociated pairing D6 (Ka–Pd, Kb–Pc, Kc–Pa, Kd–Pb) ── */
     await saveLabels(fac, { dissociated: 6 });
     await shot(fac, "server/setup-08-labels");
     await next(fac).click();
@@ -125,28 +128,34 @@ scenario(
     await next(fac).click();
     await expect(fac.locator(".live-indicator")).toBeVisible();
 
-    /* ── onboarding: the seats at different steps (audio: consent hold → mic checks) ── */
-    await consent(p4); // held: seats 1–3 have not agreed yet, so no microphone opens
-    await expect(p4.getByText("Waiting for the other players to finish the consent form")).toBeVisible();
+    /* ── onboarding: the seats at different steps (audio: consent → about you → briefing → hold → mic checks) ── */
+    await consent(p4);
+    await aboutYou(p4);
+    await briefing(p4); // held: seats 1–3 are not through the briefing, so no microphone opens
+    await expect(p4.getByText("Waiting for the other players to finish the briefing")).toBeVisible();
     await shot(p4, "client/audio-01-mic-check-held");
     await crop(fac, "server/audio-next-held", panel(fac, "Next"));
     await consent(p3);
+    await aboutYou(p3);
     await consent(p2);
+    // the seats at different steps: 4 at the mic check (held), 3 at the briefing, 2 at about you, 1 in consent
     await expect(p1.getByText("Information and consent").first()).toBeVisible({ timeout: 20_000 });
+    await shot(fac, "server/live-01-onboarding");
+    await crop(fac, "server/live-panel-seats-onboarding", panel(fac, "Seats"));
     await shot(p1, "client/03-consent");
     await consent(p1);
+    await shot(p1, "client/04-about-you");
+    await aboutYou(p1);
+    await shot(p1, "client/05-briefing");
+    await briefing(p1);
+    await briefing(p3);
+    await aboutYou(p2);
+    await briefing(p2);
+    // everyone is through the briefing: part 1, the mic checks, open
     await expect(p1.getByRole("button", { name: /Start mic check/ })).toBeVisible({ timeout: 30_000 });
     await shot(p1, "client/audio-02-mic-check-ready");
     // seats 2–4 pass their own mic checks (the real detector, fed by the synthetic voice)
-    await micCheck(p4);
-    await aboutYou(p4);
-    await briefing(p4);
-    await micCheck(p3);
-    await aboutYou(p3);
-    await micCheck(p2);
-    // the seats at different steps: 4 ready, 3 at the briefing, 2 at about you, 1 in the mic check
-    await shot(fac, "server/live-01-onboarding");
-    await crop(fac, "server/live-panel-seats-onboarding", panel(fac, "Seats"));
+    await Promise.all([micCheck(p4), micCheck(p3), micCheck(p2)]);
     // seat 1: listening (the level meter moves), then passed
     await p1.getByRole("button", { name: /Start mic check/ }).click();
     await expect(p1.getByText("Speech heard")).toBeVisible();
@@ -154,21 +163,18 @@ scenario(
     await expect(p1.getByText("Mic check passed")).toBeVisible({ timeout: 30_000 });
     await shot(p1, "client/audio-04-mic-check-passed");
     await expect(onMicCheck(p1)).toHaveCount(0, { timeout: 10_000 });
-    await shot(p1, "client/04-about-you");
-    await aboutYou(p1);
-    await shot(p1, "client/05-briefing");
-    await briefing(p1);
-    await shot(p1, "client/06-ready");
-    await aboutYou(p2);
-    await briefing(p2);
-    await briefing(p3);
-    await expect(p1.getByText("Waiting for the other players (4/4 ready)")).toBeVisible();
+    // part 2: ready for the calibration? (it starts once every seat has said so)
+    await expect(p1.getByText("Part 2: the calibration")).toBeVisible();
     await shot(p1, "client/audio-06-calibration-waiting");
-    await expect(fac.getByRole("button", { name: "Start calibration" })).toBeEnabled();
+    await readyForCalibration(p1);
+    await readyForCalibration(p4);
+    await shot(p1, "client/06-ready");
     await crop(fac, "server/live-panel-next-ready", panel(fac, "Next"));
 
-    // calibration: each seat reads in turn while the others stay quiet (~7 s per seat)
-    await fac.getByRole("button", { name: "Start calibration" }).click();
+    // calibration: starts by itself once the last seats are ready; each seat reads in turn
+    // while the others stay quiet (~7 s per seat)
+    await readyForCalibration(p3);
+    await readyForCalibration(p2);
     await expect(p1.getByText("Your turn: read this sentence aloud")).toBeVisible({ timeout: 30_000 });
     await shot(p1, "client/audio-07-calibration-turn", { wait: 800 });
     await expect(p2.getByText(/Stay quiet: .*seat 1 is reading/)).toBeVisible();
@@ -504,13 +510,12 @@ scenario("small-grid", "small grid: one player PC and three fake players", async
   await shot(fac, "server/setup-01-scenario-small-grid");
   await next(fac).click();
   await fillRounds(fac, { rounds: 1, propose: 3, decide: 2 });
-  await nextThrough(fac, ["rounds", "players", "onboarding", "tags", "review"]);
+  await nextThrough(fac, ["rounds", "who", "players", "onboarding", "tags", "create"]);
 
   await current(fac, "connect");
   const real = await newPlayer(browser);
   await bind(fac, 1, real.terminal);
-  await fac.getByRole("combobox", { name: "Fake player pace" }).selectOption("fast");
-  await fac.getByRole("button", { name: /Fill empty seats with fake players/ }).click();
+  for (const seat of [2, 3, 4]) await addFake(fac, seat);
   await expect(fac.locator(".acc-step.current").getByText("4/4 seats bound")).toBeVisible();
   await shot(fac, "server/setup-07-connect-fake-players");
   await next(fac).click();
@@ -552,12 +557,12 @@ scenario("simulation", "simulated players: agents play, simulation database", as
   await next(fac).click();
   await fillRounds(fac, { rounds: 2, propose: 3, decide: 2 });
   await next(fac).click();
-  await current(fac, "players");
+  await current(fac, "who");
   await fac.getByRole("radio", { name: "Simulated players" }).check();
   const step3 = fac.locator(".acc-step.current");
   await step3.getByRole("combobox").filter({ hasText: "Watchable" }).selectOption("quick");
   await step3.getByPlaceholder("random", { exact: true }).fill("DOCS");
-  await nextThrough(fac, ["players", "onboarding", "tags", "review"]);
+  await nextThrough(fac, ["who", "players", "onboarding", "tags", "create"]);
   await current(fac, "connect");
   await shot(fac, "server/simulation-01-agents");
   await next(fac).click();
@@ -591,9 +596,9 @@ scenario(
     await chooseScenario(fac, "Demo grid");
     await next(fac).click();
     await fillRounds(fac, { rounds: 1, propose: 1, decide: 1 });
-    await nextThrough(fac, ["rounds", "players"]);
+    await nextThrough(fac, ["rounds", "who", "players"]);
     await enableAudio(fac);
-    await nextThrough(fac, ["onboarding", "tags", "review"]);
+    await nextThrough(fac, ["onboarding", "tags", "create"]);
 
     // one real PC whose browser can be told to refuse the microphone, and whose track can be ended
     await current(fac, "connect");
@@ -617,8 +622,7 @@ scenario(
     await p1.goto("/");
     await expect(p1.getByText("Waiting for the facilitator to assign a seat")).toBeVisible();
     await bind(fac, 1, Number(await p1.locator(".client-number").textContent()));
-    await fac.getByRole("combobox", { name: "Fake player pace" }).selectOption("fast");
-    await fac.getByRole("button", { name: /Fill empty seats with fake players/ }).click();
+    for (const seat of [2, 3, 4]) await addFake(fac, seat);
     await expect(fac.locator(".acc-step.current").getByText("4/4 seats bound")).toBeVisible();
     await next(fac).click();
     await saveLabels(fac, "aligned");
@@ -630,6 +634,8 @@ scenario(
 
     // permission refused: what the player sees, and the facilitator's way out
     await consent(p1);
+    await aboutYou(p1);
+    await briefing(p1);
     const start = p1.getByRole("button", { name: /Start mic check/ });
     await expect(start).toBeVisible({ timeout: 30_000 });
     await p1.evaluate(() => {
@@ -648,15 +654,13 @@ scenario(
       .getByRole("button", { name: /Cancel/ })
       .click();
 
-    // allowed after all: try again, finish onboarding, calibrate, play
+    // allowed after all: try again, then part 2 (ready → calibration), play
     await p1.evaluate(() => {
       (window as unknown as { __deny: boolean }).__deny = false;
     });
     await p1.getByRole("button", { name: /Try again/ }).click();
     await expect(onMicCheck(p1)).toHaveCount(0, { timeout: 30_000 });
-    await aboutYou(p1);
-    await briefing(p1);
-    await calibrate(fac);
+    await calibrate(fac, [p1]);
     const start1 = fac.getByRole("button", { name: /Start round 1 of 1/ });
     await expect(start1).toBeEnabled();
     await start1.click();
@@ -697,9 +701,9 @@ scenario(
     await chooseScenario(fac, "Demo grid");
     await next(fac).click();
     await fillRounds(fac, { rounds: 2, propose: 2, decide: 2 });
-    await nextThrough(fac, ["rounds", "players"]);
+    await nextThrough(fac, ["rounds", "who", "players"]);
     await enableAudio(fac);
-    await nextThrough(fac, ["onboarding", "tags", "review"]);
+    await nextThrough(fac, ["onboarding", "tags", "create"]);
     await current(fac, "connect");
     // tsx directly (not through npx), so that SIGTERM at the end reaches the bots
     const bots = spawn(

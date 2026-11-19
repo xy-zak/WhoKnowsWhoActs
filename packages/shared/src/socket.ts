@@ -52,6 +52,7 @@ export interface PlayerAcks {
   "demographics:submit": Ack;
   "mic:check": Ack;
   "briefing:ack": Ack;
+  "calibration:ready": Ack;
   intent: IntentAck | Refusal;
   telemetry: { stored: number } | Refusal;
   "audio:start": AudioAck<unknown>;
