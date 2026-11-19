@@ -10,7 +10,8 @@
       "!**/*.md",
       "!playwright-report",
       "!test-results",
-      "!.screenshots"
+      "!.screenshots",
+      "!docs/.obsidian"
     ]
   },
   "formatter": {
@@ -22,7 +23,7 @@
   "linter": {
     "enabled": true,
     "rules": {
-      "recommended": true,
+      "preset": "recommended",
       "style": {
         "noNonNullAssertion": "off"
       },

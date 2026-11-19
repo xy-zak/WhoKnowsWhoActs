@@ -357,7 +357,7 @@ describe("RecordingController", () => {
       event: "audio:stop",
       payload: { reason: "client_stop", droppedChunks: 2 },
     });
-    r.o.onLevel?.({ rmsDb: Number.NEGATIVE_INFINITY, peakDb: -3.14159 });
+    r.o.onLevel?.({ rmsDb: Number.NEGATIVE_INFINITY, peakDb: -Math.PI });
     expect(t.levels.at(-1)).toEqual({
       state: "recording",
       rmsDb: -120,

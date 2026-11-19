@@ -49,7 +49,7 @@ export function prevBeat(events: StoredEvent[], cursor: number): number {
     }
   }
   const first = events.findIndex(isAction);
-  return first < 0 ? 0 : first;
+  return Math.max(first, 0);
 }
 
 /**
@@ -180,7 +180,7 @@ export function Replay({
   const play = () => {
     if (cursor >= data.events.length) {
       const first = data.events.findIndex(isAction);
-      setCursor(first < 0 ? 0 : first); // replay from the start
+      setCursor(Math.max(first, 0)); // replay from the start
     }
     setPlaying(true);
   };
