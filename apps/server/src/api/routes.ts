@@ -94,6 +94,6 @@ export function registerApi(ctx: AppContext, guard: Guard) {
   });
 
   const audio = createAudioService(ctx);
-  registerGdprApi(ctx, guard, audio);
-  registerAudioApi(ctx, guard, audio);
+  registerGdprApi(ctx, guard, audio.sessionGuard);
+  registerAudioApi(ctx, guard, audio.service);
 }

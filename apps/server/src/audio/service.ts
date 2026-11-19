@@ -56,6 +56,7 @@ import type {
   Store,
 } from "../db/store";
 import { nowTs, wall } from "../runtime";
+import { SessionGuard, type Verdict } from "../session/sessionGuard";
 import {
   type AttributionOptions,
   type AttributionResult,
@@ -95,21 +96,6 @@ import { wavStream } from "./wav";
 
 const round = (v: number, digits = 2) => Math.round(v * 10 ** digits) / 10 ** digits;
 
-/** What the audio service needs to know about the server's attached session (the Hub fits). */
-export interface ActiveSessionProbe {
-  readonly session: {
-    readonly sessionId: string;
-    readonly isFinal: boolean;
-    readonly state: { readonly phase: string };
-  } | null;
-}
-
-/** Same rule as the delete-session and erase routes: attached, not final, not game_complete. */
-export function isSessionRunning(hub: ActiveSessionProbe | undefined, sessionId: string): boolean {
-  const s = hub?.session;
-  return Boolean(s && s.sessionId === sessionId && !s.isFinal && s.state.phase !== "game_complete");
-}
-
 /** A refused request; REST routes answer with `statusCode`. */
 export class AudioRequestError extends Error {
   constructor(
@@ -126,7 +112,11 @@ export const CLEAN_FADE_MS = 10;
 export interface AudioServiceDeps {
   /** The participant database (the only one with audio). */
   store: Store;
-  hub?: ActiveSessionProbe;
+  /**
+   * Whether the session may change now (running, attribution, export). Default: a guard over
+   * `runner` with no hub attached. The server passes the guard it shares with the GDPR routes.
+   */
+  guard?: SessionGuard;
   /** Where exports of the participant database go (WKWA_EXPORTS_DIR). */
   exportsDir: string;
   runner: AudioJobRunner;
@@ -340,38 +330,28 @@ function deletionView(d: AudioDeletionRow): AudioDeletionRecord {
 
 /* ─────────── the service ─────────── */
 
+/** A guard refusal as the error the audio routes answer with; the value otherwise. */
+function orThrow<T>(v: Verdict<T>): T {
+  if (!v.ok) throw new AudioRequestError(v.status, v.message);
+  return v.value;
+}
+
 export class AudioService {
   private readonly store: Store;
   private readonly runTask: TaskRunner;
+  private readonly guard: SessionGuard;
 
   constructor(private readonly deps: AudioServiceDeps) {
     this.store = deps.store;
     this.runTask = deps.runTask ?? runInWorker;
+    this.guard = deps.guard ?? new SessionGuard({ hub: null, jobs: deps.runner });
     sweepPartialExports(deps.exportsDir, deps.log);
-  }
-
-  /**
-   * Why the session's audio files are in use (an attribution queued or running, an export being
-   * written), or null. Erasure and session deletion refuse while it is not null.
-   */
-  busyReason(sessionId: string): string | null {
-    if (this.deps.runner.activeJob(sessionId)) return "An attribution of this session is queued or running";
-    if (this.exporting.get(sessionId)) return "An audio export of this session is being written";
-    return null;
   }
 
   private session(sessionId: string) {
     const row = this.store.getSession(sessionId);
     if (!row) throw new AudioRequestError(404, "Unknown session");
     return row;
-  }
-
-  private refuseWhileRunning(sessionId: string, what: string) {
-    if (isSessionRunning(this.deps.hub, sessionId))
-      throw new AudioRequestError(
-        409,
-        `This session is still running. ${what} works after the session: end, close or abort it first.`,
-      );
   }
 
   /* ── summary ── */
@@ -411,7 +391,7 @@ export class AudioService {
             }
           : null,
       audioExports: this.audioExports(sessionId),
-      running: isSessionRunning(this.deps.hub, sessionId),
+      running: this.guard.running(sessionId),
     };
   }
 
@@ -444,24 +424,11 @@ export class AudioService {
     opts: { options?: Partial<AttributionOptions> } = {},
   ): AttributionJobView {
     this.session(sessionId);
-    this.refuseWhileRunning(sessionId, "Speaker attribution");
-    if (!this.store.audioFiles) throw new AudioRequestError(409, "This database stores no audio.");
-    const tracks = this.store.listAudioTracks(sessionId);
-    if (tracks.length === 0) throw new AudioRequestError(409, "This session has no audio.");
-    if (tracks.some((t) => t.status === "deleted" || !t.hasKey))
-      throw new AudioRequestError(
-        409,
-        "The raw audio of this session was deleted, so it cannot be analysed again. The stored speech segments are kept.",
-      );
-    if (!tracks.some((t) => t.chunks > 0))
-      throw new AudioRequestError(409, "This session's tracks hold no audio yet.");
-    this.refuseWhileExporting(sessionId, "start the attribution");
-    const active = this.deps.runner.activeJob(sessionId);
-    if (active)
-      throw new AudioRequestError(
-        409,
-        `An attribution of this session is already ${active.status} (${active.jobId}).`,
-      );
+    orThrow(
+      this.guard.check("start-attribution", sessionId, {
+        precondition: () => this.unanalysable(sessionId),
+      }),
+    );
     const params = { engineVersion: ENGINE_VERSION, options: opts.options ?? {} };
     const row = this.deps.runner.enqueue(sessionId, "attribution", params, async (ctx) => {
       const input = this.taskInput(sessionId, opts.options);
@@ -476,6 +443,17 @@ export class AudioService {
       return this.storeAttribution(sessionId, ctx.jobId, input, output);
     });
     return jobView(row);
+  }
+
+  /** Why the session's audio cannot be analysed (409), or null. */
+  private unanalysable(sessionId: string): string | null {
+    if (!this.store.audioFiles) return "This database stores no audio.";
+    const tracks = this.store.listAudioTracks(sessionId);
+    if (tracks.length === 0) return "This session has no audio.";
+    if (tracks.some((t) => t.status === "deleted" || !t.hasKey))
+      return "The raw audio of this session was deleted, so it cannot be analysed again. The stored speech segments are kept.";
+    if (!tracks.some((t) => t.chunks > 0)) return "This session's tracks hold no audio yet.";
+    return null;
   }
 
   /** Read the track index, keys and events (main thread) into plain data for the task. */
@@ -691,36 +669,13 @@ export class AudioService {
       .sort();
   }
 
-  /** Sessions with an audio export in progress (it reads files that a deletion or a re-run would remove). */
-  private exporting = new Map<string, number>();
-
-  private refuseWhileExporting(sessionId: string, what: string) {
-    if (this.exporting.get(sessionId))
-      throw new AudioRequestError(
-        409,
-        `An audio export of this session is being written: ${what} when it is done.`,
-      );
-  }
-
   async exportAudio(
     sessionId: string,
     opts: { kind: AudioExportRequestKind; seats?: number[]; note?: string; requestedBy: string },
   ): Promise<AudioExportResult> {
     this.session(sessionId);
-    this.refuseWhileRunning(sessionId, "Exporting audio");
-    if (this.deps.runner.activeJob(sessionId))
-      throw new AudioRequestError(
-        409,
-        "An attribution of this session is queued or running: export when it ends.",
-      );
-    this.exporting.set(sessionId, (this.exporting.get(sessionId) ?? 0) + 1);
-    try {
-      return await this.writeAudioExport(sessionId, opts);
-    } finally {
-      const n = (this.exporting.get(sessionId) ?? 1) - 1;
-      if (n > 0) this.exporting.set(sessionId, n);
-      else this.exporting.delete(sessionId);
-    }
+    // while it is written, the session is busy: nothing may delete or replace what it reads
+    return orThrow(await this.guard.exportAudio(sessionId, () => this.writeAudioExport(sessionId, opts)));
   }
 
   private async writeAudioExport(
@@ -900,18 +855,7 @@ export class AudioService {
     this.session(sessionId);
     if (opts.confirm.trim() !== sessionId)
       throw new AudioRequestError(400, "Confirmation does not match the session id");
-    const active = this.deps.runner.activeJob(sessionId);
-    if (active)
-      throw new AudioRequestError(
-        409,
-        "An attribution of this session is queued or running: wait until it ends.",
-      );
-    this.refuseWhileExporting(sessionId, "delete the audio");
-    if (isSessionRunning(this.deps.hub, sessionId))
-      throw new AudioRequestError(
-        409,
-        "This session is still running. Close or abort it first, then delete its audio.",
-      );
+    orThrow(this.guard.check("delete-audio", sessionId));
     const r = new PersonalDataMap(this.store).deleteAudio(sessionId, {
       scope: opts.scope,
       ...(opts.note !== undefined ? { note: opts.note } : {}),

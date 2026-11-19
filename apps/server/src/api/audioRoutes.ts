@@ -6,6 +6,7 @@ import { AudioJobRunner, runInWorker } from "../audio/jobs";
 import { AudioRequestError, AudioService } from "../audio/service";
 import { exportsDirFor } from "../db/stores";
 import { isLoopback } from "../net/hub";
+import { SessionGuard } from "../session/sessionGuard";
 import { sessionOr404 } from "./sessionLookup";
 
 type Guard = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
@@ -72,13 +73,18 @@ function badRequest(reply: FastifyReply, error: z.ZodError) {
  * Audio lives only in the participant database; simulated sessions have none.
  * Audio content leaves the server only through POST …/audio/export.
  */
-/** The audio service of the participant database (shared with the GDPR routes for the busy check). */
-export function createAudioService(ctx: AppContext): AudioService {
+/**
+ * The audio service of the participant database, and the session guard it shares with the GDPR
+ * routes (one rule for running and busy sessions: the hub's attached session, this runner's jobs,
+ * this service's exports).
+ */
+export function createAudioService(ctx: AppContext): { service: AudioService; sessionGuard: SessionGuard } {
   const runner = new AudioJobRunner(ctx.store, ctx.log);
   runner.recoverStale();
+  const sessionGuard = new SessionGuard({ hub: ctx.hub, jobs: runner });
   const service = new AudioService({
     store: ctx.store,
-    hub: ctx.hub,
+    guard: sessionGuard,
     exportsDir: exportsDirFor(ctx.runtime.exportsDir, "real"),
     runner,
     runTask: runInWorker,
@@ -89,7 +95,7 @@ export function createAudioService(ctx: AppContext): AudioService {
   ctx.app.addHook("onClose", async () => {
     await runner.close();
   });
-  return service;
+  return { service, sessionGuard };
 }
 
 export function registerAudioApi(ctx: AppContext, guard: Guard, service: AudioService) {

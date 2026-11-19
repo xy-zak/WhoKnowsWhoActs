@@ -22,7 +22,7 @@ import {
 } from "@wkwa/shared";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { AudioFileStore } from "../src/audio/fileStore";
-import { AudioJobRunner, runInline, runInWorker, scrubError, type TaskRunner } from "../src/audio/jobs";
+import { AudioJobRunner, runInWorker, scrubError, type TaskRunner } from "../src/audio/jobs";
 import { seqOrderedChunks } from "../src/audio/jobWorker";
 import { AudioRequestError, AudioService } from "../src/audio/service";
 import { parseWavHeader } from "../src/audio/wav";
@@ -30,6 +30,7 @@ import { openDatabase } from "../src/db/database";
 import { PersonalDataMap } from "../src/db/personalData";
 import { Store } from "../src/db/store";
 import { exportSession } from "../src/gdpr/exporter";
+import { SessionGuard } from "../src/session/sessionGuard";
 import { readTrackPcm } from "./audioFixtures";
 import { type SeededSession, seedAudioSession } from "./audioSession";
 import { cleanup, PASSPHRASE } from "./harness";
@@ -63,8 +64,10 @@ const scenarios = {
 describe("audio processing: jobs, derivatives, export", () => {
   const env = makeEnv();
   const runner = new AudioJobRunner(env.store);
+  const guard = new SessionGuard({ hub: null, jobs: runner });
   const service = new AudioService({
     store: env.store,
+    guard,
     exportsDir: env.exportsDir,
     runner,
     runTask: runInWorker,
@@ -341,15 +344,18 @@ describe("audio processing: jobs, derivatives, export", () => {
       { calibration: false },
     );
     const pending = service.exportAudio(fresh.sessionId, { kind: "raw", requestedBy: "test" });
-    // erasure and session deletion check this before they touch the session
-    expect(service.busyReason(fresh.sessionId)).toMatch(/export of this session is being written/);
+    // the export is registered with the guard that erasure and session deletion share
+    expect(guard.deleteSession(fresh.sessionId, () => "deleted")).toMatchObject({
+      ok: false,
+      reason: "exporting",
+    });
     // while the WAVs are being written, nothing may delete or replace what they are read from
     expect(() => service.deleteAudio(fresh.sessionId, { confirm: fresh.sessionId, scope: "all" })).toThrow(
       /export of this session is being written/,
     );
     expect(() => service.startAttribution(fresh.sessionId)).toThrow(/being written/);
     const r = await pending;
-    expect(service.busyReason(fresh.sessionId)).toBeNull();
+    expect(guard.check("delete-audio", fresh.sessionId).ok).toBe(true);
     expect(r.timing).toBe("timestamps");
     expect(r.warnings).toEqual([]);
     expect(r.files).toHaveLength(4);
@@ -416,28 +422,6 @@ describe("audio processing: jobs, derivatives, export", () => {
     await expect(service.exportAudio(sessionId, { kind: "raw", requestedBy: "t" })).rejects.toMatchObject({
       statusCode: 409,
     });
-  });
-
-  it("refuses attribution, export and deletion while the session is running", async () => {
-    const hub = {
-      session: { sessionId: seeded.sessionId, isFinal: false, state: { phase: "round_active" } },
-    };
-    const live = new AudioService({
-      store: env.store,
-      hub,
-      exportsDir: env.exportsDir,
-      runner,
-      runTask: runInline,
-      speechModel: false,
-    });
-    for (const fn of [
-      () => live.startAttribution(seeded.sessionId),
-      () => live.deleteAudio(seeded.sessionId, { confirm: seeded.sessionId, scope: "all" }),
-    ])
-      expect(fn).toThrow(/still running/);
-    await expect(live.exportAudio(seeded.sessionId, { kind: "raw", requestedBy: "t" })).rejects.toThrow(
-      /still running/,
-    );
   });
 });
 

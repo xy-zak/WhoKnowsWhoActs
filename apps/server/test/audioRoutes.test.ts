@@ -140,7 +140,53 @@ describe("audio REST routes (DATABASE tab)", () => {
     expect(del.json.error).toMatch(/still running/);
     const summary = await api("GET", `/api/sessions/${id}/audio`);
     expect(summary.json).toMatchObject({ running: true, tracks: [] });
+    // the same guard refuses session deletion and erasure of a participant in the running session
+    expect(await api("POST", `/api/sessions/${id}/delete`, { confirm: id })).toMatchObject({
+      status: 409,
+      json: { error: "This session is still running. Close or abort it first, then delete it." },
+    });
+    const code = Object.values(srv.ctx.hub.session?.state.seats ?? {})[0]?.participantCode;
+    expect(code).toMatch(CODE_RE);
+    expect(await api("POST", `/api/participants/${code}/erase`, { confirm: code })).toMatchObject({
+      status: 409,
+      json: {
+        error: "This participant is in the running session. Withdraw them, end the session, then erase.",
+      },
+    });
+    expect(srv.ctx.store.getSession(id)).toBeDefined();
+    expect(srv.ctx.hub.session?.sessionId).toBe(id);
   });
+
+  it("refuses session deletion, erasure and audio deletion while an attribution is queued or running (409)", async () => {
+    const busy = await seedAudioSession(srv.ctx.store, srv.ctx.audioFiles, { seed: 22, durationSec: 40 });
+    const id = busy.sessionId;
+    const start = await api("POST", `/api/sessions/${id}/audio/attribution`, {});
+    expect(start.status).toBe(202);
+    const job = "An attribution of this session is queued or running";
+    const code = busy.codes[1]!;
+    const [del, erase, delAudio] = await Promise.all([
+      api("POST", `/api/sessions/${id}/delete`, { confirm: id }),
+      api("POST", `/api/participants/${code}/erase`, { confirm: code }),
+      api("POST", `/api/sessions/${id}/audio/delete`, { confirm: id, scope: "all" }),
+    ]);
+    expect(del).toMatchObject({
+      status: 409,
+      json: { error: `${job}: delete the session when it is done.` },
+    });
+    expect(erase).toMatchObject({
+      status: 409,
+      json: { error: `${job} (session ${id}): erase when it is done.` },
+    });
+    expect(delAudio).toMatchObject({ status: 409, json: { error: `${job}: wait until it ends.` } });
+    let status = start.json.status;
+    for (let i = 0; i < 200 && status !== "done" && status !== "failed"; i++) {
+      await new Promise((r) => setTimeout(r, 100));
+      status = (await api("GET", `/api/audio/jobs/${start.json.jobId}`)).json.status;
+    }
+    expect(status).toBe("done");
+    expect(srv.ctx.store.getSession(id)).toBeDefined();
+    expect(srv.ctx.store.listAudioTracks(id)).toHaveLength(4);
+  }, 60_000);
 
   it("POST …/audio/delete: typed confirmation, then re-running attribution answers 409", async () => {
     const id = seeded.sessionId;

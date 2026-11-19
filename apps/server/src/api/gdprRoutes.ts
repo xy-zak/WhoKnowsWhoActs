@@ -1,11 +1,11 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
 import type { AppContext } from "../app";
-import type { AudioService } from "../audio/service";
 import { loadOnboardingContent } from "../content";
 import { PersonalDataMap, parseCodeOrThrow } from "../db/personalData";
 import { exportsDirFor } from "../db/stores";
 import { exportSession } from "../gdpr/exporter";
 import { cardSeats, keySheetHtml, takedownCardPdf } from "../gdpr/print";
+import type { SessionGuard, Verdict } from "../session/sessionGuard";
 import { sessionOr404 } from "./sessionLookup";
 
 type Guard = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
@@ -16,9 +16,12 @@ type Guard = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
  * look-up and erasure, key sheets and takedown cards exist only for the
  * participant database (simulated sessions have no participants).
  */
-export function registerGdprApi(ctx: AppContext, guard: Guard, audio: Pick<AudioService, "busyReason">) {
-  const { app, store, stores, scenarios, runtime, hub } = ctx;
+export function registerGdprApi(ctx: AppContext, guard: Guard, sessionGuard: SessionGuard) {
+  const { app, store, stores, scenarios, runtime } = ctx;
   const opts = { preHandler: guard };
+  /** The guard's answer: the value, or its refusal (409 and why). */
+  const render = <T>(reply: FastifyReply, v: Verdict<T>) =>
+    v.ok ? v.value : reply.code(v.status).send({ error: v.message });
   /** Participant look-up and erasure: the participant database only. */
   const participants = new PersonalDataMap(store);
 
@@ -89,7 +92,8 @@ export function registerGdprApi(ctx: AppContext, guard: Guard, audio: Pick<Audio
 
   /**
    * Delete an entire session (irreversible). The body must repeat the session id.
-   * Refused while the session is attached and still running (lobby, onboarding or rounds).
+   * Refused while the session is attached and still running (lobby, onboarding or rounds), or busy
+   * (an attribution queued or running, an audio export being written); see SessionGuard.
    */
   app.post<{ Params: { id: string }; Body: { confirm?: string; deleteExports?: boolean; note?: string } }>(
     "/api/sessions/:id/delete",
@@ -101,22 +105,16 @@ export function registerGdprApi(ctx: AppContext, guard: Guard, audio: Pick<Audio
       if ((req.body?.confirm ?? "").trim() !== id) {
         return reply.code(400).send({ error: "Confirmation does not match the session id" });
       }
-      const active = hub.session;
-      if (active?.sessionId === id && !active.isFinal && active.state.phase !== "game_complete") {
-        return reply
-          .code(409)
-          .send({ error: "This session is still running. Close or abort it first, then delete it." });
-      }
-      const busy = audio.busyReason(id);
-      if (busy) return reply.code(409).send({ error: `${busy}: delete the session when it is done.` });
-      hub.release(id);
-      const r = new PersonalDataMap(found.store).deleteSession(id, {
-        exportsDir: exportsDirFor(runtime.exportsDir, found.players),
-        deleteExports: req.body?.deleteExports === true,
-        note: req.body?.note ?? "",
-      });
-      ctx.log.info({ rows: r.rows, exportsDeleted: r.exportsDeleted }, "session deleted");
-      return r;
+      const v = sessionGuard.deleteSession(id, () =>
+        new PersonalDataMap(found.store).deleteSession(id, {
+          exportsDir: exportsDirFor(runtime.exportsDir, found.players),
+          deleteExports: req.body?.deleteExports === true,
+          note: req.body?.note ?? "",
+        }),
+      );
+      if (v.ok)
+        ctx.log.info({ rows: v.value.rows, exportsDeleted: v.value.exportsDeleted }, "session deleted");
+      return render(reply, v);
     },
   );
 
@@ -132,7 +130,10 @@ export function registerGdprApi(ctx: AppContext, guard: Guard, audio: Pick<Audio
     }
   });
 
-  /** Erase a participant. The body must repeat the code (typed again by the facilitator). */
+  /**
+   * Erase a participant. The body must repeat the code (typed again by the facilitator).
+   * Refused while the code is in the running attached session, or while a session it occurs in is busy.
+   */
   app.post<{ Params: { code: string }; Body: { confirm?: string; note?: string } }>(
     "/api/participants/:code/erase",
     opts,
@@ -148,25 +149,14 @@ export function registerGdprApi(ctx: AppContext, guard: Guard, audio: Pick<Audio
         confirm = parseCodeOrThrow(req.body?.confirm ?? "");
       } catch {}
       if (confirm !== code) return reply.code(400).send({ error: "Confirmation does not match the code" });
-      const active = hub.session;
-      const attached =
-        active != null && Object.values(active.state.seats).some((s) => s.participantCode === code);
-      if (attached && !active.isFinal && active.state.phase !== "game_complete") {
-        return reply.code(409).send({
-          error: "This participant is in the running session. Withdraw them, end the session, then erase.",
-        });
-      }
-      for (const occ of participants.lookup(code).occurrences) {
-        const busy = audio.busyReason(occ.sessionId);
-        if (busy)
-          return reply
-            .code(409)
-            .send({ error: `${busy} (session ${occ.sessionId}): erase when it is done.` });
-      }
-      const result = participants.erase(code, req.body?.note ?? "");
-      if (attached) hub.reloadActiveSession();
-      ctx.log.info({ sessions: result.occurrences.length, rows: result.rows }, "participant erased");
-      return result;
+      const v = sessionGuard.eraseParticipant(
+        code,
+        () => participants.lookup(code).occurrences.map((o) => o.sessionId),
+        () => participants.erase(code, req.body?.note ?? ""),
+      );
+      if (v.ok)
+        ctx.log.info({ sessions: v.value.occurrences.length, rows: v.value.rows }, "participant erased");
+      return render(reply, v);
     },
   );
 

@@ -45,6 +45,7 @@ import type { SessionStores } from "../db/stores";
 import { FakePlayers } from "../fake/FakePlayers";
 import { nowTs } from "../runtime";
 import { CommandError, SessionManager } from "../session/SessionManager";
+import { sessionHasEnded } from "../session/sessionGuard";
 import { SimulationRunner } from "../simulation/SimulationRunner";
 
 interface TerminalEntry {
@@ -371,7 +372,7 @@ export class Hub {
    * (at the pace logged in their SeatBound); they re-claim their seats by token.
    */
   private restoreFakes(m: SessionManager) {
-    if (m.isFinal || m.state.phase === "game_complete") return;
+    if (sessionHasEnded(m.state.phase)) return;
     for (const s of seatList(m.state)) {
       if (!s.bound || !s.fake || s.withdrawn) continue;
       const opts = {
