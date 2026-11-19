@@ -315,6 +315,144 @@ describe("audio processing: jobs, derivatives, export", () => {
     expect(aSegs.every((s) => bySeat.get(s.seat) === s.participant_code)).toBe(true);
   });
 
+  it("writes every audio_tracks.csv and speech_segments.csv column from its own field", async () => {
+    const id = "S-20261118-COLS";
+    env.store.insertSession({
+      id,
+      created_wall: "2026-11-18T10:00:00.000Z",
+      scenario_id: "demo",
+      scenario_version: "1",
+      scenario_hash: "h",
+      status: "closed",
+      tags_json: "[]",
+      notes: "",
+      config_json: "{}",
+      harness_version: "0",
+      git_commit: "x",
+    });
+    const t0 = 1_800_000_000_000;
+    const { fileName, key } = await env.files.createFile(id);
+    const trackId = "11111111-2222-4333-8444-555555555555";
+    env.store.insertAudioTrack({
+      trackId,
+      sessionId: id,
+      seat: 3,
+      participantCode: "WK-COLS-0003-X",
+      fileName,
+      fileKey: key,
+      sampleRate: 16_000,
+      settings: {
+        sampleRate: 44_100,
+        echoCancellation: false,
+        noiseSuppression: true,
+        autoGainControl: false,
+        channelCount: 2,
+      },
+      reason: "reconnect",
+      startedServerTs: t0,
+      startedClientTs: t0 - 37,
+      clockOffsetMs: 0,
+    });
+    // seqs 0 and 4: three chunks missing, more than the two the browser dropped
+    for (const seq of [0, 4])
+      env.store.insertAudioChunk({
+        trackId,
+        seq,
+        startSample: seq * 1600,
+        sampleCount: 1600,
+        clientTs: t0 - 37 + seq * 100,
+        clockOffsetMs: 0,
+        serverTs: t0 + seq * 100,
+        round: 1,
+        phase: "round_active",
+        rmsDb: -20,
+        peakDb: -6,
+        clipped: 0,
+      });
+    env.store.closeAudioTrack(trackId, {
+      closedServerTs: t0 + 9000,
+      stopReason: "disconnect",
+      droppedChunks: 2,
+    });
+    env.store.insertAudioDerivative({
+      derivativeId: "D-COLS",
+      sessionId: id,
+      seat: 3,
+      participantCode: "WK-COLS-0003-X",
+      kind: "speech_segments",
+      sourceTracks: [trackId],
+      fileName: null,
+      fileKey: null,
+      data: {
+        segments: [
+          {
+            seat: 3,
+            startTs: t0 + 100,
+            endTs: t0 + 900,
+            durationMs: 800,
+            round: 1,
+            phase: "round_active",
+            paused: false,
+            recordingPaused: true,
+            meanDb: -23.5,
+            confidence: 0.75,
+            overlap: true,
+            overlapMs: 120,
+            overlapWith: [],
+          },
+        ],
+      },
+      params: {},
+      engineVersion: "test-engine",
+    });
+    const r = exportSession({ store: env.store, scenarios, exportsDir: env.exportsDir }, id);
+    expect(parseCsv(readFileSync(path.join(r.dir, "audio_tracks.csv"), "utf8"))).toEqual([
+      {
+        session_id: id,
+        seat: "3",
+        participant_code: "WK-COLS-0003-X",
+        track_id: trackId,
+        status: "interrupted",
+        start_reason: "reconnect",
+        stop_reason: "disconnect",
+        started_server_ts: String(t0),
+        first_sample_ts: String(t0 - 37),
+        closed_server_ts: String(t0 + 9000),
+        duration_ms: "200",
+        samples: "3200",
+        chunks: "2",
+        dropped_chunks: "2",
+        gaps: "3",
+        sample_rate: "16000",
+        capture_sample_rate: "44100",
+        echo_cancellation: "0",
+        noise_suppression: "1",
+        auto_gain_control: "0",
+        channel_count: "2",
+      },
+    ]);
+    expect(parseCsv(readFileSync(path.join(r.dir, "speech_segments.csv"), "utf8"))).toEqual([
+      {
+        session_id: id,
+        seat: "3",
+        participant_code: "WK-COLS-0003-X",
+        start_server_ts: String(t0 + 100),
+        end_server_ts: String(t0 + 900),
+        duration_ms: "800",
+        round: "1",
+        phase: "round_active",
+        paused: "0",
+        recording_paused: "1",
+        mean_db: "-23.5",
+        confidence: "0.75",
+        overlap: "1",
+        overlap_ms: "120",
+        overlap_with: "",
+        engine_version: "test-engine",
+      },
+    ]);
+  });
+
   it("a session without audio still gets both files, header only", () => {
     env.store.insertSession({
       id: "S-20261118-NOAU",
