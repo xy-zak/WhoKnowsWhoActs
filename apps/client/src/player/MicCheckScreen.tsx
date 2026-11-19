@@ -67,6 +67,8 @@ export function MicCheckScreen({ conn, view }: { conn: PlayerConnection; view: P
     () =>
       new MicCheckAttempt({
         minSpeechMs: need,
+        // the Start click survives a remount of this screen (the recorder keeps it)
+        resumed: conn.recording.store.get().gesture,
         submit: (o) => submitMicCheck(conn, o),
       }),
   );

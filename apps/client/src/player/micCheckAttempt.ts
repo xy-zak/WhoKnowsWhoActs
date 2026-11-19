@@ -48,6 +48,11 @@ export interface MicCheckAttemptOptions {
   minSpeechMs: number;
   /** Sends `mic:check`; resolves true when the server took it (false: refused or failed). */
   submit(outcome: MicCheckOutcome): Promise<boolean>;
+  /**
+   * The participant clicked Start before this screen mounted (it remounted, e.g. after a detached
+   * session, while the recorder kept the click): the first attempt is already running.
+   */
+  resumed?: boolean;
   /** Default: performance.now() and the global timers. */
   clock?: MicCheckClock;
   /** Default: a SpeechDetector. */
@@ -95,6 +100,7 @@ export class MicCheckAttempt {
   constructor(private readonly o: MicCheckAttemptOptions) {
     this.clock = o.clock ?? browserClock;
     this.openedAt = this.clock.now();
+    if (o.resumed) this.start();
   }
 
   get snapshot(): MicCheckSnapshot {

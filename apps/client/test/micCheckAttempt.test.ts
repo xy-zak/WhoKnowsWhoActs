@@ -1,5 +1,11 @@
-import { describe, expect, it } from "vitest";
+import type { PlayerView } from "@wkwa/shared";
+import { createElement } from "react";
+import { renderToString } from "react-dom/server";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SpeechCheckResult } from "../src/audio";
+import { memoryStorage } from "../src/net/storage";
+import { PlayerConnection } from "../src/player/connection";
+import { MicCheckScreen } from "../src/player/MicCheckScreen";
 import {
   GIVE_UP_MS,
   MicCheckAttempt,
@@ -7,6 +13,7 @@ import {
   type MicCheckOutcome,
   PASSED_HOLD_MS,
 } from "../src/player/micCheckAttempt";
+import { FakeSocket } from "./fakeSocket";
 
 /* ─── fixtures ─── */
 
@@ -42,7 +49,7 @@ const heard = (speechMs: number, analysedMs: number, need = 1000): SpeechCheckRe
 });
 
 /** A mic check whose detector returns `next` for every block, and whose server answers `answer`. */
-function setup() {
+function setup(o: { resumed?: boolean } = {}) {
   const clock = new FakeClock();
   const sent: MicCheckOutcome[] = [];
   let answer: (o: MicCheckOutcome) => Promise<boolean> = async () => true;
@@ -51,6 +58,7 @@ function setup() {
   const check = new MicCheckAttempt({
     minSpeechMs: 1000,
     clock,
+    resumed: o.resumed,
     detector: () => {
       detectors++;
       return { push: () => next };
@@ -192,5 +200,86 @@ describe("MicCheckAttempt", () => {
     t.clock.advance(PASSED_HOLD_MS);
     await flush();
     expect(t.sent).toEqual([]);
+  });
+
+  it("resumed (the Start click came before this screen mounted): the first attempt runs at once", () => {
+    const t = setup({ resumed: true });
+    expect(t.check.snapshot.attempts).toBe(1);
+    t.hear(heard(400, 500));
+    expect(t.check.snapshot.result?.speechMs).toBe(400);
+  });
+});
+
+/* ─── the screen ─── */
+
+const MIC_CHECK = {
+  seq: 1,
+  phase: "onboarding",
+  onboardingSteps: ["consent", "mic_check"],
+  me: { seat: 2, consent: "given", nextStep: "mic_check", withdrawn: false },
+  audio: {
+    enabled: true,
+    record: true,
+    notRecording: null,
+    paused: false,
+    micCheck: "pending",
+    micCheckHeld: false,
+    calibration: {
+      status: "pending",
+      turnSeat: null,
+      myTurn: false,
+      sentence: null,
+      turnEndsAt: null,
+      order: [],
+    },
+  },
+} as unknown as PlayerView;
+
+describe("MicCheckScreen", () => {
+  // a browser that can record (the server render has no window)
+  beforeEach(() => {
+    vi.stubGlobal("window", { isSecureContext: true });
+    vi.stubGlobal("navigator", { mediaDevices: { getUserMedia: () => {} } });
+    vi.stubGlobal("AudioContext", class {});
+    vi.stubGlobal("AudioWorkletNode", class {});
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  function screen(gesture: boolean) {
+    const conn = new PlayerConnection({
+      socket: new FakeSocket().asSocket(),
+      local: memoryStorage(),
+      session: memoryStorage(),
+      createRecorder: () => {
+        throw new Error("not in a server render");
+      },
+    });
+    // the recorder's state as RecordingController publishes it
+    conn.recording.store.set({
+      status: {
+        state: gesture ? "recording" : "idle",
+        trackId: null,
+        error: null,
+        needsGesture: false,
+        muted: false,
+      },
+      gesture,
+      contextSampleRate: null,
+    });
+    const html = renderToString(createElement(MicCheckScreen, { conn, view: MIC_CHECK }));
+    conn.telemetry.dispose();
+    conn.clock.stop();
+    return html;
+  }
+
+  it("asks for the Start click first", () => {
+    expect(screen(false)).toContain("Start mic check");
+  });
+
+  it("mounted again after the Start click (a detached session came back): goes on listening", () => {
+    // before: a fresh mount showed "Start mic check" while the recorder was already recording
+    const html = screen(true);
+    expect(html).not.toContain("Start mic check");
+    expect(html).toContain("Read this aloud");
   });
 });
