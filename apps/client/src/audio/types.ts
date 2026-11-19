@@ -116,6 +116,11 @@ export interface AudioStopInfo {
   chunks: number;
   /** 16 kHz samples the track produced */
   samples: number;
+  /**
+   * chunks the send queue dropped (over maxPendingSeconds) while the track recorded, at most
+   * `chunks`; their audio never reaches the server
+   */
+  droppedChunks: number;
   /** server-epoch ms estimate of the end of the track's last sample */
   clientTs: number;
   clockOffsetMs: number;

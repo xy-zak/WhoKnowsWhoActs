@@ -317,6 +317,17 @@ describe("MicRecorder", () => {
     await rec.whenSent();
     expect(chunksOf(sent).map((c) => c.seq)).toEqual([3, 4, 5]);
     await rec.stop();
+    await rec.whenSent();
+    // the track's stop counts what it lost; the next track starts from zero
+    await rec.start();
+    env.render(2.1);
+    await rec.stop();
+    await rec.whenSent();
+    const stops = sent.filter((s) => s.kind === "stop").map((s) => s.m);
+    expect(stops.map((m) => [m.chunks, m.droppedChunks])).toEqual([
+      [7, 3],
+      [3, 0],
+    ]);
   });
 
   it("reports a denied permission with help text", async () => {

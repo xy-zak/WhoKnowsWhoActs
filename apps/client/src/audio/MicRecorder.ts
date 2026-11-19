@@ -107,6 +107,8 @@ interface ActiveTrack {
   inputLatencyMs: number;
   mapper: ClockMapper;
   pipeline: TrackPipeline;
+  /** the queue's dropped count when the track began (its stop reports what was dropped since) */
+  droppedAtStart: number;
 }
 
 interface Split {
@@ -818,6 +820,7 @@ export class MicRecorder {
       inputLatencyMs,
       mapper,
       pipeline,
+      droppedAtStart: this.queue.dropped,
     };
     this.track = track;
     const info: AudioStartInfo = {
@@ -875,6 +878,7 @@ export class MicRecorder {
         reason,
         chunks: t.pipeline.chunks,
         samples,
+        droppedChunks: Math.min(this.queue.dropped - t.droppedAtStart, t.pipeline.chunks),
         clientTs: roundTs(t.mapper.captureEpochMs(endFrame, t.inputLatencyMs, this.epochMinusPerf())),
         clockOffsetMs: this.o.clockOffsetMs(),
       },
