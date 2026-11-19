@@ -2,6 +2,14 @@
 
 History of [AESTHETIC-RULES.md](../AESTHETIC-RULES.md). Newest first. How entries are written: [README.md](README.md).
 
+## Unreleased
+
+### Not yet committed · documents `03fa07e`
+
+- **Type:** Feature
+- **Change:** § 8 describes the setup accordion with eleven steps (`STEP nn/11`, commit points 07 and 11) and notes that the consent screen uses the same accordion; § 8.1 says the recording banner appears only after the mic check. The generated icon table gives `randomise` its new meaning.
+- **Reason:** The setup steps and the consent screen changed; the rules must describe the screens as built.
+
 ### 2026-11-19 · `2428109` · Docs: audio design document (AUDIO.md), docs sweep against the built behaviour and change logs (U14) (#14)
 
 - **Type:** Bug fix

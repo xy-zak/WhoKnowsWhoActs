@@ -2,6 +2,20 @@
 
 History of [NETWORKING.md](../NETWORKING.md). Newest first. How entries are written: [README.md](README.md).
 
+## Unreleased
+
+### Not yet committed · documents `03fa07e`
+
+- **Type:** Feature
+- **Change:** § 4 replaces `HTTP_REDIRECT_PORT` with `LANDING_PORT` and adds the subsection **The welcome page**; § 2 and § 5 (topology and seat-binding diagrams) show participants opening it first; § 10 adds `GET /api/landing` and `landingUrls`; § 11 explains why the page is plain HTTP and carries nothing about the session; § 12–14 update the firewall, checklist, troubleshooting and step numbers.
+- **Reason:** Participants need a page that opens without a certificate warning and explains that warning before they meet it; the page must not expose session data over unencrypted HTTP (privacy).
+
+### 2026-11-19 · `03fa07e` · Session startup: who-plays step, create step, consent sections, calibration after the room is ready, welcome page
+
+- **Type:** Feature
+- **Change:** The generated message catalogue adds the player message `calibration:ready` and says that `calibration:start` and `calibration:redo` now wait until every recorded seat is ready.
+- **Reason:** The calibration starts only once every player has said they are ready, so it never starts by surprise.
+
 ### 2026-11-19 · `ead1760` · Hover follows the telemetry consent rule; no stale dashboard after a failed switch
 
 - **Type:** Risk mitigation

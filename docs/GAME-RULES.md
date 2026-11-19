@@ -36,7 +36,7 @@ The look follows an election tile map: a base grid of outlined squares, each sub
 | Scores of the other three knowledge types | ✗ never sent | ✓ (composite map, all or one type) |
 | Map score (§ 5) | ✓ | ✓ |
 
-A player *knows* one knowledge type: the view of their seat, which by default is their K label (setup step 03 can switch to choosing views by hand, per seat). The server filters the scores before it sends the state, so a player's browser never receives the scores of another type. A sub-square whose score a player does not know shows no number, and its hover text says "score unknown to you". There is no toggle: the knowledge split is the point of the game.
+A player *knows* one knowledge type: the view of their seat, which by default is their K label (setup step 04 can switch to choosing views by hand, per seat, in the **Labels** step 09). The server filters the scores before it sends the state, so a player's browser never receives the scores of another type. A sub-square whose score a player does not know shows no number, and its hover text says "score unknown to you". There is no toggle: the knowledge split is the point of the game.
 
 ## 3. What a player can act on
 

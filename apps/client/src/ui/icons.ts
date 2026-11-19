@@ -44,7 +44,7 @@ export const ICON_TABLE = {
     meaning: "A fake player: a test client the server created, not a participant",
   },
   labels: { iconoir: "Label", meaning: "K/P labels" },
-  randomise: { iconoir: "DiceFive", meaning: "Shuffle K labels across seats / random pairing" },
+  randomise: { iconoir: "DiceFive", meaning: "Random draw (a pairing drawn with a logged seed)" },
   connected: { iconoir: "Wifi", meaning: "Connected" },
   disconnected: { iconoir: "WifiOff", meaning: "Disconnected" },
   idle: { iconoir: "Hourglass", meaning: "Idle / waiting" },

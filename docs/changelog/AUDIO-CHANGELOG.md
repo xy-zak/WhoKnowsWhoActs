@@ -2,6 +2,14 @@
 
 History of [AUDIO.md](../AUDIO.md). Newest first. How entries are written: [README.md](README.md).
 
+## Unreleased
+
+### Not yet committed · documents `03fa07e`
+
+- **Type:** Feature
+- **Change:** § 2, § 8 and § 9 (with their state and sequence diagrams) now describe the **mic check hold** until every seat has finished the briefing, the mic check as the last onboarding step, and the readiness step: each recorded seat says it is ready (`CalibrationReady`), the server then starts the calibration itself, and a redo asks again (`CalibrationRequested`). § 5 adds `calibration:ready` and the welcome page that explains the certificate warning; § 14 lists the new code and tests.
+- **Reason:** The calibration should never start by surprise, and no microphone should record while anyone is still reading; the questionnaire and briefing are therefore no longer recorded (privacy, data minimisation).
+
 ### 2026-11-19 · `4e6927e` · Audio: recording windows and calibration runs come from the reducer
 
 - **Type:** Risk mitigation

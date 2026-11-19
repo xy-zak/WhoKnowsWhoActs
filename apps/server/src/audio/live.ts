@@ -215,9 +215,9 @@ export class LiveAudio {
     if (!s.participantCode) return "This seat has no participant code";
     if (!micCheckApplies(st, s) || s.consent !== "given") return "No audio consent for this seat";
     if (s.micCheck === "skipped") return "The mic check of this seat was skipped";
-    // nobody's mic records while a seat is still in consent (not reachable after onboarding started:
-    // seats are bound in the lobby only; checked anyway)
-    if (isMicCheckHeld(st)) return "Waiting for every seat to finish the consent form";
+    // nobody's mic records while a seat has not finished the steps before the mic check (consent,
+    // questionnaire, briefing: micCheckHoldSeats)
+    if (isMicCheckHeld(st)) return "Waiting for every seat to finish the briefing";
     return null;
   }
 

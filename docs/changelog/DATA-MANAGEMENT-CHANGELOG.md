@@ -2,6 +2,20 @@
 
 History of [DATA-MANAGEMENT.md](../DATA-MANAGEMENT.md). Newest first. How entries are written: [README.md](README.md).
 
+## Unreleased
+
+### Not yet committed · documents `03fa07e`
+
+- **Type:** Risk mitigation
+- **Change:** § 1, § 3, § 7, § 8 and § 14 now say that microphones stay closed until every seat has consented and finished the briefing (the **mic check hold**), so the consent form, questionnaire and briefing are not recorded; § 7 describes the consent screen as sections, each confirmed by its own statement. § 4 and § 9 note that the welcome page is plain HTTP and carries no personal data; § 18 updates the fake-player controls.
+- **Reason:** Recording less and confirming each part of the information separately strengthens informed consent and data minimisation (privacy).
+
+### 2026-11-19 · `03fa07e` · Session startup: who-plays step, create step, consent sections, calibration after the room is ready, welcome page
+
+- **Type:** Risk mitigation
+- **Change:** The generated classification table lists the new events `CalibrationReady` (pseudonymous: tied to a seat) and `CalibrationRequested` (non-personal).
+- **Reason:** Every logged event must have a data class, so the new calibration events are classified.
+
 ### 2026-11-19 · `ead1760` · Hover follows the telemetry consent rule; no stale dashboard after a failed switch
 
 - **Type:** Risk mitigation

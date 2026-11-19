@@ -32,15 +32,15 @@ Players talk while they play, and what they say is research data. The harness th
 | In scope (built) | Not built |
 | --- | --- |
 | Microphone capture in the browser (Chrome, Edge, Firefox, Safari), no installation | Automatic transcription (researched only: [AUDIO-TRANSCRIPTION.md](AUDIO-TRANSCRIPTION.md)) |
-| Separate, required consent item; the mic opens only after every real seat has consented | Any identification of a person by voice (excluded on purpose) |
-| Mic check, facilitator-led calibration, pause and resume for everyone | A mute button for players (talk is part of the data) |
+| Separate, required consent item; the mic opens only after every real seat has finished consent, the questionnaire and the briefing | Any identification of a person by voice (excluded on purpose) |
+| Mic check, a calibration that starts by itself once every player says they are ready, pause and resume for everyone | A mute button for players (talk is part of the data) |
 | Encrypted storage, one key per file, erasure by deleting the key | Audio downloads in the browser: audio leaves the store only through *Export audio* |
 | Offline speaker attribution (who spoke when) and cleaned per-seat tracks | Real-time attribution during play |
 | Facilitator monitoring in LIVE and audio tools in DATABASE | |
 
 **Hardware.** Every player wears a **wired single-ear USB headset** (USB-C on tablets and phones), plugged into their own device. Its microphone sits at the corner of the mouth, so it hears its own player 20 to 30 dB louder than anyone else at the table; the attribution (§ 10) is built on that. Bluetooth headsets are not suitable: while their microphone is in use they fall back to a compressed call mode with a varying delay. Built-in laptop microphones still work but separate the voices by only 3 to 10 dB, and the calibration flags them (§ 9).
 
-Audio is **off by default** (`audio.enabled: false` in `config/session.default.json`). It is switched on per session in setup step 04. Simulated sessions, fake players and agents never record.
+Audio is **off by default** (`audio.enabled: false` in `config/session.default.json`). It is switched on per session in setup step 05 (**Onboarding**). Simulated sessions, fake players and agents never record.
 
 ## 2. Design decisions
 
@@ -53,7 +53,8 @@ Audio is **off by default** (`audio.enabled: false` in `config/session.default.j
 | Attribution detects **speech** and compares **loudness**, nothing else | A small speech/non-speech model (Silero VAD) says *whether* a mic hears speech; comparing the levels of the mics says *which seat*. Voiceprints and speaker embeddings could count as biometric processing (GDPR Art. 9); this method identifies a *seat*, not a person ([DATA-MANAGEMENT.md § 2](DATA-MANAGEMENT.md#2-roles-and-legal-basis)). |
 | The speech model ships in the repository, checked by its SHA-256 | Installation stays offline and reproducible, and a changed model file is refused. Only the attribution worker loads it, never the game server. |
 | Attribution runs after the session, not live | It needs the whole recording to fit each track's clock and noise floor, and a session needs no extra CPU load while people play. |
-| No mic opens until every real seat has consented (the **consent hold**) | Otherwise the mics of seats that are already recording would hear a participant who has not yet agreed to anything. |
+| The mic check is the last onboarding step, and no mic opens until every real seat has finished the steps before it: consent, the questionnaire and the briefing (the **mic check hold**, earlier called the consent hold) | Otherwise the mics of seats that are already recording would hear a participant who has not yet agreed to anything. The room then does the mic checks and the calibration together, and the questionnaire and the briefing are not recorded. |
+| The calibration starts by itself once every recorded player has clicked **I'm ready for the calibration** | The turns never start by surprise, while someone is still putting on a headset, and the facilitator does not have to judge when the room is ready. |
 | Chunks are encrypted as they arrive, one random key per file, stored only in the database | Deleting the key row makes the file unreadable even if a copy exists (crypto-shredding), and changing the database passphrase needs no change to the files. |
 | Unsent audio waits in browser memory only | No voice stays on the participant's laptop after the tab closes. |
 | Raw audio is never modified | Cleaned tracks are new files, so a better attribution can be run later. |
@@ -76,7 +77,7 @@ flowchart LR
   end
   subgraph Server["Facilitator laptop, Node.js server"]
     ING["Live ingest<br/>gates, dedupe, ack"]
-    SM["SessionManager<br/>consent hold, calibration,<br/>pause, track lifecycle"]
+    SM["SessionManager<br/>mic check hold, calibration,<br/>pause, track lifecycle"]
     STORE[("data/audio/session/<br/>.wka files, AES-256-GCM")]
     DB[("data/wkwa.db<br/>tracks, chunks, keys,<br/>derivatives, jobs, registers")]
     JOB["Attribution job<br/>worker thread"]
@@ -91,7 +92,7 @@ flowchart LR
   ING --> STORE
   ING --> DB
   DB -.->|"one key per file"| STORE
-  FAC -->|"calibration, pause, mic skip"| SM
+  FAC -->|"calibration redo and skip,<br/>pause, mic skip"| SM
   FAC --> API
   API --> JOB
   STORE --> JOB
@@ -156,7 +157,9 @@ Audio uses the existing player socket (`/player`), so it needs no extra port or 
 | `mic:check` | player to server | Result of the mic check (passed, attempts, level figures, processing flags) |
 | `audio:start`, `audio:chunk`, `audio:stop` | player to server | Open a track, upload a chunk (binary PCM), close a track. Each is acknowledged. |
 | `audio:level` | player to server | Volatile meter reading, not acknowledged |
-| `calibration:start`, `calibration:redo`, `calibration:skip` | facilitator to server | Run, repeat or skip the calibration |
+| `calibration:ready` | player to server | The player is ready for the calibration (**I'm ready for the calibration**); the last one starts it |
+| `calibration:redo`, `calibration:skip` | facilitator to server | Ask for the calibration again, or skip it |
+| `calibration:start` | facilitator to server | Start a waiting calibration now. It needs the same readiness as the automatic start, so the screens have no button for it |
 | `mic:skip` | facilitator to server | Skip one seat's mic check (that seat is then not recorded) |
 | `recording:pause`, `recording:resume` | facilitator to server | Pause or resume recording for every seat |
 
@@ -196,7 +199,7 @@ sequenceDiagram
 
 **Late chunks.** The server closes a seat's track when its browser disconnects, when recording is paused, at game complete, and after a restart. A closed track still accepts chunks for 10 minutes after the close, or after the previous late chunk. Audio captured during a recording pause or after the game was complete is never stored, even late: a chunk that starts in such a stretch is refused, and one that runs into it is cut where it begins.
 
-**HTTPS.** A browser exposes the microphone only on a secure page. Players open the laptop by its LAN address, so the server uses HTTPS with a self-signed certificate it makes itself. The certificate warning, the fingerprint check and what to do when the warning returns are in [NETWORKING.md § 11](NETWORKING.md#11-security-on-the-lan) and [SESSION-RUNBOOK.md § 10](SESSION-RUNBOOK.md#10-https-and-the-certificate-warning). Setup step 04 warns when the server runs on plain HTTP.
+**HTTPS.** A browser exposes the microphone only on a secure page. Players open the laptop by its LAN address, so the server uses HTTPS with a self-signed certificate it makes itself. Participants first open the **welcome page** (plain HTTP on `LANDING_PORT`, default 8080, served by `apps/server/src/landing.ts`). It opens without a warning, explains the warning the browser will show next and why it is there, and links to the game page with **Join live session** while a session is open. The certificate warning, the fingerprint check and what to do when the warning returns are in [NETWORKING.md § 11](NETWORKING.md#11-security-on-the-lan) and [SESSION-RUNBOOK.md § 10](SESSION-RUNBOOK.md#10-https-and-the-certificate-warning). Setup step 05 warns when the server runs on plain HTTP.
 
 ## 6. Timing model
 
@@ -315,25 +318,27 @@ Field-level tables: [DATA-TYPES.md](DATA-TYPES.md#audio-storage).
 
 ## 8. Recording lifecycle
 
-A seat is recorded only while its **recording verdict** (`recordingVerdict`, `packages/shared/src/recordingVerdict.ts`) says so: the session records audio, the seat is held by a **real participant** who gave the audio consent, has not withdrawn, has reached the mic check and not had it skipped, **no other real seat is still in consent** (the hold), recording is not paused, and the phase is onboarding, round active or round complete. Breaks and game pauses are recorded too.
+A seat is recorded only while its **recording verdict** (`recordingVerdict`, `packages/shared/src/recordingVerdict.ts`) says so: the session records audio, the seat is held by a **real participant** who gave the audio consent, has not withdrawn, has reached the mic check and not had it skipped, **every real seat has finished the steps before the mic check** (no hold), recording is not paused, and the phase is onboarding, round active or round complete. Breaks and game pauses are recorded too.
 
-When a seat is not recorded, the verdict names the **first** reason that applies, in a fixed order: first the reasons that concern the seat itself (audio off, no client, fake player or agent, withdrawn, consent declined, no audio consent, consent not finished, mic check skipped, no mic check step), then the moment (still in the lobby, game complete, session closed or aborted, the consent hold, the facilitator's pause). `paused` therefore means that the pause is the only thing stopping the seat. The player's view carries the reason (`PlayerView.audio.notRecording`); the browser takes the track's stop reason from it, and the facilitator's mic column and wrap-up check read the same verdict, so all three always agree.
+When a seat is not recorded, the verdict names the **first** reason that applies, in a fixed order: first the reasons that concern the seat itself (audio off, no client, fake player or agent, withdrawn, consent declined, no audio consent, consent not finished, mic check skipped, no mic check step), then the moment (still in the lobby, game complete, session closed or aborted, the mic check hold: `mic_check_held`, the facilitator's pause). `paused` therefore means that the pause is the only thing stopping the seat. The player's view carries the reason (`PlayerView.audio.notRecording`); the browser takes the track's stop reason from it, and the facilitator's mic column and wrap-up check read the same verdict, so all three always agree.
 
 ```mermaid
 stateDiagram-v2
   state "Consent" as consent
-  state "Held: waiting for the other seats' consent" as held
-  state "Mic check: mic open after Start" as check
+  state "About you and Briefing (not recorded)" as steps
+  state "Held: waiting for the other seats to finish the briefing" as held
+  state "Mic check, part 1: mic open after Start" as check
   state "Recording" as rec
   state "Paused by the facilitator" as paused
   state "Reconnecting or mic lost" as lost
   state "Not recorded" as off
   state "Finished" as fin
   [*] --> consent: onboarding starts
-  consent --> held: audio consent given, another real seat not yet
-  consent --> check: audio consent given, every real seat has consented
-  held --> check: the last real seat consents, or its seat is withdrawn
-  consent --> off: declined (the hold stays on until that seat is withdrawn)
+  consent --> steps: audio consent given
+  consent --> off: declined (holds the others until that seat is withdrawn)
+  steps --> held: briefing done, another real seat not yet
+  steps --> check: briefing done, every real seat through the briefing
+  held --> check: the last real seat finishes the briefing, or its seat is withdrawn
   check --> rec: mic check passed, MicCheckCompleted
   check --> off: facilitator skips the mic check, MicCheckSkipped
   rec --> paused: recording:pause, tracks stop with paused
@@ -345,9 +350,15 @@ stateDiagram-v2
   paused --> fin: game complete
   fin --> [*]
   off --> [*]
+  note right of rec
+    Part 2 (ready, calibration turns),
+    the rounds and the breaks
+  end note
 ```
 
-**The consent hold.** `micCheckHoldSeats` lists the bound, non-withdrawn real participants whose consent is not `given`. While the list is not empty, no seat may start its mic check, so no microphone opens anywhere; the player sees *waiting for the other seats*. The server enforces it in the ingest as well. A participant who declines keeps the hold until the facilitator withdraws that seat. Fake players and agents never count.
+**The mic check hold.** In a new session the onboarding runs consent → **About you** (the questionnaire) → **Briefing** → **Mic check & calibration** (`ONBOARDING_STEPS`), so the mic check comes last. `micCheckHoldSeats` lists the bound, non-withdrawn real participants that have not finished every step before the mic check: consent not `given` yet, or the questionnaire or the briefing not done. While the list is not empty, no seat may start its mic check, so no microphone opens anywhere; the player sees *Waiting for the other players to finish the briefing*, and the facilitator's NEXT panel names the seats that hold. The server refuses `mic:check` and `audio:start` meanwhile, and the ingest checks it as well. A participant who declines keeps the hold until the facilitator withdraws that seat. Fake players and agents never count. Recording starts at the mic check, so the questionnaire and the briefing are not recorded.
+
+**Older sessions keep their order.** A session logs its steps in `OnboardingStarted`, and `nextOnboardingStep` follows that list. A session started before this order had the mic check right after consent (consent → mic check → demographics → briefing): only consent holds its mic checks, and its questionnaire and briefing are recorded.
 
 **Tracks.** A track is one continuous capture run of one seat. The reason it started and stopped is stored with it:
 
@@ -370,6 +381,8 @@ A track shows as `interrupted` in the facilitator's views, the REST summary and 
 
 Calibration measures how loud each seat's voice is **on every other mic**: each seat in turn reads a fixed sentence aloud while the others stay quiet. From these turns, attribution learns the leakage between mics and the server can tell the facilitator within seconds whether the headsets separate the voices.
 
+It is part 2 of the last onboarding step, **Mic check & calibration**. Part 1 is each player's own mic check. Part 2 explains the calibration, shows the player's mic level and has one button, **I'm ready for the calibration** (`calibration:ready`, logged as `CalibrationReady`). Nobody starts the turns by hand: **the server starts them by itself** once the room is ready.
+
 ```mermaid
 sequenceDiagram
   autonumber
@@ -377,9 +390,11 @@ sequenceDiagram
   participant S as Server (timers)
   participant C as Calibration collector (memory)
   participant B as Seat browsers
-  F->>S: calibration:start
-  S->>S: refused if a mic check is still pending or recording is paused
-  S->>S: CalibrationStarted (order, sentenceIds, turnMs 6 s, gapMs 1 s)
+  Note over B,S: every seat through consent, About you and Briefing (the hold),<br/>then each seat's own mic check (part 1)
+  B->>S: calibration:ready, one per recorded seat (CalibrationReady)
+  S-->>F: NEXT panel: who is ready, "waiting · seat n not ready yet"
+  S->>S: after each command: calibrationReadyToStart?<br/>every seat through its onboarding, every recorded seat ready, not paused
+  S->>S: CalibrationStarted, actor system (order, sentenceIds, turnMs 6 s, gapMs 1 s)
   S->>C: begin, keep chunks from 1 s before the first turn
   loop each recorded seat in seat order
     S->>S: CalibrationTurn (seat n)
@@ -395,15 +410,24 @@ sequenceDiagram
   C-->>S: margin per seat, verdict, advice
   S->>S: CalibrationChecked (quality)
   S-->>F: calibration card: margin per seat, advice, verdict
-  Note over F,S: redo cancels a running run cleanly (stale timers do nothing)<br/>skip logs a reason, round 1 may then start
+  opt the facilitator asks for it again
+    F->>S: calibration:redo
+    S->>S: a running run ends (stale timers do nothing), CalibrationRequested
+    S-->>B: the ready button again, then as from step 1
+  end
+  Note over F,S: skip logs a reason, round 1 may then start
 ```
 
 - **Sentences.** Each seat gets a different sentence from `config/audio.json` (public-domain Harvard sentences). A player sees only their own sentence, and only during their turn.
 - **Timing is the server's.** The turns are timed by server timers and logged (`CalibrationTurn`), so the analysis later knows exactly when each seat was supposed to speak.
 - **Leakage.** In seat *s*'s turn, only the frames where its own mic is at least 10 dB above its noise floor count. `L[s][j]` is the median, over those frames, of mic *j*'s level minus mic *s*'s level (negative: quieter). A leak below mic *j*'s noise floor reads as the floor, which only makes the gate stricter.
 - **Quality check.** A seat's **margin** is the gain-invariant separation from every other mic: the smallest `−(L[s][j] + L[j][s]) / 2` over the other seats, so a difference in microphone gain cancels out. A seat passes at 12 dB or more (`CALIBRATION_MIN_MARGIN_DB`, shared by the server and the facilitator's card); headsets reach about 20 to 30 dB. A seat is also flagged for no audio, fewer than 1 s of clear speech, a voice less than 15 dB above its own noise, or clipping. Each problem comes with advice such as *check the headset is plugged in, chosen as microphone and its mic sits at the corner of the mouth*.
-- **Gate.** With `audio.requireCalibration` on (the default), round 1 cannot start until the calibration is done or skipped. If the server stops a running calibration itself (recording paused, server restart), it logs `CalibrationSkipped` with `cancelled: true`, which puts the calibration back to pending, so the gate holds.
-- **When.** After every seat has finished onboarding, or in a break between rounds (for example after someone put their headset back on or changed device).
+- **Gate.** With `audio.requireCalibration` on (the default), round 1 cannot start until the calibration is done or skipped. If the server stops a running calibration itself (recording paused, server restart), it logs `CalibrationSkipped` with `cancelled: true`, which puts the calibration back to pending, so the gate holds. Like a redo, this empties `ready` and sets `requested`: everyone says again that they are ready.
+- **Ready first.** A seat may say it is ready (`canSayCalibrationReady`) once it is recorded, the calibration is waiting and, in the onboarding, the seat is through its onboarding (its mic check passed). The state keeps the ready seats in `audio.calibration.ready`. The player then sees *You are ready. Waiting for seat n* (`PlayerView.audio.calibration.waitingFor`). A seat that is not recorded (mic check skipped) gets no button and only waits.
+- **It starts by itself.** At the end of every command, `SessionManager` checks `calibrationReadyToStart`: the calibration is pending and waiting in this phase, recording is not paused, every real seat is through its onboarding (`calibrationWaitingSeats`), and every recorded seat (`calibrationSeats`) has said it is ready (`calibrationNotReadySeats` is empty). It then calls `CalibrationRunner.start("system")`, so `CalibrationStarted` has actor `system`. This also happens when what it waited for goes away: a seat is withdrawn, its mic check is skipped, or recording resumes. The facilitator's `calibration:start` still exists but needs the same readiness. A run empties `ready`.
+- **Facilitator.** The NEXT panel has no start button. It shows each recorded seat as *ready* or *waiting*, with the tag *waiting · seat n still in the onboarding*, *waiting · seat n not ready yet*, *waiting · recording paused* or *starting*, and the buttons **Redo** (once it has run or is running) and **Skip calibration**.
+- **Redo.** `calibration:redo` (`CalibrationRunner.redo`) ends a running run and logs `CalibrationRequested`. The reducer puts the calibration back to pending, with `ready` empty and `requested` set. Every recorded player clicks **I'm ready for the calibration** again, and it starts by itself. A redo before any run is refused: the calibration then still waits for the room.
+- **When.** At the end of the onboarding, before round 1 (`calibrationWaitsIn` is always true there). In a break between rounds only after a redo or the server's own cancel (`requested`), for example after someone put their headset back on or changed device; the player's screen then shows the ready button again.
 - **Memory only.** The collector keeps at most about 4.5 MB for the length of one run. The chunks are stored by the normal ingest as well.
 
 ## 10. Speaker attribution
@@ -593,17 +617,18 @@ The stored `audio_tracks.status` is only `recording`, `closed` or `deleted`. The
 | Area | Where |
 | --- | --- |
 | Shared contracts (config, events, messages, state, projections, REST types) | `packages/shared/src/audio.ts`, `state.ts`, `events.ts`, `protocol.ts`, `projections.ts`, `config.ts` |
-| Recording verdict and reason catalogue | `packages/shared/src/recordingVerdict.ts`, `audioReasons.ts` |
+| Recording verdict, calibration readiness and reason catalogue | `packages/shared/src/recordingVerdict.ts` (`recordingVerdict`, `calibrationSeats`, `calibrationNotReadySeats`, `calibrationWaitsIn`, `calibrationReadyToStart`, `canSayCalibrationReady`), `audioReasons.ts`; the onboarding order and the hold (`ONBOARDING_STEPS`, `micCheckHoldSeats`, `calibrationWaitingSeats`) are in `state.ts` |
 | Browser capture engine | `apps/client/src/audio/` (`MicRecorder`, worklet, resampler, chunker, queue, speech detector, timing, errors) |
-| Browser recording flow and screens | `apps/client/src/player/recording.ts`, `recordingMachine.ts` (the controller's states and transitions), `micCheckAttempt.ts` (one mic-check attempt), `MicCheckScreen.tsx`, `CalibrationScreen.tsx`, `RecordingIndicator.tsx` |
-| Live ingest, consent hold, calibration, pause | `apps/server/src/audio/live.ts`, `calibration.ts`, `session/CalibrationRunner.ts` (timed turns, quick check), `session/SessionManager.ts` |
+| Browser recording flow and screens | `apps/client/src/player/recording.ts`, `recordingMachine.ts` (the controller's states and transitions), `micCheckAttempt.ts` (one mic-check attempt), `MicCheckScreen.tsx` (part 1, and the hold), `CalibrationScreen.tsx` (part 2: the **I'm ready for the calibration** button, then the turns), `RecordingIndicator.tsx` |
+| Live ingest, mic check hold, calibration, pause | `apps/server/src/audio/live.ts`, `calibration.ts`, `session/CalibrationRunner.ts` (timed turns, quick check, redo), `session/SessionManager.ts` (`sayCalibrationReady`, the automatic start `autoStartCalibration`) |
 | Encrypted store | `apps/server/src/audio/crypto.ts`, `fileStore.ts`, `verify.ts`, `db/database.ts` (migrations 6 and 7) |
 | Attribution | `apps/server/src/audio/attribution/` (overview in the header of `index.ts`; `features.ts`, `vad.ts`, `clock.ts`, `analyse.ts`, `smooth.ts`, `render.ts`, `annotate.ts`), `service.ts`, `jobs.ts`, `jobWorker.ts`, `wav.ts` |
 | Speech model | `apps/server/models/silero_vad.onnx` (Silero VAD 6.2.3, MIT), checked against its SHA-256 in `vad.ts`; runtime `onnxruntime-node` |
 | REST routes | `apps/server/src/api/audioRoutes.ts` (`GET /api/sessions/:id/audio`, `POST …/audio/attribution`, `GET /api/audio/jobs/:jobId`, `GET …/audio/segments`, `POST …/audio/export`, `POST …/audio/delete`) |
 | Erasure and deletion | `apps/server/src/db/personalData.ts` (the personal-data map), `session/sessionGuard.ts` (when each operation is refused), `cli.ts` |
-| Facilitator screens | `apps/client/src/facilitator/live/AudioPanels.tsx`, `AudioControls.tsx`, `seats.tsx`, `database/AudioPopup.tsx`, `setup/ConfigSteps.tsx` (step 04) |
+| Facilitator screens | `apps/client/src/facilitator/live/AudioPanels.tsx`, `AudioControls.tsx`, `seats.tsx`, `database/AudioPopup.tsx`, `setup/ConfigSteps.tsx` (step 05) |
 | UI primitives | `apps/client/src/ui/audio.tsx`, `audioMeta.ts` ([AESTHETIC-RULES.md § 8.1](AESTHETIC-RULES.md#81-audio-indicators)) |
+| Welcome page (explains the certificate warning) | `apps/server/src/landing.ts`, `apps/client/src/landing/` ([NETWORKING.md § 11](NETWORKING.md#11-security-on-the-lan)) |
 | Test bots | `npm run bots -- --count 4 --auto --audio` ([ARCHITECTURE.md § 13](ARCHITECTURE.md#13-testing-strategy-and-bots)) |
 
-Tests: a table test of the recording verdict, checked against every combination of the fields it reads; a test of the reason catalogue against the schemas and the codebook; unit tests for the resampler, queue, recorder (against a fake Web Audio environment), file store (round trip, tampering, truncation, path tricks), attribution (synthetic headset and laptop-like mixes with known truth, with and without a calibration), live ingest (every gate, every lifecycle close), processing jobs, routes, exports and erasure; a Playwright flow with a fake microphone that plays a synthetic voice (`e2e/app-audio.spec.ts`), through consent hold, mic check, calibration, a round, pause and resume, and game complete.
+Tests: a table test of the recording verdict, checked against every combination of the fields it reads; the onboarding order, the hold until every seat is through the briefing (and by consent only in an older session), and the calibration's readiness and redo (`packages/shared/test/audio.test.ts`); a test of the reason catalogue against the schemas and the codebook; unit tests for the resampler, queue, recorder (against a fake Web Audio environment), file store (round trip, tampering, truncation, path tricks), attribution (synthetic headset and laptop-like mixes with known truth, with and without a calibration), live ingest (every gate, every lifecycle close; the hold, the ready seats, the automatic start, a redo mid-run, no start while paused), processing jobs, routes, exports and erasure; a Playwright flow with a fake microphone that plays a synthetic voice (`e2e/app-audio.spec.ts`), through the hold (one seat through the briefing, the other still in consent), each mic check, both players clicking ready, the automatic calibration, a round, pause and resume, and game complete.

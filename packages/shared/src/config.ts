@@ -203,7 +203,7 @@ export const SessionConfigSchema = z
           .boolean()
           .default(false)
           .describe(
-            "Record each participant's microphone, from their mic check (an onboarding step after consent) until the game is complete. Needs the consent step with the audio consent item, and HTTPS; never used for simulated sessions or fake players",
+            "Record each participant's microphone, from their mic check (the last onboarding step, once every seat has finished the briefing) until the game is complete. Needs the consent step with the audio consent item, and HTTPS; never used for simulated sessions or fake players",
           ),
         requireCalibration: z
           .boolean()

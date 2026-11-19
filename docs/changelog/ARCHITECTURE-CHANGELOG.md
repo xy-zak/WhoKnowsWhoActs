@@ -4,7 +4,13 @@ History of [ARCHITECTURE.md](../ARCHITECTURE.md). Newest first. How entries are 
 
 ## Unreleased
 
-### Not yet committed · documents `ead1760`
+### Not yet committed · documents `03fa07e`
+
+- **Type:** Feature
+- **Change:** The glossary adds **Mic check hold** and **Welcome page**; § 3 shows the second, plain-HTTP listener; § 4 lists the welcome page code, the 11-step setup and the consent `section` field; § 7's onboarding state diagram now ends with the mic check and the readiness step; § 13–15 update the tests, step numbers and audio state (`ready`, `requested`, automatic start).
+- **Reason:** The startup flow was redesigned: the document must show where the new rules live (onboarding order, readiness, welcome page).
+
+### 2026-11-19 · `97e3fc4` · Docs: hover consent rule, failed session switch; change logs for wave 3
 
 - **Type:** Risk mitigation
 - **Change:** § 7 adds that the live hover signal follows the telemetry consent rule, and the testing row for the live figures adds hover and a failed session switch, which now shows that no session is attached.

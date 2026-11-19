@@ -2,6 +2,14 @@
 
 History of [GAME-RULES.md](../GAME-RULES.md). Newest first. How entries are written: [README.md](README.md).
 
+## Unreleased
+
+### Not yet committed · documents `03fa07e`
+
+- **Type:** Risk mitigation
+- **Change:** § 3 points to the new step numbers: views chosen per seat are switched on in step 04 and picked in the **Labels** step 09.
+- **Reason:** The setup steps were renumbered when **Who plays** became its own step.
+
 ### 2026-11-18 · `fc32ce7` · Grid map with knowledge sub-squares, scores and pluggable game rules
 
 - **Type:** Feature

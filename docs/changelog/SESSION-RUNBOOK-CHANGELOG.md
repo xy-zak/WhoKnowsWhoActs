@@ -2,6 +2,14 @@
 
 History of [SESSION-RUNBOOK.md](../SESSION-RUNBOOK.md). Newest first. How entries are written: [README.md](README.md).
 
+## Unreleased
+
+### Not yet committed · documents `03fa07e`
+
+- **Type:** Feature
+- **Change:** The setup tables and diagram now show eleven steps (§ 1, § 4.2–4.3, § 8, § 9): a separate **Who plays** step 03, **Create session** in place of the review table, fake players added per seat at the normal pace, and labels that only take the pairing and save at once. § 10 and § 11 add the welcome page that participants open first, and the new audio order: briefing, mic check, **I'm ready for the calibration**, then a calibration that starts by itself.
+- **Reason:** The facilitator follows this runbook during a session, so it must match the screens after the startup redesign; recording now starts later, after the briefing (less audio recorded).
+
 ### 2026-11-19 · `490686a` · Docs: headset gate engine, speech model, storage fixes
 
 - **Type:** Risk mitigation
