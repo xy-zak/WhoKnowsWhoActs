@@ -35,7 +35,7 @@ describe("audio reason catalogue", () => {
     context_interrupted: ["clean", true],
     clock_jump: ["clean", false],
     discontinuity: ["clean", false],
-    track_ended: ["clean", true],
+    track_ended: ["interrupted", true],
     cleared: ["clean", false],
   };
 
@@ -49,7 +49,13 @@ describe("audio reason catalogue", () => {
 
   it("lists every stop reason in the table above, and nothing else", () => {
     expect([...AUDIO_STOP_REASONS].sort()).toEqual(Object.keys(STOPS).sort());
-    expect(INTERRUPTED_STOP_REASONS).toEqual(["disconnect", "permission_lost", "error", "interrupted"]);
+    expect(INTERRUPTED_STOP_REASONS).toEqual([
+      "disconnect",
+      "permission_lost",
+      "error",
+      "interrupted",
+      "track_ended",
+    ]);
   });
 
   it("flags every interrupted reason in the wrap-up check", () => {

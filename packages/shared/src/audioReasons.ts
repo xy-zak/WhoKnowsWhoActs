@@ -30,7 +30,7 @@ export interface AudioStopReasonDef extends AudioStartReasonDef {
   /**
    * How the facilitator's wrap-up check names a track that stopped for this reason (audio may be
    * missing), or null when it does not flag it. Every `interrupted` reason is flagged; a few clean
-   * ones are too (e.g. `track_ended`), without changing their status.
+   * ones are too (e.g. `context_interrupted`), without changing their status.
    */
   wrapUpIssue: string | null;
 }
@@ -129,7 +129,7 @@ export const AUDIO_STOP_REASON_DEFS = {
   ),
   clock_jump: clean("clock jump", "the capture clock jumped"),
   discontinuity: clean("audio discontinuity", "a gap or overlap in the audio too large to patch"),
-  track_ended: clean(
+  track_ended: interrupted(
     "microphone track ended",
     "the browser ended the microphone track (device unplugged or permission revoked)",
     "microphone unplugged or blocked",
