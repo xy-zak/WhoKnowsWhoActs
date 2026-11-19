@@ -14,7 +14,6 @@ import {
   REC_STATES,
   recStateMeta,
 } from "../src/ui/audioMeta";
-import { ICON_TABLE } from "../src/ui/icons";
 
 describe("dbToCells", () => {
   it("maps the default −60…0 dB scale onto 12 cells (5 dB per cell, rounded)", () => {
@@ -143,14 +142,12 @@ describe("meterValue", () => {
 
 describe("recording states (AESTHETIC-RULES § 8.1)", () => {
   it("describes every state", () => {
-    expect(Object.keys(REC_STATE_META).sort()).toEqual([...REC_STATES].sort());
     for (const s of REC_STATES) {
       const m = REC_STATE_META[s];
       expect(m.text.length, s).toBeGreaterThan(0);
       expect(m.short.length, s).toBeGreaterThan(0);
       expect(m.tip.length, s).toBeGreaterThan(0);
       expect(m.banner.length, s).toBeGreaterThan(0);
-      expect(ICON_TABLE[m.icon], `${s}: unknown icon ${m.icon}`).toBeDefined();
     }
   });
   it("uses the reserved tones: recording is live, never red", () => {

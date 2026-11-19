@@ -14,6 +14,7 @@ import {
   PASSED_HOLD_MS,
 } from "../src/player/micCheckAttempt";
 import { FakeSocket } from "./fakeSocket";
+import { flushPromises as flush } from "./helpers";
 
 /* ─── fixtures ─── */
 
@@ -85,8 +86,6 @@ function setup(o: { resumed?: boolean } = {}) {
   };
 }
 
-const flush = () => new Promise((r) => setTimeout(r, 0));
-
 /* ─── the attempt ─── */
 
 describe("MicCheckAttempt", () => {
@@ -118,14 +117,14 @@ describe("MicCheckAttempt", () => {
     const t = setup();
     t.clock.advance(3000); // the screen was open 3 s before Start
     t.check.start();
-    t.hear(heard(1000, 2000));
-    t.hear(heard(1400, 2400)); // still passing: not sent again
-    t.clock.advance(PASSED_HOLD_MS - 201);
+    t.hear(heard(1000, 2000)); // passes 200 ms after Start: the confirmation runs from here
+    t.hear(heard(1400, 2400)); // 200 ms later, still passing: not sent again
+    t.clock.advance(PASSED_HOLD_MS - 200 - 1); // 1 ms before the confirmation ends
     expect(t.sent).toEqual([]);
     t.clock.advance(1);
     await flush();
     expect(t.sent).toEqual([
-      { passed: true, attempts: 1, durationMs: 3000 + 400 + PASSED_HOLD_MS - 200, result: heard(1000, 2000) },
+      { passed: true, attempts: 1, durationMs: 3000 + 200 + PASSED_HOLD_MS, result: heard(1000, 2000) },
     ]);
     expect(t.check.snapshot).toMatchObject({ passed: true, unsent: false, busy: false });
   });
@@ -272,12 +271,9 @@ describe("MicCheckScreen", () => {
     return html;
   }
 
-  it("asks for the Start click first", () => {
+  it("asks for the Start click first; mounted again after it (a detached session came back) goes on listening", () => {
     expect(screen(false)).toContain("Start mic check");
-  });
-
-  it("mounted again after the Start click (a detached session came back): goes on listening", () => {
-    // before: a fresh mount showed "Start mic check" while the recorder was already recording
+    // the regression: a fresh mount showed "Start mic check" while the recorder was already recording
     const html = screen(true);
     expect(html).not.toContain("Start mic check");
     expect(html).toContain("Read this aloud");
