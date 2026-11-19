@@ -23,6 +23,13 @@ export type ConsentStatus = "pending" | "given" | "declined" | "skipped";
 /** Every onboarding step, in the order a player does them. `mic_check` is used only when the session records audio. */
 export const ONBOARDING_STEPS = ["consent", "mic_check", "demographics", "briefing"] as const;
 export type OnboardingStep = (typeof ONBOARDING_STEPS)[number];
+/** Name of each onboarding step, as the player's stepper and the facilitator's summaries show it. */
+export const STEP_LABEL: Record<OnboardingStep, string> = {
+  consent: "Consent",
+  mic_check: "Mic check",
+  demographics: "About you",
+  briefing: "Briefing",
+};
 /** A seat's own mic check: still to do, passed, or skipped by the facilitator (then the seat is not recorded). */
 export type MicCheckStatus = "pending" | "passed" | "skipped";
 export type CalibrationStatus = "pending" | "running" | "done" | "skipped";
@@ -133,6 +140,11 @@ export interface CalibrationState {
   startedTs: number | null;
   completedTs: number | null;
   quality: CalibrationQuality | null;
+  /**
+   * The server's cancel of the latest run (CalibrationSkipped with `cancelled`: status back to
+   * pending), with its reason and time; null once a calibration starts again, or if none was cancelled.
+   */
+  lastCancel: { reason: string; ts: number } | null;
 }
 
 /** Audio recording state of the session (see audio.ts and shouldRecord). */
@@ -143,6 +155,10 @@ export interface AudioState {
   requireCalibration: boolean;
   /** The facilitator paused recording for every seat. */
   recordingPaused: boolean;
+  /** When the current pause began (server clock; null while recording is not paused). */
+  pausedTs: number | null;
+  /** The facilitator's reason for the current pause (null when none was given or not paused). */
+  pauseReason: string | null;
   calibration: CalibrationState;
 }
 
@@ -224,6 +240,7 @@ export function emptyCalibration(): CalibrationState {
     startedTs: null,
     completedTs: null,
     quality: null,
+    lastCancel: null,
   };
 }
 
@@ -238,6 +255,8 @@ export function emptyAudioState(config?: SessionConfig): AudioState {
     enabled: config ? audioEnabled(config) : AUDIO_CONFIG_DEFAULTS.enabled,
     requireCalibration: config ? config.audio.requireCalibration : AUDIO_CONFIG_DEFAULTS.requireCalibration,
     recordingPaused: false,
+    pausedTs: null,
+    pauseReason: null,
     calibration: emptyCalibration(),
   };
 }
@@ -277,6 +296,24 @@ export function initialState(): GameState {
 }
 
 /* ─────────────────────────── Derived helpers ─────────────────────────── */
+
+/**
+ * The onboarding steps a session with this config uses, in ONBOARDING_STEPS order (logged in
+ * OnboardingStarted). The mic check comes right after consent when the session records audio
+ * (never for simulated players): recording starts at each participant's own mic check.
+ */
+export function onboardingStepsFor(
+  config: Pick<SessionConfig, "onboarding" | "audio" | "players">,
+): OnboardingStep[] {
+  const o = config.onboarding;
+  const used: Record<OnboardingStep, boolean> = {
+    consent: o.consent,
+    mic_check: config.audio.enabled && config.players !== "simulated",
+    demographics: o.demographics,
+    briefing: o.briefing,
+  };
+  return ONBOARDING_STEPS.filter((step) => used[step]);
+}
 
 export function seatList(state: GameState): SeatState[] {
   return Object.values(state.seats).sort((a, b) => a.seat - b.seat);
@@ -400,6 +437,22 @@ export function canStartFirstRound(state: GameState): boolean {
   if (!state.audio.enabled || !state.audio.requireCalibration) return true;
   const status = state.audio.calibration.status;
   return status === "done" || status === "skipped";
+}
+
+/** Real seats the calibration waits for: active participants not past their mic check yet (consent included). */
+export function calibrationWaitingSeats(state: GameState): SeatState[] {
+  return activeSeats(state).filter(
+    (s) =>
+      isParticipant(s) && (s.consent !== "given" || (micCheckApplies(state, s) && s.micCheck === "pending")),
+  );
+}
+
+/** Seats in their own mic check now (onboarding, consent given, check pending): the facilitator may skip them. */
+export function seatsInMicCheck(state: GameState): SeatState[] {
+  if (state.phase !== "onboarding") return [];
+  return activeSeats(state).filter(
+    (s) => micCheckApplies(state, s) && s.consent === "given" && s.micCheck === "pending",
+  );
 }
 
 /**

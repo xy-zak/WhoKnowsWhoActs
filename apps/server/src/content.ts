@@ -126,7 +126,7 @@ export class ScenarioLibrary {
 /* ─────────────────────────── Onboarding content ─────────────────────────── */
 
 /** Suffix of the consent form version in sessions that record audio (the text then has the audio section). */
-export const AUDIO_CONSENT_VERSION_SUFFIX = "+audio";
+const AUDIO_CONSENT_VERSION_SUFFIX = "+audio";
 
 /**
  * Load study info, consent form, demographics and briefing from config/ (and, for a session that

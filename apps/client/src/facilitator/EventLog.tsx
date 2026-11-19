@@ -4,10 +4,12 @@ import {
   type GameState,
   type StoredEvent,
   type StoredTelemetry,
+  samplesToMs,
 } from "@wkwa/shared";
 import { Fragment, useMemo, useState } from "react";
+import { fmtDuration, fmtSigned, plural } from "../common/format";
 import { Button, formatDb, Panel, SeatDot } from "../ui";
-import { fmtMargin, START_REASON_TEXT, STOP_REASON_TEXT, samplesText, shortTrack } from "./audioLive";
+import { START_REASON_TEXT, STOP_REASON_TEXT, shortTrack } from "./audioLive";
 
 function ms(ts: number) {
   const d = new Date(ts);
@@ -66,29 +68,29 @@ export function summarise(ev: StoredEvent, regionName: (id: string) => string): 
       return `${ev.payload.roundsPlayed} rounds, ${ev.payload.reason}`;
     case "MicCheckCompleted": {
       const p = ev.payload;
-      const tries = `${p.attempts} attempt${p.attempts === 1 ? "" : "s"}`;
+      const tries = plural(p.attempts, "attempt");
       return `mic check ${p.passed ? "passed" : "NOT passed"} (${tries}) · speech ${formatDb(p.speechDb)} for ${(p.speechMs / 1000).toFixed(1)} s, background ${formatDb(p.noiseFloorDb)}`;
     }
     case "MicCheckSkipped":
       return `mic check of seat ${ev.payload.seat} skipped${ev.payload.reason ? `: “${ev.payload.reason}”` : ""} · not recorded`;
     case "AudioTrackStarted":
-      return `track ${shortTrack(ev.payload.trackId)} started (${START_REASON_TEXT[ev.payload.reason] ?? ev.payload.reason})`;
+      return `track ${shortTrack(ev.payload.trackId)} started (${START_REASON_TEXT[ev.payload.reason]})`;
     case "AudioTrackStopped": {
       const p = ev.payload;
       const dropped = p.droppedChunks ? `, ${p.droppedChunks} DROPPED (audio missing)` : "";
-      return `track ${shortTrack(p.trackId)} stopped (${STOP_REASON_TEXT[p.reason] ?? p.reason}) · ${samplesText(p.samples)} stored in ${p.chunks} chunk${p.chunks === 1 ? "" : "s"}${dropped}`;
+      return `track ${shortTrack(p.trackId)} stopped (${STOP_REASON_TEXT[p.reason]}) · ${fmtDuration(samplesToMs(p.samples))} stored in ${plural(p.chunks, "chunk")}${dropped}`;
     }
     case "CalibrationStarted":
       return `calibration started · order seat ${ev.payload.order.join(" → ")} · ${ev.payload.turnMs / 1000} s turns, ${ev.payload.gapMs / 1000} s gaps`;
     case "CalibrationTurn":
       return `turn ${ev.payload.index + 1}: seat ${ev.payload.seat} reads sentence ${ev.payload.sentenceId}`;
     case "CalibrationCompleted":
-      return `calibration complete · ${ev.payload.turns.length} turn${ev.payload.turns.length === 1 ? "" : "s"} · checking the quality…`;
+      return `calibration complete · ${plural(ev.payload.turns.length, "turn")} · checking the quality…`;
     case "CalibrationChecked": {
       const seats = ev.payload.perSeat
         .map(
           (r) =>
-            `seat ${r.seat} ${r.marginDb === null ? "no audio" : fmtMargin(r.marginDb)} ${r.ok ? "✓" : "✗"}`,
+            `seat ${r.seat} ${r.marginDb === null ? "no audio" : fmtSigned(r.marginDb, "dB")} ${r.ok ? "✓" : "✗"}`,
         )
         .join(", ");
       return `calibration ${ev.payload.ok ? "OK" : "NOT OK"} · own voice over the loudest other mic: ${seats}`;

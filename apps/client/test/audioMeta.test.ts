@@ -1,3 +1,4 @@
+import { MIC_LEVEL_STATES } from "@wkwa/shared";
 import { describe, expect, it } from "vitest";
 import {
   CLIP_PEAK_DB,
@@ -96,8 +97,8 @@ describe("formatDb", () => {
   });
   it("marks silence and missing levels", () => {
     expect(formatDb(Number.NEGATIVE_INFINITY)).toBe("−∞ dB");
-    expect(formatDb(null)).toBe("— dB");
-    expect(formatDb(Number.NaN)).toBe("— dB");
+    expect(formatDb(null)).toBe("– dB");
+    expect(formatDb(Number.NaN)).toBe("– dB");
   });
 });
 
@@ -173,10 +174,10 @@ describe("recording states (AESTHETIC-RULES § 8.1)", () => {
     }
     expect(REC_STATE_META.recording.icon).toBe("microphone");
   });
-  it("reads an unknown state (e.g. a capture state such as 'idle') as not recording", () => {
+  it("has a look for every state the browser reports except idle (shown as off), plus off and skipped", () => {
+    const expected = [...MIC_LEVEL_STATES.filter((s) => s !== "idle"), "off", "skipped"];
+    expect([...REC_STATES].sort()).toEqual(expected.sort());
     expect(recStateMeta("recording")).toBe(REC_STATE_META.recording);
-    expect(recStateMeta("idle")).toBe(REC_STATE_META.off);
-    expect(recStateMeta("toString")).toBe(REC_STATE_META.off);
   });
   it("writes tag text in lower case (the tag style upper-cases it, except with OpenDyslexic)", () => {
     for (const s of REC_STATES) {

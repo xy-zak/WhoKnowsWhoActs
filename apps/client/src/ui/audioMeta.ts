@@ -1,3 +1,4 @@
+import type { MicLevelState } from "@wkwa/shared";
 import type { Tone } from "./components";
 import type { IconName } from "./icons";
 
@@ -82,15 +83,7 @@ export function levelTone(
   return s === "quiet" || s === "clipping" ? "warn" : "neutral";
 }
 
-/** `−24 dB`, `0 dB`, `−∞ dB`; `— dB` when there is no level. Uses the real minus sign (U+2212). */
-export function formatDb(db: number | null | undefined): string {
-  if (!usable(db)) return "— dB";
-  if (db === Number.NEGATIVE_INFINITY) return "−∞ dB";
-  if (db === Number.POSITIVE_INFINITY) return "+∞ dB";
-  const r = Math.round(db);
-  if (r === 0) return "0 dB"; // also −0
-  return r < 0 ? `−${-r} dB` : `+${r} dB`;
-}
+export { formatDb } from "../common/format";
 
 export type MeterCell = "on" | "off" | "peak";
 
@@ -117,18 +110,12 @@ export function meterValue(db: number | null | undefined, min = METER_MIN_DB, ma
 
 /* ─────────────────────────── recording state ─────────────────────────── */
 
-/** Every state a seat's microphone recording can be in, as shown by RecTag / RecordingBanner. */
-export const REC_STATES = [
-  "recording",
-  "paused",
-  "no_signal",
-  "denied",
-  "error",
-  "off",
-  "skipped",
-  "requesting",
-] as const;
-export type RecState = (typeof REC_STATES)[number];
+/**
+ * Every state a seat's microphone recording can be in, as shown by RecTag / RecordingBanner: the
+ * browser's reported states (`audio:level`) except `idle`, which reads as `off` (not recording),
+ * plus `skipped` (the facilitator skipped the seat's mic check).
+ */
+export type RecState = Exclude<MicLevelState, "idle"> | "off" | "skipped";
 
 export interface RecStateMeta {
   /** Reserved-meaning tone (§ 2.2): live = recording, warn = needs attention, danger = error. */
@@ -211,7 +198,9 @@ export const REC_STATE_META: Record<RecState, RecStateMeta> = {
   },
 };
 
-/** The look of a recording state. Anything unknown (e.g. a capture state such as "idle") reads as not recording. */
-export function recStateMeta(state: string): RecStateMeta {
-  return Object.hasOwn(REC_STATE_META, state) ? REC_STATE_META[state as RecState] : REC_STATE_META.off;
+export const REC_STATES = Object.keys(REC_STATE_META) as RecState[];
+
+/** The look of a recording state. */
+export function recStateMeta(state: RecState): RecStateMeta {
+  return REC_STATE_META[state];
 }
