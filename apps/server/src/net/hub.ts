@@ -270,6 +270,9 @@ export class Hub {
   }
 
   private detach(reason: string) {
+    // a refresh still pending belongs to the session that leaves
+    if (this.statsTimer) clearTimeout(this.statsTimer);
+    this.statsTimer = null;
     this.runner?.dispose();
     this.runner = null;
     this.dropFakes();
@@ -429,7 +432,11 @@ export class Hub {
       // the mic meter of a seat that is no longer recorded goes blank
       if (ev.type === "SeatUnbound" || ev.type === "ParticipantWithdrawn" || ev.type === "MicCheckSkipped")
         this.micLevels.delete(ev.payload.seat);
+      // nobody is recorded once the session has ended
+      if (ev.type === "SessionClosed" || ev.type === "SessionAborted") this.micLevels.clear();
       if (ev.type === "SeatUnbound") {
+        // the next client in this seat starts with empty live figures
+        this.stats.set(ev.payload.seat, emptyStats(ev.payload.seat));
         const sock = this.seatSockets.get(ev.payload.seat);
         const key = sock ? sock.data.terminalKey : undefined;
         if (sock && key && this.fakes.isFake(key)) {
