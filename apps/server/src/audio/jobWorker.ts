@@ -4,10 +4,12 @@
  * The task needs no database: the main thread (audio/service.ts) reads the
  * session's track index, file keys and events, and hands this module plain
  * data. Here we
- *  1. decrypt each track record by record and reduce it to an energy envelope
- *     (only about one 5 s chunk of PCM is in memory at a time),
- *  2. run `analyse` (loudness comparison between the seats' mics, never voice
- *     identity) and `annotate` (round / phase / pause of every segment),
+ *  1. decrypt each track record by record, in sample order, and reduce it to
+ *     10 ms features: level and Silero speech probability (only about one 5 s
+ *     chunk of PCM is in memory at a time),
+ *  2. run `analyse` (speech detection plus a loudness gate between the seats'
+ *     mics, never voice identity) and `annotate` (round / phase / pause of
+ *     every segment),
  *  3. render one cleaned track per seat (`renderClean`: other seats' frames
  *     attenuated by 30 dB) into a NEW encrypted `.wka` file with a fresh key.
  * The raw files are only ever read. Every new file name is reported through
@@ -28,13 +30,15 @@ import {
   annotate,
   type CalibrationTurn,
   type ChunkMeta,
-  EnvelopeBuilder,
+  FeatureBuilder,
+  loadSilero,
   type PcmChunk,
   type PhaseChange,
   renderClean,
   type TrackInput,
   type TrackSource,
   trackSampleEnd,
+  type Vad,
 } from "./attribution";
 import { AudioFileStore, type AudioReadIssue } from "./fileStore";
 
@@ -64,6 +68,8 @@ export interface AttributionTaskInput {
   phaseChanges: PhaseChange[];
   options?: Partial<AttributionOptions>;
   clean: { attenuationDb: number; fadeMs: number };
+  /** Use the Silero speech model (default true); false = energy only (tests). */
+  speechModel?: boolean;
 }
 
 export interface CleanFileOutput {
@@ -91,11 +97,7 @@ export interface TaskHooks {
 
 const asBuffer = (key: Uint8Array) => (Buffer.isBuffer(key) ? key : Buffer.from(key));
 
-export function describeIssues(
-  seat: number,
-  issues: AudioReadIssue[],
-  extra: { unindexed: number },
-): string[] {
+export function describeIssues(seat: number, issues: AudioReadIssue[]): string[] {
   const out: string[] = [];
   const count = (k: AudioReadIssue["kind"]) => issues.filter((i) => i.kind === k).length;
   if (count("missing")) out.push(`Seat ${seat}: a raw audio file is missing; its track was skipped.`);
@@ -106,8 +108,6 @@ export function describeIssues(
   if (count("bad_length"))
     out.push(`Seat ${seat}: a raw audio file is corrupt after some point; the rest was skipped.`);
   if (count("truncated")) out.push(`Seat ${seat}: a raw audio file ends with an incomplete chunk (ignored).`);
-  if (extra.unindexed)
-    out.push(`Seat ${seat}: ${extra.unindexed} chunk(s) in a file have no index row (ignored).`);
   return out;
 }
 
@@ -173,46 +173,43 @@ export async function runAttributionTask(
   const files = new AudioFileStore(input.audioRoot);
   const readWarnings: string[] = [];
   const trackInputs: TrackInput[] = [];
+  let vad: Vad | null = null;
+  if (input.speechModel !== false) {
+    try {
+      vad = await loadSilero();
+    } catch (e) {
+      readWarnings.push(`The speech model could not be loaded (${(e as Error).message}).`);
+    }
+  }
 
-  // 1. Envelopes, one track at a time, one record at a time.
+  // 1. Features, one track at a time, one record at a time, in sample order.
   for (const [i, t] of input.tracks.entries()) {
-    const meta = new Map(t.chunks.map((c) => [c.seq, c]));
-    const builder = new EnvelopeBuilder({ sampleRate: t.sampleRate });
+    const builder = new FeatureBuilder(vad);
     const issues: AudioReadIssue[] = [];
-    let unindexed = 0;
-    // a resent chunk is stored twice: the first valid copy wins
-    for await (const r of files.readUniqueRecords(input.sessionId, t.fileName, asBuffer(t.key), {
+    for await (const c of seqOrderedChunks(files, input.sessionId, t.fileName, t.key, t.chunks, {
       onIssue: (x) => issues.push(x),
     })) {
-      const m = meta.get(r.seq);
-      if (!m) {
-        unindexed++;
-        continue;
-      }
-      // the builder places samples by startSample: records may come in any order
-      builder.push(int16FromLeBytes(r.data), m.startSample);
+      builder.push(c.samples, c.startSample);
+      await builder.drain();
     }
-    readWarnings.push(...describeIssues(t.seat, issues, { unindexed }));
+    readWarnings.push(...describeIssues(t.seat, issues));
     trackInputs.push({
       trackId: t.trackId,
       seat: t.seat,
       sampleRate: t.sampleRate,
       chunks: t.chunks,
-      envelope: builder.finish(),
+      features: builder.finish(),
     });
-    progress((0.3 * (i + 1)) / input.tracks.length, "envelopes");
+    progress((0.5 * (i + 1)) / input.tracks.length, "features");
   }
 
-  // 2. Attribution (pure and synchronous: this is why it runs in a worker).
-  const result = analyse(
-    {
-      tracks: trackInputs,
-      seats: input.seats,
-      calibration: input.calibration.length ? { turns: input.calibration } : null,
-      ...(input.options ? { options: input.options } : {}),
-    },
-    { onProgress: (p) => progress(0.3 + 0.25 * p.fraction, `analyse:${p.stage}`) },
-  );
+  // 2. Attribution (pure and synchronous).
+  const result = analyse({
+    tracks: trackInputs,
+    seats: input.seats,
+    calibration: input.calibration.length ? { turns: input.calibration } : null,
+    ...(input.options ? { options: input.options } : {}),
+  });
   const segments = annotate(result.segments, input.phaseChanges);
   progress(0.55, "annotate");
 

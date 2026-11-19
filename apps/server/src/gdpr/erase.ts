@@ -3,6 +3,7 @@ import {
   type ErasureRows,
   normaliseParticipantCode,
   reduceEvents,
+  type SpeechSegmentRow,
 } from "@wkwa/shared";
 import { sha256 } from "../content";
 import { compactAfterDelete } from "../db/database";
@@ -83,6 +84,12 @@ export function unlinkAudioFiles(
  *  5. unlink the encrypted audio files (already unreadable: their keys are gone).
  * Returns the exports that contained the code so they can be deleted/regenerated.
  */
+/** A kept segment without the erased seat as overlap partner (its overlap time is then only an upper bound). */
+function stripOverlap(x: SpeechSegmentRow, seat: number): SpeechSegmentRow {
+  const overlapWith = x.overlapWith.filter((s) => s !== seat);
+  return overlapWith.length ? { ...x, overlapWith } : { ...x, overlapWith, overlap: false, overlapMs: 0 };
+}
+
 export function eraseParticipant(store: Store, input: string, note = ""): ErasureResult {
   const found = lookupParticipant(store, input);
   const { code } = found;
@@ -110,13 +117,14 @@ export function eraseParticipant(store: Store, input: string, note = ""): Erasur
       const trackIds = new Set(tracks.map((t) => t.track_id));
       const derived = db
         .prepare(
-          "SELECT derivative_id, participant_code, file_name, source_tracks_json FROM audio_derivatives WHERE session_id = ?",
+          "SELECT derivative_id, participant_code, file_name, source_tracks_json, data_json FROM audio_derivatives WHERE session_id = ?",
         )
         .all(occ.sessionId) as Array<{
         derivative_id: string;
         participant_code: string | null;
         file_name: string | null;
         source_tracks_json: string;
+        data_json: string | null;
       }>;
       for (const d of derived) {
         const sources = JSON.parse(d.source_tracks_json) as string[];
@@ -125,6 +133,22 @@ export function eraseParticipant(store: Store, input: string, note = ""): Erasur
           .prepare("DELETE FROM audio_derivatives WHERE derivative_id = ?")
           .run(d.derivative_id).changes;
         if (d.file_name) files.push({ sessionId: occ.sessionId, fileName: d.file_name });
+      }
+      const seat = occ.seat;
+      if (seat !== null) {
+        // the other seats' kept segments name the erased seat as an overlap partner: drop it
+        for (const d of derived) {
+          if (d.participant_code === code || !d.data_json) continue;
+          const data = JSON.parse(d.data_json) as { segments?: SpeechSegmentRow[] } | null;
+          if (!data?.segments?.some((x) => x.overlapWith.includes(seat))) continue;
+          data.segments = data.segments.map((x) => stripOverlap(x, seat));
+          db.prepare("UPDATE audio_derivatives SET data_json = ? WHERE derivative_id = ?").run(
+            JSON.stringify(data),
+            d.derivative_id,
+          );
+        }
+        // job summaries hold per-seat talk time and warnings: re-run the attribution for new ones
+        db.prepare("UPDATE audio_jobs SET result_json = NULL WHERE session_id = ?").run(occ.sessionId);
       }
       for (const t of tracks) {
         rows.audioChunks += db.prepare("DELETE FROM audio_chunks WHERE track_id = ?").run(t.track_id).changes;

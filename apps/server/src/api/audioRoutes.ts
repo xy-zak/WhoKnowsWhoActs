@@ -2,7 +2,7 @@ import { SeatSchema } from "@wkwa/shared";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import type { AppContext } from "../app";
-import { AudioJobRunner, runInWorker, type TaskRunner } from "../audio/jobs";
+import { AudioJobRunner, runInWorker } from "../audio/jobs";
 import { AudioRequestError, AudioService } from "../audio/service";
 import { exportsDirFor } from "../db/stores";
 import { isLoopback } from "../net/hub";
@@ -72,21 +72,28 @@ function badRequest(reply: FastifyReply, error: z.ZodError) {
  * Audio lives only in the participant database; simulated sessions have none.
  * Audio content leaves the server only through POST …/audio/export.
  */
-export function registerAudioApi(ctx: AppContext, guard: Guard, opts: { runTask?: TaskRunner } = {}) {
-  const { app, store, stores, runtime, hub } = ctx;
-  const runner = new AudioJobRunner(store, ctx.log);
+/** The audio service of the participant database (shared with the GDPR routes for the busy check). */
+export function createAudioService(ctx: AppContext): AudioService {
+  const runner = new AudioJobRunner(ctx.store, ctx.log);
   runner.recoverStale();
   const service = new AudioService({
-    store,
-    hub,
-    exportsDir: exportsDirFor(runtime.exportsDir, "real"),
+    store: ctx.store,
+    hub: ctx.hub,
+    exportsDir: exportsDirFor(ctx.runtime.exportsDir, "real"),
     runner,
-    runTask: opts.runTask ?? runInWorker,
+    runTask: runInWorker,
+    // WKWA_SPEECH_MODEL=off: speech by energy only (bots and demos send synthetic, voice-less audio)
+    speechModel: process.env.WKWA_SPEECH_MODEL !== "off",
     log: ctx.log,
   });
-  app.addHook("onClose", async () => {
+  ctx.app.addHook("onClose", async () => {
     await runner.close();
   });
+  return service;
+}
+
+export function registerAudioApi(ctx: AppContext, guard: Guard, service: AudioService) {
+  const { app, stores } = ctx;
   const route = { preHandler: guard };
 
   /** Run `fn`, mapping refusals to their status codes. */

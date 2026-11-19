@@ -18,8 +18,9 @@ import type { AudioChunk } from "./protocol";
  *  - only real participants who gave the separate audio consent item are
  *    recorded (see `shouldRecord` in state.ts); fake players, agents and
  *    simulated sessions never record;
- *  - speaker attribution compares loudness across the seats' microphones and
- *    never identifies a speaker by their voice (no voiceprints: GDPR Art. 9).
+ *  - speaker attribution detects speech on each seat's headset mic and compares
+ *    loudness across the mics; it never identifies a speaker by their voice
+ *    (no voiceprints: GDPR Art. 9).
  * ═══════════════════════════════════════════════════════════════════════════ */
 
 /* ─────────────────────────── Constants ─────────────────────────── */
@@ -38,6 +39,11 @@ export const AUDIO_MAX_CHUNK_SECONDS = 6;
 export const AUDIO_MAX_CHUNK_SAMPLES = AUDIO_SAMPLE_RATE * AUDIO_MAX_CHUNK_SECONDS;
 /** Extension of the encrypted audio container files in `data/audio/<sessionId>/`. */
 export const AUDIO_ENGINE_FILE_EXT = ".wka";
+/**
+ * Smallest calibration margin (dB) at which a seat passes: its own voice must be this much louder
+ * on its own mic than on the others (gain differences cancelled). Headsets reach ≈ 20–30 dB.
+ */
+export const CALIBRATION_MIN_MARGIN_DB = 12;
 /** Levels are reported in dBFS, clamped to [AUDIO_SILENCE_DB, 0]; this floor stands for digital silence. */
 export const AUDIO_SILENCE_DB = -120;
 /** How often the browser sends its volatile `audio:level` meter reading (ms, about 4 Hz). */
@@ -414,6 +420,11 @@ export const AttributionSummarySchema = z
         calibrated: z
           .boolean()
           .describe("True if the leakage between microphones was measured in the calibration"),
+        speechDetector: z
+          .enum(["silero", "energy"])
+          .describe(
+            "How speech was detected: 'silero' = the Silero VAD model, 'energy' = level above the noise floor (fallback when the model could not run)",
+          ),
         perSeat: z
           .array(
             z.object({
@@ -421,15 +432,13 @@ export const AttributionSummarySchema = z
               marginDb: z
                 .number()
                 .nullable()
-                .describe("Calibration margin: own voice over the loudest other seat on this mic (dB)"),
+                .describe(
+                  "Calibration margin: how much louder this seat's voice is on its own mic than on the others, gain differences cancelled (dB; headsets ≈ 20–30)",
+                ),
               driftPpm: z
                 .number()
                 .nullable()
                 .describe("Estimated sample-clock drift of this seat's device (parts per million)"),
-              lagMs: z
-                .number()
-                .nullable()
-                .describe("Median lag of this channel against the common timeline after alignment (ms)"),
               coverage: z
                 .number()
                 .min(0)
@@ -442,14 +451,18 @@ export const AttributionSummarySchema = z
           .number()
           .min(0)
           .max(1)
-          .describe("Share of speech frames that could not be attributed to one seat with confidence (0–1)"),
+          .describe(
+            "Share of speech frames whose loudness comparison was within 3 dB of the decision threshold (0–1)",
+          ),
         warnings: z
           .array(z.string())
           .describe("Human-readable warnings, e.g. 'seat 3: own voice only +4 dB over the others'"),
       })
       .describe("Quality report of the attribution"),
   })
-  .describe("Result summary of a speaker-attribution run (loudness comparison only, never voice identity)");
+  .describe(
+    "Result summary of a speaker-attribution run (speech detection and loudness comparison only, never voice identity)",
+  );
 export type AttributionSummary = z.infer<typeof AttributionSummarySchema>;
 
 export const AUDIO_JOB_KINDS = ["attribution"] as const;

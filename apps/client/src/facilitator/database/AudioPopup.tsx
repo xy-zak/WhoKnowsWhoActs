@@ -575,7 +575,7 @@ const AttributionResult = memo(function AttributionResult({
         <StatusTag
           tone={GRADE_TONE[a.grade]}
           icon={a.grade === "good" ? "ok" : "warning"}
-          tip="Overall quality of the attribution, from the calibration margins, drift, coverage and ambiguous share"
+          tip="Overall quality of the attribution, from the calibration margins, coverage, clipping and ambiguous share"
         >
           {a.grade}
         </StatusTag>
@@ -591,14 +591,15 @@ const AttributionResult = memo(function AttributionResult({
           <StatusTag
             tone="warn"
             icon="voice"
-            tip="No calibration: the leakage between microphones was estimated"
+            tip="No calibration: a conservative default leakage between microphones was assumed"
           >
             not calibrated
           </StatusTag>
         )}
         <span className="muted">
-          {whenTs(a.createdServerTs)} · engine {a.engineVersion} · {a.segments} segments · overlap{" "}
-          <span className="mono">{fmtDuration(a.overlapMs)}</span> · ambiguous{" "}
+          {whenTs(a.createdServerTs)} · engine {a.engineVersion} · speech{" "}
+          {a.quality.speechDetector === "silero" ? "Silero VAD" : "energy (fallback)"} · {a.segments} segments
+          · overlap <span className="mono">{fmtDuration(a.overlapMs)}</span> · ambiguous{" "}
           {fmtShare(a.quality.ambiguousShare)}
         </span>
       </div>
@@ -626,9 +627,10 @@ const AttributionResult = memo(function AttributionResult({
           <thead>
             <tr>
               <th>Seat</th>
-              <th data-tip="Calibration margin: own voice over the loudest other seat on this mic">Margin</th>
+              <th data-tip="Calibration margin: own voice over the other mics, gain differences cancelled (headsets ≈ 20–30 dB)">
+                Margin
+              </th>
               <th data-tip="Estimated sample-clock drift of the seat's device">Drift</th>
-              <th data-tip="Median lag of the channel against the common timeline after alignment">Lag</th>
               <th data-tip="Share of the recording window covered by the seat's audio">Coverage</th>
             </tr>
           </thead>
@@ -643,7 +645,6 @@ const AttributionResult = memo(function AttributionResult({
                 </td>
                 <td className="mono">{fmtSigned(q.marginDb, "dB")}</td>
                 <td className="mono">{fmtSigned(q.driftPpm, "ppm", 0)}</td>
-                <td className="mono">{fmtSigned(q.lagMs, "ms", 0)}</td>
                 <td className="mono">{fmtShare(q.coverage)}</td>
               </tr>
             ))}

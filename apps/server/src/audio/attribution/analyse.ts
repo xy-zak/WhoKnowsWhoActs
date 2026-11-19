@@ -1,589 +1,470 @@
 /**
- * `analyse`: the whole offline attribution pipeline on envelopes (see `index.ts` for the overview).
+ * `analyse`: the offline attribution pipeline on track features (overview in `index.ts`).
  *
- * Stages (each timed in `timingsMs`): clock fit → timeline + noise floors → lag refinement →
- * re-mapping with the refined alignment → leakage matrix (calibration, else estimated) → frame
- * attribution (with one leakage refinement when it was estimated) → smoothing and segments →
- * quality report. It is synchronous and CPU-bound; run it in a `worker_thread`.
+ * clock fit per track → one 10 ms timeline per seat → noise floors → speech per mic (detector with
+ * hysteresis, or energy above the floor) → leakage (calibration, else a conservative default) →
+ * cross-channel gate → smoothing → segments, talk time, overlap → quality report.
+ * Synchronous and CPU-light (well under a second per session hour); it runs in the job worker.
  */
 
-import { driftFromMsPerSample, fitClocks, trackSampleEnd } from "./clock";
-import { attributeFrames, type FrameDecisions } from "./frames";
-import { measureLags, solveOffsets } from "./lag";
+import { fitClock, median, trackSampleEnd } from "./clock";
+import { maskToRuns, segmentsFromMasks, smoothSpeech } from "./smooth";
 import {
-  cloneModel,
-  confidentSingleFrames,
-  type DominanceRule,
-  emptyModel,
-  estimateRowsFromDominance,
-  fillDefaults,
-  type LeakageModel,
-  leakageReport,
-  measureCalibration,
-  measureRow,
-} from "./leakage";
-import { median, round, roundOrNull } from "./math";
-import { maskToRuns, segmentsFromMasks, smoothActivity } from "./smooth";
-import { buildChannels, makeTimeline, type Placement, type SeatChannel, typicalLevels } from "./timeline";
-import {
-  type AnalysisHooks,
   type AnalysisInput,
   type AttributionOptions,
   type AttributionResult,
+  type CalibrationIssue,
+  type CalibrationReport,
   type CalibrationSeatQuality,
+  type CalibrationTurn,
   DEAD_DB,
   ENGINE_VERSION,
   HOP_MS,
-  type LagPairReport,
-  type LagReport,
-  type QualityReport,
+  HOP_SAMPLES,
+  type LeakageReport,
   resolveOptions,
   SAMPLE_RATE,
   type SeatQuality,
   type Timeline,
   type TrackAlignment,
+  type TrackInput,
 } from "./types";
 
-const MIN_REFINE_FRAMES = 200;
+const round = (v: number, digits = 2) => Math.round(v * 10 ** digits) / 10 ** digits;
+const roundOrNull = (v: number | null, digits = 2) => (v === null ? null : round(v, digits));
 
-function emptyResult(seats: number[], opts: AttributionOptions, warnings: string[]): AttributionResult {
-  const model = emptyModel(seats);
+/** One seat's features on the session timeline (`NaN` = no data). */
+export interface SeatChannel {
+  seat: number;
+  energyDb: Float32Array;
+  clipped: Uint8Array;
+  /** Speech probability, `NaN` where no detector ran or no data. */
+  speech: Float32Array;
+  floorDb: number;
+}
+
+/* ─────────── timeline ─────────── */
+
+/** Clock fits, the timeline and each seat's channel. Where two tracks of a seat overlap, the earlier one wins. */
+export function placeTracks(
+  tracks: readonly TrackInput[],
+  seats: readonly number[],
+  opts: AttributionOptions,
+  window?: { fromTs: number; toTs: number } | null,
+): { alignment: TrackAlignment[]; timeline: Timeline | null; channels: SeatChannel[]; warnings: string[] } {
+  const warnings: string[] = [];
+  const placed: Array<{ a: TrackAlignment; t: TrackInput }> = [];
+  for (const t of tracks) {
+    if (t.features.frames === 0) {
+      warnings.push(`Seat ${t.seat}: track ${t.trackId.slice(0, 8)} has no audio and was skipped.`);
+      continue;
+    }
+    const sampleRate = t.sampleRate ?? SAMPLE_RATE;
+    const fit = fitClock({ ...t, sampleRate }, opts.maxPlausibleDriftPpm);
+    if (!fit) continue;
+    if (fit.implausible)
+      warnings.push(`Seat ${t.seat}: implausible timestamps on a track; its nominal sample rate was used.`);
+    const samples = trackSampleEnd(t.chunks) || t.features.frames * HOP_SAMPLES;
+    placed.push({
+      t,
+      a: {
+        trackId: t.trackId,
+        seat: t.seat,
+        startTs: fit.startTs,
+        msPerSample: fit.msPerSample,
+        driftPpm: round(fit.driftPpm, 2),
+        samples,
+        endTs: fit.startTs + samples * fit.msPerSample,
+        residualMs: round(fit.residualMs, 2),
+      },
+    });
+  }
+  placed.sort((x, y) => x.a.startTs - y.a.startTs);
+  const alignment = placed.map((p) => p.a);
+  if (!placed.length) return { alignment, timeline: null, channels: [], warnings };
+  const t0 = window?.fromTs ?? Math.min(...alignment.map((a) => a.startTs));
+  const end = window?.toTs ?? Math.max(...alignment.map((a) => a.endTs));
+  const frames = Math.max(0, Math.ceil((end - t0) / HOP_MS));
+  const timeline = frames > 0 ? { t0, hopMs: HOP_MS, frames } : null;
+  const channels = seats.map((seat) => {
+    const energyDb = new Float32Array(frames).fill(Number.NaN);
+    const speech = new Float32Array(frames).fill(Number.NaN);
+    const clipped = new Uint8Array(frames);
+    for (const { a, t } of placed) {
+      if (a.seat !== seat) continue;
+      const f = t.features;
+      const fa = Math.max(0, Math.floor((a.startTs - t0) / HOP_MS));
+      const fb = Math.min(frames, Math.ceil((a.endTs - t0) / HOP_MS));
+      for (let i = fa; i < fb; i++) {
+        if (!Number.isNaN(energyDb[i]!)) continue; // an earlier track covers it
+        const k = Math.floor((t0 + (i + 0.5) * HOP_MS - a.startTs) / a.msPerSample / HOP_SAMPLES);
+        if (k < 0 || k >= f.frames || Number.isNaN(f.energyDb[k]!)) continue;
+        energyDb[i] = f.energyDb[k]!;
+        clipped[i] = f.clipped[k]!;
+        speech[i] = f.speech ? f.speech[k]! : Number.NaN;
+      }
+    }
+    return { seat, energyDb, speech, clipped, floorDb: noiseFloor(energyDb, opts.floorPercentile) };
+  });
+  return { alignment, timeline, channels, warnings };
+}
+
+function noiseFloor(energyDb: Float32Array, percentile: number): number {
+  const live = Array.from(energyDb).filter((e) => e > DEAD_DB);
+  if (!live.length) return Number.NaN;
+  live.sort((a, b) => a - b);
+  return live[Math.min(live.length - 1, Math.floor(percentile * live.length))]!;
+}
+
+/* ─────────── calibration: leakage ─────────── */
+
+/**
+ * Measures the leakage matrix from the calibration turns (each seat reads while the others listen)
+ * and judges each seat. `L[s][j]` = median over the reader's clearly active frames of
+ * `E_j − E_s`. A leak below mic j's noise floor reads as the floor: an upper bound, which only
+ * makes the gate stricter.
+ */
+export function measureCalibration(
+  channels: readonly SeatChannel[],
+  tl: Timeline,
+  turns: readonly CalibrationTurn[],
+  opts: AttributionOptions,
+): CalibrationReport {
+  const n = channels.length;
+  const seats = channels.map((c) => c.seat);
+  const L: (number | null)[][] = seats.map((_, s) => seats.map((_, j) => (s === j ? 0 : null)));
+  const rows: Array<Omit<CalibrationSeatQuality, "marginDb" | "ok" | "advice"> | null> = seats.map(
+    () => null,
+  );
+  for (const turn of turns) {
+    const s = seats.indexOf(turn.seat);
+    if (s < 0) continue;
+    const ch = channels[s]!;
+    const fa = Math.max(0, Math.floor((turn.startTs - tl.t0) / tl.hopMs));
+    const fb = Math.min(tl.frames, Math.ceil((turn.endTs - tl.t0) / tl.hopMs));
+    const active: number[] = [];
+    let data = 0;
+    let clipped = 0;
+    for (let f = fa; f < fb; f++) {
+      const e = ch.energyDb[f]!;
+      if (!(e > DEAD_DB)) continue;
+      data++;
+      if (e >= ch.floorDb + opts.calibrationActiveDb) {
+        active.push(f);
+        clipped += ch.clipped[f]!;
+      }
+    }
+    const issues: CalibrationIssue[] = [];
+    if (data === 0) issues.push("no_signal");
+    else if (active.length < opts.minCalibrationFrames) issues.push("not_enough_speech");
+    const ownDb = active.length ? median(active.map((f) => ch.energyDb[f]!)) : null;
+    let bestOtherDb: number | null = null;
+    let bestOtherSeat: number | null = null;
+    if (active.length >= opts.minCalibrationFrames) {
+      for (let j = 0; j < n; j++) {
+        if (j === s) continue;
+        const other = channels[j]!.energyDb;
+        const diffs = active.filter((f) => other[f]! > DEAD_DB).map((f) => other[f]! - ch.energyDb[f]!);
+        if (diffs.length < opts.minCalibrationFrames / 2) continue;
+        L[s]![j] = round(median(diffs), 1);
+        const level = median(active.filter((f) => other[f]! > DEAD_DB).map((f) => other[f]!));
+        if (bestOtherDb === null || level > bestOtherDb) {
+          bestOtherDb = level;
+          bestOtherSeat = seats[j]!;
+        }
+      }
+    }
+    const snrDb = ownDb !== null && Number.isFinite(ch.floorDb) ? ownDb - ch.floorDb : null;
+    if (snrDb !== null && snrDb < opts.minSnrDb) issues.push("too_quiet");
+    const clippingShare = active.length ? clipped / active.length : 0;
+    if (clippingShare > opts.maxClippingShare) issues.push("clipping");
+    rows[s] = {
+      seat: turn.seat,
+      frames: active.length,
+      ownDb: roundOrNull(ownDb, 1),
+      snrDb: roundOrNull(snrDb, 1),
+      bestOtherDb: roundOrNull(bestOtherDb, 1),
+      bestOtherSeat,
+      clippingShare: round(clippingShare, 4),
+      issues,
+    };
+  }
+  const report: CalibrationSeatQuality[] = [];
+  rows.forEach((row, s) => {
+    if (!row) return;
+    let margin = Number.POSITIVE_INFINITY;
+    for (let j = 0; j < n; j++) {
+      const out = L[s]![j];
+      if (j === s || out === null || out === undefined) continue;
+      const back = L[j]![s];
+      margin = Math.min(margin, back === null || back === undefined ? -out : -(out + back) / 2);
+    }
+    const marginDb = Number.isFinite(margin) ? round(margin, 1) : null;
+    const issues = [...row.issues];
+    if (marginDb !== null && marginDb < opts.minMarginDb) issues.push("low_margin");
+    report.push({
+      ...row,
+      marginDb,
+      issues,
+      ok: issues.length === 0,
+      advice: adviceFor(row.seat, issues, marginDb),
+    });
+  });
+  const measured = report.some((q) => q.frames >= opts.minCalibrationFrames);
+  const warnings = report.filter((q) => q.advice).map((q) => q.advice!);
   return {
-    engineVersion: ENGINE_VERSION,
-    options: opts,
-    timeline: { t0: 0, hopMs: HOP_MS, frames: 0, endTs: 0 },
-    seats,
-    alignment: [],
-    leakage: leakageReport(model, null, null),
-    segments: [],
-    talkTimeMs: Object.fromEntries(seats.map((s) => [s, 0])),
-    overlapMs: 0,
-    masks: seats.map((seat) => ({ seat, runs: [] })),
-    quality: {
-      grade: "poor",
-      calibration: null,
-      leakageSource: "estimated",
-      ambiguousFrameShare: 0,
-      clippingShare: 0,
-      noSignalShare: 1,
-      absentSpeakerShare: 0,
-      driftPpm: [],
-      lag: { windows: 0, observations: 0, accepted: 0, residualRmsMs: null, pairs: [] },
-      seats: seats.map((seat) => ({
-        seat,
-        tracks: 0,
-        dataMs: 0,
-        noDataShare: 1,
-        deadShare: 0,
-        noSignalShare: 1,
-        clippingShare: 0,
-        noiseFloorDb: null,
-        speechLevelDb: null,
-        snrDb: null,
-        talkTimeMs: 0,
-        overlapMs: 0,
-        ambiguousShare: 0,
-      })),
-      warnings: [...warnings, "No audio to analyse."],
-    },
-    timingsMs: {},
+    ok: report.length > 0 && report.every((q) => q.ok),
+    seats: report,
+    leakage: { seats, matrixDb: L, source: measured ? "calibration" : "default" },
+    warnings,
   };
 }
 
-/** Gain-invariant margin of seat s from the matrix: min_j −(G[s][j] + G[j][s]) / 2. */
-function marginOf(model: LeakageModel, s: number): number | null {
-  const n = model.n;
-  let m = Number.POSITIVE_INFINITY;
-  for (let j = 0; j < n; j++) {
-    if (j === s) continue;
-    const a = model.G[s * n + j]!;
-    const b = model.G[j * n + s]!;
-    if (Number.isNaN(a) || Number.isNaN(b)) continue;
-    m = Math.min(m, -(a + b) / 2);
+function adviceFor(seat: number, issues: CalibrationIssue[], marginDb: number | null): string | null {
+  if (issues.includes("no_signal"))
+    return `Seat ${seat}: no audio during its calibration turn; check the headset is plugged in.`;
+  if (issues.includes("not_enough_speech"))
+    return `Seat ${seat}: too little speech in its calibration turn; redo it.`;
+  if (issues.includes("low_margin"))
+    return `Seat ${seat}: own voice only +${marginDb} dB over the other mics; check the headset is selected and its mic sits at the corner of the mouth.`;
+  if (issues.includes("too_quiet"))
+    return `Seat ${seat}: own voice is close to the noise; move the headset mic closer to the mouth.`;
+  if (issues.includes("clipping")) return `Seat ${seat}: the voice clips; lower the input level.`;
+  return null;
+}
+
+/** Calibration check alone, on tracks covering the calibration window (live, in milliseconds). */
+export function quickCalibrationCheck(
+  tracks: readonly TrackInput[],
+  turns: readonly CalibrationTurn[],
+  window: { fromTs: number; toTs: number },
+  options?: Partial<AttributionOptions>,
+): CalibrationReport {
+  const opts = resolveOptions(options);
+  const seats = [...new Set(turns.map((t) => t.seat))];
+  const { timeline, channels } = placeTracks(tracks, seats, opts, window);
+  if (!timeline)
+    return {
+      ok: false,
+      seats: [],
+      leakage: {
+        seats,
+        matrixDb: seats.map((_, s) => seats.map((_, j) => (s === j ? 0 : null))),
+        source: "default",
+      },
+      warnings: ["No audio arrived for the calibration."],
+    };
+  return measureCalibration(channels, timeline, turns, opts);
+}
+
+/* ─────────── the gate ─────────── */
+
+/** Sliding maximum over ±`w` frames (frames without data are skipped). */
+function slidingMax(x: Float32Array, w: number): Float32Array {
+  const out = new Float32Array(x.length).fill(Number.NaN);
+  for (let f = 0; f < x.length; f++) {
+    let m = Number.NaN;
+    for (let k = Math.max(0, f - w); k <= Math.min(x.length - 1, f + w); k++) if (!(x[k]! <= m)) m = x[k]!;
+    out[f] = m;
   }
-  return Number.isFinite(m) ? m : null;
+  return out;
 }
 
 /**
- * Fills the rows `toEstimate` (by `rule`), attributes the frames, and refines estimated or default
- * rows from the session's own confident single-speaker frames (up to twice). The final session rows
- * are returned as well, for the calibration consistency check.
+ * Per frame, seat s speaks when its mic detects speech AND its level beats what every other seat's
+ * voice would leak onto it by `gateMarginDb`: `E_s ≥ max E_j + L[j][s] + margin` for all j, where
+ * `max E_j` is mic j's peak within ±`alignToleranceMs` (the mics' clocks agree only to a few tens of
+ * ms). Leakage alone (another seat speaking) fails the gate; two people speaking at once both pass.
  */
-function attributeWithModel(
-  model: LeakageModel,
+function gate(
   channels: readonly SeatChannel[],
-  hasData: readonly boolean[],
-  toEstimate: readonly number[],
-  rule: DominanceRule,
+  leak: (number | null)[][],
+  frames: number,
   opts: AttributionOptions,
-  typical: readonly number[],
-): { model: LeakageModel; dec: FrameDecisions; session: LeakageModel; defaulted: boolean[] } {
-  estimateRowsFromDominance(model, channels, toEstimate, opts, rule);
-  const defaulted = model.rowSource.map((r) => r === "none");
-  fillDefaults(model, channels);
-  let dec = attributeFrames(channels, model, opts, typical);
-  const n = model.n;
-  const measureSession = (d: FrameDecisions): LeakageModel => {
-    const m = emptyModel(model.seats);
-    for (let s = 0; s < n; s++) {
-      if (!hasData[s]) continue;
-      const frames = confidentSingleFrames(channels, d.dominant, d.active, d.confidence, s);
-      if (frames.length >= MIN_REFINE_FRAMES) measureRow(m, channels, s, frames, "estimated");
-    }
-    return m;
-  };
-  let session = measureSession(dec);
-  for (let iter = 0; iter < 2; iter++) {
-    const refine: number[] = [];
-    for (let s = 0; s < n; s++) {
-      if ((model.rowSource[s] === "estimated" || defaulted[s]) && session.rowSource[s] === "estimated")
-        refine.push(s);
-    }
-    if (!refine.length) break;
-    let change = 0;
-    for (const s of refine) {
-      for (let j = 0; j < n; j++) {
-        const g = session.G[s * n + j]!;
-        if (Number.isNaN(g)) continue;
-        change = Math.max(change, Math.abs(g - model.G[s * n + j]!));
-        model.G[s * n + j] = g;
-        model.spread[s * n + j] = session.spread[s * n + j]!;
-        model.censored[s * n + j] = session.censored[s * n + j]!;
+  detector: "silero" | "energy",
+) {
+  const n = channels.length;
+  const voiced = channels.map(() => new Uint8Array(frames));
+  const passed = channels.map(() => new Uint8Array(frames));
+  const confidence = channels.map(() => new Float32Array(frames));
+  let speechFrames = 0;
+  let ambiguousFrames = 0;
+  const L = leak.map((row) => row.map((v) => v ?? opts.defaultLeakageDb));
+  const peak = channels.map((ch) => slidingMax(ch.energyDb, Math.round(opts.alignToleranceMs / HOP_MS)));
+  channels.forEach((ch, s) => {
+    let on = false;
+    for (let f = 0; f < frames; f++) {
+      const e = ch.energyDb[f]!;
+      if (!(e > DEAD_DB)) {
+        on = false;
+        continue;
       }
-      model.rowSource[s] = "estimated";
-      model.rowFrames[s] = session.rowFrames[s]!;
-      defaulted[s] = false;
+      if (detector === "silero") {
+        const p = ch.speech[f]!;
+        on = p >= (on ? opts.speechOffProb : opts.speechOnProb);
+        confidence[s]![f] = p;
+      } else {
+        on = e >= ch.floorDb + opts.energyMarginDb;
+        confidence[s]![f] = on ? 1 : 0;
+      }
+      voiced[s]![f] = on ? 1 : 0;
     }
-    dec = attributeFrames(channels, model, opts, typical);
-    session = measureSession(dec); // always from the final decisions
-    if (change < 0.5) break;
+  });
+  for (let f = 0; f < frames; f++) {
+    let any = false;
+    let ambiguous = false;
+    for (let s = 0; s < n; s++) {
+      if (!voiced[s]![f]) continue;
+      any = true;
+      const e = channels[s]!.energyDb[f]!;
+      let margin = Number.POSITIVE_INFINITY;
+      for (let j = 0; j < n; j++) {
+        const other = peak[j]![f]!;
+        if (j !== s && other > DEAD_DB) margin = Math.min(margin, e - (other + L[j]![s]!));
+      }
+      if (margin >= opts.gateMarginDb) passed[s]![f] = 1;
+      if (Math.abs(margin - opts.gateMarginDb) < opts.ambiguousDb) ambiguous = true;
+    }
+    if (any) speechFrames++;
+    if (ambiguous) ambiguousFrames++;
   }
-  return { model, dec, session, defaulted };
+  return { passed, confidence, ambiguousShare: speechFrames ? ambiguousFrames / speechFrames : 0 };
 }
 
-export function analyse(input: AnalysisInput, hooks: AnalysisHooks = {}): AttributionResult {
+/* ─────────── analyse ─────────── */
+
+export function analyse(input: AnalysisInput): AttributionResult {
   const opts = resolveOptions(input.options);
-  const timings: Record<string, number> = {};
-  let mark = performance.now();
-  const lap = (stage: string, fraction: number) => {
-    const now = performance.now();
-    timings[stage] = round(now - mark, 1);
-    mark = now;
-    hooks.onProgress?.({ stage, fraction });
-  };
-  const warnings: string[] = [];
   const seats = [...new Set([...(input.seats ?? []), ...input.tracks.map((t) => t.seat)])].sort(
     (a, b) => a - b,
   );
+  const placed = placeTracks(input.tracks, seats, opts, input.window);
+  const warnings = [...placed.warnings];
+  const { alignment, channels } = placed;
+  const tl = placed.timeline ?? { t0: 0, hopMs: HOP_MS, frames: 0 };
+  const withAudio = input.tracks.filter((t) => t.features.frames > 0);
+  const detector = withAudio.length && withAudio.every((t) => t.features.speech) ? "silero" : "energy";
+  if (detector === "energy" && withAudio.length)
+    warnings.push(
+      "No speech detector ran: speech was taken as energy above the noise floor (less robust to noise).",
+    );
 
-  // 1. Clock fit per track.
-  const usable = input.tracks.filter((t) => {
-    if (t.envelope.frames > 0) return true;
-    warnings.push(`Seat ${t.seat}: track ${t.trackId.slice(0, 8)} has no audio and was skipped.`);
-    return false;
-  });
-  const clock = fitClocks(
-    usable.map((t) => ({
-      trackId: t.trackId,
-      seat: t.seat,
-      sampleRate: t.sampleRate ?? SAMPLE_RATE,
-      chunks: t.chunks,
-    })),
-    { maxPlausibleDriftPpm: opts.maxPlausibleDriftPpm },
-  );
-  warnings.push(...clock.warnings);
-  const fitById = new Map(clock.fits.map((f) => [f.trackId, f]));
-  const placements: Placement[] = [];
-  for (const t of usable) {
-    const fit = fitById.get(t.trackId);
-    if (!fit) continue;
-    let samples = trackSampleEnd(t.chunks);
-    if (!(samples > 0)) samples = t.envelope.frames * t.envelope.hopSamples;
-    placements.push({
-      trackId: t.trackId,
-      seat: t.seat,
-      seatIndex: seats.indexOf(t.seat),
-      group: fit.group,
-      sampleRate: fit.sampleRate,
-      hopSamples: t.envelope.hopSamples,
-      startTs: fit.startTs,
-      msPerSample: fit.msPerSample,
-      offsetMs: 0,
-      samples,
-      envelope: t.envelope,
-    });
-  }
-  lap("clock", 0.05);
-
-  let tl = makeTimeline(placements, HOP_MS, input.window);
-  if (!tl) return emptyResult(seats, opts, warnings);
-  const floorOpts = {
-    windowFrames: Math.round((opts.floorWindowSec * 1000) / HOP_MS),
-    percentile: opts.floorPercentile,
-  };
-  let channels = buildChannels(seats, placements, tl, floorOpts);
-  lap("timeline", 0.15);
-
-  // 2. Lag refinement by envelope cross-correlation.
-  const lagMeasure = measureLags(channels, tl, {
-    windowSec: opts.lagWindowSec,
-    maxLagMs: opts.lagMaxMs,
-    minCorr: opts.lagMinCorr,
-  });
-  const dataFrames = placements.map(() => 0);
-  for (const ch of channels) {
-    for (let f = 0; f < tl.frames; f++) {
-      const t = ch.track[f]!;
-      if (t >= 0 && !Number.isNaN(ch.energyDb[f]!)) dataFrames[t]!++;
-    }
-  }
-  let anchor = 0;
-  dataFrames.forEach((n, i) => {
-    if (n > dataFrames[anchor]!) anchor = i;
-  });
-  const groupSigma = new Map<string, number>();
-  for (const f of clock.fits) groupSigma.set(f.group, f.driftSigmaPpm);
-  const solution = solveOffsets(placements, groupSigma, lagMeasure.observations, anchor);
-  placements.forEach((p, i) => {
-    const eps = (solution.epsPpm.get(p.group) ?? 0) * 1e-6;
-    const tc = solution.groupCentre.get(p.group) ?? 0;
-    const S = p.startTs + p.offsetMs;
-    const S2 = S - solution.offsets[i]! - eps * (S - tc);
-    p.msPerSample *= 1 - eps;
-    p.offsetMs = S2 - p.startTs;
-  });
-  lap("lag", 0.3);
-
-  // 3. Re-map with the refined alignment.
-  tl = makeTimeline(placements, HOP_MS, input.window) ?? tl;
-  channels = buildChannels(seats, placements, tl, floorOpts);
-  lap("remap", 0.45);
-
-  // 4. Leakage matrix.
-  const model = emptyModel(seats);
+  // leakage
   const turns = input.calibration?.turns ?? [];
   let calibration: CalibrationSeatQuality[] | null = null;
-  if (turns.length) {
-    const r = measureCalibration(model, channels, tl, turns, opts);
-    calibration = r.seats;
-    warnings.push(...r.warnings);
-    // A turn in which someone else spoke does not measure this seat's leakage: estimate instead.
-    for (const q of r.seats) {
-      if (!q.issues.includes("others_spoke")) continue;
-      const s = seats.indexOf(q.seat);
-      const fresh = emptyModel(seats);
-      for (let j = 0; j < model.n; j++) {
-        model.G[s * model.n + j] = fresh.G[s * model.n + j]!;
-        model.spread[s * model.n + j] = fresh.spread[s * model.n + j]!;
-        model.censored[s * model.n + j] = 0;
-      }
-      model.rowSource[s] = "none";
-      model.rowFrames[s] = 0;
-    }
-  } else {
-    warnings.push(
-      "No calibration: the leakage matrix was estimated from the session itself (less reliable, especially with laptop mics).",
-    );
-  }
-  const hasData = channels.map((ch) => ch.energyDb.some((e) => e > DEAD_DB));
-  const typical = typicalLevels(channels);
-  const toEstimate = seats.map((_, s) => s).filter((s) => hasData[s] && model.rowSource[s] === "none");
-  lap("leakage", 0.55);
-
-  // 5. Frame attribution. Rows that had to be estimated are tried with both labelling rules and
-  // refined from the session (EM-style); the least ambiguous result wins.
-  const runs = (toEstimate.length ? (["floor", "p95"] as const) : (["floor"] as const)).map((rule) =>
-    attributeWithModel(cloneModel(model), channels, hasData, toEstimate, rule, opts, typical),
-  );
-  const score = (r: (typeof runs)[number]) =>
-    r.dec.speechFrames ? r.dec.ambiguousFrames / r.dec.speechFrames : 0;
-  const chosen = runs.reduce((x, y) => (score(y) < score(x) ? y : x));
-  const { dec, session, defaulted } = chosen;
-  const finalModel = chosen.model;
-  lap("frames", 0.8);
-
-  // 6. Smoothing, masks and segments.
-  const hop = tl.hopMs;
-  const smoothing = {
-    minGap: Math.round(opts.minGapMs / hop),
-    minSpeech: Math.round(opts.minSpeechMs / hop),
-    hangover: Math.round(opts.hangoverMs / hop),
-    preRoll: Math.round(opts.preRollMs / hop),
+  let leakage: LeakageReport = {
+    seats,
+    matrixDb: seats.map((_, s) => seats.map((_, j) => (s === j ? 0 : null))),
+    source: "default",
   };
-  const valid = channels.map((ch) => {
-    const v = new Uint8Array(tl.frames);
-    for (let f = 0; f < tl.frames; f++) v[f] = ch.energyDb[f]! > DEAD_DB ? 1 : 0;
-    return v;
-  });
-  const masks = channels.map((_, s) => {
-    const blocked = new Uint8Array(tl.frames);
-    for (let f = 0; f < tl.frames; f++) {
-      const d = dec.dominant[f]!;
-      if (d >= 0 && d !== s) blocked[f] = 1;
-    }
-    return smoothActivity(dec.active[s]!, valid[s]!, blocked, smoothing);
-  });
-  const segments = segmentsFromMasks(masks, channels, dec.active, dec.confidence, tl);
-  let overlapFrames = 0;
-  for (let f = 0; f < tl.frames; f++) {
-    let k = 0;
-    for (const m of masks) k += m[f]!;
-    if (k >= 2) overlapFrames++;
+  if (turns.length && tl.frames) {
+    const r = measureCalibration(channels, tl, turns, opts);
+    calibration = r.seats;
+    leakage = r.leakage;
+    warnings.push(...r.warnings);
   }
-  lap("smoothing", 0.9);
+  if (leakage.source === "default")
+    warnings.push(
+      `No calibration: a default leakage of ${opts.defaultLeakageDb} dB was assumed between mics.`,
+    );
 
-  // 7. Alignment and quality report.
-  const alignment: TrackAlignment[] = placements.map((p, i) => {
-    const fit = fitById.get(p.trackId)!;
-    const per = solution.perPlacement[i]!;
+  // gate, smoothing, segments
+  const g = gate(channels, leakage.matrixDb, tl.frames, opts, detector);
+  const frames = (ms: number) => Math.round(ms / HOP_MS);
+  const smoothing = {
+    minGap: frames(opts.minGapMs),
+    minSpeech: frames(opts.minSpeechMs),
+    hangover: frames(opts.hangoverMs),
+    preRoll: frames(opts.preRollMs),
+  };
+  const valid = channels.map((ch) => Uint8Array.from(ch.energyDb, (e) => (e > DEAD_DB ? 1 : 0)));
+  const masks = channels.map((_, s) => smoothSpeech(g.passed[s]!, valid[s]!, smoothing));
+  const segments = segmentsFromMasks(
+    seats,
+    masks,
+    channels.map((c) => c.energyDb),
+    g.passed,
+    g.confidence,
+    tl,
+  );
+  let overlapFrames = 0;
+  for (let f = 0; f < tl.frames; f++) if (masks.reduce((k, m) => k + m[f]!, 0) >= 2) overlapFrames++;
+
+  // quality
+  const seatQuality: SeatQuality[] = channels.map((ch, s) => {
+    let data = 0;
+    let clipped = 0;
+    let talk = 0;
+    let overlap = 0;
+    const speech: number[] = [];
+    for (let f = 0; f < tl.frames; f++) {
+      if (valid[s]![f]) {
+        data++;
+        clipped += ch.clipped[f]!;
+      }
+      if (!masks[s]![f]) continue;
+      talk++;
+      if (masks.some((m, k) => k !== s && m[f])) overlap++;
+      if (g.passed[s]![f] && speech.length < 200_000) speech.push(ch.energyDb[f]!);
+    }
+    const floor = Number.isFinite(ch.floorDb) ? ch.floorDb : null;
+    const level = speech.length ? median(speech) : null;
+    const longest = alignment.filter((a) => a.seat === ch.seat).sort((a, b) => b.samples - a.samples)[0];
     return {
-      trackId: p.trackId,
-      seat: p.seat,
-      startTs: round(p.startTs, 3),
-      offsetMs: round(p.offsetMs, 3),
-      driftPpm: round(driftFromMsPerSample(p.msPerSample, p.sampleRate), 3),
-      clockDriftPpm: round(fit.driftPpm, 3),
-      msPerSample: p.msPerSample,
-      samples: p.samples,
-      alignedStartTs: round(p.startTs + p.offsetMs, 3),
-      alignedEndTs: round(p.startTs + p.offsetMs + p.samples * p.msPerSample, 3),
-      confidence: round(per.confidence, 3),
-      anchor: i === anchor,
-      clockGroup: fit.group,
-      clockResidualMs: round(fit.residualRmsMs, 2),
-      clockOutliers: fit.outliers,
-      lagObservations: per.observations,
-      lagResidualMs: roundOrNull(per.residualRmsMs),
+      seat: ch.seat,
+      tracks: alignment.filter((a) => a.seat === ch.seat).length,
+      coverage: round(tl.frames ? data / tl.frames : 0, 4),
+      clippingShare: round(data ? clipped / data : 0, 4),
+      noiseFloorDb: roundOrNull(floor, 1),
+      speechLevelDb: roundOrNull(level, 1),
+      snrDb: roundOrNull(level !== null && floor !== null ? level - floor : null, 1),
+      driftPpm: longest ? longest.driftPpm : null,
+      talkTimeMs: talk * HOP_MS,
+      overlapMs: overlap * HOP_MS,
     };
   });
-  const sessionCheck = finalModel.rowSource.includes("calibration") ? session : null;
-  const leakage = leakageReport(finalModel, sessionCheck, sessionCheck ? "calibration" : null);
-  if (leakage.maxChangeDb !== null && leakage.maxChangeDb > opts.leakageChangeWarnDb) {
-    warnings.push(
-      `The leakage during the session differs from the calibration by up to ${round(leakage.maxChangeDb, 1)} dB (did people or mics move?).`,
-    );
+  for (const q of seatQuality) {
+    if (q.coverage === 0) warnings.push(`Seat ${q.seat}: no audio at all; its speech is not attributed.`);
+    else if (q.coverage < 0.95)
+      warnings.push(
+        `Seat ${q.seat}: no usable audio for ${round((1 - q.coverage) * 100, 1)} % of the session.`,
+      );
+    if (q.clippingShare > opts.clippingWarnShare)
+      warnings.push(
+        `Seat ${q.seat}: clipping in ${round(q.clippingShare * 100, 2)} % of frames; lower its input level.`,
+      );
   }
-  const quality = qualityReport({
-    channels,
-    tl,
-    masks,
-    dec,
-    model: finalModel,
-    defaulted,
-    placements,
-    alignment,
-    calibration,
-    lag: lagReport(lagMeasure, solution.residualRmsMs),
-    warnings,
-    opts,
-  });
-  const talkTimeMs: Record<number, number> = {};
-  for (const q of quality.seats) talkTimeMs[q.seat] = q.talkTimeMs;
-  lap("quality", 1);
+  if (g.ambiguousShare > opts.ambiguousWarnShare)
+    warnings.push(
+      `${round(g.ambiguousShare * 100, 1)} % of speech frames were close to the gate threshold (mics hear each other too similarly).`,
+    );
+  const meanCoverage = seatQuality.length
+    ? seatQuality.reduce((a, q) => a + q.coverage, 0) / seatQuality.length
+    : 0;
+  const poor =
+    meanCoverage < 0.5 ||
+    g.ambiguousShare > 0.25 ||
+    (calibration ?? []).some((q) => q.marginDb !== null && q.marginDb < opts.minMarginDb / 2);
+  if (!tl.frames) warnings.push("No audio to analyse.");
+
   return {
     engineVersion: ENGINE_VERSION,
     options: opts,
-    timeline: { t0: tl.t0, hopMs: tl.hopMs, frames: tl.frames, endTs: tl.t0 + tl.frames * tl.hopMs },
+    timeline: { ...tl, endTs: tl.t0 + tl.frames * HOP_MS },
     seats,
     alignment,
     leakage,
     segments,
-    talkTimeMs,
-    overlapMs: overlapFrames * hop,
+    talkTimeMs: Object.fromEntries(seatQuality.map((q) => [q.seat, q.talkTimeMs])),
+    overlapMs: overlapFrames * HOP_MS,
     masks: masks.map((m, s) => ({ seat: seats[s]!, runs: maskToRuns(m) })),
-    quality,
-    timingsMs: timings,
-  };
-}
-
-function lagReport(measured: ReturnType<typeof measureLags>, residualRmsMs: number | null): LagReport {
-  const pairs = new Map<
-    string,
-    { seatA: number; seatB: number; lags: number[]; corr: number[]; windows: number }
-  >();
-  for (const o of measured.observations) {
-    const key = `${o.seatA}:${o.seatB}`;
-    const p = pairs.get(key) ?? { seatA: o.seatA, seatB: o.seatB, lags: [], corr: [], windows: 0 };
-    p.windows++;
-    if (o.accepted) {
-      p.lags.push(o.lagMs);
-      p.corr.push(o.corr);
-    }
-    pairs.set(key, p);
-  }
-  const list: LagPairReport[] = [...pairs.values()].map((p) => ({
-    seatA: p.seatA,
-    seatB: p.seatB,
-    windows: p.windows,
-    accepted: p.lags.length,
-    medianLagMs: p.lags.length ? round(median(p.lags), 2) : null,
-    meanCorr: p.corr.length ? round(p.corr.reduce((a, b) => a + b, 0) / p.corr.length, 3) : null,
-  }));
-  return {
-    windows: measured.windows,
-    observations: measured.observations.length,
-    accepted: measured.observations.filter((o) => o.accepted).length,
-    residualRmsMs: roundOrNull(residualRmsMs),
-    pairs: list,
-  };
-}
-
-function qualityReport(ctx: {
-  channels: readonly SeatChannel[];
-  tl: Timeline;
-  masks: readonly Uint8Array[];
-  dec: FrameDecisions;
-  model: LeakageModel;
-  defaulted: readonly boolean[];
-  placements: readonly Placement[];
-  alignment: readonly TrackAlignment[];
-  calibration: CalibrationSeatQuality[] | null;
-  lag: LagReport;
-  warnings: string[];
-  opts: AttributionOptions;
-}): QualityReport {
-  const { channels, tl, masks, dec, model, opts, warnings } = ctx;
-  const frames = tl.frames;
-  let clippedAll = 0;
-  let validAll = 0;
-  const seats: SeatQuality[] = channels.map((ch, s) => {
-    let validN = 0;
-    let deadN = 0;
-    let clipped = 0;
-    let talk = 0;
-    let overlap = 0;
-    let dom = 0;
-    let amb = 0;
-    let gaps = 0;
-    let inGap = false;
-    const floors: number[] = [];
-    const speech: number[] = [];
-    for (let f = 0; f < frames; f++) {
-      const e = ch.energyDb[f]!;
-      const missing = Number.isNaN(e);
-      if (missing) {
-        if (!inGap) gaps++;
-        inGap = true;
-      } else inGap = false;
-      if (!missing && e > DEAD_DB) {
-        validN++;
-        if (ch.clipped[f]) clipped++;
-        if (f % 10 === 0) floors.push(ch.floorDb[f]!);
-      } else if (!missing) deadN++;
-      if (masks[s]![f]) {
-        talk++;
-        for (let k = 0; k < masks.length; k++) {
-          if (k !== s && masks[k]![f]) {
-            overlap++;
-            break;
-          }
-        }
-        if (dec.active[s]![f] === 1 && speech.length < 200_000) speech.push(e);
-      }
-      if (dec.dominant[f] === s) {
-        dom++;
-        if (dec.ambiguous[f]) amb++;
-      }
-    }
-    clippedAll += clipped;
-    validAll += validN;
-    const noData = frames - validN - deadN;
-    const noiseFloorDb = floors.length ? median(floors) : null;
-    const speechLevelDb = speech.length ? median(speech) : null;
-    const q: SeatQuality = {
-      seat: ch.seat,
-      tracks: ctx.placements.filter((p) => p.seatIndex === s).length,
-      dataMs: (validN + deadN) * tl.hopMs,
-      noDataShare: round(noData / frames, 4),
-      deadShare: round(deadN / frames, 4),
-      noSignalShare: round((noData + deadN) / frames, 4),
-      clippingShare: round(validN ? clipped / validN : 0, 4),
-      noiseFloorDb: roundOrNull(noiseFloorDb),
-      speechLevelDb: roundOrNull(speechLevelDb),
-      snrDb: roundOrNull(
-        speechLevelDb !== null && noiseFloorDb !== null ? speechLevelDb - noiseFloorDb : null,
-      ),
-      talkTimeMs: talk * tl.hopMs,
-      overlapMs: overlap * tl.hopMs,
-      ambiguousShare: round(dom ? amb / dom : 0, 4),
-    };
-    if (validN === 0) {
-      warnings.push(
-        `Seat ${ch.seat}: no audio at all; this seat's speech cannot be attributed (its voice may be credited to a neighbour).`,
-      );
-    } else {
-      if (q.noSignalShare > 0.05) {
-        warnings.push(
-          `Seat ${ch.seat}: no usable audio for ${round(q.noSignalShare * 100, 1)} % of the session (${gaps} gap${gaps === 1 ? "" : "s"}).`,
-        );
-      }
-      if (q.clippingShare > opts.clippingWarnShare) {
-        warnings.push(
-          `Seat ${ch.seat}: clipping in ${round(q.clippingShare * 100, 2)} % of frames; lower its input level.`,
-        );
-      }
-      if (ctx.defaulted[s]) {
-        warnings.push(
-          `Seat ${ch.seat}: its leakage could not be measured (it hardly spoke); a default was used.`,
-        );
-      }
-      if (model.rowSource[s] !== "calibration") {
-        const m = marginOf(model, s);
-        if (m !== null && m < opts.minMarginDb) {
-          warnings.push(
-            `Seat ${ch.seat}: own voice only +${round(m, 1)} dB over the other mics (estimated; needs ${opts.minMarginDb} dB): attribution is less reliable.`,
-          );
-        }
-      }
-      if (ch.overlapFrames > 10) {
-        warnings.push(
-          `Seat ${ch.seat}: two of its tracks overlap in time by ${ch.overlapFrames * tl.hopMs} ms.`,
-        );
-      }
-    }
-    return q;
-  });
-  const ambiguousFrameShare = dec.speechFrames ? dec.ambiguousFrames / dec.speechFrames : 0;
-  if (ambiguousFrameShare > opts.ambiguousWarnShare) {
-    warnings.push(
-      `${round(ambiguousFrameShare * 100, 1)} % of speech frames were ambiguous (mics hear each other too similarly).`,
-    );
-  }
-  const withData = channels.filter((_, s) => seats[s]!.noSignalShare < 1).length;
-  if (withData > 1 && ctx.lag.accepted === 0) {
-    warnings.push(
-      "Lag refinement found no shared sound between the mics; alignment relies on client timestamps only (±20–50 ms).",
-    );
-  } else if (ctx.lag.residualRmsMs !== null && ctx.lag.residualRmsMs > 10) {
-    warnings.push(`Mic alignment is uncertain (residual ${round(ctx.lag.residualRmsMs, 1)} ms RMS).`);
-  }
-  for (const a of ctx.alignment) {
-    if (Math.abs(a.driftPpm) > 300) {
-      warnings.push(`Seat ${a.seat}: unusually large clock drift (${round(a.driftPpm, 0)} ppm).`);
-    }
-  }
-  const absentSpeakerShare = dec.speechFrames ? dec.absentFrames / dec.speechFrames : 0;
-  const noSignalShare = seats.length ? seats.reduce((a, q) => a + q.noSignalShare, 0) / seats.length : 1;
-  const lowMargins = [
-    ...(ctx.calibration ?? []).map((q) => q.marginDb),
-    ...channels.map((_, s) => (model.rowSource[s] === "calibration" ? null : marginOf(model, s))),
-  ].filter((m): m is number => m !== null);
-  const poor =
-    withData === 0 ||
-    noSignalShare > 0.5 ||
-    ambiguousFrameShare > 0.25 ||
-    lowMargins.some((m) => m < opts.minMarginDb / 2);
-  return {
-    grade: poor ? "poor" : warnings.length ? "fair" : "good",
-    calibration: ctx.calibration,
-    leakageSource: model.rowSource.includes("calibration") ? "calibration" : "estimated",
-    ambiguousFrameShare: round(ambiguousFrameShare, 4),
-    clippingShare: round(validAll ? clippedAll / validAll : 0, 4),
-    noSignalShare: round(noSignalShare, 4),
-    absentSpeakerShare: round(absentSpeakerShare, 4),
-    driftPpm: ctx.alignment.map((a) => ({ trackId: a.trackId, seat: a.seat, driftPpm: a.driftPpm })),
-    lag: ctx.lag,
-    seats,
-    warnings: [...warnings],
+    quality: {
+      grade: poor || !tl.frames ? "poor" : warnings.length ? "fair" : "good",
+      detector,
+      calibration,
+      ambiguousShare: round(g.ambiguousShare, 4),
+      seats: seatQuality,
+      warnings,
+    },
   };
 }

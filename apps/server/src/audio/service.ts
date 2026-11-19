@@ -16,7 +16,7 @@
  * Raw audio is never modified. Audio exists only in the participant database.
  */
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { open } from "node:fs/promises";
 import path from "node:path";
 import {
@@ -69,7 +69,7 @@ import {
   type CalibrationTurn,
   type ChunkMeta,
   ENGINE_VERSION,
-  fitClocks,
+  fitClock,
   HOP_MS,
   type PhaseChange,
   type RenderTiming,
@@ -80,12 +80,12 @@ import {
   type TrackSource,
   trackSampleEnd,
 } from "./attribution";
-import { round } from "./attribution/math";
 import type { AudioReadIssue } from "./fileStore";
 import { type AudioJobRunner, runInWorker, type TaskRunner } from "./jobs";
 import {
   type AttributionTaskInput,
   type AttributionTaskOutput,
+  CLEAN_RECORD_SAMPLES,
   describeIssues,
   seqOrderedChunks,
 } from "./jobWorker";
@@ -99,6 +99,8 @@ import {
   trackViews,
 } from "./records";
 import { wavStream } from "./wav";
+
+const round = (v: number, digits = 2) => Math.round(v * 10 ** digits) / 10 ** digits;
 
 /** A refused request; REST routes answer with `statusCode`. */
 export class AudioRequestError extends Error {
@@ -122,6 +124,8 @@ export interface AudioServiceDeps {
   runner: AudioJobRunner;
   /** How the attribution task runs (default: a worker thread). */
   runTask?: TaskRunner;
+  /** Detect speech with the Silero model (default true); false = energy only (tests with synthetic audio). */
+  speechModel?: boolean;
   log?: Logger;
 }
 
@@ -177,41 +181,51 @@ interface StoredTiming {
   alignment: TrackAlignment[];
 }
 
-/** Timing from the chunks' timestamps alone (no attribution yet): a clock fit per track, no offset refinement. */
+/** Timing from the chunks' timestamps alone (no attribution yet): the same clock fit as the engine's. */
 export function timestampTiming(
   tracks: ReadonlyArray<{ trackId: string; seat: number; sampleRate: number; chunks: readonly ChunkMeta[] }>,
 ): StoredTiming | null {
-  const { fits } = fitClocks(tracks.filter((t) => t.chunks.length > 0));
-  if (fits.length === 0) return null;
-  const alignment: TrackAlignment[] = fits.map((f) => {
-    const samples = trackSampleEnd(tracks.find((x) => x.trackId === f.trackId)!.chunks);
-    return {
-      trackId: f.trackId,
-      seat: f.seat,
+  const alignment: TrackAlignment[] = [];
+  for (const t of tracks) {
+    const f = fitClock(t);
+    if (!f) continue;
+    const samples = trackSampleEnd(t.chunks);
+    alignment.push({
+      trackId: t.trackId,
+      seat: t.seat,
       startTs: f.startTs,
-      offsetMs: 0,
-      driftPpm: f.driftPpm,
-      clockDriftPpm: f.driftPpm,
       msPerSample: f.msPerSample,
+      driftPpm: f.driftPpm,
       samples,
-      alignedStartTs: f.startTs,
-      alignedEndTs: f.startTs + samples * f.msPerSample,
-      confidence: 0,
-      anchor: false,
-      clockGroup: f.group,
-      clockResidualMs: f.residualRmsMs,
-      clockOutliers: f.outliers,
-      lagObservations: 0,
-      lagResidualMs: null,
-    };
-  });
-  const t0 = Math.min(...alignment.map((a) => a.alignedStartTs));
-  const end = Math.max(...alignment.map((a) => a.alignedEndTs));
+      endTs: f.startTs + samples * f.msPerSample,
+      residualMs: f.residualMs,
+    });
+  }
+  if (alignment.length === 0) return null;
+  const t0 = Math.min(...alignment.map((a) => a.startTs));
+  const end = Math.max(...alignment.map((a) => a.endTs));
   const frames = Math.max(1, Math.ceil((end - t0) / HOP_MS));
   return { timeline: { t0, hopMs: HOP_MS, frames, endTs: t0 + frames * HOP_MS }, alignment };
 }
 
 /* ─────────── reading audio for export ─────────── */
+
+/** Suffix of an audio export folder still being written. */
+export const PARTIAL_SUFFIX = ".partial";
+
+/** Remove export folders left half-written by a crash (`<exportsDir>/<session>/audio-*.partial`). */
+export function sweepPartialExports(exportsDir: string, log?: Logger): void {
+  if (!existsSync(exportsDir)) return;
+  for (const session of readdirSync(exportsDir, { withFileTypes: true })) {
+    if (!session.isDirectory()) continue;
+    const dir = path.join(exportsDir, session.name);
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      if (!e.isDirectory() || !e.name.startsWith("audio-") || !e.name.endsWith(PARTIAL_SUFFIX)) continue;
+      rmSync(path.join(dir, e.name), { recursive: true, force: true });
+      log?.warn({ folder: path.join(session.name, e.name) }, "removed a half-written audio export");
+    }
+  }
+}
 
 /** A track's PCM as render chunks, streamed in startSample order; read problems go to `onIssue`. */
 function trackPcmChunks(
@@ -262,18 +276,12 @@ export function attributionSummaryOf(
   r: AttributionResult,
   extraWarnings: string[] = [],
 ): AttributionSummaryView {
-  const perSeat = r.seats.map((seat) => {
-    const own = r.alignment.filter((a) => a.seat === seat).sort((a, b) => b.samples - a.samples)[0];
-    const q = r.quality.seats.find((s) => s.seat === seat);
-    const cal = r.quality.calibration?.find((c) => c.seat === seat);
-    return {
-      seat,
-      marginDb: cal?.marginDb ?? null,
-      driftPpm: own ? round(own.driftPpm, 2) : null,
-      lagMs: own?.lagResidualMs ?? null,
-      coverage: q ? Math.min(1, Math.max(0, round(1 - q.noDataShare, 4))) : 0,
-    };
-  });
+  const perSeat = r.quality.seats.map((q) => ({
+    seat: q.seat,
+    marginDb: r.quality.calibration?.find((c) => c.seat === q.seat)?.marginDb ?? null,
+    driftPpm: q.driftPpm,
+    coverage: Math.min(1, Math.max(0, q.coverage)),
+  }));
   return {
     engineVersion: r.engineVersion,
     talkTimeMs: Object.fromEntries(r.seats.map((s) => [String(s), Math.round(r.talkTimeMs[s] ?? 0)])),
@@ -282,8 +290,9 @@ export function attributionSummaryOf(
     grade: r.quality.grade,
     quality: {
       calibrated: r.leakage.source === "calibration",
+      speechDetector: r.quality.detector,
       perSeat,
-      ambiguousShare: Math.min(1, Math.max(0, round(r.quality.ambiguousFrameShare, 4))),
+      ambiguousShare: Math.min(1, Math.max(0, r.quality.ambiguousShare)),
       warnings: [...r.quality.warnings, ...extraWarnings],
     },
   };
@@ -330,6 +339,17 @@ export class AudioService {
   constructor(private readonly deps: AudioServiceDeps) {
     this.store = deps.store;
     this.runTask = deps.runTask ?? runInWorker;
+    sweepPartialExports(deps.exportsDir, deps.log);
+  }
+
+  /**
+   * Why the session's audio files are in use (an attribution queued or running, an export being
+   * written), or null. Erasure and session deletion refuse while it is not null.
+   */
+  busyReason(sessionId: string): string | null {
+    if (this.deps.runner.activeJob(sessionId)) return "An attribution of this session is queued or running";
+    if (this.exporting.get(sessionId)) return "An audio export of this session is being written";
+    return null;
   }
 
   private session(sessionId: string) {
@@ -485,6 +505,7 @@ export class AudioService {
       phaseChanges: tl.phaseChanges,
       ...(options && Object.keys(options).length ? { options } : {}),
       clean: { attenuationDb: CLEAN_ATTENUATION_DB, fadeMs: CLEAN_FADE_MS },
+      ...(this.deps.speechModel === false ? { speechModel: false } : {}),
     };
   }
 
@@ -596,7 +617,6 @@ export class AudioService {
       timing: { timeline: r.timeline, alignment: r.alignment },
       calibrationTurns: input.calibration.length,
       readWarnings: out.readWarnings,
-      timingsMs: r.timingsMs,
     });
     session("leakage_matrix", r.leakage);
 
@@ -643,10 +663,11 @@ export class AudioService {
 
   /* ── export audio ── */
 
-  /** The latest stored attribution timing, if it was computed from exactly these tracks. */
+  /** The latest stored attribution timing, if this engine computed it from exactly these tracks. */
   private storedTiming(sessionId: string, trackIds: readonly string[]): StoredTiming | null {
     const q = this.store.listAudioDerivatives(sessionId, { kind: "quality_report" }).at(-1);
-    if (!q) return null;
+    // an earlier engine's alignment has another shape: fall back to the timestamps
+    if (!q || q.engineVersion !== ENGINE_VERSION) return null;
     const same =
       q.sourceTracks.length === trackIds.length && q.sourceTracks.every((t) => trackIds.includes(t));
     if (!same) return null;
@@ -753,7 +774,10 @@ export class AudioService {
     const now = nowTs();
     const exportId = exportIdOf(now);
     const dir = path.join(this.deps.exportsDir, sessionId, `audio-${exportId}`);
-    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    // written under a `.partial` name and renamed once registered: a crash never leaves a complete-
+    // looking, unregistered folder of voice files (leftovers are removed at start-up)
+    const work = `${dir}${PARTIAL_SUFFIX}`;
+    mkdirSync(work, { recursive: true, mode: 0o700 });
     const files: AudioExportFile[] = [];
     const warnings: string[] = [];
     try {
@@ -774,13 +798,13 @@ export class AudioService {
           const total = renderedSampleCount(timing.timeline);
           const name = audioExportFileName(sessionId, seat, "raw");
           const w = await writeWavFile(
-            path.join(dir, name),
+            path.join(work, name),
             renderAligned(seat, sources, timing as RenderTiming),
             total,
           );
           const durationMs = Math.round(samplesToMs(total));
           files.push({ name, seat, kind: "raw", samples: total, durationMs, ...w });
-          warnings.push(...describeIssues(seat, issues, { unindexed: 0 }));
+          warnings.push(...describeIssues(seat, issues));
         }
         if (kinds.includes("clean")) {
           const d = clean.get(seat)!;
@@ -788,15 +812,21 @@ export class AudioService {
           const total = (d.params as Partial<CleanParams>).samples ?? 0;
           const name = audioExportFileName(sessionId, seat, "clean");
           let bad = 0;
+          // record `seq` holds samples [seq · 5 s, …): a damaged record plays as silence in its place
           const blocks = async function* () {
+            let next = 0;
             for await (const r of store.requireAudioFiles().readUniqueRecords(sessionId, d.fileName!, key, {
               onIssue: (i) => {
                 if (i.kind !== "truncated") bad++;
               },
-            }))
+            })) {
+              if (r.seq < next) continue;
+              if (r.seq > next) yield new Int16Array((r.seq - next) * CLEAN_RECORD_SAMPLES);
               yield int16FromLeBytes(r.data);
+              next = r.seq + 1;
+            }
           };
-          const w = await writeWavFile(path.join(dir, name), blocks(), total);
+          const w = await writeWavFile(path.join(work, name), blocks(), total);
           const durationMs = Math.round(samplesToMs(total));
           files.push({ name, seat, kind: "clean", samples: total, durationMs, ...w });
           if (bad)
@@ -826,7 +856,7 @@ export class AudioService {
         files,
       };
       const manifestText = `${JSON.stringify(manifest, null, 2)}\n`;
-      writeFileSync(path.join(dir, "manifest.json"), manifestText, { mode: 0o600 });
+      writeFileSync(path.join(work, "manifest.json"), manifestText, { mode: 0o600 });
       registerExport(store, {
         id: exportId,
         sessionId,
@@ -843,9 +873,10 @@ export class AudioService {
           timing: timingSource,
         },
       });
+      renameSync(work, dir);
     } catch (e) {
       // never leave unregistered voice files behind (the folder is ours: created above, inside the exports folder)
-      rmSync(dir, { recursive: true, force: true });
+      rmSync(work, { recursive: true, force: true });
       throw e;
     }
     this.deps.log?.info({ exportId, files: files.length, seats }, "audio exported");

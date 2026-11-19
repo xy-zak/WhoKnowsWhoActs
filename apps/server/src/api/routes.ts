@@ -7,7 +7,7 @@ import type { AppContext } from "../app";
 import { redactEvent } from "../net/hub";
 import { harnessVersion } from "../runtime";
 import { playerUrls } from "../tls";
-import { registerAudioApi } from "./audioRoutes";
+import { createAudioService, registerAudioApi } from "./audioRoutes";
 import { registerGdprApi } from "./gdprRoutes";
 import { sessionOr404 } from "./sessionLookup";
 
@@ -93,6 +93,7 @@ export function registerApi(ctx: AppContext, guard: Guard) {
     return { scenario, hashMatches: scenario.hash === row.scenario_hash };
   });
 
-  registerGdprApi(ctx, guard);
-  registerAudioApi(ctx, guard);
+  const audio = createAudioService(ctx);
+  registerGdprApi(ctx, guard, audio);
+  registerAudioApi(ctx, guard, audio);
 }

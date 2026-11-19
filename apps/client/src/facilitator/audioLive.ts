@@ -2,6 +2,7 @@ import {
   type AudioStartReason,
   type AudioStopReason,
   type AudioTrackSummary,
+  CALIBRATION_MIN_MARGIN_DB,
   type CalibrationQuality,
   currentCalibrationTurn,
   isParticipant,
@@ -32,7 +33,6 @@ export const STALE_CHUNK_MS = 15_000;
 /** Upload backlog (chunks of 5 s) at which the mic column warns, growing or not. */
 export const BACKLOG_WARN_CHUNKS = 3;
 /** The engine's minimum calibration margin (dB): below it a seat's voice is hard to tell apart. */
-export const CALIBRATION_MIN_MARGIN_DB = 10;
 
 /** Each seat's live mic figures from the dashboard's stats. */
 export function micStatsOf(stats: Record<number, SeatLiveStats> | undefined): Record<number, SeatMicStats> {
@@ -235,7 +235,7 @@ export function calibrationSummary(st: ReadonlyGameState): CalibrationSummary {
           .map((p) => `seat ${p.seat}${p.marginDb !== null ? ` (${fmtSigned(p.marginDb, "dB")})` : ""}`)
           .join(", ")}`,
         label: "needs attention",
-        tip: "A seat's voice is nearly as loud on another microphone: move it closer to its own mic (or use a headset) and redo",
+        tip: "A seat's voice is nearly as loud on another microphone: check its headset is plugged in, chosen as microphone and worn close to the mouth, then redo",
       };
     }
     case "skipped":
@@ -244,7 +244,7 @@ export function calibrationSummary(st: ReadonlyGameState): CalibrationSummary {
         icon: "close",
         text: "skipped",
         label: "skipped",
-        tip: "Skipped: attribution estimates the leakage between microphones from the recording",
+        tip: "Skipped: attribution assumes a conservative leakage between the microphones (overlapping speech is missed more often)",
       };
     default:
       return {
@@ -263,8 +263,8 @@ export function calibrationAdvice(r: SeatQuality): string | null {
   if (r.ownDb === null || r.marginDb === null)
     return `No audio from seat ${r.seat}: check its microphone and connection, then redo the calibration.`;
   if (r.marginDb < CALIBRATION_MIN_MARGIN_DB)
-    return `Seat ${r.seat}: own voice only ${fmtSigned(r.marginDb, "dB")} over the others. Move the laptop closer or use a headset, then redo the calibration.`;
-  return `Seat ${r.seat}: its voice is hard to tell apart from the others on the other microphones. Move the laptop closer or use a headset, then redo the calibration.`;
+    return `Seat ${r.seat}: own voice only ${fmtSigned(r.marginDb, "dB")} over the others. Check the headset is plugged in, chosen as microphone and its mic sits at the corner of the mouth, then redo the calibration.`;
+  return `Seat ${r.seat}: its voice is hard to tell apart from the others on the other microphones. Check the headset is plugged in, chosen as microphone and worn close to the mouth, then redo the calibration.`;
 }
 
 /* ─────────────────────────── wrap-up audio check ─────────────────────────── */

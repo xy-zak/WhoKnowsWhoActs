@@ -1,5 +1,13 @@
 import { createHash } from "node:crypto";
-import { mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {
@@ -10,6 +18,7 @@ import {
   EXPORT_FILES,
   expandColumns,
   exportFile,
+  type SpeechSegmentRow,
 } from "@wkwa/shared";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { AudioFileStore } from "../src/audio/fileStore";
@@ -59,6 +68,7 @@ describe("audio processing: jobs, derivatives, export", () => {
     exportsDir: env.exportsDir,
     runner,
     runTask: runInWorker,
+    speechModel: false,
   });
   let seeded: SeededSession;
 
@@ -100,7 +110,7 @@ describe("audio processing: jobs, derivatives, export", () => {
       expect(d.participantCode).toBe(codes[d.seat!]);
       expect(d.sourceTracks).toEqual(seeded.trackIds[d.seat!]);
       expect(d.hasKey).toBe(false);
-      expect(d.engineVersion).toMatch(/^wkwa-energy-attribution\//);
+      expect(d.engineVersion).toMatch(/^wkwa-gate-attribution\//);
     }
     const clean = kinds("clean");
     expect(clean).toHaveLength(4);
@@ -236,6 +246,36 @@ describe("audio processing: jobs, derivatives, export", () => {
     expect((await service.summary(sessionId)).audioExports).toHaveLength(2);
   }, 60_000);
 
+  it("a damaged record of a cleaned track plays as silence in its own place, the rest stays aligned", async () => {
+    const { sessionId } = seeded;
+    const exportSeat1 = async () => {
+      const r = await service.exportAudio(sessionId, { kind: "clean", seats: [1], requestedBy: "test" });
+      expect(readdirSync(path.dirname(r.dir)).some((n) => n.endsWith(".partial"))).toBe(false);
+      const bytes = readFileSync(path.join(r.dir, r.files[0]!.name));
+      return { r, pcm: new Int16Array(bytes.buffer, bytes.byteOffset + 44, (bytes.length - 44) / 2) };
+    };
+    const before = await exportSeat1();
+    const d = env.store.listAudioDerivatives(sessionId, { kind: "clean" }).find((x) => x.seat === 1)!;
+    const file = env.files.pathOf(sessionId, d.fileName!);
+    const bytes = readFileSync(file);
+    const at = Math.floor(bytes.length / 2);
+    bytes[at] = bytes[at]! ^ 0xff;
+    writeFileSync(file, bytes);
+    const after = await exportSeat1();
+    expect(after.r.warnings.some((w) => w.includes("damaged records"))).toBe(true);
+    expect(after.pcm.length).toBe(before.pcm.length);
+    const changed: number[] = [];
+    for (let i = 0; i < before.pcm.length; i++) if (after.pcm[i] !== before.pcm[i]) changed.push(i);
+    expect(changed.length).toBeGreaterThan(0);
+    // one 5 s record, now silent; everything after it is unchanged (not shifted forward)
+    const block = Math.floor(changed[0]! / 80_000);
+    expect(changed.every((i) => Math.floor(i / 80_000) === block)).toBe(true);
+    expect(after.pcm.subarray(block * 80_000, (block + 1) * 80_000).every((v) => v === 0)).toBe(true);
+    // restore the file for the tests below
+    bytes[at] = bytes[at]! ^ 0xff;
+    writeFileSync(file, bytes);
+  }, 60_000);
+
   it("CSV exports gain audio_tracks.csv and speech_segments.csv (pseudonymised like the other files)", () => {
     const { sessionId, codes } = seeded;
     const deps = { store: env.store, scenarios, exportsDir: env.exportsDir };
@@ -301,12 +341,15 @@ describe("audio processing: jobs, derivatives, export", () => {
       { calibration: false },
     );
     const pending = service.exportAudio(fresh.sessionId, { kind: "raw", requestedBy: "test" });
+    // erasure and session deletion check this before they touch the session
+    expect(service.busyReason(fresh.sessionId)).toMatch(/export of this session is being written/);
     // while the WAVs are being written, nothing may delete or replace what they are read from
     expect(() => service.deleteAudio(fresh.sessionId, { confirm: fresh.sessionId, scope: "all" })).toThrow(
       /export of this session is being written/,
     );
     expect(() => service.startAttribution(fresh.sessionId)).toThrow(/being written/);
     const r = await pending;
+    expect(service.busyReason(fresh.sessionId)).toBeNull();
     expect(r.timing).toBe("timestamps");
     expect(r.warnings).toEqual([]);
     expect(r.files).toHaveLength(4);
@@ -337,6 +380,12 @@ describe("audio processing: jobs, derivatives, export", () => {
     // were computed from every seat: gone, re-run to refresh them
     expect(env.store.listAudioDerivatives(sessionId, { kind: "talk_time" })).toHaveLength(0);
     expect(env.store.listAudioDerivatives(sessionId, { kind: "clean" })).toHaveLength(0);
+    // in the database too: kept segments no longer name seat 2, job summaries (talk time per seat) are cleared
+    for (const d of env.store.listAudioDerivatives(sessionId, { kind: "speech_segments" })) {
+      const data = env.store.getAudioDerivative(d.derivativeId)!.data as { segments: SpeechSegmentRow[] };
+      expect(data.segments.some((x) => x.overlapWith.includes(2))).toBe(false);
+    }
+    expect(env.store.listAudioJobs(sessionId).every((j) => j.result === null)).toBe(true);
   });
 
   it("delete raw audio: typed confirmation, registered, then attribution and export answer 409", async () => {
@@ -379,6 +428,7 @@ describe("audio processing: jobs, derivatives, export", () => {
       exportsDir: env.exportsDir,
       runner,
       runTask: runInline,
+      speechModel: false,
     });
     for (const fn of [
       () => live.startAttribution(seeded.sessionId),
@@ -509,6 +559,18 @@ describe("audio jobs: lifecycle", () => {
     expect(row.status).toBe("failed");
     expect(row.error).toMatch(/server stopped/);
     expect(env.files.exists(sessionId, f.fileName)).toBe(false);
+  });
+
+  it("on start-up, half-written audio export folders are removed", () => {
+    const partial = path.join(env.exportsDir, "S-20261118-PART", "audio-AU-20261118-120000-ABCD.partial");
+    const done = path.join(env.exportsDir, "S-20261118-PART", "audio-AU-20261118-110000-ABCD");
+    for (const d of [partial, done]) {
+      mkdirSync(d, { recursive: true });
+      writeFileSync(path.join(d, "x.wav"), "x");
+    }
+    new AudioService({ store: env.store, exportsDir: env.exportsDir, runner: new AudioJobRunner(env.store) });
+    expect(existsSync(partial)).toBe(false);
+    expect(existsSync(done)).toBe(true);
   });
 
   it("scrubs anything code-like from error texts", () => {

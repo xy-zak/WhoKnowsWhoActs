@@ -249,8 +249,8 @@ export function MicCheckScreen({ conn, view }: { conn: PlayerConnection; view: P
         in the consent form). There is no mute button: the facilitator can pause the recording for everyone.
       </p>
       <p className="muted small" style={{ margin: 0 }}>
-        <Icon name="info" /> A headset works best: keep its microphone close to your mouth. Only your own
-        voice should be loud on your microphone.
+        <Icon name="info" /> Wear the headset at your seat, its microphone at the corner of your mouth (about
+        two fingers away). If your device asks which microphone to use, choose the headset.
       </p>
 
       {error ? (

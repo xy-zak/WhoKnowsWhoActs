@@ -1,18 +1,19 @@
 import { describe, expect, it } from "vitest";
 import {
+  analyse,
   annotate,
-  buildEnvelope,
   type ChunkMeta,
-  EnvelopeBuilder,
-  fitClocks,
+  FeatureBuilder,
+  fitClock,
+  loadSilero,
   maskToRuns,
   quickCalibrationCheck,
   runsToMask,
   type SpeechSegment,
+  type TrackInput,
+  type Vad,
 } from "../src/audio/attribution";
-import { calibrationChannelsFromTracks } from "../src/audio/attribution/leakage";
-import { estimateNoiseFloor } from "../src/audio/attribution/noiseFloor";
-import { smoothActivity } from "../src/audio/attribution/smooth";
+import { smoothSpeech } from "../src/audio/attribution/smooth";
 import {
   encodeWav,
   parseWavHeader,
@@ -31,57 +32,69 @@ function sine(n: number, amp: number, hz = 400): Int16Array {
   return out;
 }
 
-describe("EnvelopeBuilder", () => {
-  it("measures a sine at its true level and is independent of block size", () => {
+function features(pcm: Int16Array, blocks = pcm.length) {
+  const b = new FeatureBuilder();
+  for (let i = 0; i < pcm.length; i += blocks) b.push(pcm.subarray(i, i + blocks), i);
+  return b.finish();
+}
+
+describe("FeatureBuilder", () => {
+  it("measures a sine at its true level, independent of block size", () => {
     const pcm = sine(FS, 32767 * 10 ** (-20 / 20)); // peak −20 dBFS ⇒ RMS −23 dBFS
-    const whole = buildEnvelope(pcm);
-    const b = new EnvelopeBuilder();
-    for (let i = 0; i < pcm.length; i += 777) b.push(pcm.subarray(i, i + 777));
-    const blocks = b.finish();
+    const whole = features(pcm);
+    const blocks = features(pcm, 777);
     expect(whole.frames).toBe(100);
-    for (let k = 2; k < 98; k++) {
-      expect(whole.energyDb[k]!).toBeCloseTo(-23.01, 1);
+    expect(whole.speech).toBeNull();
+    for (let k = 5; k < 95; k++) {
+      expect(whole.energyDb[k]!).toBeCloseTo(-23.01, 0);
       expect(blocks.energyDb[k]!).toBeCloseTo(whole.energyDb[k]!, 4);
-      expect(whole.peakDb[k]!).toBeCloseTo(-20, 1);
     }
   });
 
-  it("marks lost chunks as no data, ignores duplicates and flags clipping", () => {
-    const b = new EnvelopeBuilder();
+  it("marks gaps as no data, skips resent overlaps and flags clipping", () => {
+    const b = new FeatureBuilder();
     const a = sine(8000, 1000);
     b.push(a, 0);
-    b.push(a.subarray(0, 4000), 4000); // re-sent overlap: ignored
+    b.push(a.subarray(0, 4000), 4000); // re-sent overlap: skipped
     b.push(sine(8000, 32767), 16_000); // after a gap of 8000 samples, clipping
-    const env = b.finish();
-    expect(env.frames).toBe(150);
-    expect(Number.isNaN(env.energyDb[60]!)).toBe(true); // inside the gap
-    expect(Number.isNaN(env.energyDb[40]!)).toBe(false);
-    expect(env.clipped[120]).toBe(1);
-    expect(env.clipped[20]).toBe(0);
-    // No step transient after the gap (the filter restarts in steady state).
-    expect(env.energyDb[101]!).toBeLessThan(env.energyDb[120]! + 1);
+    const f = b.finish();
+    expect(f.frames).toBe(150);
+    expect(Number.isNaN(f.energyDb[60]!)).toBe(true);
+    expect(Number.isNaN(f.energyDb[40]!)).toBe(false);
+    expect(f.clipped[120]).toBe(1);
+    expect(f.clipped[20]).toBe(0);
   });
 
-  it("removes DC offset before measuring energy", () => {
-    const pcm = new Int16Array(FS).fill(3000);
-    const env = buildEnvelope(pcm);
-    expect(env.energyDb[50]!).toBeLessThan(-100);
+  it("removes DC offset and rumble before measuring energy", () => {
+    const f = features(new Int16Array(FS).fill(3000));
+    expect(f.energyDb[50]!).toBeLessThan(-60);
+    expect(features(sine(FS, 10_000, 30)).energyDb[50]!).toBeLessThan(
+      features(sine(FS, 10_000, 400)).energyDb[50]! - 9,
+    );
   });
 
-  it("fills a gap when the missing chunk arrives late, matching in-order delivery", () => {
-    const pcm = sine(3 * 8000, 2000);
-    const inOrder = buildEnvelope(pcm);
-    const b = new EnvelopeBuilder();
-    b.push(pcm.subarray(0, 8000), 0);
-    b.push(pcm.subarray(16_000), 16_000); // chunk 2 before chunk 1
-    b.push(pcm.subarray(8000, 16_000), 8000); // the late chunk
-    b.push(pcm.subarray(8000, 16_000), 8000); // and a duplicate of it
-    const late = b.finish();
-    expect(late.frames).toBe(inOrder.frames);
-    for (let k = 2; k < late.frames - 2; k++) {
-      expect(Number.isNaN(late.energyDb[k]!)).toBe(false);
-      expect(Math.abs(late.energyDb[k]! - inOrder.energyDb[k]!)).toBeLessThan(0.5);
-    }
+  it("gives every frame the probability of the detector window around its centre, restarting after a gap", async () => {
+    const calls: number[] = [];
+    let resets = 0;
+    const vad: Vad = {
+      windowSamples: 512,
+      reset: () => resets++,
+      next: async (w) => {
+        calls.push(w.length);
+        return w[0]! > 0 ? 0.9 : 0.1;
+      },
+    };
+    const b = new FeatureBuilder(vad);
+    b.push(new Int16Array(5120).fill(1000), 0); // 10 windows of "speech"
+    await b.drain();
+    b.push(new Int16Array(5120).fill(-1000), 10_240); // after a gap: 10 windows of "silence"
+    await b.drain();
+    const f = b.finish();
+    expect(calls).toHaveLength(20);
+    expect(resets).toBe(2);
+    expect(f.speech![10]).toBeCloseTo(0.9);
+    expect(Number.isNaN(f.speech![40]!)).toBe(true); // in the gap
+    expect(f.speech![70]).toBeCloseTo(0.1);
   });
 });
 
@@ -108,51 +121,84 @@ describe("clock fit", () => {
       [3, 12],
       [4, -40],
     ] as const) {
-      const { fits } = fitClocks([
-        { trackId: `t${seed}`, seat: 1, sampleRate: FS, chunks: track(seed, 30, drift, 6) },
-      ]);
-      const f = fits[0]!;
+      const f = fitClock({ trackId: "t", seat: 1, sampleRate: FS, chunks: track(seed, 30, drift, 6) })!;
       expect(Math.abs(f.driftPpm - drift)).toBeLessThan(5);
-      expect(f.outliers).toBeGreaterThanOrEqual(6);
       expect(Math.abs(f.startTs - (1_763_000_000_000 + 35))).toBeLessThan(5);
+      expect(f.residualMs).toBeLessThan(15);
     }
   });
 
-  it("shares one drift across a seat's tracks and isolates a track on a different clock", () => {
-    const a = track(5, 20, 60);
-    const b = track(6, 3, 60).map((c) => ({ ...c, clientTs: c.clientTs + 1_500_000 }));
-    const c = track(7, 20, -80).map((x) => ({ ...x, clientTs: x.clientTs + 2_000_000 }));
-    const { fits, warnings } = fitClocks([
-      { trackId: "a", seat: 2, sampleRate: FS, chunks: a },
-      { trackId: "b", seat: 2, sampleRate: FS, chunks: b },
-      { trackId: "c", seat: 2, sampleRate: FS, chunks: c },
-    ]);
-    const fa = fits.find((f) => f.trackId === "a")!;
-    const fb = fits.find((f) => f.trackId === "b")!;
-    const fc = fits.find((f) => f.trackId === "c")!;
-    expect(fa.group).toBe(fb.group);
-    expect(fb.driftPpm).toBe(fa.driftPpm);
-    expect(Math.abs(fa.driftPpm - 60)).toBeLessThan(5);
-    expect(fc.group).not.toBe(fa.group);
-    expect(Math.abs(fc.driftPpm + 80)).toBeLessThan(5);
-    expect(warnings.some((w) => w.includes("different clock"))).toBe(true);
+  it("keeps the nominal rate on short tracks and on implausible timestamps", () => {
+    const short = fitClock({ trackId: "t", seat: 1, sampleRate: FS, chunks: track(5, 0.5, 90) })!;
+    expect(short.driftPpm).toBe(0);
+    const broken = track(6, 10, 0).map((c, k) => ({ ...c, clientTs: c.clientTs + k * 50 })); // +1 %
+    const f = fitClock({ trackId: "t", seat: 1, sampleRate: FS, chunks: broken })!;
+    expect(f.implausible).toBe(true);
+    expect(f.driftPpm).toBe(0);
   });
 });
 
-describe("noise floor", () => {
-  it("tracks the quiet frames of a busy channel and follows a step", () => {
-    const r = mulberry32(3);
-    const e = new Float32Array(12_000);
-    for (let f = 0; f < e.length; f++) {
-      const base = f < 6000 ? -60 : -45;
-      e[f] = r() < 0.7 ? -25 + r() * 10 : base + r();
-    }
-    e.fill(Number.NaN, 2000, 2500); // a gap does not disturb it
-    const fl = estimateNoiseFloor(e, { windowFrames: 3000, percentile: 0.05 });
-    expect(fl[1000]!).toBeGreaterThan(-61);
-    expect(fl[1000]!).toBeLessThan(-58);
-    expect(fl[11_000]!).toBeGreaterThan(-46);
-    expect(fl[11_000]!).toBeLessThan(-43);
+describe("gate", () => {
+  /** Two seats, one track each, from frame levels (10 ms frames, all "speech" to the detector). */
+  function session(levels: number[][]): { tracks: TrackInput[]; t0: number } {
+    const t0 = 1_763_000_000_000;
+    const frames = levels[0]!.length;
+    const tracks = levels.map((lv, s) => ({
+      trackId: `00000000-0000-4000-8000-00000000000${s}`,
+      seat: s + 1,
+      chunks: [{ seq: 0, startSample: 0, sampleCount: frames * 160, clientTs: t0, serverTs: t0 }],
+      features: {
+        frames,
+        energyDb: Float32Array.from(lv),
+        clipped: new Uint8Array(frames),
+        speech: Float32Array.from(lv, (e) => (e > -50 ? 0.95 : 0.05)),
+      },
+    }));
+    return { tracks, t0 };
+  }
+  const run = (n: number, v: number) => new Array<number>(n).fill(v);
+
+  it("credits the speaker, not the mic that hears the leak, and keeps real overlap", () => {
+    // 1 s silence, seat 1 speaks 1 s (leak −20 dB on mic 2), both speak 1 s, silence
+    const mic1 = [...run(100, -70), ...run(100, -25), ...run(100, -25), ...run(100, -70)];
+    const mic2 = [...run(100, -70), ...run(100, -45), ...run(100, -28), ...run(100, -70)];
+    const { tracks, t0 } = session([mic1, mic2]);
+    const r = analyse({ tracks, options: { defaultLeakageDb: -15 } });
+    expect(r.quality.detector).toBe("silero");
+    const seat1 = r.segments.filter((x) => x.seat === 1);
+    const seat2 = r.segments.filter((x) => x.seat === 2);
+    expect(seat1).toHaveLength(1);
+    expect(seat1[0]!.startTs).toBeCloseTo(t0 + 1000 - 20, -1);
+    expect(seat2).toHaveLength(1);
+    expect(seat2[0]!.startTs).toBeGreaterThanOrEqual(t0 + 1900);
+    expect(seat2[0]!.overlapWith).toEqual([1]);
+    expect(r.overlapMs).toBeGreaterThan(900);
+  });
+
+  it("falls back to energy above the noise floor without a detector, and says so", () => {
+    const mic1 = [...run(200, -70), ...run(100, -25), ...run(200, -70)];
+    const mic2 = [...run(200, -70), ...run(100, -45), ...run(200, -70)];
+    const { tracks } = session([mic1, mic2]);
+    for (const t of tracks) (t.features as { speech: Float32Array | null }).speech = null;
+    const r = analyse({ tracks });
+    expect(r.quality.detector).toBe("energy");
+    expect(r.quality.warnings.some((w) => w.startsWith("No speech detector"))).toBe(true);
+    expect(r.segments.map((x) => x.seat)).toEqual([1]);
+  });
+});
+
+describe("Silero VAD", () => {
+  it("loads the shipped model (checksum verified) and scores windows quickly", async () => {
+    const vad = await loadSilero();
+    const r = mulberry32(1);
+    const noise = Float32Array.from({ length: 512 }, () => (r() - 0.5) * 0.02);
+    vad.reset();
+    const t = performance.now();
+    let p = 0;
+    for (let i = 0; i < 100; i++) p = await vad.next(noise);
+    expect(p).toBeGreaterThanOrEqual(0);
+    expect(p).toBeLessThan(0.5); // quiet noise is not speech
+    expect((performance.now() - t) / 100).toBeLessThan(5);
   });
 });
 
@@ -166,7 +212,7 @@ describe("smoothing and masks", () => {
     raw.fill(1, 300, 340);
     const valid = new Uint8Array(400).fill(1);
     valid.fill(0, 345, 400); // no data after 345: hangover stops there
-    const m = smoothActivity(raw, valid, null, p);
+    const m = smoothSpeech(raw, valid, p);
     expect(maskToRuns(m)).toEqual([8, 130, 298, 345]);
   });
 
@@ -176,7 +222,7 @@ describe("smoothing and masks", () => {
     raw.fill(1, 70, 120);
     const valid = new Uint8Array(200).fill(1);
     valid[65] = 0;
-    const m = smoothActivity(raw, valid, null, { ...p, hangover: 0, preRoll: 0 });
+    const m = smoothSpeech(raw, valid, { ...p, hangover: 0, preRoll: 0 });
     expect(maskToRuns(m)).toEqual([10, 60, 70, 120]);
   });
 
@@ -269,19 +315,24 @@ describe("WAV", () => {
 });
 
 describe("quick calibration check", () => {
+  const window = (s: ReturnType<typeof synthesise>) => ({
+    fromTs: s.turns[0]!.startTs - 2000,
+    toTs: s.turns[3]!.endTs + 1000,
+  });
+
   it("passes headsets, flags laptop mics with advice, and is fast", () => {
     for (const profile of ["headset", "laptop"] as const) {
       const s = synthesise({ seed: 11, durationSec: 36, profile });
-      const tracks = trackInputs(s);
-      const from = s.turns[0]!.startTs - 2000;
-      const to = s.turns[3]!.endTs + 1000;
-      const channels = calibrationChannelsFromTracks(tracks, from, to);
-      const report = quickCalibrationCheck(channels, s.turns);
+      const t = performance.now();
+      const report = quickCalibrationCheck(trackInputs(s), s.turns, window(s));
+      expect(performance.now() - t).toBeLessThan(200);
       expect(report.seats).toHaveLength(4);
-      expect(report.elapsedMs).toBeLessThan(200);
       if (profile === "headset") {
         expect(report.ok).toBe(true);
         for (const q of report.seats) expect(q.marginDb!).toBeGreaterThan(12);
+        // the leakage is measured against the known mix
+        for (const [i, row] of report.leakage.matrixDb.entries())
+          for (const [j, g] of row.entries()) expect(Math.abs(g! - s.leakageDb[i]![j]!)).toBeLessThan(2);
       } else {
         expect(report.ok).toBe(false);
         const low = report.seats.filter((q) => q.issues.includes("low_margin"));
@@ -289,21 +340,13 @@ describe("quick calibration check", () => {
         expect(low[0]!.advice).toMatch(/headset/);
         expect(report.warnings.length).toBeGreaterThan(0);
       }
-      // Leakage rows are measured against the known mix.
-      report.leakage.matrixDb.forEach((row, i) => {
-        row.forEach((g, j) => {
-          if (g !== null && !report.leakage.belowFloor[i]![j])
-            expect(Math.abs(g - s.leakageDb[i]![j]!)).toBeLessThan(1.5);
-        });
-      });
     }
   });
 
   it("reports a seat that stayed silent in its turn", () => {
     const s = synthesise({ seed: 12, durationSec: 36, profile: "headset" });
     const tracks = trackInputs(s).filter((t) => t.seat !== 2);
-    const channels = calibrationChannelsFromTracks(tracks, s.turns[0]!.startTs - 2000, s.turns[3]!.endTs);
-    const report = quickCalibrationCheck(channels, s.turns);
+    const report = quickCalibrationCheck(tracks, s.turns, window(s));
     const q2 = report.seats.find((q) => q.seat === 2)!;
     expect(q2.ok).toBe(false);
     expect(q2.issues).toContain("no_signal");

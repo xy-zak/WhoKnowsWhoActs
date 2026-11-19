@@ -1,5 +1,6 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
 import type { AppContext } from "../app";
+import type { AudioService } from "../audio/service";
 import { loadOnboardingContent } from "../content";
 import { exportsDirFor } from "../db/stores";
 import { deleteSession, listSessionDeletions } from "../gdpr/deleteSession";
@@ -16,7 +17,7 @@ type Guard = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
  * look-up and erasure, key sheets and takedown cards exist only for the
  * participant database (simulated sessions have no participants).
  */
-export function registerGdprApi(ctx: AppContext, guard: Guard) {
+export function registerGdprApi(ctx: AppContext, guard: Guard, audio: Pick<AudioService, "busyReason">) {
   const { app, store, stores, scenarios, runtime, hub } = ctx;
   const opts = { preHandler: guard };
 
@@ -105,6 +106,8 @@ export function registerGdprApi(ctx: AppContext, guard: Guard) {
           .code(409)
           .send({ error: "This session is still running. Close or abort it first, then delete it." });
       }
+      const busy = audio.busyReason(id);
+      if (busy) return reply.code(409).send({ error: `${busy}: delete the session when it is done.` });
       hub.release(id);
       const r = deleteSession(found.store, id, {
         exportsDir: exportsDirFor(runtime.exportsDir, found.players),
@@ -149,6 +152,13 @@ export function registerGdprApi(ctx: AppContext, guard: Guard) {
         return reply.code(409).send({
           error: "This participant is in the running session. Withdraw them, end the session, then erase.",
         });
+      }
+      for (const occ of lookupParticipant(store, code).occurrences) {
+        const busy = audio.busyReason(occ.sessionId);
+        if (busy)
+          return reply
+            .code(409)
+            .send({ error: `${busy} (session ${occ.sessionId}): erase when it is done.` });
       }
       const result = eraseParticipant(store, code, req.body?.note ?? "");
       if (attached) hub.reloadActiveSession();

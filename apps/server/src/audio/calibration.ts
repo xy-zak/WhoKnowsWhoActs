@@ -3,8 +3,7 @@ import {
   type CalibrationReport,
   type CalibrationTurn,
   type ChunkMeta,
-  calibrationChannelsFromTracks,
-  EnvelopeBuilder,
+  FeatureBuilder,
   quickCalibrationCheck,
   type TrackInput,
 } from "./attribution";
@@ -71,14 +70,14 @@ export class CalibrationCollector {
     for (const [trackId, t] of this.tracks) {
       const chunks = [...t.chunks].sort((a, b) => a.meta.startSample - b.meta.startSample);
       const base = chunks[0]?.meta.startSample ?? 0;
-      const builder = new EnvelopeBuilder({ sampleRate: AUDIO_SAMPLE_RATE });
+      const builder = new FeatureBuilder(); // levels only: no speech model on the live path
       for (const c of chunks) builder.push(c.samples, c.meta.startSample - base);
       out.push({
         trackId,
         seat: t.seat,
         sampleRate: AUDIO_SAMPLE_RATE,
         chunks: chunks.map((c) => ({ ...c.meta, startSample: c.meta.startSample - base })),
-        envelope: builder.finish(),
+        features: builder.finish(),
       });
     }
     return out;
@@ -87,8 +86,7 @@ export class CalibrationCollector {
   /** Run the quick leakage check on the collected audio, over the turns' window plus a margin (milliseconds). */
   check(turns: readonly CalibrationTurn[]): CalibrationReport {
     const toTs = Math.max(this.fromTs, ...turns.map((t) => t.endTs)) + CALIBRATION_MARGIN_MS;
-    const channels = calibrationChannelsFromTracks(this.trackInputs(), this.fromTs, toTs);
-    return quickCalibrationCheck(channels, turns);
+    return quickCalibrationCheck(this.trackInputs(), turns, { fromTs: this.fromTs, toTs });
   }
 }
 

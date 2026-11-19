@@ -208,7 +208,7 @@ describe("calibration advice", () => {
   it("gives plain advice per failing seat", () => {
     expect(calibrationAdvice({ seat: 1, ownDb: -22, bestOtherDb: -39, marginDb: 17, ok: true })).toBeNull();
     expect(calibrationAdvice({ seat: 3, ownDb: -30.1, bestOtherDb: -34.2, marginDb: 4.1, ok: false })).toBe(
-      "Seat 3: own voice only +4.1 dB over the others. Move the laptop closer or use a headset, then redo the calibration.",
+      "Seat 3: own voice only +4.1 dB over the others. Check the headset is plugged in, chosen as microphone and its mic sits at the corner of the mouth, then redo the calibration.",
     );
     expect(calibrationAdvice({ seat: 4, ownDb: null, bestOtherDb: null, marginDb: null, ok: false })).toMatch(
       /^No audio from seat 4/,

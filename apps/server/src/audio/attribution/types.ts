@@ -1,35 +1,36 @@
 /**
- * Local input/output types and tunable parameters of the speaker-attribution engine.
+ * Input/output types and tunable parameters of the speaker-attribution engine (see `index.ts`).
  *
- * The algorithm itself is documented in `index.ts`. These types are deliberately **local to the
- * engine**: the job runner (wave 2) maps them onto the shared REST contracts in
- * `packages/shared/src/audio.ts`. Everything here is plain data (numbers, strings, typed arrays),
- * so it can cross a `worker_thread` boundary with structured clone.
+ * Plain data only (numbers, strings, typed arrays), so everything can cross a `worker_thread`
+ * boundary. The job runner maps the result onto the shared REST contracts in
+ * `packages/shared/src/audio.ts`.
  *
- * Conventions used throughout the engine:
+ * Conventions:
  * - **Time** is server-epoch milliseconds (the clock of `serverTs` in the event log).
- * - **Levels** are dBFS of the mean-square energy: 0 dB is a full-scale square wave, −3 dB a
- *   full-scale sine, and −120 dB is used for digital silence.
- * - **Leakage** `G[s][j]` (dB) is how much louder (positive) or quieter (negative) seat `s`'s voice
- *   arrives on mic `j` than on its own mic `s`; `G[s][s] = 0`. It includes the gain difference
- *   between the two devices, so it can be positive when mic `j` is set much louder.
- * - **Frames** are 10 ms hops (20 ms analysis windows). Frame `f` of the session timeline covers
- *   `[t0 + 10·f, t0 + 10·(f+1))`.
+ * - **Levels** are dBFS of the mean-square energy (0 dB = full-scale square wave); −120 dB stands
+ *   for digital silence. `NaN` means "no data" (a lost chunk, no track), never silence.
+ * - **Frames** are 10 ms. Frame `f` of the session timeline covers `[t0 + 10·f, t0 + 10·(f+1))`.
+ * - **Leakage** `L[s][j]` (dB) is how loud seat `s`'s voice is on mic `j` relative to its own
+ *   mic `s` (negative: quieter). It includes the gain difference between the two mics.
  */
 
-import { type AttributionGrade, AUDIO_SAMPLE_RATE, AUDIO_SILENCE_DB } from "@wkwa/shared";
+import {
+  type AttributionGrade,
+  AUDIO_SAMPLE_RATE,
+  AUDIO_SILENCE_DB,
+  CALIBRATION_MIN_MARGIN_DB,
+} from "@wkwa/shared";
 
 /** Version of the algorithm; stored with every derivative so results can be traced to the code. */
-export const ENGINE_VERSION = "wkwa-energy-attribution/1.0.0";
+export const ENGINE_VERSION = "wkwa-gate-attribution/2.0.0";
 /** The capture format: 16 kHz mono signed 16-bit PCM. */
 export const SAMPLE_RATE = AUDIO_SAMPLE_RATE;
-/** Frame hop of every envelope and of the session timeline. */
+/** Frame length of the features and of the session timeline. */
 export const HOP_MS = 10;
-/** Length of the analysis window centred on each hop. */
-export const WINDOW_MS = 20;
+export const HOP_SAMPLES = (SAMPLE_RATE * HOP_MS) / 1000;
 /** Level reported for digital silence (and the floor of every level). */
 export const SILENCE_DB = AUDIO_SILENCE_DB;
-/** At or below this level a frame counts as a dead signal (digital silence), not as quiet room noise. */
+/** At or below this level a frame is a dead signal (digital silence), not quiet room noise. */
 export const DEAD_DB = -110;
 
 /** Metadata of one stored 5 s chunk of a track (as received from the client). */
@@ -45,30 +46,26 @@ export interface ChunkMeta {
 }
 
 /**
- * Per-frame energy envelope of one track, produced by `EnvelopeBuilder`.
- * Frame `k` covers samples `[k·hop, (k+1)·hop)`; its energy is measured over a 20 ms window
- * centred on that hop. `NaN` energy means "no data" (a lost chunk), not silence.
+ * Per-frame features of one track (`FeatureBuilder`). Frame `k` covers samples `[160k, 160k + 160)`.
  */
-export interface Envelope {
-  sampleRate: number;
-  hopSamples: number;
+export interface TrackFeatures {
   frames: number;
-  /** Mean-square energy after a 100 Hz high-pass (dBFS); `NaN` = no samples for this frame. */
+  /** Mean-square energy after a 100 Hz high-pass (dBFS); `NaN` = no samples. */
   energyDb: Float32Array;
-  /** Highest absolute raw sample in the frame's hop (dBFS); `NaN` = no data. */
-  peakDb: Float32Array;
-  /** 1 when at least one raw sample in the frame's hop is at full scale. */
+  /** 1 when a sample in the frame is at full scale. */
   clipped: Uint8Array;
+  /** Speech probability (0–1) from the voice activity detector; null when none ran (energy is used). */
+  speech: Float32Array | null;
 }
 
-/** One continuous capture run of one seat, reduced to its envelope (the PCM is not needed for analysis). */
+/** One continuous capture run of one seat, reduced to its features. */
 export interface TrackInput {
   trackId: string;
   seat: number;
   /** Nominal sample rate (default 16 000). */
   sampleRate?: number;
   chunks: readonly ChunkMeta[];
-  envelope: Envelope;
+  features: TrackFeatures;
 }
 
 /** One calibration turn as logged by the server: seat `seat` was asked to read between the two times. */
@@ -82,36 +79,30 @@ export interface AnalysisInput {
   tracks: readonly TrackInput[];
   /** All seats of the session (default: the seats that have tracks). Seats without audio are reported. */
   seats?: readonly number[];
-  /** Logged calibration turns; without them the leakage matrix is estimated from the session itself. */
+  /** Logged calibration turns; without them a conservative default leakage is used. */
   calibration?: { turns: readonly CalibrationTurn[] } | null;
   /** Limit the analysis to this window (server-epoch ms); default: from the first to the last sample. */
   window?: { fromTs: number; toTs: number } | null;
   options?: Partial<AttributionOptions>;
 }
 
-/** Optional callbacks for a job runner. */
-export interface AnalysisHooks {
-  /** Called between stages; `fraction` is the share of the work done (0–1). */
-  onProgress?: (progress: { stage: string; fraction: number }) => void;
-}
-
 /** Tunable parameters. Defaults (`DEFAULT_OPTIONS`) are the values the tests validate. */
 export interface AttributionOptions {
-  /** Noise floor: length of the sliding window. */
-  floorWindowSec: number;
-  /** Noise floor: the low percentile of frame energies taken as the floor. */
+  /** Speech detector: a frame starts speech at this probability… */
+  speechOnProb: number;
+  /** …and stays speech while it is at least this (hysteresis). */
+  speechOffProb: number;
+  /** Without a speech detector: speech is energy this far above the mic's noise floor. */
+  energyMarginDb: number;
+  /** Noise floor: this low percentile of a mic's frame energies. */
   floorPercentile: number;
-  /** A channel is a speech candidate in a frame when it is at least this far above its noise floor. */
-  activeMarginDb: number;
-  /** A second seat counts as overlapping speech when its mic exceeds the predicted leakage by this much. */
-  overlapMarginDb: number;
-  /** …or by this multiple of the measured spread of that leakage, whichever is larger. */
-  overlapSpreadFactor: number;
-  /** Residuals larger than this (dB) count linearly instead of quadratically in the pattern fit. */
-  huberDb: number;
-  /** Extra cost of explaining a frame by a seat whose own mic has no data at that moment. */
-  absentPenalty: number;
-  /** A frame is ambiguous when the best and second-best speaker differ by less than this (dB). */
+  /** Gate: own level must exceed every other speaker's predicted leakage onto this mic by this much. */
+  gateMarginDb: number;
+  /** Gate: each other mic's peak within ± this is compared (covers the timing error between devices). */
+  alignToleranceMs: number;
+  /** Leakage used without a calibration (conservative: laptop-like). */
+  defaultLeakageDb: number;
+  /** A speech frame within this distance of the gate threshold counts as ambiguous. */
   ambiguousDb: number;
   /** Smoothing: speech runs shorter than this are dropped. */
   minSpeechMs: number;
@@ -119,30 +110,18 @@ export interface AttributionOptions {
   minGapMs: number;
   /** Smoothing: each speech run is extended by this much after it ends… */
   hangoverMs: number;
-  /** …and by this much before it starts (compensates the analysis window). */
+  /** …and by this much before it starts. */
   preRollMs: number;
-  /** Lag refinement: window length for envelope cross-correlation. */
-  lagWindowSec: number;
-  /** Lag refinement: search range (±). */
-  lagMaxMs: number;
-  /** Lag refinement: minimum normalised correlation for a window to count. */
-  lagMinCorr: number;
   /** Calibration: only frames where the reader's mic is this far above its floor are used. */
   calibrationActiveDb: number;
   /** Calibration: fewer active frames than this (10 ms each) means "not enough speech". */
   minCalibrationFrames: number;
-  /** Calibration quality: required gain-invariant margin between a seat and every other seat. */
+  /** Calibration: required margin between a seat's own mic and every other mic (headsets: ≈ 25 dB). */
   minMarginDb: number;
-  /** Calibration quality: required own-voice level above the own noise floor. */
+  /** Calibration: required own-voice level above the own noise floor. */
   minSnrDb: number;
-  /** Calibration quality: share of clipped frames above which the seat is flagged. */
+  /** Calibration: share of clipped frames above which the seat is flagged. */
   maxClippingShare: number;
-  /** Leakage estimation without calibration: minimum level above floor of the dominant mic. */
-  estimateMinSnrDb: number;
-  /** Leakage estimation without calibration: the same mic must dominate this many frames in a row. */
-  estimateMinRunFrames: number;
-  /** Warn when the leakage seen during the session differs from the calibration by more than this. */
-  leakageChangeWarnDb: number;
   /** Warn above this share of ambiguous speech frames. */
   ambiguousWarnShare: number;
   /** Warn above this share of clipped frames (session-wide, per seat). */
@@ -152,29 +131,23 @@ export interface AttributionOptions {
 }
 
 export const DEFAULT_OPTIONS: AttributionOptions = {
-  floorWindowSec: 30,
-  floorPercentile: 0.05,
-  activeMarginDb: 6,
-  overlapMarginDb: 6,
-  overlapSpreadFactor: 3,
-  huberDb: 4,
-  absentPenalty: 16,
+  speechOnProb: 0.5,
+  speechOffProb: 0.35,
+  energyMarginDb: 10,
+  floorPercentile: 0.1,
+  gateMarginDb: 6,
+  alignToleranceMs: 60,
+  defaultLeakageDb: -10,
   ambiguousDb: 3,
   minSpeechMs: 250,
   minGapMs: 200,
   hangoverMs: 100,
   preRollMs: 20,
-  lagWindowSec: 40,
-  lagMaxMs: 500,
-  lagMinCorr: 0.3,
   calibrationActiveDb: 10,
   minCalibrationFrames: 100,
-  minMarginDb: 10,
+  minMarginDb: CALIBRATION_MIN_MARGIN_DB,
   minSnrDb: 15,
   maxClippingShare: 0.01,
-  estimateMinSnrDb: 15,
-  estimateMinRunFrames: 10,
-  leakageChangeWarnDb: 4,
   ambiguousWarnShare: 0.1,
   clippingWarnShare: 0.005,
   maxPlausibleDriftPpm: 1000,
@@ -184,7 +157,7 @@ export function resolveOptions(partial?: Partial<AttributionOptions>): Attributi
   return { ...DEFAULT_OPTIONS, ...(partial ?? {}) };
 }
 
-/** The common session timeline: `frames` hops of `hopMs` starting at `t0`. */
+/** The common session timeline: `frames` frames of `hopMs` starting at `t0`. */
 export interface Timeline {
   t0: number;
   hopMs: number;
@@ -192,67 +165,32 @@ export interface Timeline {
 }
 
 /**
- * Where one track sits on the session timeline. Sample `n` of the track was captured at
- * `startTs + offsetMs + n · msPerSample` (server-epoch ms).
+ * Where one track sits on the server clock: sample `n` was captured at `startTs + n · msPerSample`.
  */
 export interface TrackAlignment {
   trackId: string;
   seat: number;
-  /** Time of sample 0 from the robust regression of `clientTs` on `startSample`. */
   startTs: number;
-  /** Correction from envelope cross-correlation (and the drift refinement), added to `startTs`. */
-  offsetMs: number;
-  /** Final sample-clock drift: positive means the device produced more samples per second than nominal. */
-  driftPpm: number;
-  /** Drift from the timestamp regression alone (before the cross-correlation refinement). */
-  clockDriftPpm: number;
-  /** Duration of one sample on the server clock (`1000 / (rate · (1 + driftPpm·1e-6))`). */
   msPerSample: number;
+  /** Sample-clock drift: positive means the device produced more samples per second than nominal. */
+  driftPpm: number;
   samples: number;
-  /** `startTs + offsetMs`, and the time just after the last sample. */
-  alignedStartTs: number;
-  alignedEndTs: number;
-  /** 0–1: how well the cross-correlation confirmed this track's alignment (0 = timestamps only). */
-  confidence: number;
-  /** The reference track all others are aligned to (the one with the most data). */
-  anchor: boolean;
-  /** Tracks of one seat share a clock group (one device) unless a track's own rate disagreed. */
-  clockGroup: string;
-  /** RMS residual of the timestamp regression (ms): the client timestamp jitter. */
-  clockResidualMs: number;
-  clockOutliers: number;
-  lagObservations: number;
-  /** RMS residual of this track's accepted cross-correlation lags after the solve (ms). */
-  lagResidualMs: number | null;
+  /** Time just after the last sample. */
+  endTs: number;
+  /** RMS residual of the clock fit (ms): the jitter of the client timestamps. */
+  residualMs: number;
 }
 
-/** The leakage matrix, indexed `[speaker][mic]` in the order of `seats`. */
+/** The leakage matrix, indexed `[speaker][mic]` in the order of `seats`; diagonal 0. */
 export interface LeakageReport {
   seats: number[];
-  /** `matrixDb[s][j]` = G[s][j] in dB; diagonal 0; null when it could not be measured. */
+  /** `matrixDb[s][j]` = L[s][j] in dB; null when the calibration could not measure it. */
   matrixDb: (number | null)[][];
-  /** Robust spread (σ, dB) of the frame-by-frame measurements behind each entry. */
-  spreadDb: (number | null)[][];
-  /** True when the leakage was below the mic's noise floor most of the time (the value is an upper bound). */
-  belowFloor: boolean[][];
-  /** Where the matrix came from overall (`calibration` when at least one row was calibrated). */
-  source: "calibration" | "estimated";
-  rowSource: Array<"calibration" | "estimated" | "default">;
-  /** Number of frames behind each row. */
-  rowFrames: number[];
-  /** The same matrix re-estimated from the session's own single-speaker frames (consistency check). */
-  sessionMatrixDb: (number | null)[][] | null;
-  /** Largest absolute difference between calibration and session matrices (dB), when both exist. */
-  maxChangeDb: number | null;
+  /** `calibration` when at least one row was measured, else `default`. */
+  source: "calibration" | "default";
 }
 
-export type CalibrationIssue =
-  | "no_signal"
-  | "not_enough_speech"
-  | "too_quiet"
-  | "low_margin"
-  | "clipping"
-  | "others_spoke";
+export type CalibrationIssue = "no_signal" | "not_enough_speech" | "too_quiet" | "low_margin" | "clipping";
 
 /** Calibration quality of one seat. */
 export interface CalibrationSeatQuality {
@@ -266,16 +204,12 @@ export interface CalibrationSeatQuality {
   /** Level of the seat's voice on the other mic that hears it best (dBFS), and which seat that is. */
   bestOtherDb: number | null;
   bestOtherSeat: number | null;
-  /** `ownDb − bestOtherDb`: how much louder the voice is on its own mic than on the nearest other mic. */
-  rawMarginDb: number | null;
   /**
-   * Gain-invariant decision margin: min over other seats j of −(G[s][j] + G[j][s]) / 2. Mic gain
-   * differences cancel in this sum, so it is the margin the attribution actually works with.
+   * Gain-invariant separation: min over other seats j of −(L[s][j] + L[j][s]) / 2 (mic gain
+   * differences cancel in the sum); −L[s][j] where only one direction was measured.
    */
   marginDb: number | null;
   clippingShare: number;
-  /** Share of the turn in which another seat's mic showed speech that was not this seat's leakage. */
-  othersActiveShare: number;
   ok: boolean;
   issues: CalibrationIssue[];
   /** One-line advice for the facilitator, or null when the seat is fine. */
@@ -287,8 +221,6 @@ export interface CalibrationReport {
   seats: CalibrationSeatQuality[];
   leakage: LeakageReport;
   warnings: string[];
-  /** Compute time (ms). */
-  elapsedMs: number;
 }
 
 /** One stretch of speech by one seat on the server clock. */
@@ -299,7 +231,7 @@ export interface SpeechSegment {
   durationMs: number;
   /** Mean level of the seat's own mic over the segment's speech frames (dBFS). */
   meanDb: number;
-  /** 0–1: mean per-frame confidence of the attribution inside the segment. */
+  /** 0–1: mean speech probability (or share of gated speech frames) inside the segment. */
   confidence: number;
   /** True when another seat was speaking at the same time for part of the segment. */
   overlap: boolean;
@@ -313,65 +245,33 @@ export interface SeatMask {
   runs: number[];
 }
 
-export interface LagPairReport {
-  seatA: number;
-  seatB: number;
-  windows: number;
-  accepted: number;
-  /** Median measured lag of B relative to A before correction (ms). */
-  medianLagMs: number | null;
-  meanCorr: number | null;
-}
-
-export interface LagReport {
-  windows: number;
-  observations: number;
-  accepted: number;
-  /** RMS of the accepted lags around the solved offsets (ms). */
-  residualRmsMs: number | null;
-  pairs: LagPairReport[];
-}
-
 export interface SeatQuality {
   seat: number;
   tracks: number;
-  /** Time covered by this seat's audio (ms). */
-  dataMs: number;
-  /** Share of the timeline without audio from this seat (no track or lost chunks). */
-  noDataShare: number;
-  /** Share of the timeline where the seat sent digital silence. */
-  deadShare: number;
-  /** `noDataShare + deadShare`. */
-  noSignalShare: number;
+  /** Share of the timeline with usable audio from this seat (not lost, not digital silence). */
+  coverage: number;
   /** Share of this seat's frames with clipping. */
   clippingShare: number;
-  /** Median noise floor (dBFS). */
+  /** Noise floor (dBFS). */
   noiseFloorDb: number | null;
   /** Median own-mic level in this seat's attributed speech (dBFS). */
   speechLevelDb: number | null;
   /** `speechLevelDb − noiseFloorDb`. */
   snrDb: number | null;
+  /** Clock drift of the seat's longest track (ppm). */
+  driftPpm: number | null;
   talkTimeMs: number;
   overlapMs: number;
-  /** Share of this seat's dominant frames that were ambiguous. */
-  ambiguousShare: number;
 }
 
 export interface QualityReport {
   /** `good`: no warnings; `fair`: warnings, results usable with care; `poor`: results unreliable. */
   grade: AttributionGrade;
+  /** How speech was detected: the Silero model, or energy above the noise floor (fallback). */
+  detector: "silero" | "energy";
   calibration: CalibrationSeatQuality[] | null;
-  leakageSource: "calibration" | "estimated";
-  /** Share of speech frames (any mic active) where the speaker could not be told apart clearly. */
-  ambiguousFrameShare: number;
-  /** Share of all frames with audio that were clipped. */
-  clippingShare: number;
-  /** Mean over seats of the share of the timeline without a usable signal. */
-  noSignalShare: number;
-  /** Share of speech frames best explained by a seat whose mic had no data at that moment. */
-  absentSpeakerShare: number;
-  driftPpm: Array<{ trackId: string; seat: number; driftPpm: number }>;
-  lag: LagReport;
+  /** Share of speech frames whose gate decision was within `ambiguousDb` of the threshold. */
+  ambiguousShare: number;
   seats: SeatQuality[];
   warnings: string[];
 }
@@ -390,11 +290,4 @@ export interface AttributionResult {
   overlapMs: number;
   masks: SeatMask[];
   quality: QualityReport;
-  /** Compute time per stage (ms). */
-  timingsMs: Record<string, number>;
-}
-
-/** Server time (ms) at which sample `n` of an aligned track was captured. */
-export function sampleTime(alignment: TrackAlignment, n: number): number {
-  return alignment.startTs + alignment.offsetMs + n * alignment.msPerSample;
 }

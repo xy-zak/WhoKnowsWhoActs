@@ -17,13 +17,15 @@
 
 import { AUDIO_SAMPLE_RATE } from "@wkwa/shared";
 import {
+  type AttributionResult,
   type CalibrationTurn,
   type ChunkMeta,
-  EnvelopeBuilder,
+  FeatureBuilder,
+  type TrackAlignment,
   type TrackInput,
 } from "../src/audio/attribution";
-import type { AttributionResult, TrackAlignment } from "../src/audio/attribution/types";
-import { sampleTime } from "../src/audio/attribution/types";
+
+const sampleTime = (a: TrackAlignment, n: number) => a.startTs + n * a.msPerSample;
 
 export const FS = AUDIO_SAMPLE_RATE;
 const CHUNK = 80_000;
@@ -337,11 +339,12 @@ export function deliveredChunks(t: SynthTrack): Array<{ startSample: number; sam
   }));
 }
 
+/** Track features without a speech model (the synthetic sources are noise, not voices). */
 export function trackInputs(s: SynthSession): TrackInput[] {
   return s.tracks.map((t) => {
-    const b = new EnvelopeBuilder();
+    const b = new FeatureBuilder();
     for (const c of deliveredChunks(t)) b.push(c.samples, c.startSample);
-    return { trackId: t.trackId, seat: t.seat, chunks: t.chunks, envelope: b.finish() };
+    return { trackId: t.trackId, seat: t.seat, chunks: t.chunks, features: b.finish() };
   });
 }
 
@@ -350,9 +353,9 @@ export function trueSampleTime(t: SynthTrack, n: number): number {
   return t.trueStartMs + (n / (FS * (1 + t.driftPpm * 1e-6))) * 1000;
 }
 
-/** Offset of the engine's clock from true time, taken at the anchor track's midpoint (ms). */
+/** Offset of the engine's clock from true time, taken at the longest track's midpoint (ms). */
 export function anchorBias(result: AttributionResult, s: SynthSession): number {
-  const a = result.alignment.find((x) => x.anchor)!;
+  const a = [...result.alignment].sort((x, y) => y.samples - x.samples)[0]!;
   const t = s.tracks.find((x) => x.trackId === a.trackId)!;
   const n = t.pcm.length / 2;
   return sampleTime(a, n) - trueSampleTime(t, n);

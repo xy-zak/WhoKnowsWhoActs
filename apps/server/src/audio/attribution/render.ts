@@ -5,8 +5,8 @@
  * timeline's `t0` and has exactly 160 samples per timeline frame, so sample `m` is the sound at
  * `t0 + m / 16` ms on the server clock for every seat. Each output sample is read from the track
  * that covers it at the fractional position given by the track's alignment
- * (`(t − startTs − offsetMs) / msPerSample`), with 4-point Catmull–Rom interpolation; that
- * removes clock drift (fractional resampling) and the measured offsets in one step. Before, between
+ * (`(t − startTs) / msPerSample`), with 4-point Catmull–Rom interpolation; that
+ * removes clock drift (fractional resampling). Before, between
  * and after tracks, and in lost chunks, the output is digital silence.
  *
  * `renderClean` does the same and multiplies by a gain that is 1 on frames in the seat's speech
@@ -154,9 +154,9 @@ export async function* renderAligned(
       alignment: a,
       source,
       reader: null,
-      start: a.startTs + a.offsetMs,
-      end: a.startTs + a.offsetMs + samples * a.msPerSample,
-      from: a.startTs + a.offsetMs,
+      start: a.startTs,
+      end: a.startTs + samples * a.msPerSample,
+      from: a.startTs,
     });
   }
   plans.sort((x, y) => x.start - y.start);

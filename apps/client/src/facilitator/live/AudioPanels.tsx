@@ -1,4 +1,5 @@
 import {
+  CALIBRATION_MIN_MARGIN_DB,
   currentCalibrationTurn,
   type FacilitatorCommand,
   type FacilitatorPayload,
@@ -11,7 +12,6 @@ import { useStore } from "../../net/store";
 import { Button, Callout, Icon, Panel, SeatDot, StatusTag, usePromptReason } from "../../ui";
 import {
   type AudioCheck,
-  CALIBRATION_MIN_MARGIN_DB,
   calibrationAdvice,
   micStatsOf,
   type TrackStatusLite,
@@ -64,8 +64,8 @@ export function CalibrationCard({ st }: { st: ReadonlyGameState }) {
           <div className="row">
             <CalibrationTag st={st} short />
             <span className="muted">
-              No calibration: speaker attribution estimates the leakage between the microphones from the
-              recordings (less exact with laptop microphones).
+              No calibration: speaker attribution assumes a conservative leakage between the microphones
+              (overlapping speech is missed more often).
             </span>
           </div>
         )}
