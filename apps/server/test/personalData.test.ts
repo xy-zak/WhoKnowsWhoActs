@@ -235,11 +235,22 @@ describe("personal-data map", () => {
     expect(before.exports.map((e) => e.sessionId).sort()).toEqual(sessions);
     const otherRows = rowsContaining(db, others[0]!);
     const filesBefore = files.listFiles().length;
+    // a row large enough that deleting it frees whole pages
+    store.insertTelemetry(a.sessionId, 1, code, 1, 0, [
+      {
+        type: "screen_view",
+        clientTs: nowTs(),
+        payload: { screen: "x".repeat(65536) },
+      } as unknown as TelemetryItem,
+    ]);
 
     const r = map.erase(code.toLowerCase(), "invariant");
 
     expect(r.erased).toBe(true);
-    expect(r.rows).toMatchObject({ events: 2, telemetry: 2, audioTracks: 2, audioChunks: 4 });
+    // physically gone: freed pages are overwritten, and VACUUM left none on the free list
+    expect(db.pragma("secure_delete", { simple: true })).toBe(1);
+    expect(db.pragma("freelist_count", { simple: true })).toBe(0);
+    expect(r.rows).toMatchObject({ events: 2, telemetry: 3, audioTracks: 2, audioChunks: 4 });
     // each session: their cleaned track and the session-wide segments (computed from their track)
     expect(r.rows.audioDerivatives).toBe(4);
     expect(r.audioFiles).toEqual({ removed: 4, failed: [] });
