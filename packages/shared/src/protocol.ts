@@ -623,7 +623,7 @@ export const MESSAGES: {
       },
       "telemetry:live": {
         description: "Newly stored telemetry rows (chatty types such as state_received are omitted).",
-        schema: "{ items: StoredTelemetry[] }",
+        schema: "{ items: StoredTelemetry[], reset: boolean }",
         logged: "—",
       },
       "presence:live": {
