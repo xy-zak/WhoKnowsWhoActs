@@ -47,9 +47,6 @@ export interface RenderTiming {
 export interface RenderOptions {
   /** Output block size in samples (default 16 000 = 1 s). */
   blockSamples?: number;
-  /** Render only frames `[fromFrame, toFrame)` of the timeline (default: all). */
-  fromFrame?: number;
-  toFrame?: number;
 }
 
 export interface CleanOptions extends RenderOptions {
@@ -114,11 +111,8 @@ class SequentialPcmReader {
 }
 
 /** Number of samples `renderAligned` / `renderClean` will produce. */
-export function renderedSampleCount(timeline: Timeline, options: RenderOptions = {}): number {
-  const perFrame = Math.round((timeline.hopMs * OUT_RATE) / 1000);
-  const from = Math.max(0, options.fromFrame ?? 0);
-  const to = Math.min(timeline.frames, options.toFrame ?? timeline.frames);
-  return Math.max(0, to - from) * perFrame;
+export function renderedSampleCount(timeline: Timeline): number {
+  return timeline.frames * Math.round((timeline.hopMs * OUT_RATE) / 1000);
 }
 
 interface TrackPlan {
@@ -139,9 +133,7 @@ export async function* renderAligned(
   options: RenderOptions = {},
 ): AsyncGenerator<Int16Array> {
   const { timeline } = timing;
-  const perFrame = Math.round((timeline.hopMs * OUT_RATE) / 1000);
-  const from = Math.max(0, options.fromFrame ?? 0) * perFrame;
-  const total = renderedSampleCount(timeline, options);
+  const total = renderedSampleCount(timeline);
   const block = Math.max(1, options.blockSamples ?? OUT_RATE);
   const msPerOut = 1000 / OUT_RATE;
   const plans: TrackPlan[] = [];
@@ -169,8 +161,8 @@ export async function* renderAligned(
   }
   let scratch = new Int16Array(0);
   try {
-    for (let m0 = from; m0 < from + total; m0 += block) {
-      const len = Math.min(block, from + total - m0);
+    for (let m0 = 0; m0 < total; m0 += block) {
+      const len = Math.min(block, total - m0);
       const out = new Int16Array(len);
       const tA = timeline.t0 + m0 * msPerOut;
       const tB = timeline.t0 + (m0 + len) * msPerOut;
@@ -256,24 +248,22 @@ function fillGain(
 
 /**
  * A seat's aligned audio with everything outside its speech mask attenuated (default −30 dB,
- * 10 ms raised-cosine fades outside the mask). `mask` is the seat's `SeatMask` from the result or a
- * frame-level 0/1 array on the same timeline.
+ * 10 ms raised-cosine fades outside the mask). `mask` is the seat's `SeatMask` from the result.
  */
 export async function* renderClean(
   seat: number,
   sources: readonly TrackSource[],
   timing: RenderTiming,
-  mask: SeatMask | Uint8Array,
+  mask: SeatMask,
   options: CleanOptions = {},
 ): AsyncGenerator<Int16Array> {
   const { timeline } = timing;
   const perFrame = Math.round((timeline.hopMs * OUT_RATE) / 1000);
-  const frameMask = mask instanceof Uint8Array ? mask : runsToMask(mask.runs, timeline.frames);
-  const runs = maskToRuns(frameMask).map((f) => f * perFrame);
+  const runs = maskToRuns(runsToMask(mask.runs, timeline.frames)).map((f) => f * perFrame);
   const floor = 10 ** ((options.attenuationDb ?? -30) / 20);
   const fade = Math.max(0, Math.round(((options.fadeMs ?? 10) * OUT_RATE) / 1000));
   const runIndex = { i: 0 };
-  let m0 = Math.max(0, options.fromFrame ?? 0) * perFrame;
+  let m0 = 0;
   let gain = new Float32Array(0);
   for await (const block of renderAligned(seat, sources, timing, options)) {
     if (gain.length < block.length) gain = new Float32Array(block.length);
