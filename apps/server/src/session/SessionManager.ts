@@ -558,7 +558,7 @@ export class SessionManager {
    */
   setLabels(
     assignments: LabelAssignment[],
-    pairingIn: { mode: "aligned" | "dissociated"; id: number | null } = { mode: "aligned", id: null },
+    pairingIn: LabelPairing = { mode: "aligned", id: null },
     method: "manual" | "random" = "manual",
     seedIn: string | null = null,
   ) {
@@ -598,10 +598,7 @@ export class SessionManager {
   }
 
   /** Shuffle which seat gets which K (or keep seat order) and apply a pairing. Seed is logged. */
-  randomiseLabels(
-    pairing: { mode: "aligned" | "dissociated"; id: number | null } = { mode: "aligned", id: null },
-    shuffleK = true,
-  ) {
+  randomiseLabels(pairing: LabelPairing = { mode: "aligned", id: null }, shuffleK = true) {
     const seed = randomCrockford(6);
     const rng = seededRandom(seed);
     const ks = [...K_LABELS];

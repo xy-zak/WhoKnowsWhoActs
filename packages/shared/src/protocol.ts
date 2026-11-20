@@ -14,7 +14,7 @@ import {
 import { AudioStopReasonSchema, type MicLevelState, MicLevelStateSchema } from "./audioReasons";
 import { FakePaceSchema, SessionConfigSchema } from "./config";
 import { EVENT_DEFS } from "./events";
-import { ActionKindSchema, KLabelSchema, SeatSchema } from "./labels";
+import { ActionKindSchema, KLabelSchema, LabelPairingSchema, SeatSchema } from "./labels";
 import type { FacilitatorServerToClient, PlayerServerToClient } from "./socket";
 import { TelemetryItemSchema } from "./telemetry";
 
@@ -223,27 +223,16 @@ export const FakeAdd = z.object({
   pace: FakePaceSchema.default("normal"),
 });
 export const SeatUnbind = z.object({ seat: SeatSchema, reason: z.string().max(200).default("facilitator") });
+const PairingIn = LabelPairingSchema.default({ mode: "aligned", id: null }).describe(
+  "Pairing to use; dissociated with id null = random D1–D6 (seed logged)",
+);
 /** K per seat + pairing; the server derives each P from the pairing (P is never chosen freely). */
 export const LabelsSet = z.object({
   assignments: z.array(z.object({ seat: SeatSchema, k: KLabelSchema, view: z.string().optional() })),
-  pairing: z
-    .object({
-      mode: z.enum(["aligned", "dissociated"]),
-      id: z
-        .number()
-        .int()
-        .min(1)
-        .max(6)
-        .nullable()
-        .describe("1–6; null with dissociated = pick one at random (seed logged)"),
-    })
-    .default({ mode: "aligned", id: null }),
+  pairing: PairingIn,
 });
 export const LabelsRandomise = z.object({
-  pairing: z
-    .object({ mode: z.enum(["aligned", "dissociated"]), id: z.number().int().min(1).max(6).nullable() })
-    .default({ mode: "aligned", id: null })
-    .describe("Pairing to use; dissociated with id null = random D1–D6"),
+  pairing: PairingIn,
   shuffleK: z
     .boolean()
     .default(true)
