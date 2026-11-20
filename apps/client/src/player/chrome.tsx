@@ -4,15 +4,11 @@ import { type IconName, Panel, type StepDef, Stepper } from "../ui";
 import type { PlayerConnection } from "./connection";
 
 /** Onboarding wayfinding: the steps this session uses, plus READY. */
-export function onboardingSteps(v: PlayerView): StepDef[] {
-  return [
+export function OnboardingStepper({ v, current }: { v: PlayerView; current: string }) {
+  const steps: StepDef[] = [
     ...v.onboardingSteps.map((k) => ({ key: k, label: STEP_LABEL[k] })),
     { key: "ready", label: "Ready" },
   ];
-}
-
-export function OnboardingStepper({ v, current }: { v: PlayerView; current: string }) {
-  const steps = onboardingSteps(v);
   const idx = Math.max(
     0,
     steps.findIndex((s) => s.key === current),

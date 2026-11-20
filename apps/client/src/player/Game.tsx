@@ -5,7 +5,6 @@ import {
   getGameRules,
   type Highlight,
   K_LABELS,
-  type KLabel,
   type PlayerView,
   quotaLeft,
   roundActiveMs,
@@ -340,7 +339,6 @@ function SquarePanel({
   onCancel: () => void;
 }) {
   const actsOn = view.me.actsOn;
-  const target = (kind: ActionKind): KLabel | null => actsOn[kind];
   const showActors = view.visibility.showActorToPlayers;
   return (
     <div className="col">
@@ -431,7 +429,7 @@ function SquarePanel({
       ) : (
         <div className="row">
           {(["propose", "decide"] as const).map((kind) => {
-            const k = target(kind);
+            const k = actsOn[kind];
             return (
               <Button
                 key={kind}
