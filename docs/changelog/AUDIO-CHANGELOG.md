@@ -2,9 +2,7 @@
 
 History of [AUDIO.md](../AUDIO.md). Newest first. How entries are written: [README.md](README.md).
 
-## Unreleased
-
-### Not yet committed · documents `b1e5248`, `3c3f5e3`
+### 2026-11-20 · `2a6c8a1` · Docs: audit fixes (log redaction, failed-export clean-up, admin token storage, offline facilitator commands, action resend, REST errors, verify warning, reason catalogue, layout classes); change logs
 
 - **Type:** Risk mitigation
 - **Change:** The **Integrity** row of § 7 says `verify` reports a header-only orphan file (a crash between creating a track's file and storing its row) as a warning, not a problem. § 8 adds that the player's indicator, the facilitator's mic-column tooltip and the server's refusal of an audio message all take their wording from one catalogue per reason (`NOT_RECORDING_REASONS`).

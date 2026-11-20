@@ -4,7 +4,19 @@ History of [ARCHITECTURE.md](../ARCHITECTURE.md). Newest first. How entries are 
 
 ## Unreleased
 
-### Not yet committed · documents `4c1f565`, `15615b1`, `3c3f5e3`, `2b82c98`, `90e6bb9`, `b377c25`, `18ad4eb`, `74f74ac`, `384f810`
+### Not yet committed · documents `9f38db2`, `296af03`, `b8b9872`, `004ca42`, `8b64115`
+
+- **Type:** Risk mitigation
+- **Change:** § 13's testing table adds four checks: a failed download on the dashboard shows the server's error text; every `/api` route except `/api/health` and `/api/landing` refuses a request from another computer with 403; the erasure and session-deletion registers (the records of what was deleted) are checked field by field; every `reaction_ms` (reaction time) in the export matches the stored telemetry.
+- **Reason:** The systems refactor moved the facilitator check onto all API routes at once and rewrote the register and export code, so tests were added first to show nothing changed. A download error used to show raw JSON (a bug fix, also recorded here).
+
+### 2026-11-20 · `00f87ef` · Docs: round rules are two functions, standardRules is a plain object, audio REST shapes are types (wave 1 drift)
+
+- **Type:** Risk mitigation
+- **Change:** The glossary describes a **Round rule** as the `quota` or `manual` setting of a round, not a plug-in; the event-flow diagram in § 5 calls `roundIsComplete(state)`; § 12 "Add a round rule" drops the `RoundRule` interface and the `ROUND_RULES` registry (two steps instead of three); § 4 says `audio.ts` holds the REST response *types* rather than schemas.
+- **Reason:** A refactor replaced the single-entry rule plug-in with two plain functions (`checkQuota`, `roundIsComplete`) and turned response schemas that nothing validated into types; the document must describe the code as it is (docs drifting from the code).
+
+### 2026-11-20 · `2a6c8a1` · Docs: audit fixes (log redaction, failed-export clean-up, admin token storage, offline facilitator commands, action resend, REST errors, verify warning, reason catalogue, layout classes); change logs
 
 - **Type:** Risk mitigation
 - **Change:** § 4 adds `packages/shared/src/rest.ts` (the REST response types) and `api/http.ts` (one `HttpError`, answered as `{ error }`), and says that `recordingVerdict.ts` holds the per-reason catalogue `NOT_RECORDING_REASONS` (indicator, tooltip, refusal text, late chunks). § 12's socket-message guide says what a `MESSAGES` entry still needs. § 13's testing table adds the code-free logs, `secure_delete` after an erasure, the failed-export clean-up, the offline facilitator command, the REST error answers, the per-reason refusals and `npm run test:coverage`.

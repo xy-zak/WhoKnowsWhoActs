@@ -2,9 +2,13 @@
 
 History of [NETWORKING.md](../NETWORKING.md). Newest first. How entries are written: [README.md](README.md).
 
-## Unreleased
+### 2026-11-20 · `49a2392` · Docs(shared): telemetry:live catalogue schema includes reset (SH14)
 
-### Not yet committed · documents `7f73c59`, `74f74ac`, `95904fc`, `15615b1`, `4c1f565`
+- **Type:** Bug fix
+- **Change:** The generated message catalogue in § 6 now shows that `telemetry:live` carries `{ items, reset }`, where `reset: true` tells the dashboard to replace its list of live telemetry instead of adding to it.
+- **Reason:** The server and the typed event map already sent `reset`; only the catalogue text left it out, so the document was wrong.
+
+### 2026-11-20 · `2a6c8a1` · Docs: audit fixes (log redaction, failed-export clean-up, admin token storage, offline facilitator commands, action resend, REST errors, verify warning, reason catalogue, layout classes); change logs
 
 - **Type:** Risk mitigation
 - **Change:** § 7 adds that an action whose processing failed before anything was logged is processed again on resend, not answered as a duplicate, and that the facilitator dashboard refuses a command while offline instead of queuing it. § 9 points to `packages/shared/src/rest.ts` for the REST response types; § 10 states the error answer (status and `{ "error" }`); § 11 says the dashboard keeps `ADMIN_TOKEN` in the tab's `sessionStorage`, never in `localStorage`.
