@@ -38,7 +38,6 @@ import {
   audioExportFileName,
   initialState,
   int16FromLeBytes,
-  randomCrockford,
   type SpeechSegmentRow,
   type SpeechSegmentsView,
   type StoredEvent,
@@ -56,6 +55,7 @@ import type {
   NewAudioDerivative,
   Store,
 } from "../db/store";
+import { exportId as newExportId } from "../gdpr/exporter";
 import { nowTs, wall } from "../runtime";
 import { SessionGuard } from "../session/sessionGuard";
 import {
@@ -244,11 +244,6 @@ async function writeWavFile(
     await fh.close();
   }
   return { bytes, sha256: hash.digest("hex") };
-}
-
-function exportIdOf(now: number): string {
-  const d = new Date(now).toISOString().replace(/[-:]/g, "").replace("T", "-").slice(0, 15);
-  return `AU-${d}-${randomCrockford(4)}`;
 }
 
 /* ─────────── summaries ─────────── */
@@ -712,7 +707,7 @@ export class AudioService {
     }
 
     const now = nowTs();
-    const exportId = exportIdOf(now);
+    const exportId = newExportId(now, "AU");
     const dir = path.join(this.deps.exportsDir, sessionId, `audio-${exportId}`);
     // written under a `.partial` name and renamed once registered: a crash never leaves a complete-
     // looking, unregistered folder of voice files (leftovers are removed at start-up)

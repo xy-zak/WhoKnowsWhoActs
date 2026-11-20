@@ -49,9 +49,10 @@ export function toCsv(columns: ExportColumn[], rows: Array<Record<string, unknow
 
 /* ─────────────────────────── Export ─────────────────────────── */
 
-function exportId(now: number): string {
+/** An export's id, e.g. E-20261120-143005-7K2Q (audio exports use the prefix AU). */
+export function exportId(now: number, prefix = "E"): string {
   const d = new Date(now).toISOString().replace(/[-:]/g, "").replace("T", "-").slice(0, 15);
-  return `E-${d}-${randomCrockford(4)}`;
+  return `${prefix}-${d}-${randomCrockford(4)}`;
 }
 
 /**
