@@ -238,7 +238,7 @@ sequenceDiagram
 ```
 
 - Socket.IO reconnects automatically with back-off. The player sees a "Reconnecting…" overlay.
-- **Actions are never lost and never made twice.** The browser keeps every action (`intent`) until the server has answered it (the `resend` policy below). It sends an action only while its socket is *seated* (the server has answered `hello` with the seat, or sent `bound`), and sends every unanswered one again, unchanged (same `clientSeq` and click time), each time the socket is seated again. The server stores an action once and answers a resend with its first answer (`duplicate: true`); it keeps the answers of each seat's last 50 actions and rebuilds them from the event log after a restart, so a resend gets the exact answer then too. An action still unanswered after 45 s is given up: the player is told to check the map, and it is never sent again.
+- **Actions are never lost and never made twice.** The browser keeps every action (`intent`) until the server has answered it (the `resend` policy below). It sends an action only while its socket is *seated* (the server has answered `hello` with the seat, or sent `bound`), and sends every unanswered one again, unchanged (same `clientSeq` and click time), each time the socket is seated again. The server stores an action once and answers a resend with its first answer (`duplicate: true`); an action whose processing failed before anything was logged (a busy database, for example) is not remembered, so its resend is processed, not answered as a duplicate. It keeps the answers of each seat's last 50 actions and rebuilds them from the event log after a restart, so a resend gets the exact answer then too. An action still unanswered after 45 s is given up: the player is told to check the map, and it is never sent again.
 - **Why the browser waits for `hello`'s answer.** On a reconnect, Socket.IO sends what was emitted while offline *before* the `connect` handler runs, so before `hello`: the server's new socket holds no seat yet and refuses it. Requests from a socket without a seat are refused as transient (`{ ok: false, error: "Not seated", retry: true }`), and the browser's onboarding requests (consent, mic check, demographics, briefing) also wait until the socket is seated before they are sent.
 - **Audio uploads wait for the seat too.** The recorder's send queue (`apps/client/src/audio/queue.ts`) delivers one item at a time; each attempt waits until the socket is seated before it is emitted (within its 20 s budget). After a reconnect the queue gives up on the attempt in flight and sends it again; an attempt it gave up on while still waiting for the seat is cancelled (an `AbortSignal`), so the item is not sent twice.
 - **One seat gate for every answered message.** The player connection (`apps/client/src/player/connection.ts`) holds the socket's seat in one place, the *seat gate* (`apps/client/src/net/delivery.ts`). `hello`'s answer, `bound`, a disconnect, `detached` and `unbound` reach it, the recorder and telemetry through one handler. Each kind of message picks a delivery policy:
@@ -253,6 +253,7 @@ sequenceDiagram
 
   A `retry: true` refusal that arrives while the socket is still seated (a server fault) is sent again after 1 s. An onboarding request that got no answer is **not** resent after a reconnect, because consent and the other onboarding steps must not be recorded twice; only actions, which the server deduplicates by `clientSeq`, are. A message still waiting for its seat fails at once when the seat is released (`unbound`).
 - Telemetry produced while offline is buffered in the browser and sent once the socket is seated again (the server refuses telemetry from a socket without a seat). Its `clientTs` keeps the original timing.
+- The facilitator dashboard does not queue commands while its socket is down: a command is refused at once (*Not connected to the server*), so nothing the screen already reported as failed runs later, on reconnect.
 - A reload, or even closing and reopening the tab, keeps the seat, because the token is in `localStorage` (`wkwa.seat`). Clearing the browser's site data, or using a different browser profile, loses it.
 
 ### After a server restart
@@ -403,13 +404,13 @@ Every client→server payload is validated with the zod schema listed here. Inva
 
 <!-- END GENERATED: message-catalogue -->
 
-Server→client payload types are TypeScript interfaces in `packages/shared/src/projections.ts` (`PlayerView`) and `protocol.ts` (`DashboardMsg`, `TerminalInfo`, `SeatLiveStats`). Stored event and telemetry rows are described in [DATA-TYPES.md](DATA-TYPES.md).
+Server→client payload types are TypeScript interfaces in `packages/shared/src/projections.ts` (`PlayerView`) and `protocol.ts` (`DashboardMsg`, `TerminalInfo`, `SeatLiveStats`); the REST response types are in `packages/shared/src/rest.ts`. Stored event and telemetry rows are described in [DATA-TYPES.md](DATA-TYPES.md).
 
 **One source for the protocol, checked by the compiler.** `protocol.ts` holds one table per namespace that says which zod schema validates which message (`PLAYER_SCHEMAS`, `FACILITATOR_SCHEMAS`). The typed Socket.IO event maps in `packages/shared/src/socket.ts` are derived from them (payload = the schema's input type, plus each message's acknowledgement and every server→client payload), and every socket uses them: `Socket<PlayerServerToClient, PlayerClientToServer>` in the browsers and test clients, and on the server `Namespace<ServerSide<…>, …>`, where an incoming payload stays `unknown` until the handler has validated it with the schema from the table. The catalogue above (`MESSAGES`) is typed so that it must document exactly the messages in the tables and maps, with the same schema; a message added in one place and not the others does not compile.
 
 ## 10. REST API
 
-Used by the dashboard's data pages and by scripts. **Localhost-only** (except `/api/health` and `/api/landing`) unless `ADMIN_TOKEN` is set; then send `Authorization: Bearer <token>`. Routes with `:id` find the session in whichever database holds it. Participant look-up and erasure only search the participant database.
+Used by the dashboard's data pages and by scripts. **Localhost-only** (except `/api/health` and `/api/landing`) unless `ADMIN_TOKEN` is set; then send `Authorization: Bearer <token>`. Routes with `:id` find the session in whichever database holds it. Participant look-up and erasure only search the participant database. A refused request answers with its status (400 invalid, 404 unknown session, 409 not now) and `{ "error": "<reason>" }`.
 
 | Method | Path | Purpose |
 | --- | --- | --- |
@@ -447,7 +448,7 @@ Used by the dashboard's data pages and by scripts. **Localhost-only** (except `/
 | Threat | Control |
 | --- | --- |
 | A player opens the facilitator dashboard or the API from their PC | `/facilitator` page, `/facilitator` namespace and `/api/*` accept only loopback connections (`127.0.0.1`, `::1`) unless `ADMIN_TOKEN` is set. The remote address is used **only** for this check; it is never logged or stored. |
-| Remote facilitator access needed (e.g. a second laptop) | Set a long random `ADMIN_TOKEN`. The dashboard sends it as a bearer header and in the socket `auth` payload. Do not put it in URLs (URLs can end up in logs and browser history). |
+| Remote facilitator access needed (e.g. a second laptop) | Set a long random `ADMIN_TOKEN`. The dashboard sends it as a bearer header and in the socket `auth` payload. Do not put it in URLs (URLs can end up in logs and browser history). The dashboard keeps it in the tab's `sessionStorage` (it survives a reload, not a closed tab), never in `localStorage`, which the player pages on the same address could read. |
 | A player reads other players' data via browser devtools | Not possible: the server never sends another view's content to a player (see [ARCHITECTURE.md § 8](ARCHITECTURE.md#8-projections-who-sees-what)). |
 | A player forges messages (e.g. acting for another seat) | The seat comes from the server-side socket binding, never from the payload. Every payload is schema-validated, and rules are enforced on the server. |
 | A browser pretends to be a fake player to skip consent | Not possible: a client is fake only if the server registered its terminal key before starting it. Nothing a client sends can set the flag. |

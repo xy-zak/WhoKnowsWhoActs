@@ -4,7 +4,13 @@ History of [AESTHETIC-RULES.md](../AESTHETIC-RULES.md). Newest first. How entrie
 
 ## Unreleased
 
-### Not yet committed · documents `03fa07e`
+### Not yet committed · documents `72d01ad`
+
+- **Type:** Feature
+- **Change:** § 4 says that `.row` and `.col` space by `--s2` and that the classes `gap-1`, `gap-3` and `gap-4` choose another step of the grid, with no inline gaps; § 6 adds the `split-3-2` layout for a main LIVE panel and its companion.
+- **Reason:** Inline gap styles were replaced by utility classes on the 8 px grid; the rules must name the classes to use.
+
+### 2026-11-19 · `7f0e859` · Docs: session startup flow (welcome page, eleven setup steps, consent sections, mic check hold until the briefing, calibration readiness); change logs
 
 - **Type:** Feature
 - **Change:** § 8 describes the setup accordion with eleven steps (`STEP nn/11`, commit points 07 and 11) and notes that the consent screen uses the same accordion; § 8.1 says the recording banner appears only after the mic check. The generated icon table gives `randomise` its new meaning.

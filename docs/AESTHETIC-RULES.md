@@ -188,7 +188,7 @@ The sizes below are the **Small** (default) text size. **Large** steps every tok
 
 ## 4. Spacing and shape
 
-- **8 px grid:** `--s1` 4 · `--s2` 8 · `--s3` 12 · `--s4` 16 · `--s5` 24. No other gaps.
+- **8 px grid:** `--s1` 4 · `--s2` 8 · `--s3` 12 · `--s4` 16 · `--s5` 24. No other gaps. `.row` and `.col` space their children by `--s2`; the classes `gap-1`, `gap-3` and `gap-4` choose another step (no inline gap styles).
 - **Corners:** `--radius` 2 px everywhere, except seat dots (round).
 - **Lines:** solid 1 px frames (`--frame`) for panels and popups. Dashed 1 px lines separate rows and sub-sections. Control borders use `--control` (≥ 3:1).
 - **Depth:** the page background (`--bg`) sits behind panels (`--panel`). Inputs, table headers and the status bar are sunken (`--sunken`). Only popups and toasts have a shadow.
@@ -289,7 +289,7 @@ The sizes below are the **Small** (default) text size. **Large** steps every tok
 
 - Every content block is a `Panel`: a 1 px frame with an **UPPERCASE title inset into the top border** (`─ SEATS`), an optional icon, and optional actions inset at the top right.
 - **One level of nesting at most.** A panel inside a popup or a panel uses `nested`.
-- Panels are arranged in a grid with `--s3` gaps. Order them by **importance and order of use**: the next action first, then state (seats), then monitoring (maps), then logs.
+- Panels are arranged in a grid with `--s3` gaps. On LIVE a main panel and its companion sit side by side in `split-3-2` (three fifths and two fifths of the width). Order them by **importance and order of use**: the next action first, then state (seats), then monitoring (maps), then logs.
 - Empty panels say why they are empty and what to do (e.g. "No clients yet. Open the player URL on each PC.").
 
 ## 7. Popups, confirmations and toasts

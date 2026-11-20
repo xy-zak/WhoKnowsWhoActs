@@ -254,7 +254,7 @@ flowchart LR
 | Erasure | Delete the key rows first, then unlink the files. A leftover copy of a file can no longer be decrypted (**crypto-shredding**). |
 | Passphrase change | `rekey` needs no change to the files, because the keys are inside the database. |
 | Backup | `backup` copies the database and the audio folder together. The files stay encrypted and need the keys of that database copy. |
-| Integrity | `verify` checks every record's tag, that each chunk row has its record, that deleted audio has neither key nor file, orphan files, and that no name contains a participant code. |
+| Integrity | `verify` checks every record's tag, that each chunk row has its record, that deleted audio has neither key nor file, orphan files (a header-only orphan, left by a crash between creating a track's file and storing its row, is a warning, not a problem), and that no name contains a participant code. |
 
 ```mermaid
 erDiagram
@@ -320,7 +320,7 @@ Field-level tables: [DATA-TYPES.md](DATA-TYPES.md#audio-storage).
 
 A seat is recorded only while its **recording verdict** (`recordingVerdict`, `packages/shared/src/recordingVerdict.ts`) says so: the session records audio, the seat is held by a **real participant** who gave the audio consent, has not withdrawn, has reached the mic check and not had it skipped, **every real seat has finished the steps before the mic check** (no hold), recording is not paused, and the phase is onboarding, round active or round complete. Breaks and game pauses are recorded too.
 
-When a seat is not recorded, the verdict names the **first** reason that applies, in a fixed order: first the reasons that concern the seat itself (audio off, no client, fake player or agent, withdrawn, consent declined, no audio consent, consent not finished, mic check skipped, no mic check step), then the moment (still in the lobby, game complete, session closed or aborted, the mic check hold: `mic_check_held`, the facilitator's pause). `paused` therefore means that the pause is the only thing stopping the seat. The player's view carries the reason (`PlayerView.audio.notRecording`); the browser takes the track's stop reason from it, and the facilitator's mic column and wrap-up check read the same verdict, so all three always agree.
+When a seat is not recorded, the verdict names the **first** reason that applies, in a fixed order: first the reasons that concern the seat itself (audio off, no client, fake player or agent, withdrawn, consent declined, no audio consent, consent not finished, mic check skipped, no mic check step), then the moment (still in the lobby, game complete, session closed or aborted, the mic check hold: `mic_check_held`, the facilitator's pause). `paused` therefore means that the pause is the only thing stopping the seat. The player's view carries the reason (`PlayerView.audio.notRecording`); the browser takes the track's stop reason from it, and the facilitator's mic column and wrap-up check read the same verdict, so all three always agree. Their wording comes from one catalogue per reason (`NOT_RECORDING_REASONS`): the player's indicator, the mic column's tooltip, and also the server's refusal of an audio message.
 
 ```mermaid
 stateDiagram-v2

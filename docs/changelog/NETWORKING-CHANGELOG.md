@@ -4,11 +4,29 @@ History of [NETWORKING.md](../NETWORKING.md). Newest first. How entries are writ
 
 ## Unreleased
 
-### Not yet committed · documents `03fa07e`
+### Not yet committed · documents `7f73c59`, `74f74ac`, `95904fc`, `15615b1`, `4c1f565`
+
+- **Type:** Risk mitigation
+- **Change:** § 7 adds that an action whose processing failed before anything was logged is processed again on resend, not answered as a duplicate, and that the facilitator dashboard refuses a command while offline instead of queuing it. § 9 points to `packages/shared/src/rest.ts` for the REST response types; § 10 states the error answer (status and `{ "error" }`); § 11 says the dashboard keeps `ADMIN_TOKEN` in the tab's `sessionStorage`, never in `localStorage`.
+- **Reason:** These fixes stop a lost action, a command that runs late after a reconnect, and an admin token readable by player pages on the same address (security); the document must describe the behaviour as built.
+
+### 2026-11-19 · `7c129ae` · Server: no meta.json for the self-signed certificate; its facts come from the certificate
+
+- **Type:** Risk mitigation
+- **Change:** The self-signed certificate's **Files** row in § 11 drops `data/tls/meta.json`: the names, expiry and fingerprint are read from the certificate itself.
+- **Reason:** The separate file could disagree with the certificate it described; the document must list the files the server actually writes.
+
+### 2026-11-19 · `7f0e859` · Docs: session startup flow (welcome page, eleven setup steps, consent sections, mic check hold until the briefing, calibration readiness); change logs
 
 - **Type:** Feature
 - **Change:** § 4 replaces `HTTP_REDIRECT_PORT` with `LANDING_PORT` and adds the subsection **The welcome page**; § 2 and § 5 (topology and seat-binding diagrams) show participants opening it first; § 10 adds `GET /api/landing` and `landingUrls`; § 11 explains why the page is plain HTTP and carries nothing about the session; § 12–14 update the firewall, checklist, troubleshooting and step numbers.
 - **Reason:** Participants need a page that opens without a certificate warning and explains that warning before they meet it; the page must not expose session data over unencrypted HTTP (privacy).
+
+### 2026-11-19 · `2ea6151` · Audio: late-chunk grace outlasts the browser's 30-minute buffer, so a long outage keeps its audio
+
+- **Type:** Bug fix
+- **Change:** The `audio:chunk` row of the message catalogue and the **Late chunks** row of § 14 now say a closed track accepts resent chunks for 35 minutes, not 10.
+- **Reason:** The server refused audio the browser was still allowed to hold (up to 30 minutes), so a long outage lost recorded speech (data loss).
 
 ### 2026-11-19 · `03fa07e` · Session startup: who-plays step, create step, consent sections, calibration after the room is ready, welcome page
 

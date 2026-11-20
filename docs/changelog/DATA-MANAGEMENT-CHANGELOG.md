@@ -4,11 +4,29 @@ History of [DATA-MANAGEMENT.md](../DATA-MANAGEMENT.md). Newest first. How entrie
 
 ## Unreleased
 
-### Not yet committed · documents `03fa07e`
+### Not yet committed · documents `90e6bb9`, `18ad4eb`, `b1e5248`
+
+- **Type:** Risk mitigation
+- **Change:** The **Server log** row of the data inventory (§ 3) and risk 13 (§ 14) add that a participant code in a request path (`/api/participants/:code`) is replaced by `:code`. § 11 adds that an export that fails part-way removes its folder. The `verify` row of the command reference (§ 16) says a header-only orphan audio file, left by a crash at a track's start, is a warning.
+- **Reason:** A look-up or erasure request wrote the participant code into the server log, and a failed export could leave an unregistered folder with codes that a takedown would not find (privacy).
+
+### 2026-11-19 · `7f0e859` · Docs: session startup flow (welcome page, eleven setup steps, consent sections, mic check hold until the briefing, calibration readiness); change logs
 
 - **Type:** Risk mitigation
 - **Change:** § 1, § 3, § 7, § 8 and § 14 now say that microphones stay closed until every seat has consented and finished the briefing (the **mic check hold**), so the consent form, questionnaire and briefing are not recorded; § 7 describes the consent screen as sections, each confirmed by its own statement. § 4 and § 9 note that the welcome page is plain HTTP and carries no personal data; § 18 updates the fake-player controls.
 - **Reason:** Recording less and confirming each part of the information separately strengthens informed consent and data minimisation (privacy).
+
+### 2026-11-19 · `2f030b5` · Erasure: a failed reload or compaction after the commit no longer fails the erasure
+
+- **Type:** Bug fix
+- **Change:** The erasure procedure in § 10 adds that a failed vacuum (the compaction of the database file) no longer undoes the erasure: the audio files are still removed, the result says so, and the next erasure or deletion compacts the file.
+- **Reason:** An erasure that had already removed the data was reported as failed when only the clean-up afterwards failed.
+
+### 2026-11-19 · `11e83f5` · Erasure: withdraw a seat only while the erased code still holds it; reload a session the code was rebound out of
+
+- **Type:** Bug fix
+- **Change:** The erasure procedure in § 10 says a session gets no `ParticipantWithdrawn` event for the erased code if that seat was rebound to someone else since (a replaced player).
+- **Reason:** An erasure withdrew the seat even when another person held it by then, which wrongly ended that person's participation (research validity).
 
 ### 2026-11-19 · `03fa07e` · Session startup: who-plays step, create step, consent sections, calibration after the room is ready, welcome page
 

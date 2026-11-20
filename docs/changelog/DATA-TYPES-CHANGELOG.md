@@ -2,9 +2,7 @@
 
 History of [DATA-TYPES.md](../DATA-TYPES.md). Newest first. How entries are written: [README.md](README.md).
 
-## Unreleased
-
-### Not yet committed · documents `03fa07e`
+### 2026-11-19 · `7f0e859` · Docs: session startup flow (welcome page, eleven setup steps, consent sections, mic check hold until the briefing, calibration readiness); change logs
 
 - **Type:** Feature
 - **Change:** **Label pairings** says that each seat keeps its K (seat order by default) and that the facilitator only picks the pairing in step 09, saved at once; the generated `audio.enabled` row says recording starts at the mic check after the briefing.

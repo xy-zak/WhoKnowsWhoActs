@@ -101,7 +101,7 @@ Field-level detail of every logged record is in [DATA-TYPES.md](DATA-TYPES.md).
 | Display settings chosen by a player: colours, font, text size, animations | Player | Accessibility (Latte / Mocha / High contrast · JetBrains Mono / OpenDyslexic / System font · Small / Large · animations on/off) | — (could hint at a visual impairment or dyslexia, i.e. health data) | **Not collected**: that browser's `localStorage` only, never sent or logged | — |
 | Live microphone levels (about 4 per second) | Player's browser | Let the facilitator see in LIVE that every mic works | — | **Not stored**: shown in LIVE only | — |
 | Export register / manifest (audio exports included) | Server | Know which exports contain a participant | Pseudonymous (hashes) | `exports`, `manifest.json` | As long as the exports exist |
-| Server log | Server | Debugging | Non-personal (no IPs, no payloads, no query strings) | `data/logs/server.log` | Delete after the study |
+| Server log | Server | Debugging | Non-personal (no IPs, no payloads, no query strings; a participant code in a request path is replaced by `:code`) | `data/logs/server.log` | Delete after the study |
 | **Real name** | Researcher, by hand | Find the code if a participant loses their card | **Personal** | **Paper key sheet only** | Until the key destruction date |
 | Fake players: which seats were played by a test client the server created, and their pace; their actions | Server (setup step 08) | Try a real session without a group of people | Non-personal (no human involved; **no code, no consent, no answers, no audio**) | Participant database, flagged: `SeatBound.fake`, `players.csv` `fake_player`, `session.json` `fakeSeats` | With the session it belongs to (§ 18) |
 | Simulated sessions: agent policy, version, parameters and seed per seat; the agents' actions and timings | Server (simulation runner) | Test game rules and analyses on synthetic play | Non-personal (no human involved, no audio) | **Simulation database** `data/wkwa-sim.db` (`events`, `sessions`); exports in `exports/simulations/` | As the research needs (§ 17) |
@@ -424,7 +424,7 @@ Register entries hold only hashes, so keep the takedown correspondence (or a lis
 | Simulation | `npm run cli -- export --sim --session SIM-…` or *Export* (DATABASE → Simulations) | `exports/simulations/<sessionId>/<exportId>/` | none (agents have no code; `players.csv` names the agent policy) | Testing rules and analysis scripts |
 | Audio | *Export audio* in DATABASE (the **WAV** button of a seat, or the form for raw, clean or both): a separate, explicit action, listed in the export register | `exports/<sessionId>/audio-AU-…/`: one 16 kHz mono WAV per seat and kind, named `<sessionId>_seat<N>_<raw or clean>.wav`, and `manifest.json` (no participant codes in names or manifest) | participant codes in the register only (as hashes); the voice identifies the person anyway | Listening, manual coding and transcription by the research team |
 
-Each export folder contains `session.json`, `players.csv`, `actions.csv`, `events.csv`, `telemetry.csv`, `consent.csv`, `demographics.csv`, `manifest.json` and a generated **`codebook.md`** that describes every file and column (see [DATA-TYPES.md § Export files](DATA-TYPES.md#export-files)). `events.csv` never contains demographic answers; those are only in `demographics.csv`, so the event log can be shared without them.
+Each export folder contains `session.json`, `players.csv`, `actions.csv`, `events.csv`, `telemetry.csv`, `consent.csv`, `demographics.csv`, `manifest.json` and a generated **`codebook.md`** that describes every file and column (see [DATA-TYPES.md § Export files](DATA-TYPES.md#export-files)). An export that fails part-way removes its folder, so no unregistered copy with participant codes is left behind. `events.csv` never contains demographic answers; those are only in `demographics.csv`, so the event log can be shared without them.
 
 **Audio in exports:**
 
@@ -507,7 +507,7 @@ Likelihood (L) and impact (I): low / medium / high, after mitigation.
 | 10 | Takedown impossible (card lost and key sheet destroyed) | M | L | Explained in consent text; key sheet kept until the stated date |
 | 11 | Names typed into facilitator notes | L | M | UI warning; notes are short; review notes before exporting |
 | 12 | Backup restore brings back erased data | L | M | Erasure register; re-apply procedure (§ 10); prefer deleting old backups |
-| 13 | Logs leak personal data | L | L | Request serializer logs method and path only (no IP, host, query string, user agent); payloads never logged |
+| 13 | Logs leak personal data | L | L | Request serializer logs method and path only (no IP, host, query string, user agent), with the participant code in `/api/participants/:code` paths redacted; payloads never logged |
 | 14 | Software bug corrupts or loses events | L | M | Append-only log; `verify` command; backups; tests of full games |
 | 15 | Simulated data mistaken for, or mixed with, participant data (research validity) | L | H | Separate database file and export folder; `SIM-` session ids; `players` setting and `AgentBound` events in the log; agents cannot take a client's seat and browsers cannot take an agent's |
 | 16 | A participant ends up in a simulated session (no consent shown) | L | M | Simulated seats are filled by agents at creation, so no client can be bound; the setup screen and LIVE show **SIMULATION**; `verify --sim` reports any participant code in the simulation database |
@@ -586,7 +586,7 @@ All commands prompt for the database passphrase. Add `--sim` to work on the simu
 | `npm run cli -- audio-deletions` | Show the audio-deletion register |
 | `npm run cli -- backup --out FILE` | Encrypted backup copy of the DB, plus a copy of the audio folder (files stay encrypted) |
 | `npm run cli -- rekey` | Change the passphrase of both databases (audio keys live inside the DB, so the files need no change) |
-| `npm run cli -- verify [--sim]` | Integrity check, including every audio chunk's authentication tag, orphan audio files, deleted audio that still has a key or file, and file names that contain a participant code (with `--sim`: also checks that no participant code is in the simulation database) |
+| `npm run cli -- verify [--sim]` | Integrity check, including every audio chunk's authentication tag, orphan audio files (one that holds only a header, left by a crash at a track's start, is a warning), deleted audio that still has a key or file, and file names that contain a participant code (with `--sim`: also checks that no participant code is in the simulation database) |
 
 ## 17. Simulated sessions and the simulation database
 

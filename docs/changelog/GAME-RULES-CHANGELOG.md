@@ -2,9 +2,7 @@
 
 History of [GAME-RULES.md](../GAME-RULES.md). Newest first. How entries are written: [README.md](README.md).
 
-## Unreleased
-
-### Not yet committed · documents `03fa07e`
+### 2026-11-19 · `7f0e859` · Docs: session startup flow (welcome page, eleven setup steps, consent sections, mic check hold until the briefing, calibration readiness); change logs
 
 - **Type:** Risk mitigation
 - **Change:** § 3 points to the new step numbers: views chosen per seat are switched on in step 04 and picked in the **Labels** step 09.

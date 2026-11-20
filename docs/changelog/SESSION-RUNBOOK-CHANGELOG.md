@@ -4,11 +4,23 @@ History of [SESSION-RUNBOOK.md](../SESSION-RUNBOOK.md). Newest first. How entrie
 
 ## Unreleased
 
-### Not yet committed · documents `03fa07e`
+### Not yet committed · documents `95904fc`, `74f74ac`
+
+- **Type:** Risk mitigation
+- **Change:** The troubleshooting table in § 6 says the `ADMIN_TOKEN` link is kept for one tab only, and adds a row for **Not connected to the server**: the command was not sent and will not run later, so repeat it once the connection is back.
+- **Reason:** The facilitator must know that a refused command has not happened, and why a token link has to be opened again in a new tab.
+
+### 2026-11-19 · `7f0e859` · Docs: session startup flow (welcome page, eleven setup steps, consent sections, mic check hold until the briefing, calibration readiness); change logs
 
 - **Type:** Feature
 - **Change:** The setup tables and diagram now show eleven steps (§ 1, § 4.2–4.3, § 8, § 9): a separate **Who plays** step 03, **Create session** in place of the review table, fake players added per seat at the normal pace, and labels that only take the pairing and save at once. § 10 and § 11 add the welcome page that participants open first, and the new audio order: briefing, mic check, **I'm ready for the calibration**, then a calibration that starts by itself.
 - **Reason:** The facilitator follows this runbook during a session, so it must match the screens after the startup redesign; recording now starts later, after the briefing (less audio recorded).
+
+### 2026-11-19 · `311f714` · Wrap-up: an offline recorded seat counts as still uploading, not "All audio uploaded"
+
+- **Type:** Bug fix
+- **Change:** The **Wrap-up audio check** in § 11 adds the message *Seat 3 offline: audio it still holds arrives when it reconnects* and says a seat whose browser closed early reads *offline* until it reconnects.
+- **Reason:** The check said *All audio uploaded* while an offline seat could still hold unsent audio, so the facilitator might close the session too early (data loss).
 
 ### 2026-11-19 · `490686a` · Docs: headset gate engine, speech model, storage fixes
 

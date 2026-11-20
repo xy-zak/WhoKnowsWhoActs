@@ -4,11 +4,41 @@ History of [ARCHITECTURE.md](../ARCHITECTURE.md). Newest first. How entries are 
 
 ## Unreleased
 
-### Not yet committed · documents `03fa07e`
+### Not yet committed · documents `4c1f565`, `15615b1`, `3c3f5e3`, `2b82c98`, `90e6bb9`, `b377c25`, `18ad4eb`, `74f74ac`, `384f810`
+
+- **Type:** Risk mitigation
+- **Change:** § 4 adds `packages/shared/src/rest.ts` (the REST response types) and `api/http.ts` (one `HttpError`, answered as `{ error }`), and says that `recordingVerdict.ts` holds the per-reason catalogue `NOT_RECORDING_REASONS` (indicator, tooltip, refusal text, late chunks). § 12's socket-message guide says what a `MESSAGES` entry still needs. § 13's testing table adds the code-free logs, `secure_delete` after an erasure, the failed-export clean-up, the offline facilitator command, the REST error answers, the per-reason refusals and `npm run test:coverage`.
+- **Reason:** The audit fixes and refactors moved these rules into single places and added tests for them; the document must say where they live (docs drifting from the code).
+
+### 2026-11-19 · `3828155` · Server: hub sends the facilitator snapshot from one place; one seatCmd for every seated request
+
+- **Type:** Risk mitigation
+- **Change:** § 12's socket-message guide no longer names the `audioCmd` handler: every seated request now goes through `seatCmd`.
+- **Reason:** The hub's handlers were merged into one; the guide must name the handlers that exist (docs drifting from the code).
+
+### 2026-11-19 · `7f0e859` · Docs: session startup flow (welcome page, eleven setup steps, consent sections, mic check hold until the briefing, calibration readiness); change logs
 
 - **Type:** Feature
 - **Change:** The glossary adds **Mic check hold** and **Welcome page**; § 3 shows the second, plain-HTTP listener; § 4 lists the welcome page code, the 11-step setup and the consent `section` field; § 7's onboarding state diagram now ends with the mic check and the readiness step; § 13–15 update the tests, step numbers and audio state (`ready`, `requested`, automatic start).
 - **Reason:** The startup flow was redesigned: the document must show where the new rules live (onboarding order, readiness, welcome page).
+
+### 2026-11-19 · `2f030b5` · Erasure: a failed reload or compaction after the commit no longer fails the erasure
+
+- **Type:** Bug fix
+- **Change:** The **Session guard** row in § 15 adds that if the session cannot be reloaded after an erasure, it is detached (unloaded) and the erasure is still reported as done.
+- **Reason:** An erasure that had already been committed was reported as failed when the reload afterwards failed, and a loaded session could keep the erased code in memory.
+
+### 2026-11-19 · `2ea6151` · Audio: late-chunk grace outlasts the browser's 30-minute buffer, so a long outage keeps its audio
+
+- **Type:** Bug fix
+- **Change:** The **Recovery** row in § 15 now says browsers can resend unacknowledged audio for up to 35 minutes after a track closed, not 10.
+- **Reason:** The server's grace period for late audio (10 minutes) was shorter than the browser's 30-minute buffer, so a long network outage lost the audio the browser still held (data loss).
+
+### 2026-11-19 · `9a3960a` · E2E: one flows module, setup walked by step key; bots instead of 3 browsers
+
+- **Type:** Risk mitigation
+- **Change:** The testing table in § 13 describes the slimmer browser tests: one real player browser and three socket bots instead of four browsers, fake-player checks moved into the audio test, and a shared `e2e/flows.ts` whose `setupSession()` walks the setup by each step's key. The *Audio* row checks the recording verdict as a table of cases; the *Screenshots* row counts five scenarios and names setup shots by step key.
+- **Reason:** Each change to the setup steps broke the browser tests in about 30 places; the suite was cut to what only a browser can prove, without losing unit-test coverage, and the table must describe the suite as it is.
 
 ### 2026-11-19 · `97e3fc4` · Docs: hover consent rule, failed session switch; change logs for wave 3
 

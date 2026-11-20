@@ -4,11 +4,29 @@ History of [AUDIO.md](../AUDIO.md). Newest first. How entries are written: [READ
 
 ## Unreleased
 
-### Not yet committed · documents `03fa07e`
+### Not yet committed · documents `b1e5248`, `3c3f5e3`
+
+- **Type:** Risk mitigation
+- **Change:** The **Integrity** row of § 7 says `verify` reports a header-only orphan file (a crash between creating a track's file and storing its row) as a warning, not a problem. § 8 adds that the player's indicator, the facilitator's mic-column tooltip and the server's refusal of an audio message all take their wording from one catalogue per reason (`NOT_RECORDING_REASONS`).
+- **Reason:** A harmless crash leftover made the integrity check fail, and three copies of the reason texts could drift apart (docs drifting from the code).
+
+### 2026-11-19 · `7f0e859` · Docs: session startup flow (welcome page, eleven setup steps, consent sections, mic check hold until the briefing, calibration readiness); change logs
 
 - **Type:** Feature
 - **Change:** § 2, § 8 and § 9 (with their state and sequence diagrams) now describe the **mic check hold** until every seat has finished the briefing, the mic check as the last onboarding step, and the readiness step: each recorded seat says it is ready (`CalibrationReady`), the server then starts the calibration itself, and a redo asks again (`CalibrationRequested`). § 5 adds `calibration:ready` and the welcome page that explains the certificate warning; § 14 lists the new code and tests.
 - **Reason:** The calibration should never start by surprise, and no microphone should record while anyone is still reading; the questionnaire and briefing are therefore no longer recorded (privacy, data minimisation).
+
+### 2026-11-19 · `311f714` · Wrap-up: an offline recorded seat counts as still uploading, not "All audio uploaded"
+
+- **Type:** Bug fix
+- **Change:** The known limit on the wrap-up audio check (§ 13) now says it also checks that the seat is connected: a recorded seat that is offline is listed as still uploading.
+- **Reason:** The check said *All audio uploaded* for a seat whose browser had gone offline with audio still unsent (data loss).
+
+### 2026-11-19 · `2ea6151` · Audio: late-chunk grace outlasts the browser's 30-minute buffer, so a long outage keeps its audio
+
+- **Type:** Bug fix
+- **Change:** The reconnect sequence diagram and the **Late chunks** paragraph in § 5 now say a closed track accepts late chunks for 35 minutes, not 10.
+- **Reason:** The grace period was shorter than the browser's 30-minute buffer, so a long outage lost recorded audio (data loss).
 
 ### 2026-11-19 · `4e6927e` · Audio: recording windows and calibration runs come from the reducer
 
