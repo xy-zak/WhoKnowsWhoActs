@@ -12,7 +12,6 @@ import {
   canSayCalibrationReady,
   canStartFirstRound,
   checkSimulationConfig,
-  DEFAULT_VALIDATORS,
   DISSOCIATED_PAIRINGS,
   type EventType,
   type FakePlayerPace,
@@ -62,7 +61,6 @@ import {
   seatPolicyId,
   seededRandom,
   type TelemetryItem,
-  type Validator,
   validateIntent,
 } from "@wkwa/shared";
 import type { Logger } from "pino";
@@ -89,7 +87,6 @@ export interface SessionDeps {
   /** Called once per command with every event appended during that command. */
   onEvents: (events: StoredEvent[]) => void;
   clock?: () => number;
-  validators?: Validator[];
 }
 
 type LabelAssignment = { seat: number; k: KLabel; view?: string };
@@ -126,7 +123,6 @@ export class SessionManager {
   private lastClientSeq = new Map<number, number>();
   private ackCache = new Map<number, Map<number, IntentAck>>();
   private readonly clock: () => number;
-  private readonly validators: Validator[];
   /** Live audio ingest: tracks, chunks and the calibration audio of this session (see audio/live.ts). */
   private readonly audio: LiveAudio;
   /**
@@ -142,7 +138,6 @@ export class SessionManager {
     private readonly deps: SessionDeps,
   ) {
     this.clock = deps.clock ?? nowTs;
-    this.validators = deps.validators ?? DEFAULT_VALIDATORS;
     this.audio = new LiveAudio({
       sessionId,
       store: deps.store,
@@ -1244,7 +1239,7 @@ export class SessionManager {
     msg: { clientSeq: number; kind: ActionKind; regionId: string; clientTs: number },
   ): IntentAck {
     const st = this.state;
-    const v = validateIntent(st, seat, { kind: msg.kind, regionId: msg.regionId }, this.validators);
+    const v = validateIntent(st, seat, { kind: msg.kind, regionId: msg.regionId });
     if (!v.ok) {
       this.seatEvent(
         seat,
