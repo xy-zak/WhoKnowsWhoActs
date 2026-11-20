@@ -8,6 +8,7 @@ import {
   type KLabel,
   type PlayerView,
   quotaLeft,
+  roundActiveMs,
 } from "@wkwa/shared";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { fmtDuration, quotaText } from "../common/format";
@@ -470,11 +471,8 @@ function StatusLine({
   useNow(); // redraw the countdown each second
   const limit = view.roundSpec?.timeLimitSec;
   let left: number | null = null;
-  if (limit && view.roundStartedTs) {
-    const now = conn.clock.now();
-    const pausedNow = view.paused && view.pausedSince ? now - view.pausedSince : 0;
-    left = limit * 1000 - (now - view.roundStartedTs - view.roundPausedMs - pausedNow);
-  }
+  // not roundRemainingMs: that hides the countdown during the round break
+  if (limit && view.roundStartedTs) left = limit * 1000 - roundActiveMs(view, conn.clock.now());
   const knows = view.me.knows;
   return (
     <div className="row panel" style={{ padding: "var(--s2) var(--s3)", marginTop: 0 }}>

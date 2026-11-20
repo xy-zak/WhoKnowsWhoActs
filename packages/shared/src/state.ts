@@ -525,7 +525,10 @@ export function visibleActions(state: ReadonlyGameState): readonly DeepReadonly<
 }
 
 /** Milliseconds of active (un-paused) time elapsed in the current round at time `now`. */
-export function roundActiveMs(state: ReadonlyGameState, now: number): number {
+export function roundActiveMs(
+  state: Pick<ReadonlyGameState, "roundStartedTs" | "paused" | "pausedSince" | "roundPausedMs">,
+  now: number,
+): number {
   if (state.roundStartedTs === null) return 0;
   const pausedNow = state.paused && state.pausedSince !== null ? now - state.pausedSince : 0;
   return Math.max(0, now - state.roundStartedTs - state.roundPausedMs - pausedNow);

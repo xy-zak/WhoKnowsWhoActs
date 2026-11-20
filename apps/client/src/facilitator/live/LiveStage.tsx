@@ -1,4 +1,5 @@
 import {
+  activeSeats,
   calibrationNotReadySeats,
   calibrationWaitingSeats,
   canStartFirstRound,
@@ -84,7 +85,7 @@ function NextPanel({
   onWrapUp: () => void;
 }) {
   const confirm = useConfirm();
-  const active = seatList(st).filter((s) => s.bound && !s.withdrawn);
+  const active = activeSeats(st);
 
   let prompt: React.ReactNode;
   let primary: React.ReactNode = null;
