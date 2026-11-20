@@ -40,12 +40,8 @@ import { type AudioSessionView, audioCell, whenWall as when } from "./database/a
 type SessionSummary = InDb<StoredSessionSummary>;
 /** `players` is set here, from the session row. */
 type ExportResult = InDb<SessionExportResult>;
-type Lookup = LookupResult;
-type Deletion = SessionDeletionEntry;
-type Erasure = ErasureEntry;
 /** Rows and audio files removed by an erasure. */
 type ErasureAudio = Pick<ErasureResult, "rows" | "audioFiles">;
-type SessionDeleteResult = SessionDeletionResult;
 
 const STATUS_TONE: Record<string, "live" | "warn" | "danger" | "neutral" | "primary"> = {
   lobby: "primary",
@@ -84,12 +80,12 @@ export function Database({
 }) {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [exports, setExports] = useState<InDb<ExportRow>[]>([]);
-  const [erasures, setErasures] = useState<Erasure[]>([]);
+  const [erasures, setErasures] = useState<ErasureEntry[]>([]);
   const [lastExport, setLastExport] = useState<ExportResult | null>(null);
   const [filter, setFilter] = useState("");
   const [cardsFor, setCardsFor] = useState<string | null>(null);
   const [audioFor, setAudioFor] = useState<string | null>(null);
-  const [deletions, setDeletions] = useState<InDb<Deletion>[]>([]);
+  const [deletions, setDeletions] = useState<InDb<SessionDeletionEntry>[]>([]);
   const [db, setDb] = useState<PlayerMode>(() =>
     attachedId && isSimulatedSessionId(attachedId) ? "simulated" : "real",
   );
@@ -100,8 +96,8 @@ export function Database({
     const ifLatest = latest();
     conn.api<SessionSummary[]>("/api/sessions").then(ifLatest(setSessions), () => {});
     conn.api<InDb<ExportRow>[]>("/api/exports").then(ifLatest(setExports), () => {});
-    conn.api<Erasure[]>("/api/erasures").then(ifLatest(setErasures), () => {});
-    conn.api<InDb<Deletion>[]>("/api/session-deletions").then(ifLatest(setDeletions), () => {});
+    conn.api<ErasureEntry[]>("/api/erasures").then(ifLatest(setErasures), () => {});
+    conn.api<InDb<SessionDeletionEntry>[]>("/api/session-deletions").then(ifLatest(setDeletions), () => {});
   }, [conn, latest]);
   useEffect(refresh, [refresh]);
 
@@ -159,7 +155,7 @@ export function Database({
     });
     if (!ok) return;
     const r = await conn
-      .api<SessionDeleteResult>(`/api/sessions/${s.id}/delete`, {
+      .api<SessionDeletionResult>(`/api/sessions/${s.id}/delete`, {
         method: "POST",
         body: JSON.stringify({ confirm: s.id, deleteExports: deleteExports.current }),
       })
@@ -603,7 +599,7 @@ export function TakedownCardList({
 function ErasurePanel({ conn, onDone }: { conn: FacilitatorConnection; onDone: () => void }) {
   const confirm = useConfirm();
   const [input, setInput] = useState("");
-  const [look, setLook] = useState<Lookup | null>(null);
+  const [look, setLook] = useState<LookupResult | null>(null);
   const [note, setNote] = useState("");
   const [result, setResult] = useState<{
     text: string;
@@ -619,7 +615,7 @@ function ErasurePanel({ conn, onDone }: { conn: FacilitatorConnection; onDone: (
 
   const lookup = async () => {
     setResult(null);
-    setLook(await conn.api<Lookup>(`/api/participants/${encodeURIComponent(input)}`).catch(() => null));
+    setLook(await conn.api<LookupResult>(`/api/participants/${encodeURIComponent(input)}`).catch(() => null));
   };
   const erase = async () => {
     if (!look) return;
