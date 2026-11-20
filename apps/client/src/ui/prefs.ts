@@ -1,6 +1,7 @@
 import { useEffect } from "react";
+import { safeStorage } from "../net/storage";
 import { Store, useStore } from "../net/store";
-import type { ThemeName } from "./tokens";
+import { THEME_NAMES, type ThemeName } from "./tokens";
 
 /*
  * Display settings (accessibility): colour theme, font, text size, animations.
@@ -49,13 +50,13 @@ export function osTheme(): ThemeName {
   return window.matchMedia("(prefers-color-scheme: dark)").matches ? "mocha" : "latte";
 }
 
-const isTheme = (t: unknown): t is ThemeName => t === "latte" || t === "mocha" || t === "contrast";
+const isTheme = (t: unknown): t is ThemeName => THEME_NAMES.includes(t as ThemeName);
 const isFont = (f: unknown): f is FontName => FONT_NAMES.includes(f as FontName);
 const isScale = (s: unknown): s is ScaleName => SCALE_NAMES.includes(s as ScaleName);
 
 const cycle = <T>(list: readonly T[], cur: T): T => list[(list.indexOf(cur) + 1) % list.length]!;
 /** Next theme in the cycle Latte → Mocha → High contrast. */
-export const nextTheme = (t: ThemeName): ThemeName => cycle(["latte", "mocha", "contrast"], t);
+export const nextTheme = (t: ThemeName): ThemeName => cycle(THEME_NAMES, t);
 export const nextFont = (f: FontName): FontName => cycle(FONT_NAMES, f);
 export const nextScale = (s: ScaleName): ScaleName => cycle(SCALE_NAMES, s);
 
@@ -79,15 +80,20 @@ export function parsePrefs(raw: unknown, fallback: DisplayPrefs = defaultPrefs()
   };
 }
 
+const storage = safeStorage(() => localStorage);
+
 function load(key: string, legacyThemeKey?: string): DisplayPrefs {
   const fallback = defaultPrefs();
-  try {
-    const raw = localStorage.getItem(key);
-    if (raw) return parsePrefs(JSON.parse(raw), fallback);
-    const legacy = legacyThemeKey ? localStorage.getItem(legacyThemeKey) : null;
-    if (isTheme(legacy)) return { ...fallback, theme: legacy };
-  } catch {}
-  return fallback;
+  const raw = storage.getItem(key);
+  if (raw) {
+    try {
+      return parsePrefs(JSON.parse(raw), fallback);
+    } catch {
+      return fallback;
+    }
+  }
+  const legacy = legacyThemeKey ? storage.getItem(legacyThemeKey) : null;
+  return isTheme(legacy) ? { ...fallback, theme: legacy } : fallback;
 }
 
 export interface PrefsHandle {
@@ -96,18 +102,12 @@ export interface PrefsHandle {
 }
 
 function makePrefs(key: string, legacyThemeKey?: string): PrefsHandle {
-  const store = new Store<DisplayPrefs>(
-    typeof window === "undefined"
-      ? { theme: "mocha", font: "jetbrains", scale: "small", animations: true }
-      : load(key, legacyThemeKey),
-  );
+  const store = new Store<DisplayPrefs>(load(key, legacyThemeKey));
   return {
     store,
     set(patch) {
       store.set((p) => ({ ...p, ...patch }));
-      try {
-        localStorage.setItem(key, JSON.stringify(store.get()));
-      } catch {}
+      storage.setItem(key, JSON.stringify(store.get()));
     },
   };
 }

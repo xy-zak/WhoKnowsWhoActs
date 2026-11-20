@@ -11,7 +11,7 @@ import type {
 import { io } from "socket.io-client";
 import { MicRecorder, type MicRecorderOptions } from "../audio";
 import { ClockSync } from "../net/clock";
-import { type Delivery, type DeliveryPolicy, SeatGate } from "../net/delivery";
+import { type Delivery, SeatGate } from "../net/delivery";
 import { emitPlayer, type PlayerSocket } from "../net/socket";
 import { type KeyValueStore, safeStorage } from "../net/storage";
 import { Store } from "../net/store";
@@ -167,12 +167,15 @@ export class PlayerConnection {
     this.clientSeq = Number(this.session.getItem(CLIENT_SEQ_KEY) ?? Date.now());
     this.gate = new SeatGate((event, payload, ack) => emitPlayer(this.socket, event, payload, ack));
     this.clock = new ClockSync(
-      async (payload, timeoutMs) => answer(await this.send("clock:ping", payload, "once", timeoutMs)),
+      async (payload, timeoutMs) =>
+        answer(await this.gate.send("clock:ping", payload, "once", { timeoutMs })),
       (r) => this.track("clock_sync", r),
     );
     this.telemetry = new Telemetry({
       send: async (batch) => {
-        const d = await this.send("telemetry", batch, "whileSeated", TELEMETRY_TIMEOUT_MS);
+        const d = await this.gate.send("telemetry", batch, "whileSeated", {
+          timeoutMs: TELEMETRY_TIMEOUT_MS,
+        });
         if (d.status === "unsent") return "unsent";
         return d.status === "answered" && "stored" in d.ack ? "stored" : "failed";
       },
@@ -186,7 +189,7 @@ export class PlayerConnection {
       // from a socket without one is only refused with "Not seated"). An attempt the queue gave up
       // on while waiting (`signal`) is never emitted, so a reconnect does not send the item twice.
       send: async (event, payload, signal) =>
-        answer(await this.send(event, payload, "attempt", AUDIO_SEND_TIMEOUT_MS, signal)),
+        answer(await this.gate.send(event, payload, "attempt", { timeoutMs: AUDIO_SEND_TIMEOUT_MS, signal })),
       level: (p) => this.socket.volatile.emit("audio:level", p),
       now: () => this.clock.now(),
       clockOffsetMs: () => this.clock.offsetMs,
@@ -266,17 +269,6 @@ export class PlayerConnection {
     }
   }
 
-  /** Sends through the seat gate with `policy` (see net/delivery.ts). */
-  private send<K extends PlayerRequest>(
-    event: K,
-    payload: PlayerPayload<K>,
-    policy: DeliveryPolicy,
-    timeoutMs: number,
-    signal?: AbortSignal,
-  ): Promise<Delivery<PlayerAcks[K]>> {
-    return this.gate.send(event, payload, policy, { timeoutMs, signal });
-  }
-
   /**
    * Propose or decide; resolves with the server's answer (accepted, or rejected by the rules).
    *
@@ -288,7 +280,7 @@ export class PlayerConnection {
    */
   async intent(kind: ActionKind, regionId: string): Promise<IntentAck> {
     const payload = { clientSeq: this.nextClientSeq(), kind, regionId, clientTs: this.clock.now() };
-    const d = await this.send("intent", payload, "resend", INTENT_DEADLINE_MS);
+    const d = await this.gate.send("intent", payload, "resend", { timeoutMs: INTENT_DEADLINE_MS });
     switch (d.status) {
       case "answered":
         if ("error" in d.ack) throw new Error(d.ack.error);
@@ -325,7 +317,7 @@ export class PlayerConnection {
     payload: PlayerPayload<K>,
     timeoutMs = REQUEST_TIMEOUT_MS,
   ): Promise<PlayerAcks[K]> {
-    const d = await this.send(event, payload, "retry", timeoutMs);
+    const d = await this.gate.send(event, payload, "retry", { timeoutMs });
     if (d.status === "released") throw new Error("Your seat was released");
     if (d.status !== "answered") {
       throw new Error(

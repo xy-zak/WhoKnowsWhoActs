@@ -12,7 +12,7 @@ import {
   type View,
 } from "@wkwa/shared";
 import { type PointerEvent, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
-import { ActSwatch, Button, LabelTag } from "../ui/components";
+import { ActSwatch, Button, kColour, LabelTag, seatColour } from "../ui/components";
 
 /* ═══════════════════════════════════════════════════════════════════════════
  * THE MAP — a grid of squares; every square holds one sub-square per
@@ -60,9 +60,6 @@ export interface MapViewProps {
   /** Scale factor for hatch stripes (e.g. 2.5 for small mirrors). */
   markScale?: number;
 }
-
-export const seatColour = (seat: number | null) => (seat === null ? "var(--faint)" : `var(--seat-${seat})`);
-export const kColour = (k: string) => `var(--k-${k[1]})`;
 
 /* Geometry in SVG user units. */
 const S = 100; // square side

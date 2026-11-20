@@ -1,9 +1,9 @@
 import type { ReactNode } from "react";
+import { formatDb } from "../common/format";
 import {
   CLIP_PEAK_DB,
   cellCount,
   dbToCells,
-  formatDb,
   levelState,
   levelTone,
   METER_CELLS,
@@ -13,8 +13,8 @@ import {
   meterCells,
   meterValue,
   QUIET_DB,
+  REC_STATE_META,
   type RecState,
-  recStateMeta,
 } from "./audioMeta";
 import { StatusTag } from "./components";
 
@@ -131,7 +131,7 @@ export function RecTag({
   tip?: string;
   compact?: boolean;
 }) {
-  const m = recStateMeta(state);
+  const m = REC_STATE_META[state];
   return (
     <StatusTag tone={m.tone} icon={m.icon} tip={tip ?? m.tip} className={`rec-tag rec-${state}`}>
       {compact ? m.short : m.text}
@@ -146,7 +146,7 @@ export function RecTag({
  * `false` child keeps it: the line always says what is happening).
  */
 export function RecordingBanner({ state, children }: { state: RecState; children?: ReactNode }) {
-  const m = recStateMeta(state);
+  const m = REC_STATE_META[state];
   const message =
     children === undefined || children === null || typeof children === "boolean" || children === ""
       ? m.banner

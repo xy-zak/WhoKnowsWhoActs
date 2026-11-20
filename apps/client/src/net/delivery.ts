@@ -108,10 +108,6 @@ export class SeatGate {
 
   constructor(private readonly emit: Emit) {}
 
-  get isSeated(): boolean {
-    return this.seated;
-  }
-
   /** Unfinished deliveries (waiting for the seat, a resend or the answer). */
   get size(): number {
     return this.live.size;

@@ -1,21 +1,9 @@
 import type { PlayerView } from "@wkwa/shared";
-import { useEffect, useRef, useState } from "react";
-import { Button, Callout, Icon, SeatDot, StatusTag, type StepDef, Stepper } from "../ui";
+import { useRef } from "react";
+import { Button, Callout, Icon, SeatDot, StatusTag, type StepDef, Stepper, useNow } from "../ui";
 import { Centered, OnboardingStepper, ReadyScreen, useSubmit } from "./chrome";
 import type { PlayerConnection } from "./connection";
 import { MicLevelMeter, useRecording } from "./RecordingIndicator";
-
-/** Whole seconds left until `endsAt` (server clock), redrawn once a second: a static number, no animation. */
-function useSecondsLeft(conn: PlayerConnection, endsAt: number | null): number | null {
-  const [, tick] = useState(0);
-  useEffect(() => {
-    if (endsAt === null) return;
-    const t = setInterval(() => tick((x) => x + 1), 250);
-    return () => clearInterval(t);
-  }, [endsAt]);
-  if (endsAt === null) return null;
-  return Math.max(0, Math.ceil((endsAt - conn.clock.now()) / 1000));
-}
 
 /**
  * Does the calibration cover this seat's screen? While it runs, and in a round break while a redo
@@ -117,7 +105,9 @@ export function CalibrationPendingScreen({ conn, view }: { conn: PlayerConnectio
 export function CalibrationScreen({ conn, view }: { conn: PlayerConnection; view: PlayerView }) {
   const c = view.audio.calibration;
   const snap = useRecording(conn);
-  const left = useSecondsLeft(conn, c.myTurn ? c.turnEndsAt : null);
+  useNow(250); // redraws the whole seconds left (server clock): a static number, no animation
+  const endsAt = c.myTurn ? c.turnEndsAt : null;
+  const left = endsAt === null ? null : Math.max(0, Math.ceil((endsAt - conn.clock.now()) / 1000));
   // index of the latest turn seen, for the gap between two turns (the view has no turn then)
   const lastTurn = useRef(-1);
   if (c.status !== "running") lastTurn.current = -1;
