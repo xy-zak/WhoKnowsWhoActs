@@ -118,7 +118,7 @@ export class CalibrationRunner {
   redo() {
     if (this.state.audio.calibration.status === "pending")
       throw new CommandError("The calibration has not run yet: it starts once everyone is ready");
-    this.stop();
+    this.dispose();
     this.deps.append({ type: "CalibrationRequested", actorKind: "facilitator", payload: {} });
   }
 
@@ -127,7 +127,7 @@ export class CalibrationRunner {
     const status = this.state.audio.calibration.status;
     if (status === "done" || status === "skipped")
       throw new CommandError(`The calibration was already ${status}`);
-    this.stop();
+    this.dispose();
     this.deps.append({ type: "CalibrationSkipped", actorKind: "facilitator", payload: { reason } });
   }
 
@@ -137,7 +137,7 @@ export class CalibrationRunner {
    */
   cancel(reason: string) {
     if (!this.running || this.deps.isFinal()) return;
-    this.stop();
+    this.dispose();
     this.deps.append({
       type: "CalibrationSkipped",
       actorKind: "system",
@@ -145,12 +145,8 @@ export class CalibrationRunner {
     });
   }
 
-  /** Stop the timers and drop the collected audio (detach, shutdown, end of the session). */
+  /** Stop the timers and drop the collected audio (a redo, skip or cancel; detach, shutdown, end of the session). */
   dispose() {
-    this.stop();
-  }
-
-  private stop() {
     this.clearTimer();
     this.deps.audio.endCalibration();
   }

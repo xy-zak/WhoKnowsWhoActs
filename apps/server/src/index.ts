@@ -1,6 +1,6 @@
 import type { AddressInfo } from "node:net";
 import path from "node:path";
-import { createApp } from "./app";
+import { type AppContext, createApp } from "./app";
 import { WrongPassphraseError } from "./db/database";
 import { DB_FILES, dbFile as dbFileOf } from "./db/stores";
 import { startLandingServer } from "./landing";
@@ -17,7 +17,7 @@ async function main() {
   const tls = await resolveTls(runtime);
   // the participant database decides the passphrase prompt; the simulation database shares it
   const dbFile = dbFileOf(runtime.dataDir, "real");
-  let ctx: Awaited<ReturnType<typeof createApp>> | undefined;
+  let ctx: AppContext | undefined;
   for (let attempt = 1; !ctx; attempt++) {
     const pass = await obtainPassphrase(dbFile);
     try {

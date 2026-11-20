@@ -67,11 +67,6 @@ function badRequest(reply: FastifyReply, error: z.ZodError) {
 }
 
 /**
- * Audio routes of the DATABASE tab (facilitator-only, like the GDPR routes).
- * Audio lives only in the participant database; simulated sessions have none.
- * Audio content leaves the server only through POST …/audio/export.
- */
-/**
  * The audio service of the participant database, and the session guard it shares with the GDPR
  * routes (one rule for running and busy sessions: the hub's attached session, this runner's jobs,
  * this service's exports).
@@ -96,6 +91,11 @@ export function createAudioService(ctx: AppContext): { service: AudioService; se
   return { service, sessionGuard };
 }
 
+/**
+ * Audio routes of the DATABASE tab (facilitator-only, like the GDPR routes).
+ * Audio lives only in the participant database; simulated sessions have none.
+ * Audio content leaves the server only through POST …/audio/export.
+ */
 export function registerAudioApi(app: FastifyInstance, ctx: AppContext, service: AudioService) {
   const { stores } = ctx;
 
