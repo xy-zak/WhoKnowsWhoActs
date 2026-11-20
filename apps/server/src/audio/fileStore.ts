@@ -80,7 +80,6 @@ export interface VerifyResult {
   truncatedTailBytes: number;
   /** The seq numbers of the valid records, in file order (duplicates included). */
   seqs: number[];
-  issues: AudioReadIssue[];
 }
 
 export interface AudioFileInfo {
@@ -388,7 +387,6 @@ export class AudioFileStore {
       firstError: integrity[0]?.message ?? null,
       truncatedTailBytes: tail?.kind === "truncated" ? tail.bytes : 0,
       seqs,
-      issues,
     };
   }
 

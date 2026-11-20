@@ -63,7 +63,7 @@ function stopReasonOf(reason: string | null): AudioStopReason | null {
  * Chunks the browser reported as dropped count when they exceed that (they may
  * have been the last ones).
  */
-export function trackGaps(chunks: readonly AudioChunkRow[], droppedChunks: number): number {
+function trackGaps(chunks: readonly AudioChunkRow[], droppedChunks: number): number {
   if (chunks.length === 0) return droppedChunks;
   let missing = 0;
   let breaks = 0;

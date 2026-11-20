@@ -89,7 +89,7 @@ export interface TestTrack {
 }
 
 /** One chunk for writeTestTrack: its index row and its samples. */
-export interface TestChunk {
+interface TestChunk {
   seq: number;
   startSample: number;
   sampleCount: number;

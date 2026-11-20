@@ -60,7 +60,7 @@ export interface CleanOptions extends RenderOptions {
 const OUT_RATE = SAMPLE_RATE;
 
 /** Serves monotonic range reads from an ordered chunk stream, holding only what is still needed. */
-export class SequentialPcmReader {
+class SequentialPcmReader {
   private readonly it: AsyncIterator<PcmChunk> | Iterator<PcmChunk>;
   private queue: PcmChunk[] = [];
   private end = 0;

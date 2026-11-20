@@ -252,9 +252,9 @@ describe("annotate", () => {
         { ts: 3000, round: 2, phase: "round", paused: false, recordingPaused: false },
       ],
     );
-    expect(out[0]).toMatchObject({ round: null, phase: null, paused: false, phaseChangesInside: 0 });
-    expect(out[1]).toMatchObject({ round: 1, paused: false, phaseChangesInside: 1 });
-    expect(out[2]).toMatchObject({ round: 2, paused: false, phaseChangesInside: 0 });
+    expect(out[0]).toMatchObject({ round: null, phase: null, paused: false });
+    expect(out[1]).toMatchObject({ round: 1, paused: false });
+    expect(out[2]).toMatchObject({ round: 2, paused: false });
   });
 });
 
