@@ -91,16 +91,8 @@ export interface LiveAudioDeps {
 
 type ChunkAck = AudioAck<{ trackId: string; seq: number }>;
 
-const reject = (error: string): { ok: false; error: string; retry: false } => ({
-  ok: false,
-  error,
-  retry: false,
-});
-const retry = (error: string): { ok: false; error: string; retry: true } => ({
-  ok: false,
-  error,
-  retry: true,
-});
+const reject = (error: string) => ({ ok: false, error, retry: false }) as const;
+const retry = (error: string) => ({ ok: false, error, retry: true }) as const;
 
 function toBuffer(v: ArrayBuffer | ArrayBufferView): Buffer {
   if (v instanceof ArrayBuffer) return Buffer.from(v);
@@ -133,32 +125,23 @@ export class LiveAudio {
   observe(ev: StoredEvent) {
     switch (ev.type) {
       case "RecordingPaused":
-        this.closeAll("paused");
+        this.closeOpen("paused");
         break;
       case "GameCompleted":
-        this.closeAll("game_complete");
+        this.closeOpen("game_complete");
         break;
       case "ParticipantWithdrawn":
-        this.closeSeat(ev.payload.seat, "withdrawn");
+        this.closeOpen("withdrawn", ev.payload.seat);
         break;
       case "MicCheckSkipped":
-        this.closeSeat(ev.payload.seat, "skipped");
+        this.closeOpen("skipped", ev.payload.seat);
         break;
       case "PlayerDisconnected":
-        this.closeSeat(ev.payload.seat, "disconnect");
+        this.closeOpen("disconnect", ev.payload.seat);
         break;
       default:
         break;
     }
-  }
-
-  /**
-   * The session is about to be closed or aborted (inside that command, before its final event is
-   * appended): close every open track now, so each AudioTrackStopped is logged before
-   * SessionClosed / SessionAborted. After the final event no event may be appended any more.
-   */
-  beforeFinal(reason: "closed" | "aborted") {
-    this.closeAll(reason);
   }
 
   /**
@@ -167,16 +150,7 @@ export class LiveAudio {
    * accepts them. A closed or aborted session gets no new events: the rows are closed only.
    */
   recover() {
-    const open = this.deps.store.listAudioTracks(this.deps.sessionId, { status: "recording" });
-    for (const t of open) {
-      if (this.deps.isFinal()) {
-        this.openTracks.delete(t.trackId);
-        this.deps.store.closeAudioTrack(t.trackId, {
-          closedServerTs: this.deps.clock(),
-          stopReason: "interrupted",
-        });
-      } else this.closeTrack(t, "interrupted", "system");
-    }
+    this.closeOpen("interrupted");
     for (const t of this.deps.store.listAudioTracks(this.deps.sessionId)) {
       if (t.status === "deleted") continue;
       const s = this.seatStats(t.seat);
@@ -277,8 +251,7 @@ export class LiveAudio {
     }
     this.deps.run(() => {
       // one seat records one track at a time: a track still open (another window, a lost stop) ends here
-      for (const t of store.listAudioTracks(sessionId, { seat, status: "recording" }))
-        this.closeTrack(t, "interrupted", "system");
+      this.closeOpen("interrupted", seat);
       store.insertAudioTrack({
         trackId: msg.trackId,
         sessionId,
@@ -410,14 +383,7 @@ export class LiveAudio {
     const track = store.getAudioTrack(msg.trackId);
     if (!track || track.sessionId !== sessionId || track.seat !== seat) return reject("Unknown track");
     if (track.status === "recording") {
-      if (this.deps.isFinal()) {
-        this.openTracks.delete(track.trackId);
-        store.closeAudioTrack(track.trackId, {
-          closedServerTs: this.deps.clock(),
-          stopReason: msg.reason,
-          droppedChunks: msg.droppedChunks,
-        });
-      } else this.deps.run(() => this.closeTrack(track, msg.reason, "player", msg.droppedChunks));
+      this.deps.run(() => this.closeTrack(track, msg.reason, "player", msg.droppedChunks));
     } else if (track.status === "closed" && msg.droppedChunks > track.droppedChunks) {
       // closed by the server before the browser said how many chunks it lost
       store.addDroppedAudioChunks(track.trackId, msg.droppedChunks - track.droppedChunks);
@@ -425,7 +391,10 @@ export class LiveAudio {
     return { ok: true };
   }
 
-  /** Close one open track and log AudioTrackStopped (inside a command). */
+  /**
+   * Close one open track and log AudioTrackStopped (inside a command). A closed or aborted session
+   * gets no new events: there the row is closed only.
+   */
   private closeTrack(
     track: AudioTrackRow,
     reason: AudioStopReason,
@@ -439,7 +408,7 @@ export class LiveAudio {
       stopReason: reason,
       droppedChunks,
     });
-    if (!closed) return;
+    if (!closed || this.deps.isFinal()) return;
     const row = store.getAudioTrack(track.trackId) ?? track;
     this.deps.append({
       type: "AudioTrackStopped",
@@ -456,15 +425,9 @@ export class LiveAudio {
     });
   }
 
-  /** Close the open tracks of one seat (inside a command). */
-  private closeSeat(seat: number, reason: AudioStopReason) {
+  /** Close the open tracks of one seat, or of every seat (inside a command). */
+  closeOpen(reason: AudioStopReason, seat?: number) {
     for (const t of this.deps.store.listAudioTracks(this.deps.sessionId, { seat, status: "recording" }))
-      this.closeTrack(t, reason, "system");
-  }
-
-  /** Close every open track of the session (inside a command). */
-  closeAll(reason: AudioStopReason) {
-    for (const t of this.deps.store.listAudioTracks(this.deps.sessionId, { status: "recording" }))
       this.closeTrack(t, reason, "system");
   }
 
