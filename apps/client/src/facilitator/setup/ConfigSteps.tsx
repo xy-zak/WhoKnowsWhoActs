@@ -15,6 +15,7 @@ import {
   policyParamRows,
   type RoundSpec,
   type Scenario,
+  type ScenarioInfo,
   type Scores,
   type SessionConfig,
   type SimulationConfig,
@@ -39,17 +40,6 @@ import {
 import type { FacilitatorConnection } from "../connection";
 import { PACES, paceId } from "../simulation";
 import type { Draft } from "./draft";
-
-export interface ScenarioInfo {
-  id: string;
-  title: string;
-  version: string;
-  description: string;
-  board: { cols: number; rows: number } | null;
-  regionCount: number;
-  viewIds: string[];
-  error?: string;
-}
 
 type Upd = (patch: Partial<Draft>) => void;
 const setCfg = (d: Draft, upd: Upd, patch: Partial<SessionConfig>) =>

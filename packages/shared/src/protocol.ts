@@ -717,6 +717,20 @@ export interface ServerInfo {
   tls: TlsInfo;
 }
 
+/** GET /api/scenarios: one entry per scenario folder; one that fails to load has `error` set. */
+export interface ScenarioInfo {
+  id: string;
+  title: string;
+  version: string;
+  description: string;
+  /** Board size in squares. */
+  board: { cols: number; rows: number } | null;
+  /** Number of sub-squares (4 per square). */
+  regionCount: number;
+  viewIds: string[];
+  error?: string;
+}
+
 /**
  * GET /api/landing: what the welcome page shows. Served over plain HTTP before anyone accepted the
  * certificate, so it says only whether a session takes players now: no session id, no names.
