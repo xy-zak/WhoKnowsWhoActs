@@ -151,7 +151,7 @@ All game behaviour is in `packages/shared/src/game/rules.ts`.
 4. Update the tests in `packages/shared/test/gameRules.test.ts`, then run `npm test` and `npm run docs:generate`.
 5. Update this document, sections 3–7.
 
-**A variant** next to the standard game: write another `defineGameRules({ … })` and add it to `GAME_RULES`. It shows up in setup step 01 and in § 9. The first entry of `GAME_RULES` is the default.
+**A variant** next to the standard game: write another `GameRules` object (like `standardRules`) and add it to `GAME_RULES`. It shows up in setup step 01 and in § 9. The first entry of `GAME_RULES` is the default.
 
 ## 11. Starting scores and scenarios
 

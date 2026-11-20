@@ -78,7 +78,7 @@ Design principles:
 | **Audio reason catalogue** | The single list of why an audio track started or stopped and of the states a microphone reports, with each one's label and meaning. The message schemas, the codebook and the screens all take their text from it. |
 | **Personal-data map** | The one list of which database tables and columns hold participant codes, session ids and audio files. Look-up, erasure, session deletion and audio deletion all work from it, so none of them can miss a table ([DATA-MANAGEMENT.md § 10](DATA-MANAGEMENT.md#10-takedown-and-erasure-procedure)). |
 | **Delivery policy** | How the player's browser sends one kind of message that needs an answer: whether it waits for its seat, how long it waits for the answer, and whether it sends again after a refusal or a reconnect (`once`, `whileSeated`, `attempt`, `retry`, `resend`). |
-| **Round rule** | Plug-in that decides what counts as a round and when it is complete. |
+| **Round rule** | The `rule` of a round spec (`quota` or `manual`): what counts as a round and when it is complete. |
 | **Validator** | Plug-in that accepts or rejects an intent (a game-design hook). |
 | **Composite** | The facilitator's overlay of all four views on one map. |
 | **Fake player** | A test client the server creates itself in a session with real players (setup step 08, **Connect**). It connects over the network like a browser and plays at random, but its seat is logged as fake, gets no participant code and skips onboarding. |
@@ -196,7 +196,7 @@ flowchart TB
 | `packages/shared/src/rules/` | `reducer.ts`, `validators.ts`, `roundRules.ts` |
 | `packages/shared/src/projections.ts` | `playerView` (the facilitator is sent the full `GameState`) |
 | `packages/shared/src/simulation/` | `policy.ts` (the `PlayerPolicy` interface, registry, helpers for writing policies), `policies.ts` (built-in policies `random` and `idle`) |
-| `packages/shared/src/audio.ts` | Audio constants, settings, ack and REST schemas; `state.ts` holds the mic check hold and the calibration gate |
+| `packages/shared/src/audio.ts` | Audio constants, settings and ack schemas, REST response types; `state.ts` holds the mic check hold and the calibration gate |
 | `packages/shared/src/audioReasons.ts` | The audio reason catalogue: every track start and stop reason and every mic state, with label, description, whether a stop is clean or interrupted, and whether a state is capturing; the enums, schema descriptions and codebook texts are derived from it |
 | `packages/shared/src/recordingVerdict.ts` | `recordingVerdict(state, seat)`: whether a seat records and, if not, why; `shouldRecord` is its yes/no; per reason, the catalogue `NOT_RECORDING_REASONS` holds the track's stop reason, the player's indicator state, the facilitator's mic-column tooltip, the server's refusal text and whether a closed track's late chunks are still stored; so do the calibration's readiness rules (`calibrationSeats`, `calibrationNotReadySeats`, `calibrationWaitsIn`, `calibrationReadyToStart`, `canSayCalibrationReady`) |
 | `packages/shared/src/docgen.ts`, `exportColumns.ts` | Documentation and codebook generation; export file contract |
@@ -234,7 +234,7 @@ sequenceDiagram
     SM->>R: game rules: score changes of this decision
     SM->>DB: append DecisionMade (seq 58, scoreChanges)
     SM->>R: applyEvent(state, event)
-    SM->>R: round rule isComplete(state)?
+    SM->>R: roundIsComplete(state)?
     opt round complete
       SM->>DB: append RoundCompleted (and GameCompleted after the last round)
     end
@@ -460,10 +460,9 @@ Labels are available in the state (`state.seats[seat].k` / `.p`), so rules like 
 
 ### Add a round rule
 
-1. Implement `RoundRule` (`canAct`, `isComplete`) in `packages/shared/src/rules/roundRules.ts`.
-2. Register it in `ROUND_RULES`.
-3. Add its id to the `rule` enum of `RoundSpecSchema` in `config.ts`.
-4. Run `npm run docs:generate` (the config table and the `RoundStarted` payload change).
+1. Add its completion test to `roundIsComplete` in `packages/shared/src/rules/roundRules.ts` (action caps go through `checkQuota`).
+2. Add its id to the `rule` enum of `RoundSpecSchema` in `config.ts`.
+3. Run `npm run docs:generate` (the config table and the `RoundStarted` payload change).
 
 ### Add a new action type (e.g. `veto`)
 
