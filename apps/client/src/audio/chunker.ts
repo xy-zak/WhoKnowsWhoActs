@@ -1,6 +1,24 @@
 import { int16ToLeBytes } from "@wkwa/shared";
 import { roundDb, toDb } from "./levels";
-import { INT16_FULL_SCALE, isClippedInt16, toInt16 } from "./pcm";
+
+/**
+ * Float → signed 16-bit PCM: symmetric scaling (x · 32768, rounded), clamped
+ * to [−32768, 32767]. A sample counts as clipped when it sits on a rail.
+ */
+export const INT16_FULL_SCALE = 32768;
+
+/** Converts one float sample; NaN becomes 0. */
+export function toInt16(x: number): number {
+  const s = Math.round(x * INT16_FULL_SCALE);
+  if (s > 32767) return 32767;
+  if (s < -32768) return -32768;
+  return Number.isNaN(s) ? 0 : s;
+}
+
+/** True when a converted sample sits on a 16-bit rail. */
+export function isClippedInt16(v: number): boolean {
+  return v === 32767 || v === -32768;
+}
 
 /** A finished chunk before the recorder adds trackId and timing. */
 export interface ChunkDraft {

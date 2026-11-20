@@ -7,39 +7,14 @@ import type {
   AudioSessionView,
   SeatAudioSummary,
   SpeechSegmentRow,
-  SpeechSegmentsView,
 } from "@wkwa/shared";
 import { fmtDuration, PLACEHOLDER } from "../../common/format";
 
 /*
- * Pure helpers of the DATABASE tab's audio views: the REST response shapes
- * (the shared schemas plus the extra fields the server adds), formatting, the
+ * Pure helpers of the DATABASE tab's audio views: formatting, the
  * explanations of the deletion scopes, and the state machine that follows an
  * attribution job while it is polled. No React, no I/O: unit-tested.
  */
-
-/* ─────────────────────────── REST response shapes ─────────────────────────── */
-
-/* The server's views, from packages/shared/src/audio.ts (under the names this tab uses). */
-export type {
-  AttributionGrade,
-  AttributionJobView,
-  AttributionSummaryView,
-  AudioDeleteResult,
-  AudioExportEntry,
-  AudioExportFile,
-  AudioExportResult,
-  AudioSessionView,
-} from "@wkwa/shared";
-/** Per-seat totals of GET /api/sessions/:id/audio. */
-export type SeatAudio = SeatAudioSummary;
-export type SpeechSegment = SpeechSegmentRow;
-/** GET /api/sessions/:id/audio/segments */
-export type SegmentsView = SpeechSegmentsView;
-/** What "Export audio" asks for: raw, clean or both. */
-export type AudioExportKind = AudioExportRequestKind;
-/** What "Delete audio" deletes: raw (and cleaned) audio, or all of it. */
-export type AudioDeleteScope = AudioDeletionScope;
 
 /* ─────────────────────────── Formatting ─────────────────────────── */
 
@@ -102,7 +77,7 @@ export interface TimelineBar {
   left: number;
   width: number;
   overlap: boolean;
-  segment: SpeechSegment;
+  segment: SpeechSegmentRow;
 }
 
 /**
@@ -110,7 +85,7 @@ export interface TimelineBar {
  * the span, with a minimum visible width so a short turn still shows.
  */
 export function timelineBars(
-  segments: readonly SpeechSegment[],
+  segments: readonly SpeechSegmentRow[],
   t0: number,
   t1: number,
   minWidth = 0.15,
@@ -133,8 +108,8 @@ export function timelineBars(
 
 /** The span the timeline covers: the seats' first to last audio, else the segments'. */
 export function timelineSpan(
-  seats: readonly SeatAudio[],
-  segments: readonly SpeechSegment[],
+  seats: readonly SeatAudioSummary[],
+  segments: readonly SpeechSegmentRow[],
 ): { t0: number; t1: number } | null {
   const starts = [
     ...seats.map((s) => s.firstServerTs).filter(ok),
@@ -156,7 +131,7 @@ export interface ScopeExplanation {
 }
 
 /** What each "delete audio" scope removes and keeps (matches the server's PersonalDataMap.deleteAudio). */
-export const DELETE_SCOPES: Record<AudioDeleteScope, ScopeExplanation> = {
+export const DELETE_SCOPES: Record<AudioDeletionScope, ScopeExplanation> = {
   raw: {
     label: "Raw audio, keep derived",
     removes: "every seat's recorded microphone audio and the cleaned tracks (their encrypted files and keys)",
@@ -175,7 +150,7 @@ export const DELETE_SCOPES: Record<AudioDeleteScope, ScopeExplanation> = {
 export const EXPORTS_NOT_DELETED =
   "Audio exports already written to the exports folder are not deleted: delete those folders by hand (and any copies elsewhere).";
 
-export function scopeSentence(scope: AudioDeleteScope): string {
+export function scopeSentence(scope: AudioDeletionScope): string {
   const s = DELETE_SCOPES[scope];
   return `Deletes ${s.removes}. Keeps ${s.keeps}.`;
 }
@@ -208,7 +183,7 @@ export function attributionBlock(view: AudioSessionView, job: JobState): string 
 export function exportBlock(
   view: AudioSessionView,
   job: JobState,
-  kind: AudioExportKind,
+  kind: AudioExportRequestKind,
   seat: number | "all",
 ): string | null {
   if (view.running) return "The session is still running: export once it has ended.";
@@ -312,13 +287,6 @@ export function jobReducer(s: JobState, a: JobAction): JobState {
       };
     }
   }
-}
-
-/** The job to follow when the audio view opens: the newest one, if it is still queued or running. */
-export function initialJobState(view: Pick<AudioSessionView, "jobs">): JobState {
-  const j = view.jobs[0];
-  if (!j || (j.status !== "queued" && j.status !== "running")) return JOB_IDLE;
-  return jobReducer(JOB_IDLE, { type: "job", job: j });
 }
 
 /** "▰▰▰▱▱▱▱▱▱▱ 30 %" parts for a job's progress. */

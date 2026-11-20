@@ -1,14 +1,12 @@
+import type { AttributionSummaryView, AudioSessionView, SeatAudioSummary } from "@wkwa/shared";
 import { describe, expect, it } from "vitest";
 import { PLACEHOLDER } from "../src/common/format";
 import {
-  type AttributionSummaryView,
-  type AudioSessionView,
   attributionBlock,
   audioCell,
   DELETE_SCOPES,
   deleteBlock,
   exportBlock,
-  initialJobState,
   isJobBusy,
   JOB_IDLE,
   JOB_POLL_MAX_ERRORS,
@@ -16,7 +14,6 @@ import {
   type JobState,
   jobReducer,
   progressCells,
-  type SeatAudio,
   scopeSentence,
   shortSha,
   talkBars,
@@ -24,7 +21,7 @@ import {
   timelineSpan,
 } from "../src/facilitator/database/audioModel";
 
-const seat = (n: number, over: Partial<SeatAudio> = {}): SeatAudio => ({
+const seat = (n: number, over: Partial<SeatAudioSummary> = {}): SeatAudioSummary => ({
   seat: n,
   tracks: 2,
   durationMs: 60_000,
@@ -260,26 +257,6 @@ describe("attribution job state machine", () => {
     const failed = run({ type: "start" }, { type: "error", error: "x" });
     expect(jobReducer(failed, { type: "start" })).toEqual({ phase: "starting" });
     expect(jobReducer(failed, { type: "reset" })).toBe(JOB_IDLE);
-  });
-
-  it("resumes following the newest job when the view opens", () => {
-    const j = (status: "queued" | "running" | "done", progress: number) => ({
-      jobId: "J9",
-      kind: "attribution" as const,
-      status,
-      progress,
-      startedWall: null,
-      finishedWall: null,
-      error: null,
-      sessionId: "S-TEST",
-    });
-    expect(initialJobState({ jobs: [] })).toBe(JOB_IDLE);
-    expect(initialJobState({ jobs: [j("done", 1)] })).toBe(JOB_IDLE);
-    expect(initialJobState({ jobs: [j("running", 0.3)] })).toMatchObject({
-      phase: "active",
-      jobId: "J9",
-      progress: 0.3,
-    });
   });
 
   it("draws progress as cells", () => {

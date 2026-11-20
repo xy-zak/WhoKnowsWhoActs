@@ -33,10 +33,6 @@ export interface MicErrorInfo extends MicHelp {
   kind: MicErrorKind;
   /** DOMException name, e.g. "NotAllowedError" ("" when unknown) */
   name: string;
-  /** the browser's message, for display only (do not log or send) */
-  detail: string;
-  browser: BrowserFamily;
-  os: OsFamily;
 }
 
 /** An error raised by the capture engine itself, with its kind. */
@@ -243,9 +239,6 @@ export function classifyMicError(err: unknown, env: MicEnvironment = currentEnvi
   return {
     kind,
     name: err instanceof MicError ? "" : name,
-    detail,
-    browser,
-    os,
     ...micHelp(kind, browser, os),
   };
 }

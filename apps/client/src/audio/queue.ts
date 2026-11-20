@@ -34,8 +34,6 @@ export interface SendQueueOptions<T> {
   retryDelaysMs?: readonly number[];
   /** a delivery that has not settled after this long counts as failed; default 30 s */
   ackTimeoutMs?: number;
-  /** called after every change of the pending set */
-  onChange?(): void;
 }
 
 interface Entry<T> {
@@ -88,7 +86,6 @@ export class SendQueue<T> {
     this.sampleCount += samples;
     this.byteCount += bytes;
     this.enforceCap();
-    this.changed();
     this.pump();
   }
 
@@ -119,7 +116,6 @@ export class SendQueue<T> {
     if (this.retryTimer !== null) clearTimeout(this.retryTimer);
     this.retryTimer = null;
     this.failures = 0;
-    this.changed();
     this.settleWaiters();
     return chunks;
   }
@@ -150,14 +146,6 @@ export class SendQueue<T> {
     if (e.samples > 0) this.chunkCount--;
     this.sampleCount -= e.samples;
     this.byteCount -= e.bytes;
-  }
-
-  private changed() {
-    try {
-      this.o.onChange?.();
-    } catch (err) {
-      console.error(err);
-    }
   }
 
   private settleWaiters() {
@@ -215,7 +203,6 @@ export class SendQueue<T> {
       // a late success of an abandoned attempt also settles a resend of the same item
       if (this.inFlight?.entry === entry) this.inFlight = null;
       this.failures = 0;
-      this.changed();
       this.pump();
       return;
     }
@@ -227,6 +214,5 @@ export class SendQueue<T> {
       this.retryTimer = null;
       this.pump();
     }, delay);
-    this.changed();
   }
 }

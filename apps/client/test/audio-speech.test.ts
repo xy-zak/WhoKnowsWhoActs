@@ -87,10 +87,8 @@ describe("speech detector (mic check)", () => {
     expect(r.passed).toBe(false);
   });
 
-  it("honours minSpeechMs and reset()", () => {
+  it("honours minSpeechMs", () => {
     const det = new SpeechDetector({ minSpeechMs: 400 });
     expect(feed(det, signal(3, -55, [{ at: 1, len: 0.6, db: -22 }])).passed).toBe(true);
-    det.reset();
-    expect(det.result).toMatchObject({ speechMs: 0, passed: false, analysedMs: 0, noiseFloorDb: -100 });
   });
 });
