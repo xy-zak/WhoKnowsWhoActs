@@ -47,14 +47,7 @@ import type { Logger } from "pino";
 import { HttpError, orThrow } from "../api/http";
 import { sha256 } from "../content";
 import { type AudioDeletionResult, PersonalDataMap } from "../db/personalData";
-import type {
-  AudioChunkRow,
-  AudioDeletionRow,
-  AudioJobRow,
-  AudioTrackRow,
-  NewAudioDerivative,
-  Store,
-} from "../db/store";
+import type { AudioChunkRow, AudioDeletionRow, AudioJobRow, NewAudioDerivative, Store } from "../db/store";
 import { exportId as newExportId } from "../gdpr/exporter";
 import { nowTs, wall } from "../runtime";
 import { SessionGuard } from "../session/sessionGuard";
