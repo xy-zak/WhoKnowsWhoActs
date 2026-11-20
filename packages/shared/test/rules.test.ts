@@ -5,9 +5,9 @@ import {
   isOnboardingComplete,
   playerView,
   reduceEvents,
+  roundIsComplete,
   roundRemainingMs,
   roundSpecFor,
-  ruleFor,
   seatList,
   type Validator,
   validateIntent,
@@ -51,15 +51,14 @@ describe("rounds and quotas (default: 5 propose + 5 decide, 3 rounds)", () => {
   it("enforces quotas and completes the round when all quotas are used", () => {
     const log = readySession();
     startRound(log);
-    const rule = ruleFor(log.state);
     for (let i = 0; i < 5; i++) {
       for (let seat = 1; seat <= 4; seat++) {
         expect(act(log, seat, "propose", "A1").ok).toBe(true);
         expect(act(log, seat, "decide", "B1").ok).toBe(true);
       }
-      if (i < 4) expect(rule.isComplete(log.state)).toBe(false);
+      if (i < 4) expect(roundIsComplete(log.state)).toBe(false);
     }
-    expect(rule.isComplete(log.state)).toBe(true);
+    expect(roundIsComplete(log.state)).toBe(true);
     expect(act(log, 1, "propose", "A1")).toMatchObject({ ok: false, reason: "quota_exhausted" });
   });
 
@@ -71,7 +70,7 @@ describe("rounds and quotas (default: 5 propose + 5 decide, 3 rounds)", () => {
         act(log, seat, "propose", "A1");
         act(log, seat, "decide", "A1");
       }
-    expect(ruleFor(log.state).isComplete(log.state)).toBe(false);
+    expect(roundIsComplete(log.state)).toBe(false);
   });
 
   it("revoking an action restores quota", () => {
@@ -115,7 +114,7 @@ describe("rounds and quotas (default: 5 propose + 5 decide, 3 rounds)", () => {
     const log = readySession({ defaultRound: { rule: "manual", quota: { propose: null, decide: null } } });
     startRound(log);
     for (let i = 0; i < 20; i++) expect(act(log, 1, "propose", "A1").ok).toBe(true);
-    expect(ruleFor(log.state).isComplete(log.state)).toBe(false);
+    expect(roundIsComplete(log.state)).toBe(false);
   });
 
   it("supports per-round overrides", () => {
@@ -132,7 +131,7 @@ describe("rounds and quotas (default: 5 propose + 5 decide, 3 rounds)", () => {
       act(log, seat, "propose", "A1");
       act(log, seat, "decide", "A1");
     }
-    expect(ruleFor(log.state).isComplete(log.state)).toBe(true);
+    expect(roundIsComplete(log.state)).toBe(true);
     expect(validateIntent(log.state, 4, { kind: "propose", regionId: "A1-Kd" })).toMatchObject({
       reason: "seat_inactive",
     });

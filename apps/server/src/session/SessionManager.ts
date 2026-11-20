@@ -49,9 +49,9 @@ import {
   randomCrockford,
   resolvePolicyParams,
   roundActiveMs,
+  roundIsComplete,
   roundRemainingMs,
   roundSpecFor,
-  ruleFor,
   type Scenario,
   type SessionConfig,
   type StoredEvent,
@@ -1279,7 +1279,7 @@ export class SessionManager {
 
   /** Check round completion after anything that may complete it. */
   private afterAction() {
-    if (this.state.phase === "round_active" && ruleFor(this.state).isComplete(this.state)) {
+    if (this.state.phase === "round_active" && roundIsComplete(this.state)) {
       this.completeRound("quota_met", false);
     }
   }
