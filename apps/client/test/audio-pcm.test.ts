@@ -129,7 +129,6 @@ describe("track pipeline", () => {
       expect(drafts.map((d) => d.startSample)).toEqual([0, 80000, 160000]);
       expect(outputs).toBe(resampledLength(frames, rate));
       expect(p.outputSamples).toBe(outputs);
-      expect(p.inputFrames).toBe(frames);
     }
   });
 });

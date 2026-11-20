@@ -3,10 +3,10 @@
  *
  * Method: band-limited interpolation with a Kaiser-windowed sinc kernel,
  * evaluated polyphase.
- *  - The ratio is reduced to integers: L = outputRate / g, M = inputRate / g
+ *  - The ratio is reduced to integers: L = 16 000 / g, M = inputRate / g
  *    (g = gcd), e.g. 48 000 → 16 000 is L = 1, M = 3 and 44 100 → 16 000 is
  *    L = 160, M = 441. Output sample k is the band-limited value of the input
- *    at position k·M/L input samples, i.e. at time k / outputRate since the
+ *    at position k·M/L input samples, i.e. at time k / 16 000 since the
  *    first input sample. The position is kept as an integer pair
  *    (base, phase) = (⌊kM/L⌋, kM mod L), so the sample count never drifts:
  *    N input samples always give exactly ⌈N·L/M⌉ output samples.
@@ -53,24 +53,21 @@ function kaiserBeta(attenuationDb: number): number {
   return 0;
 }
 
+/** −6 dB point of the low-pass as a fraction of min(input, output) rate (7.5 kHz for 16 kHz) */
+const CUTOFF_RATIO = 0.46875;
+/** kernel half-width (~1 kHz transition band) */
+const HALF_WIDTH_MS = 2.5;
+/** Kaiser window β for an 80 dB stop-band */
+const BETA = kaiserBeta(80);
+const I0_BETA = besselI0(BETA);
+
 export interface ResamplerOptions {
   inputRate: number;
-  /** default 16 000 */
-  outputRate?: number;
-  /** −6 dB point of the low-pass; default 0.46875 × min(input, output) rate (7.5 kHz for 16 kHz) */
-  cutoffHz?: number;
-  /** kernel half-width; default 2.5 ms (~1 kHz transition band) */
-  halfWidthMs?: number;
-  /** Kaiser stop-band attenuation; default 80 dB */
-  attenuationDb?: number;
 }
 
-/** Exact number of output samples for `inputLength` input samples (after flush()). */
-export function resampledLength(
-  inputLength: number,
-  inputRate: number,
-  outputRate = AUDIO_SAMPLE_RATE,
-): number {
+/** Exact number of 16 kHz output samples for `inputLength` input samples (after flush()). */
+export function resampledLength(inputLength: number, inputRate: number): number {
+  const outputRate = AUDIO_SAMPLE_RATE;
   const g = gcd(inputRate, outputRate);
   const up = outputRate / g;
   const down = inputRate / g;
@@ -78,21 +75,16 @@ export function resampledLength(
 }
 
 export class Resampler {
-  readonly inputRate: number;
-  readonly outputRate: number;
   /** L: output sample k sits at input position k·down/up */
-  readonly up: number;
+  private readonly up: number;
   /** M */
-  readonly down: number;
+  private readonly down: number;
   /** taps on each side of the interpolation point (input samples) */
-  readonly halfTaps: number;
-  readonly cutoffHz: number;
+  private readonly halfTaps: number;
   private readonly taps: number;
   private readonly buckets: number;
   private readonly tables: Array<Float64Array | undefined>;
   private readonly fcNorm: number;
-  private readonly beta: number;
-  private readonly i0Beta: number;
   /** input history: buf[0] holds absolute input index bufStart; indices < 0 are zeros */
   private buf: Float32Array;
   private bufStart: number;
@@ -104,26 +96,19 @@ export class Resampler {
   private finished = false;
 
   constructor(o: ResamplerOptions) {
-    const outputRate = o.outputRate ?? AUDIO_SAMPLE_RATE;
-    for (const [k, v] of [
-      ["inputRate", o.inputRate],
-      ["outputRate", outputRate],
-    ] as const) {
-      if (!Number.isInteger(v) || v <= 0) throw new RangeError(`Resampler: ${k} must be a positive integer`);
+    const { inputRate } = o;
+    if (!Number.isInteger(inputRate) || inputRate <= 0) {
+      throw new RangeError("Resampler: inputRate must be a positive integer");
     }
-    this.inputRate = o.inputRate;
-    this.outputRate = outputRate;
-    const g = gcd(o.inputRate, outputRate);
+    const outputRate = AUDIO_SAMPLE_RATE;
+    const g = gcd(inputRate, outputRate);
     this.up = outputRate / g;
-    this.down = o.inputRate / g;
-    this.cutoffHz = o.cutoffHz ?? 0.46875 * Math.min(o.inputRate, outputRate);
-    this.halfTaps = Math.max(2, Math.ceil(((o.halfWidthMs ?? 2.5) * o.inputRate) / 1000));
+    this.down = inputRate / g;
+    this.halfTaps = Math.max(2, Math.ceil((HALF_WIDTH_MS * inputRate) / 1000));
     this.taps = 2 * this.halfTaps;
     this.buckets = Math.min(this.up, MAX_PHASES);
     this.tables = new Array(this.buckets + 1);
-    this.fcNorm = this.cutoffHz / o.inputRate;
-    this.beta = kaiserBeta(o.attenuationDb ?? 80);
-    this.i0Beta = besselI0(this.beta);
+    this.fcNorm = (CUTOFF_RATIO * Math.min(inputRate, outputRate)) / inputRate;
     // pre-roll: the H − 1 samples before the start are zeros
     this.buf = new Float32Array(Math.max(4096, this.taps * 4));
     this.bufStart = -(this.halfTaps - 1);
@@ -230,7 +215,7 @@ export class Resampler {
       const tau = j - H + 1 - frac;
       const x = tau / H;
       const r = 1 - x * x;
-      const win = r > 0 ? besselI0(this.beta * Math.sqrt(r)) / this.i0Beta : r === 0 ? 1 / this.i0Beta : 0;
+      const win = r > 0 ? besselI0(BETA * Math.sqrt(r)) / I0_BETA : r === 0 ? 1 / I0_BETA : 0;
       const sinc = tau === 0 ? w2 : Math.sin(Math.PI * w2 * tau) / (Math.PI * tau);
       const v = sinc * win;
       t[j] = v;
