@@ -48,7 +48,7 @@
 
 export { analyse, quickCalibrationCheck } from "./analyse";
 export { type AnnotatedSegment, annotate, type PhaseChange } from "./annotate";
-export { fitClock, trackSampleEnd } from "./clock";
+export { alignTrack, fitClock, trackSampleEnd } from "./clock";
 export { FeatureBuilder, type Vad } from "./features";
 export {
   type PcmChunk,

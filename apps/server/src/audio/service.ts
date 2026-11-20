@@ -54,6 +54,7 @@ import { SessionGuard } from "../session/sessionGuard";
 import {
   type AttributionOptions,
   type AttributionResult,
+  alignTrack,
   type CalibrationTurn,
   type ChunkMeta,
   ENGINE_VERSION,
@@ -163,18 +164,7 @@ export function timestampTiming(
   const alignment: TrackAlignment[] = [];
   for (const t of tracks) {
     const f = fitClock(t);
-    if (!f) continue;
-    const samples = trackSampleEnd(t.chunks);
-    alignment.push({
-      trackId: t.trackId,
-      seat: t.seat,
-      startTs: f.startTs,
-      msPerSample: f.msPerSample,
-      driftPpm: f.driftPpm,
-      samples,
-      endTs: f.startTs + samples * f.msPerSample,
-      residualMs: f.residualMs,
-    });
+    if (f) alignment.push(alignTrack(f, trackSampleEnd(t.chunks)));
   }
   if (alignment.length === 0) return null;
   const t0 = Math.min(...alignment.map((a) => a.startTs));
