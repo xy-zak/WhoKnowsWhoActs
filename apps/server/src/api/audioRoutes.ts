@@ -1,5 +1,5 @@
 import { SeatSchema } from "@wkwa/shared";
-import type { FastifyReply } from "fastify";
+import type { FastifyInstance, FastifyReply } from "fastify";
 import { z } from "zod";
 import type { AppContext } from "../app";
 import { AudioJobRunner, runInWorker } from "../audio/jobs";
@@ -7,7 +7,7 @@ import { AudioService } from "../audio/service";
 import { exportsDirFor } from "../db/stores";
 import { isLoopback } from "../net/hub";
 import { SessionGuard } from "../session/sessionGuard";
-import { type Guard, HttpError, requireSession } from "./http";
+import { HttpError, requireSession } from "./http";
 
 const Note = z
   .string()
@@ -96,16 +96,15 @@ export function createAudioService(ctx: AppContext): { service: AudioService; se
   return { service, sessionGuard };
 }
 
-export function registerAudioApi(ctx: AppContext, guard: Guard, service: AudioService) {
-  const { app, stores } = ctx;
-  const route = { preHandler: guard };
+export function registerAudioApi(app: FastifyInstance, ctx: AppContext, service: AudioService) {
+  const { stores } = ctx;
 
   /** The session in the participant database (simulated sessions have no audio). */
   const participantSession = (id: string) =>
     requireSession(stores, id, { participants: "Simulated sessions have no audio." });
 
   /** Tracks (no keys, no file names), cleaned tracks, jobs, deletion register, audio exports, per-seat totals. */
-  app.get<{ Params: { id: string } }>("/api/sessions/:id/audio", route, async (req) => {
+  app.get<{ Params: { id: string } }>("/api/sessions/:id/audio", async (req) => {
     if (requireSession(stores, req.params.id).players === "simulated")
       return {
         sessionId: req.params.id,
@@ -122,7 +121,7 @@ export function registerAudioApi(ctx: AppContext, guard: Guard, service: AudioSe
   });
 
   /** Queue a speaker attribution (post-session). 202 + the job; poll GET /api/audio/jobs/:jobId. */
-  app.post<{ Params: { id: string } }>("/api/sessions/:id/audio/attribution", route, async (req, reply) => {
+  app.post<{ Params: { id: string } }>("/api/sessions/:id/audio/attribution", async (req, reply) => {
     participantSession(req.params.id);
     const body = AttributionRequestSchema.safeParse(req.body ?? {});
     if (!body.success) return badRequest(reply, body.error);
@@ -134,18 +133,18 @@ export function registerAudioApi(ctx: AppContext, guard: Guard, service: AudioSe
   });
 
   /** Job status: progress while running, the attribution summary once done, the error if failed. */
-  app.get<{ Params: { jobId: string } }>("/api/audio/jobs/:jobId", route, async (req) =>
+  app.get<{ Params: { jobId: string } }>("/api/audio/jobs/:jobId", async (req) =>
     service.job(req.params.jobId),
   );
 
   /** Who spoke when (JSON, timing only). Empty until an attribution has been run. */
-  app.get<{ Params: { id: string } }>("/api/sessions/:id/audio/segments", route, async (req) => {
+  app.get<{ Params: { id: string } }>("/api/sessions/:id/audio/segments", async (req) => {
     participantSession(req.params.id);
     return service.speechSegments(req.params.id);
   });
 
   /** Export audio: the only way audio content leaves the encrypted store. Writes WAVs + manifest, registered. */
-  app.post<{ Params: { id: string } }>("/api/sessions/:id/audio/export", route, async (req, reply) => {
+  app.post<{ Params: { id: string } }>("/api/sessions/:id/audio/export", async (req, reply) => {
     participantSession(req.params.id);
     const body = AudioExportRequestSchema.safeParse(req.body ?? {});
     if (!body.success) return badRequest(reply, body.error);
@@ -163,7 +162,7 @@ export function registerAudioApi(ctx: AppContext, guard: Guard, service: AudioSe
   });
 
   /** Delete raw audio (scope raw) or every audio row and file (scope all). The body must repeat the session id. */
-  app.post<{ Params: { id: string } }>("/api/sessions/:id/audio/delete", route, async (req, reply) => {
+  app.post<{ Params: { id: string } }>("/api/sessions/:id/audio/delete", async (req, reply) => {
     participantSession(req.params.id);
     const body = AudioDeleteRequestSchema.safeParse(req.body ?? {});
     if (!body.success) return badRequest(reply, body.error);
