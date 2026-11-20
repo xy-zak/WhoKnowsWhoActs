@@ -70,13 +70,8 @@ import { harnessVersion, nowTs, wall } from "../runtime";
 import { CalibrationError, CalibrationRunner } from "./CalibrationRunner";
 import { type MicLevelReading, SeatMonitor } from "./SeatMonitor";
 
-export { CALIBRATION_CHECK_WAIT_MS } from "./CalibrationRunner";
-
 /** Thrown for invalid facilitator commands / player submissions; the message is shown to the user. */
 export class CommandError extends Error {}
-
-/** Ack of an intent (shared with the clients: see @wkwa/shared socket.ts). */
-export type { IntentAck } from "@wkwa/shared";
 
 export interface SessionDeps {
   store: Store;
@@ -434,10 +429,6 @@ export class SessionManager {
       if (expected && timingSafeEqual(Buffer.from(expected, "hex"), given)) return s.seat;
     }
     return null;
-  }
-
-  seatOfTerminal(terminal: number): number | null {
-    return seatList(this.state).find((s) => s.bound && s.terminal === terminal)?.seat ?? null;
   }
 
   private requireReal(what: string) {
