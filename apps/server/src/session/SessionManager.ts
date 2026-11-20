@@ -192,13 +192,6 @@ export class SessionManager {
         config = { ...config, simulation: { ...config.simulation, seed: randomCrockford(8) } };
       }
     }
-    for (const k of K_LABELS) {
-      if (config.viewAssignment === "byKnowledgeType" && !deps.scenario.views[k]) {
-        throw new CommandError(
-          `Scenario '${deps.scenario.id}' has no view '${k}' (required for byKnowledgeType)`,
-        );
-      }
-    }
     if (config.audio.enabled) {
       // nobody is recorded without being asked: the consent step, with its required audio item
       if (!config.onboarding.consent)
