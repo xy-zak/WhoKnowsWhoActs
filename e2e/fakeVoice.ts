@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { encodeWav } from "../apps/server/src/audio/wav";
 
 /**
  * A synthetic "voice" for Chromium's fake microphone (`--use-file-for-fake-audio-capture`).
@@ -14,9 +15,9 @@ import path from "node:path";
 const RATE = 48_000;
 const SECONDS = 6;
 
-function synthesise(): Buffer {
+function synthesise(): Int16Array {
   const n = RATE * SECONDS;
-  const pcm = Buffer.alloc(n * 2);
+  const pcm = new Int16Array(n);
   let x = 0x1234567;
   const rand = () => {
     // xorshift32
@@ -34,27 +35,9 @@ function synthesise(): Buffer {
     const syllable = 0.5 - 0.5 * Math.cos(2 * Math.PI * 4 * t); // 4 Hz envelope
     const amp = floor + (speaking ? voice * (0.25 + 0.75 * syllable) : 0);
     const v = Math.max(-1, Math.min(1, rand() * amp));
-    pcm.writeInt16LE(Math.round(v * 32767), i * 2);
+    pcm[i] = Math.round(v * 32767);
   }
   return pcm;
-}
-
-function wav(pcm: Buffer): Buffer {
-  const h = Buffer.alloc(44);
-  h.write("RIFF", 0);
-  h.writeUInt32LE(36 + pcm.length, 4);
-  h.write("WAVE", 8);
-  h.write("fmt ", 12);
-  h.writeUInt32LE(16, 16);
-  h.writeUInt16LE(1, 20); // PCM
-  h.writeUInt16LE(1, 22); // mono
-  h.writeUInt32LE(RATE, 24);
-  h.writeUInt32LE(RATE * 2, 28);
-  h.writeUInt16LE(2, 32);
-  h.writeUInt16LE(16, 34);
-  h.write("data", 36);
-  h.writeUInt32LE(pcm.length, 40);
-  return Buffer.concat([h, pcm]);
 }
 
 /** Path of the synthetic voice file (written once, outside the repo and outside test-results/). */
@@ -63,7 +46,7 @@ export function fakeVoiceFile(): string {
   const file = path.join(dir, "fake-voice-v1.wav");
   if (!existsSync(file)) {
     mkdirSync(dir, { recursive: true });
-    writeFileSync(file, wav(synthesise()));
+    writeFileSync(file, encodeWav(synthesise(), { sampleRate: RATE }));
   }
   return file;
 }

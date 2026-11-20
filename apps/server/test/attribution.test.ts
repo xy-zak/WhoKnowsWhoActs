@@ -15,14 +15,7 @@ import {
   type Vad,
 } from "../src/audio/attribution";
 import { smoothSpeech } from "../src/audio/attribution/smooth";
-import {
-  encodeWav,
-  parseWavHeader,
-  WAV_HEADER_BYTES,
-  WavWriter,
-  wavHeader,
-  wavStream,
-} from "../src/audio/wav";
+import { encodeWav, parseWavHeader, WAV_HEADER_BYTES, wavHeader, wavStream } from "../src/audio/wav";
 import { synthesise, trackInputs } from "./attributionSynth";
 
 /** Wall-clock limits are checked in the normal run only: coverage instrumentation slows the code down. */
@@ -303,17 +296,8 @@ describe("WAV", () => {
     expect(long.length).toBe(44 + 80_000);
   });
 
-  it("WavWriter reports the final header", () => {
-    const chunks: Uint8Array[] = [];
-    const w = new WavWriter((b) => chunks.push(b), { sampleRate: FS });
-    w.write(new Int16Array(10));
-    w.write(new Int16Array(5));
-    const { header, dataBytes } = w.end();
-    expect(dataBytes).toBe(30);
-    expect(parseWavHeader(header).dataBytes).toBe(30);
-    expect(w.length).toBe(15);
-    // An unpatched provisional header is clamped to the real size when the file size is known.
-    const provisional = parseWavHeader(chunks[0]!, 44 + 30);
+  it("clamps a header that declares more data than the file holds", () => {
+    const provisional = parseWavHeader(wavHeader({ sampleRate: FS }, 1000), 44 + 30);
     expect(provisional).toMatchObject({ dataBytes: 30, frames: 15, truncated: true });
   });
 });
