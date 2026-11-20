@@ -183,7 +183,7 @@ export function SetupStage({ conn }: { conn: FacilitatorConnection }) {
 
   const [scenarios, setScenarios] = useState<ScenarioInfo[]>([]);
   const [draft, setDraftState] = useState<Draft | null>(loadDraft);
-  const [step, setStep] = useState<number>(() => (lobby ? CONNECT : (loadDraft()?.reached ?? 0)));
+  const [step, setStep] = useState<number>(() => (lobby ? CONNECT : (draft?.reached ?? 0)));
   const [busy, run] = useBusy();
   const [keySheet, setKeySheet] = useState(false);
   const [info, setInfo] = useState<ServerInfo | null>(null);
@@ -237,7 +237,10 @@ export function SetupStage({ conn }: { conn: FacilitatorConnection }) {
   // simulated players: from the attached session once created, from the draft before
   const simulated = lobby ? isSimulated(ls) : draft?.config.players === "simulated";
   const steps = setupSteps(simulated);
-  const allBound = lobby && seatList(ls).every((s) => s.bound);
+  const seats = lobby ? seatList(ls) : [];
+  const allBound = lobby && seats.every((s) => s.bound);
+  const boundCount = seats.filter((s) => s.bound).length;
+  const agentCount = seats.filter((s) => s.agent).length;
   const fakes = lobby ? fakeSeats(ls) : [];
   // all seats taken by agents or fake players: nobody to write on a key sheet
   const noParticipants = allBound && !hasParticipants(ls);
@@ -247,11 +250,7 @@ export function SetupStage({ conn }: { conn: FacilitatorConnection }) {
   const labelsRow: ChecklistRow = [
     `Labels assigned (${lobby ? pairingName(ls.labelPairing) : "—"})`,
     labelled,
-    lobby
-      ? seatList(ls)
-          .map((s) => `${s.seat}:${s.k ?? "–"}/${s.p ?? "–"}`)
-          .join(" ")
-      : "",
+    lobby ? seats.map((s) => `${s.seat}:${s.k ?? "–"}/${s.p ?? "–"}`).join(" ") : "",
   ];
   const keySheetDone = keySheet || simulated || noParticipants;
   const done = (i: number): boolean => {
@@ -413,13 +412,11 @@ export function SetupStage({ conn }: { conn: FacilitatorConnection }) {
         return lobby ? `created · ${sessionId}` : `creates the session and locks steps 01–${stepNum(CREATE)}`;
       case CONNECT:
         return lobby
-          ? `${seatList(ls).filter((s) => s.bound).length}/${cfg.seatCount} seats bound${fakes.length ? ` (${fakes.length} fake)` : ""}`
+          ? `${boundCount}/${cfg.seatCount} seats bound${fakes.length ? ` (${fakes.length} fake)` : ""}`
           : "after the session is created";
       case LABELS:
         return lobby && labelled
-          ? `${pairingName(ls.labelPairing)} · ${seatList(ls)
-              .map((s) => `${s.seat}:${s.k}/${s.p}`)
-              .join("  ")}`
+          ? `${pairingName(ls.labelPairing)} · ${seats.map((s) => `${s.seat}:${s.k}/${s.p}`).join("  ")}`
           : "the K–P pairing: aligned or dissociated D1–D6";
       case KEYSHEET:
         return keySheet ? "printed ✓" : "print, fill in names by hand, store separately";
@@ -442,7 +439,7 @@ export function SetupStage({ conn }: { conn: FacilitatorConnection }) {
         return "skipped: agents have no onboarding";
       case CONNECT:
         return lobby
-          ? `${seatList(ls).filter((s) => s.agent).length} agents · seed ${cfg.simulation.seed}`
+          ? `${agentCount} agents · seed ${cfg.simulation.seed}`
           : "every seat gets an agent when the session is created";
       case KEYSHEET:
         return "skipped: no participants, so no names or codes";
@@ -549,11 +546,7 @@ export function SetupStage({ conn }: { conn: FacilitatorConnection }) {
             <Checklist
               rows={[
                 ["Session created", true, sessionId],
-                [
-                  "All seats bound",
-                  allBound,
-                  `${seatList(ls).filter((s) => s.bound).length}/${ls.config.seatCount}`,
-                ],
+                ["All seats bound", allBound, `${boundCount}/${ls.config.seatCount}`],
                 labelsRow,
                 ["Key sheet printed", keySheetDone, noParticipants ? "not needed (fake players only)" : ""],
                 ...(fakes.length
@@ -611,7 +604,7 @@ export function SetupStage({ conn }: { conn: FacilitatorConnection }) {
                 [
                   "Agents in every seat",
                   allBound,
-                  `${seatList(ls).filter((s) => s.agent).length}/${ls.config.seatCount} · ${policySummary(ls.config.simulation, ls.config.seatCount)}`,
+                  `${agentCount}/${ls.config.seatCount} · ${policySummary(ls.config.simulation, ls.config.seatCount)}`,
                 ],
                 labelsRow,
               ]}
