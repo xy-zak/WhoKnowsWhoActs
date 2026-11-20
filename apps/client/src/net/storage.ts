@@ -32,10 +32,9 @@ export function safeStorage(get: () => Storage): KeyValueStore {
 }
 
 /** An in-memory store (tests, or no storage at all). */
-export function memoryStorage(): KeyValueStore & { readonly map: Map<string, string> } {
+export function memoryStorage(): KeyValueStore {
   const map = new Map<string, string>();
   return {
-    map,
     getItem: (k) => map.get(k) ?? null,
     setItem: (k, v) => void map.set(k, v),
     removeItem: (k) => void map.delete(k),
