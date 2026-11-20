@@ -39,7 +39,6 @@ import {
 import type { FacilitatorConnection } from "../connection";
 import { AgentsTable, BindEditor, LabelsEditor, labelsComplete } from "../seats";
 import { paceText, policySummary } from "../simulation";
-import { inLobby } from "../stage";
 import {
   CreateStep,
   OnboardingStep,
@@ -178,7 +177,7 @@ export function SetupStage({ conn }: { conn: FacilitatorConnection }) {
   const dash = fs.dashboard;
   const st = dash?.state ?? null;
   /** the attached session while it is in its lobby (steps 08–11), else null */
-  const ls = st && inLobby(st) ? st : null;
+  const ls = st?.phase === "lobby" ? st : null;
   const lobby = ls !== null;
   const sessionId = ls?.sessionId ?? null;
 
