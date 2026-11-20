@@ -535,9 +535,7 @@ export function SetupStage({ conn }: { conn: FacilitatorConnection }) {
               <Button
                 icon="print"
                 tip="Open the printable sheet of seats and participant codes; names are written on it by hand, never typed"
-                onClick={() =>
-                  void conn.openPrintable(`/api/sessions/${sessionId}/print/keysheet`).catch(() => {})
-                }
+                onClick={() => conn.openPrintable(`/api/sessions/${sessionId}/print/keysheet`)}
               >
                 Print key sheet
               </Button>

@@ -355,9 +355,7 @@ export function Database({
                           size="sm"
                           icon="keysheet"
                           tip="Open the printable key sheet (seat → code, names written by hand). Print it; don't save it."
-                          onClick={() =>
-                            void conn.openPrintable(`/api/sessions/${s.id}/print/keysheet`).catch(() => {})
-                          }
+                          onClick={() => conn.openPrintable(`/api/sessions/${s.id}/print/keysheet`)}
                         >
                           Key sheet
                         </Button>
@@ -588,12 +586,10 @@ export function TakedownCardList({
             icon="export"
             tip={`Download takedown-card-${sessionId}-seat${seat}.pdf (A6) to print`}
             onClick={() =>
-              void conn
-                .download(
-                  `/api/sessions/${sessionId}/cards/${seat}`,
-                  `takedown-card-${sessionId}-seat${seat}.pdf`,
-                )
-                .catch(() => {})
+              conn.download(
+                `/api/sessions/${sessionId}/cards/${seat}`,
+                `takedown-card-${sessionId}-seat${seat}.pdf`,
+              )
             }
           >
             Card PDF
