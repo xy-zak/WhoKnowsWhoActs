@@ -33,7 +33,7 @@ import { fileBytes, isAudioDerivativeKind } from "../audio/records";
 import { sha256 } from "../content";
 import { nowTs, wall } from "../runtime";
 import { compactAfterDelete, fromRow, insert } from "./database";
-import type { AudioDeletionRow, AudioTrackRowStatus, Store } from "./store";
+import type { AudioDeletionRow, Store } from "./store";
 
 /* ─────────────────────────── the registry ─────────────────────────── */
 
@@ -575,39 +575,22 @@ export class PersonalDataMap {
 
     const unlink = this.removeInTransaction(() => {
       const files: FileRef[] = [];
-      const tracks = (
-        db
-          .prepare(
-            "SELECT track_id, seat, file_name, samples, sample_rate, status FROM audio_tracks WHERE session_id = ?",
-          )
-          .all(sessionId) as Array<{
-          track_id: string;
-          seat: number;
-          file_name: string | null;
-          samples: number;
-          sample_rate: number;
-          status: AudioTrackRowStatus;
-        }>
-      ).filter((t) => scope === "all" || t.status !== "deleted");
-      const derived = (
-        db
-          .prepare("SELECT derivative_id, seat, kind, file_name FROM audio_derivatives WHERE session_id = ?")
-          .all(sessionId) as Array<{
-          derivative_id: string;
-          seat: number | null;
-          kind: string;
-          file_name: string | null;
-        }>
-      ).filter((d) => scope === "all" || isAudioDerivativeKind(d.kind));
+      const tracks = store
+        .listAudioTracks(sessionId)
+        .filter((t) => scope === "all" || t.status !== "deleted");
+      const derived = store
+        .listAudioDerivatives(sessionId)
+        .filter((d) => scope === "all" || isAudioDerivativeKind(d.kind));
 
       for (const t of tracks) {
         if (t.seat > 0 && t.seat < 31) counts.seatMask |= 1 << t.seat;
-        counts.audioMs += t.sample_rate > 0 ? (t.samples * 1000) / t.sample_rate : 0;
-        if (t.file_name && t.status !== "deleted") files.push({ sessionId, fileName: t.file_name });
+        // not t.durationMs: that is rounded per track, the register rounds the sum
+        counts.audioMs += t.sampleRate > 0 ? (t.samples * 1000) / t.sampleRate : 0;
+        if (t.fileName && t.status !== "deleted") files.push({ sessionId, fileName: t.fileName });
       }
       for (const d of derived) {
         if (d.seat !== null && d.seat > 0 && d.seat < 31) counts.seatMask |= 1 << d.seat;
-        if (d.file_name) files.push({ sessionId, fileName: d.file_name });
+        if (d.fileName) files.push({ sessionId, fileName: d.fileName });
       }
       if (scope === "all") {
         for (const t of PERSONAL_DATA) {
@@ -619,11 +602,11 @@ export class PersonalDataMap {
         for (const t of tracks)
           counts.tracks += db
             .prepare("UPDATE audio_tracks SET status = 'deleted', file_key = NULL WHERE track_id = ?")
-            .run(t.track_id).changes;
+            .run(t.trackId).changes;
         for (const d of derived)
           counts.derivatives += db
             .prepare("DELETE FROM audio_derivatives WHERE derivative_id = ?")
-            .run(d.derivative_id).changes;
+            .run(d.derivativeId).changes;
       }
       counts.audioMs = Math.round(counts.audioMs);
       counts.files = files.length;
