@@ -1,18 +1,12 @@
 import { describe, expect, it } from "vitest";
-import {
-  generateParticipantCode,
-  generateSessionId,
-  isValidParticipantCode,
-  normaliseParticipantCode,
-  PARTICIPANT_CODE_PATTERN,
-} from "../src";
+import { generateParticipantCode, generateSessionId, normaliseParticipantCode } from "../src";
 
 describe("participant codes", () => {
   it("generates well-formed, self-validating codes", () => {
     for (let i = 0; i < 500; i++) {
       const code = generateParticipantCode();
-      expect(code).toMatch(PARTICIPANT_CODE_PATTERN);
-      expect(isValidParticipantCode(code)).toBe(true);
+      expect(code).toMatch(/^WK-[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]$/);
+      expect(normaliseParticipantCode(code)).toBe(code);
     }
   });
 

@@ -9,7 +9,6 @@ import {
   GAME_RULES,
   type GameRules,
   getGameRules,
-  isCellOnBoard,
   knowledgeOfPower,
   mapScoreOf,
   parseCellId,
@@ -44,8 +43,8 @@ describe("board geometry and ids", () => {
     expect(squaresOf({ cols: 3, rows: 2 })).toEqual(["A1", "B1", "C1", "A2", "B2", "C2"]);
     expect(cellsOf({ cols: 10, rows: 10 })).toHaveLength(400);
     expect(cellsOf({ cols: 5, rows: 5 })).toHaveLength(100);
-    expect(isCellOnBoard({ cols: 5, rows: 5 }, "E5-Ka")).toBe(true);
-    expect(isCellOnBoard({ cols: 5, rows: 5 }, "F1-Ka")).toBe(false);
+    expect(cellsOf({ cols: 5, rows: 5 })).toContain("E5-Ka");
+    expect(cellsOf({ cols: 5, rows: 5 })).not.toContain("F1-Ka");
   });
 
   it("reads starting scores from one matrix per knowledge type and checks the size", () => {

@@ -17,7 +17,6 @@ export const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 const CODE_BODY_LEN = 8;
 const CHECK_WEIGHTS = [1, 3, 5, 7, 9, 11, 13, 15];
 export const PARTICIPANT_CODE_PREFIX = "WK";
-export const PARTICIPANT_CODE_PATTERN = /^WK-[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]$/;
 
 function randomBytes(n: number): Uint8Array {
   const out = new Uint8Array(n);
@@ -66,10 +65,6 @@ export function normaliseParticipantCode(input: string): string | null {
   const body = s.slice(0, CODE_BODY_LEN);
   if (checkChar(body) !== s.slice(CODE_BODY_LEN)) return null;
   return formatCode(s);
-}
-
-export function isValidParticipantCode(input: string): boolean {
-  return normaliseParticipantCode(input) === input;
 }
 
 /** Prefix of simulated sessions' ids, so they can never be mistaken for sessions with participants. */

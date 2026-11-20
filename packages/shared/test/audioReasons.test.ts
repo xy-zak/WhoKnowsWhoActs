@@ -5,7 +5,6 @@ import {
   AUDIO_STOP_REASONS,
   audioTrackEnding,
   INTERRUPTED_STOP_REASONS,
-  isAudioStartReason,
   isAudioStopReason,
   MIC_LEVEL_STATES,
   MIC_STATE_DEFS,
@@ -63,7 +62,6 @@ describe("audio reason catalogue", () => {
     expect(audioTrackEnding("context_closed")).toBe("interrupted");
     expect(audioTrackEnding("toString")).toBe("interrupted");
     expect(isAudioStopReason("constructor")).toBe(false);
-    expect(isAudioStartReason("start")).toBe(false);
   });
 
   // state → [capturing, hasLevel]

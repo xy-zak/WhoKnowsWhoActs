@@ -203,9 +203,6 @@ export const INTERRUPTED_STOP_REASONS = AUDIO_STOP_REASONS.filter(
 
 const has = (defs: object, key: string) => Object.hasOwn(defs, key);
 
-export function isAudioStartReason(s: string): s is AudioStartReason {
-  return has(AUDIO_START_REASON_DEFS, s);
-}
 export function isAudioStopReason(s: string): s is AudioStopReason {
   return has(AUDIO_STOP_REASON_DEFS, s);
 }
