@@ -1,6 +1,5 @@
-import { AUDIO_SAMPLE_RATE } from "@wkwa/shared";
 import { type ChunkDraft, Chunker } from "./chunker";
-import { Resampler, type ResamplerOptions } from "./resampler";
+import { Resampler } from "./resampler";
 
 export interface TrackPipelineOptions {
   /** native rate of the captured blocks */
@@ -10,7 +9,6 @@ export interface TrackPipelineOptions {
   onChunk(draft: ChunkDraft): void;
   /** every 16 kHz block, before chunking (levels, speech detector) */
   onOutput?(samples: Float32Array): void;
-  resampler?: Omit<ResamplerOptions, "inputRate" | "outputRate">;
 }
 
 /**
@@ -19,22 +17,15 @@ export interface TrackPipelineOptions {
  * resampler's lookahead and the partial last chunk.
  */
 export class TrackPipeline {
-  readonly resampler: Resampler;
-  readonly chunker: Chunker;
+  private readonly resampler: Resampler;
+  private readonly chunker: Chunker;
   private finished = false;
 
   constructor(private readonly o: TrackPipelineOptions) {
-    this.resampler = new Resampler({
-      ...o.resampler,
-      inputRate: o.inputRate,
-      outputRate: AUDIO_SAMPLE_RATE,
-    });
+    this.resampler = new Resampler({ inputRate: o.inputRate });
     this.chunker = new Chunker(o.chunkSamples);
   }
 
-  get inputFrames(): number {
-    return this.resampler.inputSamples;
-  }
   /** 16 kHz samples produced (complete chunks + the partial one) */
   get outputSamples(): number {
     return this.chunker.totalSamples;

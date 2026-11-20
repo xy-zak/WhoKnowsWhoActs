@@ -1,4 +1,4 @@
-import type { PlayerView } from "@wkwa/shared";
+import type { PlayerView, TelemetryPayloadOf } from "@wkwa/shared";
 import { useEffect, useMemo, useRef } from "react";
 import { useStore } from "../net/store";
 import {
@@ -20,21 +20,7 @@ import { MicCheckScreen } from "./MicCheckScreen";
 import { BriefingScreen, ConsentScreen, DeclinedScreen, DemographicsScreen } from "./Onboarding";
 import { RecordingLine } from "./RecordingIndicator";
 
-type Screen =
-  | "waiting"
-  | "lobby"
-  | "consent"
-  | "declined"
-  | "mic_check"
-  | "demographics"
-  | "briefing"
-  | "ready"
-  | "calibration"
-  | "game"
-  | "round_break"
-  | "paused"
-  | "end"
-  | "withdrawn";
+type Screen = TelemetryPayloadOf<"screen_view">["screen"];
 
 function screenFor(seat: number | null, v: PlayerView | null): Screen {
   if (seat === null || !v) return "waiting";

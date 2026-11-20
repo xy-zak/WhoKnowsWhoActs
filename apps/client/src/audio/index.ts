@@ -11,36 +11,15 @@
  * No socket, UI or storage dependencies: all I/O is injected. The building blocks (PCM conversion,
  * levels, resampler, chunker) are internal; their tests import the module files directly.
  */
-export {
-  type BrowserFamily,
-  classifyMicError,
-  detectBrowser,
-  detectOs,
-  MicError,
-  type MicErrorInfo,
-  type MicErrorKind,
-  type MicHelp,
-  micHelp,
-  micSupportProblem,
-  type OsFamily,
-} from "./errors";
-export {
-  MicRecorder,
-  type MicRecorderOptions,
-  type RecorderEnv,
-  type RecorderStatus,
-} from "./MicRecorder";
-export { type SpeechCheckResult, SpeechDetector, type SpeechDetectorOptions } from "./speech";
-export type { TimingSample } from "./timing";
-export {
-  type AudioChunk,
-  type AudioContextInfo,
-  type AudioStartInfo,
-  type AudioStopInfo,
-  type EngineCaptureSettings,
-  MIC_CONSTRAINTS,
-  type MicLevel,
-  type RecorderState,
-  type SendResult,
-  type TimingMethod,
+export { classifyMicError, MicError, type MicErrorInfo, micSupportProblem } from "./errors";
+export { MicRecorder, type MicRecorderOptions, type RecorderStatus } from "./MicRecorder";
+export { type SpeechCheckResult, SpeechDetector } from "./speech";
+export type {
+  AudioChunk,
+  AudioStartInfo,
+  AudioStopInfo,
+  EngineCaptureSettings,
+  MicLevel,
+  RecorderState,
+  SendResult,
 } from "./types";

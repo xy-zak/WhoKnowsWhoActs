@@ -7,19 +7,15 @@
  * - `wavStream(blocks, format, totalSamples)`: header + little-endian samples as one async stream
  *   of byte chunks, padded with silence or truncated to exactly `totalSamples`, so the header is
  *   always true.
- * - `WavWriter`: push-style writer for when the length is not known up front; it emits a header with
- *   a provisional length and `end()` returns the final header to patch in at offset 0.
  * - `parseWavHeader`: reads a header back (RIFF/WAVE, `fmt `, `data`, skipping other chunks), for
  *   tests and verification.
  *
- * Only 16-bit PCM is produced (the capture format); mono by default.
+ * Only 16-bit mono PCM is produced (the capture format).
  */
 import { int16ToLeBytes } from "@wkwa/shared";
 
 export interface WavFormat {
   sampleRate: number;
-  channels?: number;
-  bitsPerSample?: 16;
 }
 
 export interface WavInfo {
@@ -42,12 +38,10 @@ const MAX_DATA_BYTES = 0xffff_ffff - 36;
 
 /** The 44-byte header of a PCM WAV file with `dataBytes` of sample data. */
 export function wavHeader(format: WavFormat, dataBytes: number): Uint8Array {
-  const channels = format.channels ?? 1;
-  const bits = format.bitsPerSample ?? 16;
   if (!Number.isInteger(dataBytes) || dataBytes < 0 || dataBytes > MAX_DATA_BYTES) {
     throw new Error(`WAV data length out of range: ${dataBytes}`);
   }
-  const blockAlign = (channels * bits) / 8;
+  const blockAlign = 2; // 16-bit mono
   const buf = new Uint8Array(WAV_HEADER_BYTES);
   const v = new DataView(buf.buffer);
   const ascii = (offset: number, s: string) => {
@@ -59,11 +53,11 @@ export function wavHeader(format: WavFormat, dataBytes: number): Uint8Array {
   ascii(12, "fmt ");
   v.setUint32(16, 16, true); // fmt chunk size
   v.setUint16(20, 1, true); // PCM
-  v.setUint16(22, channels, true);
+  v.setUint16(22, 1, true); // mono
   v.setUint32(24, format.sampleRate, true);
   v.setUint32(28, format.sampleRate * blockAlign, true);
   v.setUint16(32, blockAlign, true);
-  v.setUint16(34, bits, true);
+  v.setUint16(34, 16, true); // bits per sample
   ascii(36, "data");
   v.setUint32(40, dataBytes, true);
   return buf;
@@ -125,60 +119,19 @@ export async function* wavStream(
   format: WavFormat,
   totalSamples: number,
 ): AsyncGenerator<Uint8Array> {
-  const channels = format.channels ?? 1;
-  const totalValues = totalSamples * channels;
-  yield wavHeader(format, totalValues * 2);
+  yield wavHeader(format, totalSamples * 2);
   let written = 0;
   for await (const block of blocks) {
-    if (written >= totalValues) break;
-    const take = Math.min(block.length, totalValues - written);
+    if (written >= totalSamples) break;
+    const take = Math.min(block.length, totalSamples - written);
     yield int16ToLeBytes(take === block.length ? block : block.subarray(0, take));
     written += take;
   }
   const silence = new Int16Array(16_384);
-  while (written < totalValues) {
-    const take = Math.min(silence.length, totalValues - written);
+  while (written < totalSamples) {
+    const take = Math.min(silence.length, totalSamples - written);
     yield int16ToLeBytes(silence.subarray(0, take));
     written += take;
-  }
-}
-
-/**
- * Push-style WAV writer. The constructor emits a header for `expectedSamples` (or the maximum
- * length when unknown, which most players accept for streams); `end()` returns the true header to
- * write at offset 0 of a seekable sink.
- */
-export class WavWriter {
-  private samples = 0;
-  private readonly channels: number;
-
-  constructor(
-    private readonly sink: (bytes: Uint8Array) => void,
-    private readonly format: WavFormat,
-    expectedSamples?: number,
-  ) {
-    this.channels = format.channels ?? 1;
-    const bytes =
-      expectedSamples === undefined
-        ? MAX_DATA_BYTES - (MAX_DATA_BYTES % 2)
-        : expectedSamples * this.channels * 2;
-    sink(wavHeader(format, bytes));
-  }
-
-  write(samples: Int16Array): void {
-    if ((this.samples + samples.length) * 2 > MAX_DATA_BYTES) throw new Error("WAV file would exceed 4 GiB");
-    this.sink(int16ToLeBytes(samples));
-    this.samples += samples.length;
-  }
-
-  /** Samples written so far (per channel). */
-  get length(): number {
-    return Math.floor(this.samples / this.channels);
-  }
-
-  end(): { header: Uint8Array; dataBytes: number } {
-    const dataBytes = this.samples * 2;
-    return { header: wavHeader(this.format, dataBytes), dataBytes };
   }
 }
 

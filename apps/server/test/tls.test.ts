@@ -14,7 +14,6 @@ import {
   type HostFacts,
   KEY_FILE,
   RENEW_WITHIN_DAYS,
-  redirectLocation,
   resolveTls,
   TLS_DIR,
   TLS_OFF,
@@ -285,15 +284,12 @@ describe("resolveTls: provided, auto, off", () => {
 
 describe("welcome page (LANDING_PORT)", () => {
   it("links to the game page on the host the browser used, with the game's port and scheme", () => {
-    expect(redirectLocation("192.168.1.10:8080", "/facilitator?token=x", 3000)).toBe(
-      "https://192.168.1.10:3000/facilitator?token=x",
-    );
-    expect(redirectLocation("research-laptop.local", "/", 3000)).toBe("https://research-laptop.local:3000/");
-    expect(redirectLocation("[::1]:80", "/api/health", 3443)).toBe("https://[::1]:3443/api/health");
-    expect(redirectLocation("10.0.0.7", "http://elsewhere.example/x", 3000)).toBe("https://10.0.0.7:3000/x");
-    expect(redirectLocation(undefined, "/", 3000)).toBeNull();
-    expect(redirectLocation("evil.example/path", "/", 3000)).toBeNull();
-    expect(redirectLocation("a b", "/", 3000)).toBeNull();
+    expect(joinUrlFor("research-laptop.local", 3000, true, "x")).toBe("https://research-laptop.local:3000/");
+    expect(joinUrlFor("[::1]:80", 3443, true, "x")).toBe("https://[::1]:3443/");
+    expect(joinUrlFor(" 10.0.0.7 ", 3000, true, "x")).toBe("https://10.0.0.7:3000/");
+    expect(joinUrlFor(undefined, 3000, true, "fallback")).toBe("fallback");
+    expect(joinUrlFor("evil.example/path", 3000, true, "fallback")).toBe("fallback");
+    expect(joinUrlFor("a b", 3000, true, "fallback")).toBe("fallback");
     expect(joinUrlFor("192.168.1.10:8080", 3000, true, "x")).toBe("https://192.168.1.10:3000/");
     expect(joinUrlFor("192.168.1.10:8080", 3000, false, "x")).toBe("http://192.168.1.10:3000/");
     expect(joinUrlFor("evil.example/path", 3000, true, "https://10.0.0.2:3000/")).toBe(
@@ -346,6 +342,34 @@ describe("welcome page (LANDING_PORT)", () => {
       expect((await status()).live).toBe(false);
     } finally {
       fac.close();
+      await landing.close();
+      await srv.close();
+      cleanup(srv.dir);
+    }
+  });
+});
+
+describe("security headers", () => {
+  it("are on every response of the game server and the welcome page", async () => {
+    const srv = await startTestServer();
+    const landing = await startLandingServer({
+      host: "127.0.0.1",
+      port: 0,
+      gamePort: 1,
+      tls: srv.ctx.tls.info,
+      hub: srv.ctx.hub,
+      clientDist: srv.runtime.clientDist,
+      fallbackJoinUrl: srv.url,
+    });
+    try {
+      for (const app of [srv.ctx.app, landing])
+        for (const url of ["/", "/api/landing"])
+          expect((await app.inject({ url })).headers).toMatchObject({
+            "x-content-type-options": "nosniff",
+            "referrer-policy": "no-referrer",
+            "cache-control": "no-store",
+          });
+    } finally {
       await landing.close();
       await srv.close();
       cleanup(srv.dir);

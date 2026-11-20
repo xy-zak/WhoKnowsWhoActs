@@ -15,7 +15,7 @@
  * be added.
  */
 
-import { AUDIO_SAMPLE_RATE } from "@wkwa/shared";
+import { AUDIO_SAMPLE_RATE, mulberry32 } from "@wkwa/shared";
 import {
   type AttributionResult,
   type CalibrationTurn,
@@ -29,17 +29,6 @@ const sampleTime = (a: TrackAlignment, n: number) => a.startTs + n * a.msPerSamp
 
 export const FS = AUDIO_SAMPLE_RATE;
 const CHUNK = 80_000;
-
-export function mulberry32(seed: number): () => number {
-  let a = seed >>> 0;
-  return () => {
-    a = (a + 0x6d2b79f5) >>> 0;
-    let t = a;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
 
 const uni = (r: () => number, a: number, b: number) => a + (b - a) * r();
 

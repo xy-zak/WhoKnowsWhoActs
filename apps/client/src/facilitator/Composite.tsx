@@ -144,15 +144,13 @@ const NONE = "none";
 export function CompositeMap({
   scenario,
   state,
-  presence = {},
+  presence,
   onRevoke,
-  height = 560,
 }: {
   scenario: Scenario;
   state: ReadonlyGameState;
-  presence?: Record<number, string | null>;
+  presence: Record<number, string | null>;
   onRevoke?: (seq: number) => void;
-  height?: number;
 }) {
   const [numbers, setNumbers] = useState<string>(ALL);
   const [allRounds, setAllRounds] = useState(false);
@@ -227,7 +225,7 @@ export function CompositeMap({
             gap: "var(--s2)",
           }}
         >
-          <div style={{ height }}>
+          <div style={{ height: 560 }}>
             <MapView
               board={board}
               views={scenario.views}
@@ -258,7 +256,7 @@ export function CompositeMap({
                 />
               }
             >
-              <div style={{ overflow: "auto", maxHeight: height - 40 }}>
+              <div style={{ overflow: "auto", maxHeight: 520 }}>
                 <SquareComparison scenario={scenario} state={state} square={selected} onRevoke={onRevoke} />
               </div>
             </Panel>
@@ -277,12 +275,12 @@ export function CompositeMap({
 export function PlayerMirrors({
   scenario,
   state,
-  presence = {},
+  presence,
   now,
 }: {
   scenario: Scenario;
   state: ReadonlyGameState;
-  presence?: Record<number, string | null>;
+  presence: Record<number, string | null>;
   now: number;
 }) {
   const seats = seatList(state).filter((s) => s.bound || s.withdrawn);

@@ -1,10 +1,10 @@
 import { MIC_LEVEL_STATES } from "@wkwa/shared";
 import { describe, expect, it } from "vitest";
+import { formatDb } from "../src/common/format";
 import {
   CLIP_PEAK_DB,
   cellCount,
   dbToCells,
-  formatDb,
   levelState,
   levelTone,
   meterCells,
@@ -12,7 +12,6 @@ import {
   QUIET_DB,
   REC_STATE_META,
   REC_STATES,
-  recStateMeta,
 } from "../src/ui/audioMeta";
 
 describe("dbToCells", () => {
@@ -174,7 +173,6 @@ describe("recording states (AESTHETIC-RULES § 8.1)", () => {
   it("has a look for every state the browser reports except idle (shown as off), plus off and skipped", () => {
     const expected = [...MIC_LEVEL_STATES.filter((s) => s !== "idle"), "off", "skipped"];
     expect([...REC_STATES].sort()).toEqual(expected.sort());
-    expect(recStateMeta("recording")).toBe(REC_STATE_META.recording);
   });
   it("writes tag text in lower case (the tag style upper-cases it, except with OpenDyslexic)", () => {
     for (const s of REC_STATES) {

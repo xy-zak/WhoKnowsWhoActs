@@ -1,6 +1,5 @@
 import {
   AUDIO_CHUNK_SECONDS,
-  AUDIO_LEVEL_INTERVAL_MS,
   AUDIO_MAX_CHUNK_SECONDS,
   AUDIO_MAX_PENDING_SECONDS,
   AUDIO_SAMPLE_RATE,
@@ -74,10 +73,6 @@ export interface MicRecorderOptions {
   chunkSeconds?: number;
   /** unacked audio kept in memory before the oldest chunks are dropped; default AUDIO_MAX_PENDING_SECONDS */
   maxPendingSeconds?: number;
-  /** level window; default AUDIO_LEVEL_INTERVAL_MS */
-  levelIntervalMs?: number;
-  /** digital silence this long counts as no signal; default 3000 ms */
-  noSignalMs?: number;
   /** delivery back-off; default 1 s, 2 s, 5 s, 10 s, 30 s */
   retryDelaysMs?: readonly number[];
   /** a delivery not settled after this long is retried; default 30 s */
@@ -122,6 +117,8 @@ interface Split {
 
 /** Peak at or below this is digital silence (≈ one 16-bit step). */
 const SILENCE_PEAK_DB = -85;
+/** Digital silence this long counts as no signal. */
+const NO_SIGNAL_MS = 3000;
 /** A suspended context's partial chunk is sent after this grace period. */
 const SUSPEND_GRACE_MS = 300;
 /** stop() waits this long for the worklet's last batch. */
@@ -154,7 +151,7 @@ function browserEnv(): RecorderEnv {
 }
 
 /** Copies only the processing settings: never deviceId, groupId or label. */
-export function pickSettings(s: MediaTrackSettings): EngineCaptureSettings {
+function pickSettings(s: MediaTrackSettings): EngineCaptureSettings {
   return EngineCaptureSettingsSchema.safeParse(s).data ?? {};
 }
 
@@ -216,7 +213,6 @@ export class MicRecorder {
   private readonly env: RecorderEnv;
   private readonly queue: SendQueue<Outgoing>;
   private readonly chunkSamples: number;
-  private readonly noSignalMs: number;
   private readonly level: LevelMeter;
   private readonly taps = new Set<(samples: Float32Array) => void>();
   private ctx: AudioContext | null = null;
@@ -255,7 +251,6 @@ export class MicRecorder {
     }
     this.chunkSamples = Math.round(chunkSeconds * AUDIO_SAMPLE_RATE);
     if (this.chunkSamples < 1) throw new RangeError("MicRecorder: chunkSeconds is too small");
-    this.noSignalMs = options.noSignalMs ?? 3000;
     const maxPendingSeconds = options.maxPendingSeconds ?? AUDIO_MAX_PENDING_SECONDS;
     this.queue = new SendQueue<Outgoing>({
       deliver: (m, signal) =>
@@ -274,7 +269,6 @@ export class MicRecorder {
     });
     this.level = new LevelMeter({
       sampleRate: AUDIO_SAMPLE_RATE,
-      intervalMs: options.levelIntervalMs ?? AUDIO_LEVEL_INTERVAL_MS,
       onLevel: (l, ms) => this.onLevelWindow(l, ms),
     });
   }
@@ -891,7 +885,7 @@ export class MicRecorder {
     this.setState(
       ctx?.state !== "running"
         ? "paused"
-        : this.muted || this.silentMs >= this.noSignalMs
+        : this.muted || this.silentMs >= NO_SIGNAL_MS
           ? "no_signal"
           : "recording",
     );

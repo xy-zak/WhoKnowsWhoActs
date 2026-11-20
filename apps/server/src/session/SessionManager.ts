@@ -12,7 +12,6 @@ import {
   canSayCalibrationReady,
   canStartFirstRound,
   checkSimulationConfig,
-  DEFAULT_VALIDATORS,
   DISSOCIATED_PAIRINGS,
   type EventType,
   type FakePlayerPace,
@@ -39,6 +38,7 @@ import {
   type OnboardingStep,
   onboardingStepsFor,
   type PayloadOf,
+  type PlayerMessage,
   pairedP,
   parseSessionConfig,
   parseTelemetryItem,
@@ -49,9 +49,9 @@ import {
   randomCrockford,
   resolvePolicyParams,
   roundActiveMs,
+  roundIsComplete,
   roundRemainingMs,
   roundSpecFor,
-  ruleFor,
   type Scenario,
   type SessionConfig,
   type StoredEvent,
@@ -62,23 +62,15 @@ import {
   seatPolicyId,
   seededRandom,
   type TelemetryItem,
-  type Validator,
   validateIntent,
 } from "@wkwa/shared";
 import type { Logger } from "pino";
 import { type AudioChunkMsg, type AudioStartMsg, type AudioStopMsg, LiveAudio } from "../audio/live";
 import type { Store } from "../db/store";
 import { harnessVersion, nowTs, wall } from "../runtime";
-import { CalibrationError, CalibrationRunner } from "./CalibrationRunner";
+import { CalibrationRunner } from "./CalibrationRunner";
+import { CommandError } from "./errors";
 import { type MicLevelReading, SeatMonitor } from "./SeatMonitor";
-
-export { CALIBRATION_CHECK_WAIT_MS } from "./CalibrationRunner";
-
-/** Thrown for invalid facilitator commands / player submissions; the message is shown to the user. */
-export class CommandError extends Error {}
-
-/** Ack of an intent (shared with the clients: see @wkwa/shared socket.ts). */
-export type { IntentAck } from "@wkwa/shared";
 
 export interface SessionDeps {
   store: Store;
@@ -89,7 +81,6 @@ export interface SessionDeps {
   /** Called once per command with every event appended during that command. */
   onEvents: (events: StoredEvent[]) => void;
   clock?: () => number;
-  validators?: Validator[];
 }
 
 type LabelAssignment = { seat: number; k: KLabel; view?: string };
@@ -126,7 +117,6 @@ export class SessionManager {
   private lastClientSeq = new Map<number, number>();
   private ackCache = new Map<number, Map<number, IntentAck>>();
   private readonly clock: () => number;
-  private readonly validators: Validator[];
   /** Live audio ingest: tracks, chunks and the calibration audio of this session (see audio/live.ts). */
   private readonly audio: LiveAudio;
   /**
@@ -142,7 +132,6 @@ export class SessionManager {
     private readonly deps: SessionDeps,
   ) {
     this.clock = deps.clock ?? nowTs;
-    this.validators = deps.validators ?? DEFAULT_VALIDATORS;
     this.audio = new LiveAudio({
       sessionId,
       store: deps.store,
@@ -201,13 +190,6 @@ export class SessionManager {
       // the effective seed is part of the logged config, so every run can be repeated
       if (!config.simulation.seed) {
         config = { ...config, simulation: { ...config.simulation, seed: randomCrockford(8) } };
-      }
-    }
-    for (const k of K_LABELS) {
-      if (config.viewAssignment === "byKnowledgeType" && !deps.scenario.views[k]) {
-        throw new CommandError(
-          `Scenario '${deps.scenario.id}' has no view '${k}' (required for byKnowledgeType)`,
-        );
       }
     }
     if (config.audio.enabled) {
@@ -347,7 +329,7 @@ export class SessionManager {
   /** Close every open audio track (e.g. `interrupted` when the hub switches to another session). */
   closeAudioTracks(reason: "interrupted") {
     this.run(() => {
-      if (!this.isFinal) this.audio.closeAll(reason);
+      if (!this.isFinal) this.audio.closeOpen(reason);
     });
   }
 
@@ -439,10 +421,6 @@ export class SessionManager {
       if (expected && timingSafeEqual(Buffer.from(expected, "hex"), given)) return s.seat;
     }
     return null;
-  }
-
-  seatOfTerminal(terminal: number): number | null {
-    return seatList(this.state).find((s) => s.bound && s.terminal === terminal)?.seat ?? null;
   }
 
   private requireReal(what: string) {
@@ -558,7 +536,7 @@ export class SessionManager {
    */
   setLabels(
     assignments: LabelAssignment[],
-    pairingIn: { mode: "aligned" | "dissociated"; id: number | null } = { mode: "aligned", id: null },
+    pairingIn: LabelPairing = { mode: "aligned", id: null },
     method: "manual" | "random" = "manual",
     seedIn: string | null = null,
   ) {
@@ -598,10 +576,7 @@ export class SessionManager {
   }
 
   /** Shuffle which seat gets which K (or keep seat order) and apply a pairing. Seed is logged. */
-  randomiseLabels(
-    pairing: { mode: "aligned" | "dissociated"; id: number | null } = { mode: "aligned", id: null },
-    shuffleK = true,
-  ) {
+  randomiseLabels(pairing: LabelPairing = { mode: "aligned", id: null }, shuffleK = true) {
     const seed = randomCrockford(6);
     const rng = seededRandom(seed);
     const ks = [...K_LABELS];
@@ -826,7 +801,8 @@ export class SessionManager {
   close() {
     this.run(() => {
       this.requirePhase("game_complete");
-      this.audio.beforeFinal("closed");
+      // close the open tracks first: each AudioTrackStopped must be logged before the final event
+      this.audio.closeOpen("closed");
       this.append({ type: "SessionClosed", actorKind: "facilitator", payload: {} });
       this.dispose();
     });
@@ -835,7 +811,8 @@ export class SessionManager {
   abort(reason: string) {
     this.run(() => {
       if (this.isFinal) throw new CommandError("Session has already ended");
-      this.audio.beforeFinal("aborted");
+      // close the open tracks first: each AudioTrackStopped must be logged before the final event
+      this.audio.closeOpen("aborted");
       this.append({ type: "SessionAborted", actorKind: "facilitator", payload: { reason } });
       this.dispose();
     });
@@ -878,16 +855,7 @@ export class SessionManager {
     return s;
   }
 
-  submitConsent(
-    seat: number,
-    msg: {
-      formVersion: string;
-      textSha256: string;
-      answers: Record<string, boolean>;
-      durationMs: number;
-      clientTs: number;
-    },
-  ) {
+  submitConsent(seat: number, msg: PlayerMessage<"consent:submit">) {
     this.run(() => {
       const s = this.requireStep(seat, "consent");
       if (s.consent === "declined") throw new CommandError("Consent was declined; ask the facilitator");
@@ -917,10 +885,7 @@ export class SessionManager {
     });
   }
 
-  submitDemographics(
-    seat: number,
-    msg: { formVersion: string; answers: Record<string, string>; durationMs: number; clientTs: number },
-  ) {
+  submitDemographics(seat: number, msg: PlayerMessage<"demographics:submit">) {
     this.run(() => {
       this.requireStep(seat, "demographics");
       const form = this.onboarding.demographics;
@@ -945,7 +910,7 @@ export class SessionManager {
     });
   }
 
-  acknowledgeBriefing(seat: number, msg: { textSha256: string; durationMs: number; clientTs: number }) {
+  acknowledgeBriefing(seat: number, msg: PlayerMessage<"briefing:ack">) {
     this.run(() => {
       this.requireStep(seat, "briefing");
       if (msg.textSha256 !== this.onboarding.briefing.sha256) {
@@ -1076,7 +1041,7 @@ export class SessionManager {
    * Player: ready for the calibration (part 2 of "Mic check & calibration"), so its turns never start
    * by surprise. When this was the last recorded seat, the calibration starts (see run).
    */
-  sayCalibrationReady(seat: number, msg: { clientTs: number }) {
+  sayCalibrationReady(seat: number, msg: PlayerMessage<"calibration:ready">) {
     this.run(() => {
       this.requireAudio();
       const s = this.requireSeat(seat);
@@ -1097,7 +1062,7 @@ export class SessionManager {
     this.run(() => {
       this.requireAudio();
       this.requirePhase("onboarding", "round_complete");
-      this.calibrationCommand(() => this.calibration.start("facilitator"));
+      this.calibration.start("facilitator");
     });
   }
 
@@ -1106,7 +1071,7 @@ export class SessionManager {
     this.run(() => {
       this.requireAudio();
       this.requirePhase("onboarding", "round_complete");
-      this.calibrationCommand(() => this.calibration.redo());
+      this.calibration.redo();
     });
   }
 
@@ -1120,7 +1085,7 @@ export class SessionManager {
     try {
       this.calibration.start("system");
     } catch (e) {
-      if (!(e instanceof CalibrationError)) throw e;
+      if (!(e instanceof CommandError)) throw e;
       this.deps.log.warn({ sessionId: this.sessionId, reason: e.message }, "calibration did not start");
     }
   }
@@ -1130,18 +1095,8 @@ export class SessionManager {
     this.run(() => {
       this.requireAudio();
       if (this.isFinal) throw new CommandError("Session has ended");
-      this.calibrationCommand(() => this.calibration.skip(reason));
+      this.calibration.skip(reason);
     });
-  }
-
-  /** A calibration refusal is a command refusal (shown to the facilitator). */
-  private calibrationCommand(fn: () => void) {
-    try {
-      fn();
-    } catch (e) {
-      if (e instanceof CalibrationError) throw new CommandError(e.message);
-      throw e;
-    }
   }
 
   /* ═════════════════════════ telemetry and presence ═════════════════════════ */
@@ -1204,10 +1159,7 @@ export class SessionManager {
     return (this.lastClientSeq.get(seat) ?? 0) + 1;
   }
 
-  intent(
-    seat: number,
-    msg: { clientSeq: number; kind: ActionKind; regionId: string; clientTs: number },
-  ): IntentAck {
+  intent(seat: number, msg: PlayerMessage<"intent">): IntentAck {
     return this.run(() => {
       const last = this.lastClientSeq.get(seat) ?? 0;
       if (msg.clientSeq <= last) {
@@ -1242,12 +1194,9 @@ export class SessionManager {
     if (cache.size > ACK_CACHE_SIZE) cache.delete(cache.keys().next().value!);
   }
 
-  private processIntent(
-    seat: number,
-    msg: { clientSeq: number; kind: ActionKind; regionId: string; clientTs: number },
-  ): IntentAck {
+  private processIntent(seat: number, msg: PlayerMessage<"intent">): IntentAck {
     const st = this.state;
-    const v = validateIntent(st, seat, { kind: msg.kind, regionId: msg.regionId }, this.validators);
+    const v = validateIntent(st, seat, { kind: msg.kind, regionId: msg.regionId });
     if (!v.ok) {
       this.seatEvent(
         seat,
@@ -1282,7 +1231,7 @@ export class SessionManager {
 
   /** Check round completion after anything that may complete it. */
   private afterAction() {
-    if (this.state.phase === "round_active" && ruleFor(this.state).isComplete(this.state)) {
+    if (this.state.phase === "round_active" && roundIsComplete(this.state)) {
       this.completeRound("quota_met", false);
     }
   }

@@ -16,7 +16,9 @@ import type { AudioStartMsg } from "../src/audio/live";
 import { trackStatusOf } from "../src/audio/records";
 import { verifyAudio } from "../src/audio/verify";
 import { loadOnboardingContent, sha256 } from "../src/content";
-import { CALIBRATION_CHECK_WAIT_MS, CommandError, type SessionManager } from "../src/session/SessionManager";
+import { CALIBRATION_CHECK_WAIT_MS } from "../src/session/CalibrationRunner";
+import { CommandError } from "../src/session/errors";
+import type { SessionManager } from "../src/session/SessionManager";
 import { Bot, FacilitatorClient } from "../src/tools/botClient";
 import { readTrackPcm } from "./audioFixtures";
 import {
@@ -433,6 +435,45 @@ describe("chunk ingest", () => {
       ["AudioTrackStopped", 2],
       ["SessionClosed", null],
     ]);
+  });
+
+  it("a closed session closes a track still open without logging anything (browser stop, reload)", async () => {
+    await recording();
+    d.m.endGame();
+    d.m.close();
+    const leftOpen = async () => {
+      const file = await d.files.createFile(d.m.sessionId);
+      const trackId = randomUUID();
+      d.store.insertAudioTrack({
+        trackId,
+        sessionId: d.m.sessionId,
+        seat: 1,
+        participantCode: d.m.state.seats[1]!.participantCode!,
+        fileName: file.fileName,
+        fileKey: file.key,
+        sampleRate: AUDIO_SAMPLE_RATE,
+        settings: SETTINGS,
+        reason: "mic_check",
+        startedServerTs: now,
+        startedClientTs: now,
+        clockOffsetMs: 0,
+      });
+      return trackId;
+    };
+    const logged = d.store.listEvents(d.m.sessionId).length;
+    const stopped = await leftOpen();
+    expect(d.m.submitAudioStop(1, { trackId: stopped, reason: "permission_lost", droppedChunks: 2 })).toEqual(
+      { ok: true },
+    );
+    expect(d.store.getAudioTrack(stopped)).toMatchObject({
+      status: "closed",
+      stopReason: "permission_lost",
+      droppedChunks: 2,
+    });
+    const interrupted = await leftOpen();
+    d.reload();
+    expect(d.store.getAudioTrack(interrupted)).toMatchObject({ status: "closed", stopReason: "interrupted" });
+    expect(d.store.listEvents(d.m.sessionId)).toHaveLength(logged);
   });
 
   it("recovery: after a reload, audio captured in a pause is still refused and the audio before it kept", async () => {

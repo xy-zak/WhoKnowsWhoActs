@@ -1,6 +1,6 @@
+import { mulberry32 as rng } from "@wkwa/shared";
 import { describe, expect, it } from "vitest";
 import { Resampler, resampledLength } from "../src/audio/resampler";
-import { mulberry32 as rng } from "./helpers";
 
 function sine(freq: number, rate: number, seconds: number, amp = 0.5): Float32Array {
   const n = Math.round(rate * seconds);

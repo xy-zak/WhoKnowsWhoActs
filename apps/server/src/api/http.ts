@@ -1,9 +1,6 @@
-import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import type { FastifyInstance } from "fastify";
 import type { SessionStores } from "../db/stores";
 import type { Verdict } from "../session/sessionGuard";
-
-/** The facilitator check every API route runs first. */
-export type Guard = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
 
 /** A refused request: the API answers `statusCode` with `{ error: message }`. */
 export class HttpError extends Error {

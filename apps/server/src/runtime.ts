@@ -86,14 +86,9 @@ function landingPort(value: string | undefined): number | null {
   const v = value?.trim().toLowerCase();
   if (v === undefined || v === "") return DEFAULT_LANDING_PORT;
   if (v === "off") return null;
-  return optionalPort("LANDING_PORT", v);
-}
-
-function optionalPort(name: string, value: string | undefined): number | null {
-  if (value === undefined || value.trim() === "") return null;
-  const n = Number(value);
+  const n = Number(v);
   if (!Number.isInteger(n) || n < 1 || n > 65_535)
-    throw new Error(`${name} must be a TCP port (1–65535) or "off", not "${value}".`);
+    throw new Error(`LANDING_PORT must be a TCP port (1–65535) or "off", not "${v}".`);
   return n;
 }
 
@@ -106,21 +101,14 @@ export function harnessVersion(): { version: string; gitCommit: string } {
   try {
     version = JSON.parse(readFileSync(path.join(REPO_ROOT, "package.json"), "utf8")).version ?? version;
   } catch {}
+  const git = (args: string) =>
+    execSync(`git ${args}`, { cwd: REPO_ROOT, stdio: ["ignore", "pipe", "ignore"] })
+      .toString()
+      .trim();
   let gitCommit = "unknown";
   try {
-    gitCommit = execSync("git rev-parse --short HEAD", {
-      cwd: REPO_ROOT,
-      stdio: ["ignore", "pipe", "ignore"],
-    })
-      .toString()
-      .trim();
-    const dirty = execSync("git status --porcelain --untracked-files=no", {
-      cwd: REPO_ROOT,
-      stdio: ["ignore", "pipe", "ignore"],
-    })
-      .toString()
-      .trim();
-    if (dirty) gitCommit += "-dirty";
+    gitCommit = git("rev-parse --short HEAD");
+    if (git("status --porcelain --untracked-files=no")) gitCommit += "-dirty";
   } catch {}
   cachedVersion = { version, gitCommit };
   return cachedVersion;

@@ -2,9 +2,7 @@
 
 History of [AESTHETIC-RULES.md](../AESTHETIC-RULES.md). Newest first. How entries are written: [README.md](README.md).
 
-## Unreleased
-
-### Not yet committed · documents `72d01ad`
+### 2026-11-20 · `2a6c8a1` · Docs: audit fixes (log redaction, failed-export clean-up, admin token storage, offline facilitator commands, action resend, REST errors, verify warning, reason catalogue, layout classes); change logs
 
 - **Type:** Feature
 - **Change:** § 4 says that `.row` and `.col` space by `--s2` and that the classes `gap-1`, `gap-3` and `gap-4` choose another step of the grid, with no inline gaps; § 6 adds the `split-3-2` layout for a main LIVE panel and its companion.

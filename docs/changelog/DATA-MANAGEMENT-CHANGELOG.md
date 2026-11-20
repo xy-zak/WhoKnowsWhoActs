@@ -2,9 +2,7 @@
 
 History of [DATA-MANAGEMENT.md](../DATA-MANAGEMENT.md). Newest first. How entries are written: [README.md](README.md).
 
-## Unreleased
-
-### Not yet committed · documents `90e6bb9`, `18ad4eb`, `b1e5248`
+### 2026-11-20 · `2a6c8a1` · Docs: audit fixes (log redaction, failed-export clean-up, admin token storage, offline facilitator commands, action resend, REST errors, verify warning, reason catalogue, layout classes); change logs
 
 - **Type:** Risk mitigation
 - **Change:** The **Server log** row of the data inventory (§ 3) and risk 13 (§ 14) add that a participant code in a request path (`/api/participants/:code`) is replaced by `:code`. § 11 adds that an export that fails part-way removes its folder. The `verify` row of the command reference (§ 16) says a header-only orphan audio file, left by a crash at a track's start, is a warning.

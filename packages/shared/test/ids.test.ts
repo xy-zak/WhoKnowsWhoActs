@@ -1,18 +1,12 @@
 import { describe, expect, it } from "vitest";
-import {
-  generateParticipantCode,
-  generateSessionId,
-  isValidParticipantCode,
-  normaliseParticipantCode,
-  PARTICIPANT_CODE_PATTERN,
-} from "../src";
+import { generateParticipantCode, generateSessionId, normaliseParticipantCode, seededRandom } from "../src";
 
 describe("participant codes", () => {
   it("generates well-formed, self-validating codes", () => {
     for (let i = 0; i < 500; i++) {
       const code = generateParticipantCode();
-      expect(code).toMatch(PARTICIPANT_CODE_PATTERN);
-      expect(isValidParticipantCode(code)).toBe(true);
+      expect(code).toMatch(/^WK-[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]$/);
+      expect(normaliseParticipantCode(code)).toBe(code);
     }
   });
 
@@ -55,5 +49,16 @@ describe("participant codes", () => {
 describe("session ids", () => {
   it("encode the UTC date", () => {
     expect(generateSessionId(new Date("2026-11-16T10:00:00Z"))).toMatch(/^S-20261116-[0-9A-Z]{4}$/);
+  });
+});
+
+describe("seeded random", () => {
+  // pinned: logged seeds must replay to the same label assignments and agent choices
+  it("gives the same sequence for a seed as always", () => {
+    const take = (r: () => number) => [r(), r(), r()];
+    expect(take(seededRandom("x"))).toEqual([0.47333607729524374, 0.44358906359411776, 0.3202284653671086]);
+    expect(take(seededRandom("S-20261116-TEST:1"))).toEqual([
+      0.8298592355567962, 0.9348917354363948, 0.40335448854602873,
+    ]);
   });
 });

@@ -78,7 +78,7 @@ Design principles:
 | **Audio reason catalogue** | The single list of why an audio track started or stopped and of the states a microphone reports, with each one's label and meaning. The message schemas, the codebook and the screens all take their text from it. |
 | **Personal-data map** | The one list of which database tables and columns hold participant codes, session ids and audio files. Look-up, erasure, session deletion and audio deletion all work from it, so none of them can miss a table ([DATA-MANAGEMENT.md § 10](DATA-MANAGEMENT.md#10-takedown-and-erasure-procedure)). |
 | **Delivery policy** | How the player's browser sends one kind of message that needs an answer: whether it waits for its seat, how long it waits for the answer, and whether it sends again after a refusal or a reconnect (`once`, `whileSeated`, `attempt`, `retry`, `resend`). |
-| **Round rule** | Plug-in that decides what counts as a round and when it is complete. |
+| **Round rule** | The `rule` of a round spec (`quota` or `manual`): what counts as a round and when it is complete. |
 | **Validator** | Plug-in that accepts or rejects an intent (a game-design hook). |
 | **Composite** | The facilitator's overlay of all four views on one map. |
 | **Fake player** | A test client the server creates itself in a session with real players (setup step 08, **Connect**). It connects over the network like a browser and plays at random, but its seat is logged as fake, gets no participant code and skips onboarding. |
@@ -196,7 +196,7 @@ flowchart TB
 | `packages/shared/src/rules/` | `reducer.ts`, `validators.ts`, `roundRules.ts` |
 | `packages/shared/src/projections.ts` | `playerView` (the facilitator is sent the full `GameState`) |
 | `packages/shared/src/simulation/` | `policy.ts` (the `PlayerPolicy` interface, registry, helpers for writing policies), `policies.ts` (built-in policies `random` and `idle`) |
-| `packages/shared/src/audio.ts` | Audio constants, settings, ack and REST schemas; `state.ts` holds the mic check hold and the calibration gate |
+| `packages/shared/src/audio.ts` | Audio constants, settings and ack schemas, REST response types; `state.ts` holds the mic check hold and the calibration gate |
 | `packages/shared/src/audioReasons.ts` | The audio reason catalogue: every track start and stop reason and every mic state, with label, description, whether a stop is clean or interrupted, and whether a state is capturing; the enums, schema descriptions and codebook texts are derived from it |
 | `packages/shared/src/recordingVerdict.ts` | `recordingVerdict(state, seat)`: whether a seat records and, if not, why; `shouldRecord` is its yes/no; per reason, the catalogue `NOT_RECORDING_REASONS` holds the track's stop reason, the player's indicator state, the facilitator's mic-column tooltip, the server's refusal text and whether a closed track's late chunks are still stored; so do the calibration's readiness rules (`calibrationSeats`, `calibrationNotReadySeats`, `calibrationWaitsIn`, `calibrationReadyToStart`, `canSayCalibrationReady`) |
 | `packages/shared/src/docgen.ts`, `exportColumns.ts` | Documentation and codebook generation; export file contract |
@@ -234,7 +234,7 @@ sequenceDiagram
     SM->>R: game rules: score changes of this decision
     SM->>DB: append DecisionMade (seq 58, scoreChanges)
     SM->>R: applyEvent(state, event)
-    SM->>R: round rule isComplete(state)?
+    SM->>R: roundIsComplete(state)?
     opt round complete
       SM->>DB: append RoundCompleted (and GameCompleted after the last round)
     end
@@ -460,10 +460,9 @@ Labels are available in the state (`state.seats[seat].k` / `.p`), so rules like 
 
 ### Add a round rule
 
-1. Implement `RoundRule` (`canAct`, `isComplete`) in `packages/shared/src/rules/roundRules.ts`.
-2. Register it in `ROUND_RULES`.
-3. Add its id to the `rule` enum of `RoundSpecSchema` in `config.ts`.
-4. Run `npm run docs:generate` (the config table and the `RoundStarted` payload change).
+1. Add its completion test to `roundIsComplete` in `packages/shared/src/rules/roundRules.ts` (action caps go through `checkQuota`).
+2. Add its id to the `rule` enum of `RoundSpecSchema` in `config.ts`.
+3. Run `npm run docs:generate` (the config table and the `RoundStarted` payload change).
 
 ### Add a new action type (e.g. `veto`)
 
@@ -528,8 +527,8 @@ scenarios/<id>/
 | Game rules | Vitest (`packages/shared/test/gameRules.test.ts`) | Board ids and starting-score matrices, targeting by power type (also in a dissociated pairing), +4 / −1 with the 0–10 limits, map score, the reducer replaying recorded score changes, revoke replay, a second rule set plugging in |
 | Documentation | Vitest + `npm run docs:check` | Generated blocks are up to date; every event, telemetry type and message is documented |
 | Server integration | Vitest + `socket.io-client` bots | A full 3-round game with 4 bots on a temporary encrypted DB: event counts, rejections, reconnect + auto-pause, intent deduplication (also across a server restart), the transient "Not seated" refusal, revoke, resume from the log, **no cross-view data leakage**, no codes in payloads, logs without IPs or participant codes (a code in a request path is redacted) |
-| Protocol | Vitest (`packages/shared/test/protocol.test.ts`, `apps/client/test/connection.test.ts`, `delivery.test.ts`) and the compiler | The catalogue documents exactly the schema tables' messages with the same schemas; the typed event maps check every emit and listener; the player connection, run on an in-memory fake socket, goes through `hello`, `bound`, reconnects, `detached` and `unbound`: actions are sent only while seated, resent unchanged after a reconnect and given up after their deadline, a "Not seated" refusal of a request is sent again once seated, and telemetry waits for the seat; the facilitator connection refuses a command while offline instead of queuing it (`facilitator-connection.test.ts`); every REST refusal answers its status with `{ error }` (`apps/server/test/restErrors.test.ts`) |
-| GDPR | Vitest | Wrong passphrase fails; no plaintext codes in the DB file; export files match `EXPORT_FILES` column by column; anonymised exports contain no codes; erasure removes every row, adds the register entry and never reuses seq numbers, and leaves `secure_delete` on with no freed pages in the file; a failed export leaves no folder; the session guard refuses each operation in each session state and busy state with the documented message (`apps/server/test/sessionGuard.test.ts`); the personal-data map covers every table of the schema that holds a code, a session id or an audio file, and after an erasure no table holds the code (`apps/server/test/personalData.test.ts`); backups are encrypted; rekey works; data folders are git-ignored |
+| Protocol | Vitest (`packages/shared/test/protocol.test.ts`, `apps/client/test/connection.test.ts`, `delivery.test.ts`) and the compiler | The catalogue documents exactly the schema tables' messages with the same schemas; the typed event maps check every emit and listener; the player connection, run on an in-memory fake socket, goes through `hello`, `bound`, reconnects, `detached` and `unbound`: actions are sent only while seated, resent unchanged after a reconnect and given up after their deadline, a "Not seated" refusal of a request is sent again once seated, and telemetry waits for the seat; the facilitator connection refuses a command while offline instead of queuing it, and a failed download shows the server's `error` text (`facilitator-connection.test.ts`); every REST refusal answers its status with `{ error }`, and every registered `/api` route except `/api/health` and `/api/landing` refuses a request from another computer with 403 (`apps/server/test/restErrors.test.ts`) |
+| GDPR | Vitest | Wrong passphrase fails; no plaintext codes in the DB file; export files match `EXPORT_FILES` column by column; anonymised exports contain no codes; erasure removes every row, adds the register entry (the erasure and session-deletion registers are checked field by field) and never reuses seq numbers, every `reaction_ms` in the export matches the stored telemetry, and leaves `secure_delete` on with no freed pages in the file; a failed export leaves no folder; the session guard refuses each operation in each session state and busy state with the documented message (`apps/server/test/sessionGuard.test.ts`); the personal-data map covers every table of the schema that holds a code, a session id or an audio file, and after an erasure no table holds the code (`apps/server/test/personalData.test.ts`); backups are encrypted; rekey works; data folders are git-ignored |
 | Live figures | Vitest (`apps/server/test/seatMonitor.test.ts` on a `SessionManager` driven directly, `apps/server/test/dashboard.test.ts` over sockets) | Telemetry is stored, and hover shown, only after consent and never after a withdrawal; what clears a seat's figures in the seat monitor (unbinding, withdrawal, mic check skipped, disconnect, end of session); mic readings kept only for a seat that may be recorded; the rule for fake players (real session, lobby, a free seat); a session switch leaves no live figures of the previous session; a pending dashboard refresh ends with its session; a session switch that fails shows that no session is attached |
 | Fake players | Vitest (`apps/server/test/fake.test.ts`) | Fake players in a real session: seats logged as fake without codes, no consent or demographics recorded for them, they play a full round over the network, `fake_player` / `fakeSeats` in exports, FAKE PLAYER on the key sheet and no takedown card, refused outside the lobby and in simulated sessions, a browser can never count as fake, restored after a server restart with their pace |
 | Simulated players | Vitest (`packages/shared/test/simulation.test.ts`, `apps/server/test/simulation.test.ts`) | Policy registry and parameters, the random policy's quotas and seed, agents see only their own view; a full simulated game in the simulation database only, no participant codes or consent, a run repeats exactly from its seed, per-seat policies, a failing policy is stopped and noted, simulation exports, resume after a restart |

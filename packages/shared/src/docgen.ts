@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { SessionConfigSchema } from "./config";
-import { EVENT_DEFS, EVENT_TYPES, EventEnvelopeSchema, type EventType } from "./events";
+import { EVENT_DEFS, EVENT_TYPES, EventEnvelopeSchema, type EventType, type PayloadOf } from "./events";
 import { EXPORT_FILES, type ExportFileDef, expandColumns } from "./exportColumns";
 import { DEFAULT_GAME_RULES, GAME_RULES } from "./game/rules";
 import { CROCKFORD, normaliseParticipantCode } from "./ids";
@@ -606,8 +606,8 @@ export interface CodebookMeta {
   exportId: string;
   kind: "standard" | "anonymised";
   createdWall: string;
-  harness?: { version: string; gitCommit: string };
-  scenario?: { id: string; title: string; version: string; hash: string };
+  harness?: PayloadOf<"SessionCreated">["harness"];
+  scenario?: PayloadOf<"SessionCreated">["scenario"];
   consentItems?: string[];
   demographicQuestions?: string[];
 }
@@ -756,7 +756,7 @@ const BLOCK_RE = /<!-- BEGIN GENERATED: ([a-z0-9-]+) -->[\s\S]*?<!-- END GENERAT
  */
 export function applyGeneratedBlocks(
   markdown: string,
-  blocks: Record<string, () => string> = GENERATED_BLOCKS,
+  blocks: Record<string, () => string>,
 ): { content: string; used: string[]; unknown: string[] } {
   const used: string[] = [];
   const unknown: string[] = [];

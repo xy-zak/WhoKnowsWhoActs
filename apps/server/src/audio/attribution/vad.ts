@@ -16,9 +16,8 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import type { Vad } from "./features";
 
-export const SILERO_MODEL_PATH = fileURLToPath(new URL("../../../models/silero_vad.onnx", import.meta.url));
-export const SILERO_SHA256 = "1a153a22f4509e292a94e67d6f9b85e8deb25b4988682b7e174c65279d8788e3";
-export const SILERO_NAME = "silero-vad 6.2.3";
+const SILERO_MODEL_PATH = fileURLToPath(new URL("../../../models/silero_vad.onnx", import.meta.url));
+const SILERO_SHA256 = "1a153a22f4509e292a94e67d6f9b85e8deb25b4988682b7e174c65279d8788e3";
 
 const WINDOW = 512;
 const CONTEXT = 64;

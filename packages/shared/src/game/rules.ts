@@ -26,7 +26,7 @@ import type { Validator } from "../rules/validators";
  *
  * To change the current game: edit STANDARD below (numbers first), bump its
  * version, update docs/GAME-RULES.md and run the tests. To add a variant:
- * write another `defineGameRules({...})`, add it to GAME_RULES, and choose it
+ * write another `GameRules` object, add it to GAME_RULES, and choose it
  * per session in setup step 01.
  * ═══════════════════════════════════════════════════════════════════════════ */
 
@@ -86,10 +86,6 @@ export interface GameRules {
   validators?: Validator[];
 }
 
-export function defineGameRules(rules: GameRules): GameRules {
-  return rules;
-}
-
 /** The knowledge type that has the same letter as a power type: Pa → Ka, Pb → Kb, … */
 export function knowledgeOfPower(p: PLabel): KLabel {
   return K_LABELS[P_LABELS.indexOf(p)]!;
@@ -108,7 +104,7 @@ export const STANDARD = {
   propose: { target: 0, sameSquare: 0 },
 } as const;
 
-export const standardRules = defineGameRules({
+export const standardRules: GameRules = {
   id: "standard",
   version: "1",
   name: "Standard",
@@ -138,7 +134,7 @@ export const standardRules = defineGameRules({
     return out;
   },
   mapScore: (scores) => averageScore(scores),
-});
+};
 
 /* ─────────────────────────── Registry ─────────────────────────── */
 

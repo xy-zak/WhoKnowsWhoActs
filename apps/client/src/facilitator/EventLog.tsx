@@ -4,6 +4,7 @@ import {
   EVENT_TYPES,
   formatScoreChanges,
   type ReadonlyGameState,
+  SEATS,
   type StoredEvent,
   type StoredTelemetry,
   samplesToMs,
@@ -117,14 +118,12 @@ export const EventLog = memo(function EventLog({
   regionName,
   onRevoke,
   highlightSeq,
-  maxHeight = 360,
 }: {
   events: StoredEvent[];
   state: ReadonlyGameState | null;
   regionName: (id: string) => string;
   onRevoke?: (seq: number) => void;
   highlightSeq?: number;
-  maxHeight?: number;
 }) {
   const [type, setType] = useState("");
   const [seat, setSeat] = useState("");
@@ -159,14 +158,14 @@ export const EventLog = memo(function EventLog({
           </select>
           <select aria-label="Filter by seat" value={seat} onChange={(e) => setSeat(e.target.value)}>
             <option value="">all seats</option>
-            {[1, 2, 3, 4].map((s) => (
+            {SEATS.map((s) => (
               <option key={s} value={s}>
                 seat {s}
               </option>
             ))}
           </select>
         </div>
-        <GridTable head={["#", "time", "R", "type", "seat", "details", ""]} scroll={maxHeight}>
+        <GridTable head={["#", "time", "R", "type", "seat", "details", ""]} scroll={360}>
           {rows.map((e) => (
             <Fragment key={e.seq}>
               <tr
@@ -206,7 +205,7 @@ export const EventLog = memo(function EventLog({
                 <tr>
                   <td colSpan={7}>
                     <pre className="mono small" style={{ margin: 0, whiteSpace: "pre-wrap" }}>
-                      {JSON.stringify({ ...e, payload: e.payload }, null, 2)}
+                      {JSON.stringify(e, null, 2)}
                     </pre>
                   </td>
                 </tr>

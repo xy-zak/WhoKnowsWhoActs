@@ -3,7 +3,7 @@ import type { PayloadOf } from "../events";
 import { actorOf, rulesFor } from "../game/scoring";
 import type { ActionKind } from "../labels";
 import type { ReadonlyGameState } from "../state";
-import { ruleFor } from "./roundRules";
+import { checkQuota } from "./roundRules";
 
 export interface Intent {
   kind: ActionKind;
@@ -48,9 +48,8 @@ export const regionExists: Validator = (state, _seat, intent) =>
     ? OK
     : { ok: false, reason: "unknown_region", detail: `Unknown sub-square '${intent.regionId}'` };
 
-/** Delegates to the round rule (quota checks). */
-export const roundRuleAllows: Validator = (state, seat, intent) =>
-  ruleFor(state).canAct(state, seat, intent.kind);
+/** Quota checks (every round rule caps actions with the quotas). */
+export const roundRuleAllows: Validator = (state, seat, intent) => checkQuota(state, seat, intent.kind);
 
 /**
  * Delegates to the session's game rules: the target must be the sub-square

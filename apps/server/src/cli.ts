@@ -58,10 +58,10 @@ const USAGE = `Usage: npm run cli -- <sessions|lookup|export|anonymise|erase|era
 /** Commands that only make sense for participants (and so not with --sim). */
 const PARTICIPANT_ONLY = new Set(["lookup", "erase", "erasures", "delete-audio", "audio-deletions"]);
 
-/** 754000 → "12.6 min", 42000 → "42 s". */
 const COMPACTION_FAILED =
   "the database could not be compacted (the rows are deleted, but their old pages may stay in the file until the next erasure or deletion compacts it): ";
 
+/** 754000 → "12.6 min", 42000 → "42 s". */
 function duration(ms: number): string {
   return ms >= 60_000 ? `${(ms / 60_000).toFixed(1)} min` : `${Math.round(ms / 1000)} s`;
 }
@@ -226,8 +226,7 @@ async function main() {
       }
       case "delete-session": {
         const id = need(values.session, "session");
-        const row = store.getSession(id);
-        if (!row) throw new Error(`Unknown session ${id}`);
+        const row = store.requireSession(id);
         const counts = store.listSessions().find((x) => x.id === id)!;
         console.log(
           `Session ${id} (${row.status}, created ${row.created_wall.slice(0, 16)}): ${counts.eventCount} events, ${counts.telemetryCount} telemetry rows, ${counts.audioTracks} audio tracks (${duration(counts.audioMs)}).`,
@@ -285,8 +284,7 @@ async function main() {
         const scope = values.scope;
         if (scope !== "raw" && scope !== "all")
           throw new Error(`Missing or unknown --scope (raw or all)\n${USAGE}`);
-        const row = store.getSession(id);
-        if (!row) throw new Error(`Unknown session ${id}`);
+        const row = store.requireSession(id);
         const tracks = store.listAudioTracks(id);
         const stored = tracks.filter((t) => t.status !== "deleted");
         const derived = store.listAudioDerivatives(id);

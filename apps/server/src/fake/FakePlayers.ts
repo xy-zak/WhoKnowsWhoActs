@@ -1,4 +1,3 @@
-import { randomBytes } from "node:crypto";
 import { FAKE_PLAYER_PACES, type FakePlayerPace } from "@wkwa/shared";
 import type { Logger } from "pino";
 import { Bot } from "../tools/botClient";
@@ -44,12 +43,10 @@ export class FakePlayers {
     clientSeqStart?: number;
   }): Promise<Bot> {
     const url = await this.deps.selfUrl();
-    const terminalKey = randomBytes(16).toString("hex");
     const pace = FAKE_PLAYER_PACES[opts.pace];
     const bot = new Bot({
       url,
       name: `fake player seat ${opts.seat}`,
-      terminalKey,
       seatToken: opts.seatToken ?? null,
       clientSeqStart: opts.clientSeqStart,
       minDelayMs: pace.minDelayMs,
@@ -60,7 +57,7 @@ export class FakePlayers {
       insecureTls: true,
       log: (m) => this.deps.log.debug(m),
     });
-    this.bots.set(terminalKey, bot);
+    this.bots.set(bot.terminalKey, bot);
     return bot;
   }
 

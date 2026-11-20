@@ -7,8 +7,7 @@ import {
   type StoredEvent,
 } from "@wkwa/shared";
 import { useCallback, useId, useMemo, useRef, useState } from "react";
-import { kColour, seatColour } from "../map/MapView";
-import { ActSwatch, LabelTag, Panel } from "../ui";
+import { ActSwatch, kColour, LabelTag, Panel, seatColour } from "../ui";
 import { audioSpans } from "./audioLive";
 
 /**
@@ -286,7 +285,7 @@ export function Timeline({
               const cy = top + lane * laneH + laneH / 2;
               const isRevoked = revoked.has(e.seq);
               const k = parseCellId(e.payload.regionId)?.k;
-              const colour = k ? kColour(k) : "var(--text)";
+              const colour = kColour(k);
               const propose = e.type === "ProposalMade";
               const changes = formatScoreChanges(e.payload.scoreChanges);
               const tip = `#${e.seq} · seat ${e.seat} ${propose ? "proposed" : "decided"} ${cellName(e.payload.regionId)}${

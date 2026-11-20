@@ -91,11 +91,6 @@ export function parseCellId(id: string): CellRef | null {
   return { ...sq, cell: id, k: m[2] as KLabel };
 }
 
-export function isCellOnBoard(board: Board, id: string): boolean {
-  const c = parseCellId(id);
-  return c !== null && c.col < board.cols && c.row < board.rows;
-}
-
 /** Every square id, row by row from the top-left: A1 B1 … J1 A2 … */
 export function squaresOf(board: Board): string[] {
   const out: string[] = [];

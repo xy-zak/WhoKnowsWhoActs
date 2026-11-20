@@ -14,7 +14,7 @@
  * A chunk without a usable `clientTs` is placed by `serverTs − duration`.
  */
 
-import type { ChunkMeta } from "./types";
+import type { ChunkMeta, TrackAlignment } from "./types";
 
 export interface ClockTrackInput {
   trackId: string;
@@ -107,6 +107,20 @@ export function fitClock(track: ClockTrackInput, maxPlausibleDriftPpm = 1000): C
     driftPpm: (nominal / line.slope - 1) * 1e6,
     residualMs: rms,
     implausible,
+  };
+}
+
+/** A fitted track of `samples` samples on the server clock (drift and residual to 0.01). */
+export function alignTrack(fit: ClockFit, samples: number): TrackAlignment {
+  return {
+    trackId: fit.trackId,
+    seat: fit.seat,
+    startTs: fit.startTs,
+    msPerSample: fit.msPerSample,
+    driftPpm: Math.round(fit.driftPpm * 100) / 100,
+    samples,
+    endTs: fit.startTs + samples * fit.msPerSample,
+    residualMs: Math.round(fit.residualMs * 100) / 100,
   };
 }
 

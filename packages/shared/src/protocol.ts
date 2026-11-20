@@ -2,8 +2,10 @@ import { z } from "zod";
 import {
   AUDIO_BYTES_PER_SAMPLE,
   AUDIO_MAX_CHUNK_SAMPLES,
+  type AudioCaptureSettings,
   AudioCaptureSettingsSchema,
   AudioContextInfoSchema,
+  type AudioSettings,
   CaptureSampleRate,
   Dbfs,
   PcmSchema,
@@ -14,7 +16,7 @@ import {
 import { AudioStopReasonSchema, type MicLevelState, MicLevelStateSchema } from "./audioReasons";
 import { FakePaceSchema, SessionConfigSchema } from "./config";
 import { EVENT_DEFS } from "./events";
-import { ActionKindSchema, KLabelSchema, SeatSchema } from "./labels";
+import { ActionKindSchema, KLabelSchema, LabelPairingSchema, SeatSchema } from "./labels";
 import type { FacilitatorServerToClient, PlayerServerToClient } from "./socket";
 import { TelemetryItemSchema } from "./telemetry";
 
@@ -93,6 +95,20 @@ const NO_SAMPLE_RATE = {
   message: "settings.sampleRate (or the audio engine's sample rate) is needed",
   path: ["settings", "sampleRate"],
 };
+
+/** The message with its settings normalised to AudioSettings, or a NO_SAMPLE_RATE issue. */
+function withSettings<T extends { settings: AudioCaptureSettings }>(
+  m: T,
+  sampleRate: number | undefined,
+  ctx: z.RefinementCtx,
+): Omit<T, "settings"> & { settings: AudioSettings } {
+  const settings = toAudioSettings(m.settings, sampleRate);
+  if (settings === null) {
+    ctx.addIssue({ code: "custom", ...NO_SAMPLE_RATE });
+    return z.NEVER;
+  }
+  return { ...m, settings };
+}
 const ContextSampleRate = CaptureSampleRate.optional().describe(
   "Rate of the browser's audio engine (Hz): used as the sample rate when settings has none",
 );
@@ -108,14 +124,7 @@ export const MicCheckSubmit = EVENT_DEFS.MicCheckCompleted.payload
     durationMs: DurationMs,
     clientTs: ClientTs,
   })
-  .transform(({ contextSampleRate, ...m }, ctx) => {
-    const settings = toAudioSettings(m.settings, contextSampleRate);
-    if (settings === null) {
-      ctx.addIssue({ code: "custom", ...NO_SAMPLE_RATE });
-      return z.NEVER;
-    }
-    return { ...m, settings };
-  });
+  .transform(({ contextSampleRate, ...m }, ctx) => withSettings(m, contextSampleRate, ctx));
 
 /** A mic check result as the server takes it (settings normalised). */
 export type MicCheckResult = z.output<typeof MicCheckSubmit>;
@@ -148,14 +157,7 @@ export const AudioStart = EVENT_DEFS.AudioTrackStarted.payload
     settings: AudioCaptureSettingsSchema,
     context: AudioContextInfoSchema.optional(),
   })
-  .transform((m, ctx) => {
-    const settings = toAudioSettings(m.settings, m.context?.sampleRate);
-    if (settings === null) {
-      ctx.addIssue({ code: "custom", ...NO_SAMPLE_RATE });
-      return z.NEVER;
-    }
-    return { ...m, settings };
-  });
+  .transform((m, ctx) => withSettings(m, m.context?.sampleRate, ctx));
 
 export const AudioChunk = z
   .object({
@@ -223,27 +225,16 @@ export const FakeAdd = z.object({
   pace: FakePaceSchema.default("normal"),
 });
 export const SeatUnbind = z.object({ seat: SeatSchema, reason: z.string().max(200).default("facilitator") });
+const PairingIn = LabelPairingSchema.default({ mode: "aligned", id: null }).describe(
+  "Pairing to use; dissociated with id null = random D1–D6 (seed logged)",
+);
 /** K per seat + pairing; the server derives each P from the pairing (P is never chosen freely). */
 export const LabelsSet = z.object({
   assignments: z.array(z.object({ seat: SeatSchema, k: KLabelSchema, view: z.string().optional() })),
-  pairing: z
-    .object({
-      mode: z.enum(["aligned", "dissociated"]),
-      id: z
-        .number()
-        .int()
-        .min(1)
-        .max(6)
-        .nullable()
-        .describe("1–6; null with dissociated = pick one at random (seed logged)"),
-    })
-    .default({ mode: "aligned", id: null }),
+  pairing: PairingIn,
 });
 export const LabelsRandomise = z.object({
-  pairing: z
-    .object({ mode: z.enum(["aligned", "dissociated"]), id: z.number().int().min(1).max(6).nullable() })
-    .default({ mode: "aligned", id: null })
-    .describe("Pairing to use; dissociated with id null = random D1–D6"),
+  pairing: PairingIn,
   shuffleK: z
     .boolean()
     .default(true)
@@ -632,7 +623,7 @@ export const MESSAGES: {
       },
       "telemetry:live": {
         description: "Newly stored telemetry rows (chatty types such as state_received are omitted).",
-        schema: "{ items: StoredTelemetry[] }",
+        schema: "{ items: StoredTelemetry[], reset: boolean }",
         logged: "—",
       },
       "presence:live": {
@@ -724,6 +715,20 @@ export interface ServerInfo {
   landingUrls: Array<{ url: string; iface: string }>;
   port: number;
   tls: TlsInfo;
+}
+
+/** GET /api/scenarios: one entry per scenario folder; one that fails to load has `error` set. */
+export interface ScenarioInfo {
+  id: string;
+  title: string;
+  version: string;
+  description: string;
+  /** Board size in squares. */
+  board: { cols: number; rows: number } | null;
+  /** Number of sub-squares (4 per square). */
+  regionCount: number;
+  viewIds: string[];
+  error?: string;
 }
 
 /**

@@ -5,9 +5,9 @@ import {
   getGameRules,
   type Highlight,
   K_LABELS,
-  type KLabel,
   type PlayerView,
   quotaLeft,
+  roundActiveMs,
 } from "@wkwa/shared";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { fmtDuration, quotaText } from "../common/format";
@@ -22,9 +22,9 @@ import {
   Popup,
   SeatDot,
   StatusTag,
+  useBusy,
   useNow,
 } from "../ui";
-import { useSubmit } from "./chrome";
 import type { PlayerConnection } from "./connection";
 import { RecordingProblem, RecordingTag } from "./RecordingIndicator";
 
@@ -44,7 +44,7 @@ export function Game({ conn, view }: { conn: PlayerConnection; view: PlayerView 
   const [tool, setToolState] = useState<ActionKind | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [draft, setDraft] = useState<{ kind: ActionKind; regionId: string } | null>(null);
-  const [busy, run] = useSubmit(conn);
+  const [busy, run] = useBusy((e) => conn.showToast(e.message));
   const inspectOpenedAt = useRef<number | null>(null);
   const hoverStart = useRef<{ id: string; t: number } | null>(null);
 
@@ -339,7 +339,6 @@ function SquarePanel({
   onCancel: () => void;
 }) {
   const actsOn = view.me.actsOn;
-  const target = (kind: ActionKind): KLabel | null => actsOn[kind];
   const showActors = view.visibility.showActorToPlayers;
   return (
     <div className="col">
@@ -430,7 +429,7 @@ function SquarePanel({
       ) : (
         <div className="row">
           {(["propose", "decide"] as const).map((kind) => {
-            const k = target(kind);
+            const k = actsOn[kind];
             return (
               <Button
                 key={kind}
@@ -470,11 +469,8 @@ function StatusLine({
   useNow(); // redraw the countdown each second
   const limit = view.roundSpec?.timeLimitSec;
   let left: number | null = null;
-  if (limit && view.roundStartedTs) {
-    const now = conn.clock.now();
-    const pausedNow = view.paused && view.pausedSince ? now - view.pausedSince : 0;
-    left = limit * 1000 - (now - view.roundStartedTs - view.roundPausedMs - pausedNow);
-  }
+  // not roundRemainingMs: that hides the countdown during the round break
+  if (limit && view.roundStartedTs) left = limit * 1000 - roundActiveMs(view, conn.clock.now());
   const knows = view.me.knows;
   return (
     <div className="row panel" style={{ padding: "var(--s2) var(--s3)", marginTop: 0 }}>

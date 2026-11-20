@@ -17,7 +17,6 @@ export const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 const CODE_BODY_LEN = 8;
 const CHECK_WEIGHTS = [1, 3, 5, 7, 9, 11, 13, 15];
 export const PARTICIPANT_CODE_PREFIX = "WK";
-export const PARTICIPANT_CODE_PATTERN = /^WK-[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]$/;
 
 function randomBytes(n: number): Uint8Array {
   const out = new Uint8Array(n);
@@ -68,10 +67,6 @@ export function normaliseParticipantCode(input: string): string | null {
   return formatCode(s);
 }
 
-export function isValidParticipantCode(input: string): boolean {
-  return normaliseParticipantCode(input) === input;
-}
-
 /** Prefix of simulated sessions' ids, so they can never be mistaken for sessions with participants. */
 export const SIMULATED_SESSION_PREFIX = "SIM-";
 
@@ -102,7 +97,12 @@ export function seededRandom(seed: string): () => number {
     h = Math.imul(h ^ seed.charCodeAt(i), 3432918353);
     h = (h << 13) | (h >>> 19);
   }
-  let a = h >>> 0;
+  return mulberry32(h >>> 0);
+}
+
+/** Deterministic PRNG (mulberry32): numbers in [0, 1) from a 32-bit seed. */
+export function mulberry32(seed: number): () => number {
+  let a = seed >>> 0;
   return () => {
     a = (a + 0x6d2b79f5) | 0;
     let t = Math.imul(a ^ (a >>> 15), 1 | a);

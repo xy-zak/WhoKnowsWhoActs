@@ -83,8 +83,6 @@ export function levelTone(
   return s === "quiet" || s === "clipping" ? "warn" : "neutral";
 }
 
-export { formatDb } from "../common/format";
-
 export type MeterCell = "on" | "off" | "peak";
 
 /**
@@ -199,8 +197,3 @@ export const REC_STATE_META: Record<RecState, RecStateMeta> = {
 };
 
 export const REC_STATES = Object.keys(REC_STATE_META) as RecState[];
-
-/** The look of a recording state. */
-export function recStateMeta(state: RecState): RecStateMeta {
-  return REC_STATE_META[state];
-}

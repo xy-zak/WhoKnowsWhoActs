@@ -2,6 +2,12 @@
 
 History of [GAME-RULES.md](../GAME-RULES.md). Newest first. How entries are written: [README.md](README.md).
 
+### 2026-11-20 · `00f87ef` · Docs: round rules are two functions, standardRules is a plain object, audio REST shapes are types (wave 1 drift)
+
+- **Type:** Risk mitigation
+- **Change:** § 10 says a rules variant is written as another `GameRules` object (like `standardRules`) and added to `GAME_RULES`, instead of calling `defineGameRules`.
+- **Reason:** The code refactor removed `defineGameRules`, a helper that only returned its input; the document must name what exists (docs drifting from the code).
+
 ### 2026-11-19 · `7f0e859` · Docs: session startup flow (welcome page, eleven setup steps, consent sections, mic check hold until the briefing, calibration readiness); change logs
 
 - **Type:** Risk mitigation

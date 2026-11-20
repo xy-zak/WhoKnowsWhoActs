@@ -38,7 +38,6 @@ import {
   audioExportFileName,
   initialState,
   int16FromLeBytes,
-  randomCrockford,
   type SpeechSegmentRow,
   type SpeechSegmentsView,
   type StoredEvent,
@@ -48,19 +47,14 @@ import type { Logger } from "pino";
 import { HttpError, orThrow } from "../api/http";
 import { sha256 } from "../content";
 import { type AudioDeletionResult, PersonalDataMap } from "../db/personalData";
-import type {
-  AudioChunkRow,
-  AudioDeletionRow,
-  AudioJobRow,
-  AudioTrackRow,
-  NewAudioDerivative,
-  Store,
-} from "../db/store";
+import type { AudioChunkRow, AudioDeletionRow, AudioJobRow, NewAudioDerivative, Store } from "../db/store";
+import { exportId as newExportId } from "../gdpr/exporter";
 import { nowTs, wall } from "../runtime";
 import { SessionGuard } from "../session/sessionGuard";
 import {
   type AttributionOptions,
   type AttributionResult,
+  alignTrack,
   type CalibrationTurn,
   type ChunkMeta,
   ENGINE_VERSION,
@@ -75,7 +69,7 @@ import {
   type TrackSource,
   trackSampleEnd,
 } from "./attribution";
-import type { AudioReadIssue } from "./fileStore";
+import { type AudioReadIssue, writeAll } from "./fileStore";
 import { type AudioJobRunner, runInWorker, type TaskRunner } from "./jobs";
 import {
   type AttributionTaskInput,
@@ -170,18 +164,7 @@ export function timestampTiming(
   const alignment: TrackAlignment[] = [];
   for (const t of tracks) {
     const f = fitClock(t);
-    if (!f) continue;
-    const samples = trackSampleEnd(t.chunks);
-    alignment.push({
-      trackId: t.trackId,
-      seat: t.seat,
-      startTs: f.startTs,
-      msPerSample: f.msPerSample,
-      driftPpm: f.driftPpm,
-      samples,
-      endTs: f.startTs + samples * f.msPerSample,
-      residualMs: f.residualMs,
-    });
+    if (f) alignment.push(alignTrack(f, trackSampleEnd(t.chunks)));
   }
   if (alignment.length === 0) return null;
   const t0 = Math.min(...alignment.map((a) => a.startTs));
@@ -209,17 +192,6 @@ export function sweepPartialExports(exportsDir: string, log?: Logger): void {
   }
 }
 
-/** A track's PCM as render chunks, streamed in startSample order; read problems go to `onIssue`. */
-function trackPcmChunks(
-  store: Store,
-  row: AudioTrackRow,
-  key: Buffer,
-  chunks: readonly AudioChunkRow[],
-  onIssue: (i: AudioReadIssue) => void,
-) {
-  return seqOrderedChunks(store.requireAudioFiles(), row.sessionId, row.fileName!, key, chunks, { onIssue });
-}
-
 /** Write header + samples to a new file, hashing as it goes. */
 async function writeWavFile(
   file: string,
@@ -231,11 +203,7 @@ async function writeWavFile(
   let bytes = 0;
   try {
     for await (const chunk of wavStream(blocks, { sampleRate: AUDIO_SAMPLE_RATE }, totalSamples)) {
-      let done = 0;
-      while (done < chunk.byteLength) {
-        const { bytesWritten } = await fh.write(chunk, done, chunk.byteLength - done, bytes + done);
-        done += bytesWritten;
-      }
+      await writeAll(fh, chunk, bytes);
       hash.update(chunk);
       bytes += chunk.byteLength;
     }
@@ -244,11 +212,6 @@ async function writeWavFile(
     await fh.close();
   }
   return { bytes, sha256: hash.digest("hex") };
-}
-
-function exportIdOf(now: number): string {
-  const d = new Date(now).toISOString().replace(/[-:]/g, "").replace("T", "-").slice(0, 15);
-  return `AU-${d}-${randomCrockford(4)}`;
 }
 
 /* ─────────── summaries ─────────── */
@@ -615,7 +578,7 @@ export class AudioService {
   speechSegments(sessionId: string): SpeechSegmentsView {
     this.session(sessionId);
     const list = this.store.listAudioDerivatives(sessionId, { kind: "speech_segments" });
-    const { segments } = speechSegmentsOf(this.store, sessionId);
+    const segments = speechSegmentsOf(this.store, sessionId);
     return {
       sessionId,
       engineVersion: list[0]?.engineVersion ?? null,
@@ -712,7 +675,7 @@ export class AudioService {
     }
 
     const now = nowTs();
-    const exportId = exportIdOf(now);
+    const exportId = newExportId(now, "AU");
     const dir = path.join(this.deps.exportsDir, sessionId, `audio-${exportId}`);
     // written under a `.partial` name and renamed once registered: a crash never leaves a complete-
     // looking, unregistered folder of voice files (leftovers are removed at start-up)
@@ -732,7 +695,9 @@ export class AudioService {
               return {
                 trackId: t.trackId,
                 samples: trackSampleEnd(chunks),
-                chunks: trackPcmChunks(store, t, key, chunks, (i) => issues.push(i)),
+                chunks: seqOrderedChunks(store.requireAudioFiles(), t.sessionId, t.fileName!, key, chunks, {
+                  onIssue: (i) => issues.push(i),
+                }),
               };
             });
           const total = renderedSampleCount(timing.timeline);

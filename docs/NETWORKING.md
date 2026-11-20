@@ -399,7 +399,7 @@ Every client→server payload is validated with the zod schema listed here. Inva
 | `dashboard` | `DashboardMsg` | — | Full session state (all seats incl. participant codes), connected clients and live per-seat statistics. |
 | `scenario` | `Scenario \| null` | — | The loaded scenario with ALL views (for the composite map). Sent when a session is loaded. |
 | `events` | `{ events: StoredEvent[], reset: boolean }` | — | New events for the live log (demographic answers redacted). The backlog is sent on connect. |
-| `telemetry:live` | `{ items: StoredTelemetry[] }` | — | Newly stored telemetry rows (chatty types such as state_received are omitted). |
+| `telemetry:live` | `{ items: StoredTelemetry[], reset: boolean }` | — | Newly stored telemetry rows (chatty types such as state_received are omitted). |
 | `presence:live` | `{ seat: number, regionId: string \| null }` | — | Relayed hover presence of a seat for the live mirrors; null when the seat withdraws, is unbound or disconnects. |
 
 <!-- END GENERATED: message-catalogue -->

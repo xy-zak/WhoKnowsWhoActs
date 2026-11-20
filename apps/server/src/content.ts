@@ -15,6 +15,7 @@ import {
   regionsOf,
   type Scenario,
   ScenarioFileSchema,
+  type ScenarioInfo,
   ScoreMatricesSchema,
   StudyConfigSchema,
   scoresFromMatrices,
@@ -56,19 +57,6 @@ function loadScenario(dir: string): Scenario {
     initialScores,
   };
   return { ...body, hash: sha256(JSON.stringify(body)) };
-}
-
-export interface ScenarioInfo {
-  id: string;
-  title: string;
-  version: string;
-  description: string;
-  /** Board size in squares. */
-  board: { cols: number; rows: number } | null;
-  /** Number of sub-squares (4 per square). */
-  regionCount: number;
-  viewIds: string[];
-  error?: string;
 }
 
 export class ScenarioLibrary {

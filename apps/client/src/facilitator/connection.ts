@@ -131,55 +131,54 @@ export class FacilitatorConnection {
   }
 
   /**
-   * REST call to /api (adds the admin token if one is configured). A failure shows as an error
-   * toast and rethrows; `quiet` skips the toast (e.g. for polls).
+   * Fetch with the admin token (if one is configured). A non-OK reply shows the server's `error`
+   * (else the HTTP status) as an error toast and throws; `quiet` skips the toast (e.g. for polls).
    */
-  async api<T = unknown>(
-    path: string,
-    { quiet = false, ...init }: RequestInit & { quiet?: boolean } = {},
-  ): Promise<T> {
+  private async request(path: string, { quiet = false, ...init }: RequestInit & { quiet?: boolean } = {}) {
     const headers = new Headers(init.headers);
     if (this.token) headers.set("authorization", `Bearer ${this.token}`);
     if (init.body && !headers.has("content-type")) headers.set("content-type", "application/json");
     const res = await fetch(path, { ...init, headers });
-    const text = await res.text();
-    let body: unknown = text;
-    try {
-      body = JSON.parse(text);
-    } catch {}
     if (!res.ok) {
-      const msg = (body as { error?: string })?.error ?? `${res.status} ${res.statusText}`;
+      const body = (await res.json().catch(() => null)) as { error?: string } | null;
+      const msg = body?.error ?? `${res.status} ${res.statusText}`;
       if (!quiet) this.toast(msg, "error");
       throw new Error(msg);
     }
-    return body as T;
+    return res;
+  }
+
+  /** REST call to /api: the reply as JSON (or as text if it isn't JSON). Fails like `request`. */
+  async api<T = unknown>(path: string, init?: RequestInit & { quiet?: boolean }): Promise<T> {
+    const text = await (await this.request(path, init)).text();
+    try {
+      return JSON.parse(text) as T;
+    } catch {
+      return text as T;
+    }
   }
 
   /** Download a server file (e.g. a takedown-card PDF) with auth, under the given file name. */
   async download(path: string, filename: string) {
-    const headers = new Headers();
-    if (this.token) headers.set("authorization", `Bearer ${this.token}`);
-    const res = await fetch(path, { headers });
-    if (!res.ok) {
-      const msg = await res.text().catch(() => res.statusText);
-      this.toast(msg || `${res.status}`, "error");
-      throw new Error(msg);
-    }
-    const url = URL.createObjectURL(await res.blob());
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 30_000);
+    try {
+      const url = URL.createObjectURL(await (await this.request(path)).blob());
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 30_000);
+    } catch {} // the error toast is the whole failure handling
   }
 
   /** Open a printable server page (key sheet) in a new tab, with auth. */
   async openPrintable(path: string) {
-    const html = await this.api<string>(path);
-    const url = URL.createObjectURL(new Blob([html], { type: "text/html" }));
-    window.open(url, "_blank", "noopener");
-    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    try {
+      const html = await this.api<string>(path);
+      const url = URL.createObjectURL(new Blob([html], { type: "text/html" }));
+      window.open(url, "_blank", "noopener");
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch {} // the error toast is the whole failure handling
   }
 }

@@ -15,6 +15,7 @@ import {
   policyParamRows,
   type RoundSpec,
   type Scenario,
+  type ScenarioInfo,
   type Scores,
   type SessionConfig,
   type SimulationConfig,
@@ -37,19 +38,8 @@ import {
   useConfirm,
 } from "../../ui";
 import type { FacilitatorConnection } from "../connection";
-import { PACES, paceId } from "../simulation";
+import { PACES, paceId, policyLabel } from "../simulation";
 import type { Draft } from "./draft";
-
-export interface ScenarioInfo {
-  id: string;
-  title: string;
-  version: string;
-  description: string;
-  board: { cols: number; rows: number } | null;
-  regionCount: number;
-  viewIds: string[];
-  error?: string;
-}
 
 type Upd = (patch: Partial<Draft>) => void;
 const setCfg = (d: Draft, upd: Upd, patch: Partial<SessionConfig>) =>
@@ -412,7 +402,7 @@ function SimulationSettings({ d, upd }: { d: Draft; upd: Upd }) {
           <select value={sim.policy} onChange={(e) => set({ policy: e.target.value })}>
             {policies.map((p) => (
               <option key={p.id} value={p.id}>
-                {p.name} ({p.id} v{p.version})
+                {policyLabel(p.id)}
               </option>
             ))}
           </select>
@@ -666,12 +656,12 @@ export function PlayersStep({ d, upd }: { d: Draft; upd: Upd }) {
 export function OnboardingStep({
   d,
   upd,
-  httpsEnabled = null,
+  httpsEnabled,
 }: {
   d: Draft;
   upd: Upd;
   /** The server serves HTTPS (GET /api/server-info `tls.enabled`); null while unknown. */
-  httpsEnabled?: boolean | null;
+  httpsEnabled: boolean | null;
 }) {
   const confirm = useConfirm();
   const o = d.config.onboarding;

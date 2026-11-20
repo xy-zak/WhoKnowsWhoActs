@@ -7,7 +7,8 @@
  * Synchronous and CPU-light (well under a second per session hour); it runs in the job worker.
  */
 
-import { fitClock, median, trackSampleEnd } from "./clock";
+import { AUDIO_SAMPLE_RATE } from "@wkwa/shared";
+import { alignTrack, fitClock, median, trackSampleEnd } from "./clock";
 import { maskToRuns, segmentsFromMasks, smoothSpeech } from "./smooth";
 import {
   type AnalysisInput,
@@ -23,7 +24,6 @@ import {
   HOP_SAMPLES,
   type LeakageReport,
   resolveOptions,
-  SAMPLE_RATE,
   type SeatQuality,
   type Timeline,
   type TrackAlignment,
@@ -63,25 +63,12 @@ export function placeTracks(
       warnings.push(`Seat ${t.seat}: track ${t.trackId.slice(0, 8)} has no audio and was skipped.`);
       continue;
     }
-    const sampleRate = t.sampleRate ?? SAMPLE_RATE;
+    const sampleRate = t.sampleRate ?? AUDIO_SAMPLE_RATE;
     const fit = fitClock({ ...t, sampleRate }, opts.maxPlausibleDriftPpm);
     if (!fit) continue;
     if (fit.implausible)
       warnings.push(`Seat ${t.seat}: implausible timestamps on a track; its nominal sample rate was used.`);
-    const samples = trackSampleEnd(t.chunks) || t.features.frames * HOP_SAMPLES;
-    placed.push({
-      t,
-      a: {
-        trackId: t.trackId,
-        seat: t.seat,
-        startTs: fit.startTs,
-        msPerSample: fit.msPerSample,
-        driftPpm: round(fit.driftPpm, 2),
-        samples,
-        endTs: fit.startTs + samples * fit.msPerSample,
-        residualMs: round(fit.residualMs, 2),
-      },
-    });
+    placed.push({ t, a: alignTrack(fit, trackSampleEnd(t.chunks) || t.features.frames * HOP_SAMPLES) });
   }
   placed.sort((x, y) => x.a.startTs - y.a.startTs);
   const alignment = placed.map((p) => p.a);

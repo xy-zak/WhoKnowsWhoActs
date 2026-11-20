@@ -2,9 +2,7 @@
 
 History of [SESSION-RUNBOOK.md](../SESSION-RUNBOOK.md). Newest first. How entries are written: [README.md](README.md).
 
-## Unreleased
-
-### Not yet committed · documents `95904fc`, `74f74ac`
+### 2026-11-20 · `2a6c8a1` · Docs: audit fixes (log redaction, failed-export clean-up, admin token storage, offline facilitator commands, action resend, REST errors, verify warning, reason catalogue, layout classes); change logs
 
 - **Type:** Risk mitigation
 - **Change:** The troubleshooting table in § 6 says the `ADMIN_TOKEN` link is kept for one tab only, and adds a row for **Not connected to the server**: the command was not sent and will not run later, so repeat it once the connection is back.

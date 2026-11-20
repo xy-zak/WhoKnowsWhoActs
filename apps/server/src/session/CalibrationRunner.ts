@@ -31,9 +31,7 @@ import {
 import type { Logger } from "pino";
 import { calibrationCheckedPayload } from "../audio/calibration";
 import type { LiveAudio } from "../audio/live";
-
-/** Thrown for a calibration command that is not possible now; the message is shown to the facilitator. */
-export class CalibrationError extends Error {}
+import { CommandError } from "./errors";
 
 /** How often the calibration check looks whether the last turn's audio has arrived (ms). */
 const CALIBRATION_CHECK_POLL_MS = 500;
@@ -83,20 +81,20 @@ export class CalibrationRunner {
   start(by: "system" | "facilitator") {
     const st = this.state;
     const c = st.audio.calibration;
-    if (c.status === "running") throw new CalibrationError("The calibration is already running");
+    if (c.status === "running") throw new CommandError("The calibration is already running");
     if (c.status !== "pending")
-      throw new CalibrationError(`The calibration was already ${c.status}: use 'redo' to run it again`);
-    if (st.audio.recordingPaused) throw new CalibrationError("Recording is paused: resume recording first");
+      throw new CommandError(`The calibration was already ${c.status}: use 'redo' to run it again`);
+    if (st.audio.recordingPaused) throw new CommandError("Recording is paused: resume recording first");
     const waiting = calibrationWaitingSeats(st).map((s) => s.seat);
     if (waiting.length)
-      throw new CalibrationError(`Waiting for the onboarding (mic check) of seat ${waiting.join(", ")}`);
+      throw new CommandError(`Waiting for the onboarding (mic check) of seat ${waiting.join(", ")}`);
     const order = calibrationSeats(st);
-    if (order.length === 0) throw new CalibrationError("No seat is recorded: skip the calibration instead");
+    if (order.length === 0) throw new CommandError("No seat is recorded: skip the calibration instead");
     const notReady = calibrationNotReadySeats(st);
     if (notReady.length)
-      throw new CalibrationError(`Waiting for seat ${notReady.join(", ")} to say they are ready`);
+      throw new CommandError(`Waiting for seat ${notReady.join(", ")} to say they are ready`);
     const content = this.deps.content();
-    if (!content) throw new CalibrationError("No calibration texts (config/audio.json)");
+    if (!content) throw new CommandError("No calibration texts (config/audio.json)");
     this.clearTimer();
     // runs are numbered by the reducer (state.audio.calibrationRuns): this one is the next
     const run = st.audio.calibrationRuns + 1;
@@ -119,8 +117,8 @@ export class CalibrationRunner {
    */
   redo() {
     if (this.state.audio.calibration.status === "pending")
-      throw new CalibrationError("The calibration has not run yet: it starts once everyone is ready");
-    this.stop();
+      throw new CommandError("The calibration has not run yet: it starts once everyone is ready");
+    this.dispose();
     this.deps.append({ type: "CalibrationRequested", actorKind: "facilitator", payload: {} });
   }
 
@@ -128,8 +126,8 @@ export class CalibrationRunner {
   skip(reason: string) {
     const status = this.state.audio.calibration.status;
     if (status === "done" || status === "skipped")
-      throw new CalibrationError(`The calibration was already ${status}`);
-    this.stop();
+      throw new CommandError(`The calibration was already ${status}`);
+    this.dispose();
     this.deps.append({ type: "CalibrationSkipped", actorKind: "facilitator", payload: { reason } });
   }
 
@@ -139,7 +137,7 @@ export class CalibrationRunner {
    */
   cancel(reason: string) {
     if (!this.running || this.deps.isFinal()) return;
-    this.stop();
+    this.dispose();
     this.deps.append({
       type: "CalibrationSkipped",
       actorKind: "system",
@@ -147,12 +145,8 @@ export class CalibrationRunner {
     });
   }
 
-  /** Stop the timers and drop the collected audio (detach, shutdown, end of the session). */
+  /** Stop the timers and drop the collected audio (a redo, skip or cancel; detach, shutdown, end of the session). */
   dispose() {
-    this.stop();
-  }
-
-  private stop() {
     this.clearTimer();
     this.deps.audio.endCalibration();
   }

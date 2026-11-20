@@ -32,8 +32,8 @@ import {
 import { fileBytes, isAudioDerivativeKind } from "../audio/records";
 import { sha256 } from "../content";
 import { nowTs, wall } from "../runtime";
-import { compactAfterDelete, fromRow } from "./database";
-import type { AudioDeletionRow, AudioTrackRowStatus, Store } from "./store";
+import { compactAfterDelete, fromRow, insert } from "./database";
+import type { AudioDeletionRow, Store } from "./store";
 
 /* ─────────────────────────── the registry ─────────────────────────── */
 
@@ -353,15 +353,18 @@ export class PersonalDataMap {
           );
         }
       }
-      db.prepare(
-        "INSERT INTO erasures (code_sha256, requested_wall, executed_wall, sessions_json, rows_json, note) VALUES (?, ?, ?, ?, ?, ?)",
-      ).run(
-        sha256(code),
-        requested,
-        wall(nowTs()),
-        JSON.stringify(found.occurrences.map((o) => ({ sessionId: o.sessionId, seat: o.seat }))),
-        JSON.stringify({ ...rows, audioFiles: files.length }),
-        note,
+      insert(
+        db,
+        "erasures",
+        {
+          codeSha256: sha256(code),
+          requestedWall: requested,
+          executedWall: wall(nowTs()),
+          sessions: found.occurrences.map((o) => ({ sessionId: o.sessionId, seat: o.seat })),
+          rows: { ...rows, audioFiles: files.length },
+          note,
+        },
+        ["sessions", "rows"],
       );
       return files;
     });
@@ -456,8 +459,7 @@ export class PersonalDataMap {
     opts: { exportsDir: string; deleteExports?: boolean; note?: string },
   ): SessionDeletionResult {
     const { store, db } = this;
-    const row = store.getSession(sessionId);
-    if (!row) throw new Error(`Unknown session ${sessionId}`);
+    const row = store.requireSession(sessionId);
     const codes = store.sessionCodes(sessionId).map(sha256);
     const exportRows = db.prepare("SELECT path FROM exports WHERE session_id = ?").all(sessionId) as Array<{
       path: string;
@@ -473,17 +475,19 @@ export class PersonalDataMap {
         const n = db.prepare(`DELETE FROM ${t.table} WHERE ${t.ofSession}`).run(sessionId).changes;
         if (t.counts.session) rows[t.counts.session] = n;
       }
-      db.prepare(
-        `INSERT INTO session_deletions (session_id, deleted_wall, created_wall, rows_json, code_hashes_json, exports_json, note)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      ).run(
-        sessionId,
-        wall(nowTs()),
-        row.created_wall,
-        JSON.stringify(rows),
-        JSON.stringify(codes.sort()),
-        JSON.stringify(exportPaths),
-        opts.note ?? "",
+      insert(
+        db,
+        "session_deletions",
+        {
+          sessionId,
+          deletedWall: wall(nowTs()),
+          createdWall: row.created_wall,
+          rows,
+          codeHashes: codes.sort(),
+          exports: exportPaths,
+          note: opts.note ?? "",
+        },
+        ["rows", "codeHashes", "exports"],
       );
       return [];
     });
@@ -554,7 +558,7 @@ export class PersonalDataMap {
     const { store, db } = this;
     const { scope } = opts;
     if (scope !== "raw" && scope !== "all") throw new Error(`Unknown scope '${String(scope)}' (raw or all)`);
-    if (!store.getSession(sessionId)) throw new Error(`Unknown session ${sessionId}`);
+    store.requireSession(sessionId);
     const requestedWall = wall(nowTs());
     const counts: AudioDeletionCounts = {
       tracks: 0,
@@ -570,39 +574,22 @@ export class PersonalDataMap {
 
     const unlink = this.removeInTransaction(() => {
       const files: FileRef[] = [];
-      const tracks = (
-        db
-          .prepare(
-            "SELECT track_id, seat, file_name, samples, sample_rate, status FROM audio_tracks WHERE session_id = ?",
-          )
-          .all(sessionId) as Array<{
-          track_id: string;
-          seat: number;
-          file_name: string | null;
-          samples: number;
-          sample_rate: number;
-          status: AudioTrackRowStatus;
-        }>
-      ).filter((t) => scope === "all" || t.status !== "deleted");
-      const derived = (
-        db
-          .prepare("SELECT derivative_id, seat, kind, file_name FROM audio_derivatives WHERE session_id = ?")
-          .all(sessionId) as Array<{
-          derivative_id: string;
-          seat: number | null;
-          kind: string;
-          file_name: string | null;
-        }>
-      ).filter((d) => scope === "all" || isAudioDerivativeKind(d.kind));
+      const tracks = store
+        .listAudioTracks(sessionId)
+        .filter((t) => scope === "all" || t.status !== "deleted");
+      const derived = store
+        .listAudioDerivatives(sessionId)
+        .filter((d) => scope === "all" || isAudioDerivativeKind(d.kind));
 
       for (const t of tracks) {
         if (t.seat > 0 && t.seat < 31) counts.seatMask |= 1 << t.seat;
-        counts.audioMs += t.sample_rate > 0 ? (t.samples * 1000) / t.sample_rate : 0;
-        if (t.file_name && t.status !== "deleted") files.push({ sessionId, fileName: t.file_name });
+        // not t.durationMs: that is rounded per track, the register rounds the sum
+        counts.audioMs += t.sampleRate > 0 ? (t.samples * 1000) / t.sampleRate : 0;
+        if (t.fileName && t.status !== "deleted") files.push({ sessionId, fileName: t.fileName });
       }
       for (const d of derived) {
         if (d.seat !== null && d.seat > 0 && d.seat < 31) counts.seatMask |= 1 << d.seat;
-        if (d.file_name) files.push({ sessionId, fileName: d.file_name });
+        if (d.fileName) files.push({ sessionId, fileName: d.fileName });
       }
       if (scope === "all") {
         for (const t of PERSONAL_DATA) {
@@ -614,11 +601,11 @@ export class PersonalDataMap {
         for (const t of tracks)
           counts.tracks += db
             .prepare("UPDATE audio_tracks SET status = 'deleted', file_key = NULL WHERE track_id = ?")
-            .run(t.track_id).changes;
+            .run(t.trackId).changes;
         for (const d of derived)
           counts.derivatives += db
             .prepare("DELETE FROM audio_derivatives WHERE derivative_id = ?")
-            .run(d.derivative_id).changes;
+            .run(d.derivativeId).changes;
       }
       counts.audioMs = Math.round(counts.audioMs);
       counts.files = files.length;

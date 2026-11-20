@@ -92,7 +92,7 @@ export function isWildcardHost(host: string): boolean {
   return host === "0.0.0.0" || host === "::";
 }
 
-export function schemeOf(tlsEnabled: boolean): "https" | "http" {
+function schemeOf(tlsEnabled: boolean): "https" | "http" {
   return tlsEnabled ? "https" : "http";
 }
 
@@ -373,26 +373,4 @@ export function describeOutcome(o: SelfSignedOutcome): string {
  */
 export function outcomeLogFields(o: SelfSignedOutcome): { certificate: string; reason?: string } {
   return o.action === "regenerated" ? { certificate: o.action, reason: o.reason } : { certificate: o.action };
-}
-
-const HOST_NAME = /^[A-Za-z0-9.-]+$/;
-const IPV6_HOST = /^\[[0-9A-Fa-f:.]+\]$/;
-
-/**
- * The HTTPS address of a plain-HTTP request: the same host (from the Host header,
- * port dropped) on the HTTPS port, same path and query (the welcome page's
- * "Join live session" link). Null if the Host header is missing or not a plain
- * host name or address.
- */
-export function redirectLocation(hostHeader: string | undefined, url: string | undefined, httpsPort: number) {
-  if (!hostHeader) return null;
-  const h = hostHeader.trim();
-  const host = h.startsWith("[") ? h.slice(0, h.indexOf("]") + 1) : h.split(":")[0]!;
-  if (!host || !(HOST_NAME.test(host) || IPV6_HOST.test(host))) return null;
-  let rest = "/";
-  try {
-    const u = new URL(url ?? "/", "http://placeholder");
-    rest = `${u.pathname}${u.search}`;
-  } catch {}
-  return `https://${host}:${httpsPort}${rest}`;
 }

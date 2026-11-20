@@ -80,7 +80,6 @@ export interface VerifyResult {
   truncatedTailBytes: number;
   /** The seq numbers of the valid records, in file order (duplicates included). */
   seqs: number[];
-  issues: AudioReadIssue[];
 }
 
 export interface AudioFileInfo {
@@ -107,12 +106,20 @@ async function readExactly(fh: FileHandle, length: number, position: number): Pr
   return buf;
 }
 
-async function writeAll(fh: FileHandle, buf: Buffer, position: number) {
+export async function writeAll(fh: FileHandle, buf: Uint8Array, position: number) {
   let done = 0;
   while (done < buf.length) {
     const { bytesWritten } = await fh.write(buf, done, buf.length - done, position + done);
     done += bytesWritten;
   }
+}
+
+/** Why a file's header is not this file's `.wka` header, or null when it is. */
+async function headerProblem(fh: FileHandle, size: number, fileName: string): Promise<string | null> {
+  if (size < HEADER_BYTES) return "file shorter than the header";
+  const h = decodeHeader(await readExactly(fh, HEADER_BYTES, 0));
+  if (typeof h === "string") return h;
+  return h.fileId.equals(fileIdOf(fileName)) ? null : "header names another file";
 }
 
 /** fsync a directory so a new entry survives a crash (not possible on every platform: best effort). */
@@ -199,7 +206,7 @@ export class AudioFileStore {
     fileName: string,
     key: Buffer,
     seq: number,
-    data: Buffer,
+    data: Uint8Array,
   ): Promise<AppendResult> {
     let file: string;
     let record: Buffer;
@@ -249,11 +256,8 @@ export class AudioFileStore {
 
   /** Refuse to append to a file whose header is not this file's `.wka` header. */
   private async checkHeader(fh: FileHandle, size: number, fileName: string) {
-    if (size < HEADER_BYTES) throw new AudioFileError(`${fileName}: file shorter than its header`);
-    const h = decodeHeader(await readExactly(fh, HEADER_BYTES, 0));
-    if (typeof h === "string") throw new AudioFileError(`${fileName}: ${h}`);
-    if (!h.fileId.equals(fileIdOf(fileName)))
-      throw new AudioFileError(`${fileName}: header names another file`);
+    const problem = await headerProblem(fh, size, fileName);
+    if (problem) throw new AudioFileError(`${fileName}: ${problem}`);
   }
 
   /**
@@ -304,32 +308,20 @@ export class AudioFileStore {
     }
     try {
       const size = (await fh.stat()).size;
-      const h =
-        size < HEADER_BYTES
-          ? "file shorter than the header"
-          : decodeHeader(await readExactly(fh, HEADER_BYTES, 0));
-      if (typeof h === "string" || !h.fileId.equals(fileId)) {
-        report(
-          { kind: "bad_header", message: typeof h === "string" ? h : "header names another file" },
-          true,
-        );
+      const problem = await headerProblem(fh, size, fileName);
+      if (problem) {
+        report({ kind: "bad_header", message: problem }, true);
         return;
       }
+      const truncated = (off: number, rest: number) =>
+        report(
+          { kind: "truncated", offset: off, bytes: rest, message: `incomplete last record (${rest} bytes)` },
+          false,
+        );
       let off = HEADER_BYTES;
       while (off < size) {
         const rest = size - off;
-        if (rest < RECORD_PREFIX_BYTES) {
-          report(
-            {
-              kind: "truncated",
-              offset: off,
-              bytes: rest,
-              message: `incomplete last record (${rest} bytes)`,
-            },
-            false,
-          );
-          return;
-        }
+        if (rest < RECORD_PREFIX_BYTES) return truncated(off, rest);
         const prefix = await readExactly(fh, RECORD_PREFIX_BYTES, off);
         const len = prefix.readUInt32BE(0);
         const seq = prefix.readUInt32BE(4);
@@ -341,18 +333,7 @@ export class AudioFileStore {
           return;
         }
         const total = RECORD_OVERHEAD_BYTES + len;
-        if (rest < total) {
-          report(
-            {
-              kind: "truncated",
-              offset: off,
-              bytes: rest,
-              message: `incomplete last record (${rest} bytes)`,
-            },
-            false,
-          );
-          return;
-        }
+        if (rest < total) return truncated(off, rest);
         const body = await readExactly(fh, total - RECORD_PREFIX_BYTES, off + RECORD_PREFIX_BYTES);
         const data = decodeRecordBody(key, fileId, seq, body);
         if (data) yield { seq, offset: off, data };
@@ -406,7 +387,6 @@ export class AudioFileStore {
       firstError: integrity[0]?.message ?? null,
       truncatedTailBytes: tail?.kind === "truncated" ? tail.bytes : 0,
       seqs,
-      issues,
     };
   }
 
