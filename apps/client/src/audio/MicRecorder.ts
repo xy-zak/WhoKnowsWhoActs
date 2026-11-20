@@ -154,7 +154,7 @@ function browserEnv(): RecorderEnv {
 }
 
 /** Copies only the processing settings: never deviceId, groupId or label. */
-export function pickSettings(s: MediaTrackSettings): EngineCaptureSettings {
+function pickSettings(s: MediaTrackSettings): EngineCaptureSettings {
   return EngineCaptureSettingsSchema.safeParse(s).data ?? {};
 }
 

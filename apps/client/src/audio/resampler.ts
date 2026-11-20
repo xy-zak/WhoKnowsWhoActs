@@ -34,7 +34,7 @@ function gcd(a: number, b: number): number {
 }
 
 /** Modified Bessel function of the first kind, order 0 (power series). */
-export function besselI0(x: number): number {
+function besselI0(x: number): number {
   const q = (x * x) / 4;
   let sum = 1;
   let term = 1;
@@ -47,7 +47,7 @@ export function besselI0(x: number): number {
 }
 
 /** Kaiser window β for a stop-band attenuation in dB (Kaiser's formula). */
-export function kaiserBeta(attenuationDb: number): number {
+function kaiserBeta(attenuationDb: number): number {
   if (attenuationDb > 50) return 0.1102 * (attenuationDb - 8.7);
   if (attenuationDb >= 21) return 0.5842 * (attenuationDb - 21) ** 0.4 + 0.07886 * (attenuationDb - 21);
   return 0;
