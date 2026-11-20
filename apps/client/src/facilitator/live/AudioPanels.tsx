@@ -9,7 +9,7 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { fmtSigned, fmtTime, formatDb, PLACEHOLDER } from "../../common/format";
 import { useStore } from "../../net/store";
-import { Button, Callout, Icon, Panel, SeatDot, StatusTag, usePromptReason } from "../../ui";
+import { Button, Callout, Icon, Panel, SeatDot, StatusTag, useBusy, usePromptReason } from "../../ui";
 import {
   type AudioCheck,
   calibrationAdvice,
@@ -162,17 +162,12 @@ export function CalibrationCard({ st }: { st: ReadonlyGameState }) {
  */
 export function RecordingControl({ conn, st }: { conn: FacilitatorConnection; st: ReadonlyGameState }) {
   const promptReason = usePromptReason();
-  const [busy, setBusy] = useState(false);
+  const [busy, run] = useBusy();
   if (!st.audio.enabled) return null;
   const can = RECORDING_PHASES.has(st.phase);
   const a = st.audio;
-  const send = <K extends FacilitatorCommand>(name: K, payload: FacilitatorPayload<K>, ok: string) => {
-    setBusy(true);
-    void conn
-      .cmd(name, payload, ok)
-      .catch(() => {})
-      .finally(() => setBusy(false));
-  };
+  const send = <K extends FacilitatorCommand>(name: K, payload: FacilitatorPayload<K>, ok: string) =>
+    run(() => conn.cmd(name, payload, ok));
   const pause = async () => {
     const reason = await promptReason({
       title: "Pause recording for everyone?",

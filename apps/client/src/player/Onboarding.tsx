@@ -12,8 +12,9 @@ import {
   StatusTag,
   stepGlyph,
   stepNum,
+  useBusy,
 } from "../ui";
-import { Centered, OnboardingStepper, useSubmit } from "./chrome";
+import { Centered, OnboardingStepper } from "./chrome";
 import type { PlayerConnection } from "./connection";
 
 export function Page({
@@ -72,7 +73,7 @@ export function ConsentScreen({ conn, view }: { conn: PlayerConnection; view: Pl
   const study = view.onboarding!.study;
   const openedAt = useOpenedAt();
   const [answers, setAnswers] = useState<Record<string, boolean>>({});
-  const [busy, run] = useSubmit(conn);
+  const [busy, run] = useBusy((e) => conn.showToast(e.message));
   const [confirmDecline, setConfirmDecline] = useState(false);
   const split = useConsentSections(c.markdown, c.items);
   const sections = split?.sections ?? [];
@@ -272,7 +273,7 @@ export function DemographicsScreen({ conn, view }: { conn: PlayerConnection; vie
   const form = view.onboarding!.demographics;
   const openedAt = useOpenedAt();
   const [answers, setAnswers] = useState<Record<string, string>>({});
-  const [busy, run] = useSubmit(conn);
+  const [busy, run] = useBusy((e) => conn.showToast(e.message));
   const complete = form.questions.every((q) => answers[q.id]);
   const answered = form.questions.filter((q) => answers[q.id]).length;
 
@@ -342,7 +343,7 @@ export function DemographicsScreen({ conn, view }: { conn: PlayerConnection; vie
 export function BriefingScreen({ conn, view }: { conn: PlayerConnection; view: PlayerView }) {
   const b = view.onboarding!.briefing;
   const openedAt = useOpenedAt();
-  const [busy, run] = useSubmit(conn);
+  const [busy, run] = useBusy((e) => conn.showToast(e.message));
   const submit = () =>
     run(() =>
       conn.request("briefing:ack", {

@@ -1,7 +1,7 @@
 import type { PlayerView } from "@wkwa/shared";
 import { useRef } from "react";
-import { Button, Callout, Icon, SeatDot, StatusTag, type StepDef, Stepper, useNow } from "../ui";
-import { Centered, OnboardingStepper, ReadyScreen, useSubmit } from "./chrome";
+import { Button, Callout, Icon, SeatDot, StatusTag, type StepDef, Stepper, useBusy, useNow } from "../ui";
+import { Centered, OnboardingStepper, ReadyScreen } from "./chrome";
 import type { PlayerConnection } from "./connection";
 import { MicLevelMeter, useRecording } from "./RecordingIndicator";
 
@@ -40,7 +40,7 @@ function TurnStepper({ view, last }: { view: PlayerView; last: number }) {
 export function CalibrationPendingScreen({ conn, view }: { conn: PlayerConnection; view: PlayerView }) {
   const c = view.audio.calibration;
   const snap = useRecording(conn);
-  const [busy, run] = useSubmit(conn);
+  const [busy, run] = useBusy((e) => conn.showToast(e.message));
   const others = c.waitingFor.filter((s) => s !== view.me.seat);
   if (!c.canSayReady && !c.ready) {
     return (

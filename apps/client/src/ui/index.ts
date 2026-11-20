@@ -7,6 +7,7 @@ import "./crt.css";
 
 export { formatDb } from "../common/format";
 export { LevelMeter, RecordingBanner, RecTag } from "./audio";
+export { useBusy } from "./busy";
 export * from "./components";
 export { DisplaySettings } from "./DisplaySettings";
 export { Icon } from "./Icon";

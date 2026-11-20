@@ -1,4 +1,5 @@
 import { checkSimulationConfig, normaliseTags, parseSessionConfig, type SessionConfig } from "@wkwa/shared";
+import { safeStorage } from "../../net/storage";
 
 /** The session being configured (setup steps 1–6), kept in localStorage so nothing is lost on reload. */
 export interface Draft {
@@ -14,6 +15,7 @@ export interface Draft {
 }
 
 const KEY = "wkwa.setup.draft";
+const store = safeStorage(() => localStorage);
 
 export function emptyDraft(defaults?: SessionConfig): Draft {
   const config = defaults ?? parseSessionConfig({});
@@ -30,7 +32,7 @@ export function emptyDraft(defaults?: SessionConfig): Draft {
 
 export function loadDraft(): Draft | null {
   try {
-    const raw = localStorage.getItem(KEY);
+    const raw = store.getItem(KEY);
     if (!raw) return null;
     const d = JSON.parse(raw) as Draft;
     const config = parseSessionConfig(d.config);
@@ -46,15 +48,11 @@ export function loadDraft(): Draft | null {
 }
 
 export function saveDraft(d: Draft) {
-  try {
-    localStorage.setItem(KEY, JSON.stringify(d));
-  } catch {}
+  store.setItem(KEY, JSON.stringify(d));
 }
 
 export function clearDraft() {
-  try {
-    localStorage.removeItem(KEY);
-  } catch {}
+  store.removeItem(KEY);
 }
 
 /** Build the final config from the draft (tags + overrides text). Returns an error message if invalid. */
@@ -103,16 +101,10 @@ export function finalConfig(d: Draft): { config: SessionConfig } | { error: stri
 
 /** Per-key keysheet confirmation (setup step 9), per session. */
 export function keySheetConfirmed(sessionId: string): boolean {
-  try {
-    return localStorage.getItem(`wkwa.keysheet.${sessionId}`) === "1";
-  } catch {
-    return false;
-  }
+  return store.getItem(`wkwa.keysheet.${sessionId}`) === "1";
 }
 
 export function setKeySheetConfirmed(sessionId: string, v: boolean) {
-  try {
-    if (v) localStorage.setItem(`wkwa.keysheet.${sessionId}`, "1");
-    else localStorage.removeItem(`wkwa.keysheet.${sessionId}`);
-  } catch {}
+  if (v) store.setItem(`wkwa.keysheet.${sessionId}`, "1");
+  else store.removeItem(`wkwa.keysheet.${sessionId}`);
 }
