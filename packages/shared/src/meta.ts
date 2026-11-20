@@ -1,11 +1,12 @@
 import type { z } from "zod";
+import type { ActorKind } from "./events";
 
 /**
  * Documentation metadata attached to every logged record type.
  * This is the single source of truth for docs/DATA-TYPES.md and for the
  * per-export codebook.md — edit it here, then run `npm run docs:generate`.
  */
-export type Actor = "player" | "facilitator" | "system";
+export type Actor = ActorKind;
 
 /**
  * Personal-data class (GDPR):

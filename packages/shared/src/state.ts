@@ -1,5 +1,6 @@
 import type { Board, Scores } from "./board";
 import { type FakePlayerPace, type RoundSpec, type SessionConfig, SessionConfigSchema } from "./config";
+import type { PayloadOf } from "./events";
 import type { ActionKind, KLabel, LabelPairing, PLabel } from "./labels";
 
 export const PHASES = [
@@ -34,12 +35,7 @@ export type MicCheckStatus = "pending" | "passed" | "skipped";
 export type CalibrationStatus = "pending" | "running" | "done" | "skipped";
 
 /** The agent playing a seat of a simulated session, as logged in `AgentBound`. */
-export interface AgentSeat {
-  policy: string;
-  policyVersion: string;
-  params: Record<string, unknown>;
-  seed: string;
-}
+export type AgentSeat = Omit<PayloadOf<"AgentBound">, "seat">;
 
 export interface SeatState {
   seat: number;
@@ -95,7 +91,7 @@ export interface RoundRecord {
   spec: RoundSpec;
   startedTs: number;
   endedTs: number | null;
-  reason: "quota_met" | "time_limit" | "facilitator" | null;
+  reason: PayloadOf<"RoundCompleted">["reason"] | null;
 }
 
 /** One seat's turn in the calibration (server clock). */
@@ -108,21 +104,10 @@ export interface CalibrationTurnRecord {
 }
 
 /** Quick quality check after the calibration: how much louder each seat's own voice is on its own mic. */
-export interface CalibrationQuality {
-  perSeat: Array<{
-    seat: number;
-    /** Level of the seat's own voice on its own mic during its turn (dBFS; null = no audio). */
-    ownDb: number | null;
-    /** Loudest level of that voice on another seat's mic (dBFS; null = no audio). */
-    bestOtherDb: number | null;
-    /** ownDb − bestOtherDb (dB); null when either is missing. */
-    marginDb: number | null;
-    ok: boolean;
-  }>;
-  ok: boolean;
+export type CalibrationQuality = PayloadOf<"CalibrationChecked"> & {
   /** When the check was logged (server clock). */
   checkedTs: number;
-}
+};
 
 export interface CalibrationState {
   status: CalibrationStatus;
@@ -200,13 +185,13 @@ export interface GameState {
   sessionId: string | null;
   createdTs: number | null;
   config: SessionConfig;
-  scenario: { id: string; title: string; version: string; hash: string } | null;
+  scenario: PayloadOf<"SessionCreated">["scenario"] | null;
   regionIds: string[];
   viewIds: string[];
   /** Grid map of the session (null for sessions recorded before the grid map). */
   board: Board | null;
   /** Game rules recorded at creation (see game/rules.ts and docs/GAME-RULES.md). */
-  rules: { id: string; version: string } | null;
+  rules: NonNullable<PayloadOf<"SessionCreated">["rules"]> | null;
   /** Starting score of every sub-square (from the scenario). */
   initialScores: Scores;
   /** Current score of every sub-square: the starting scores plus every recorded score change. */
@@ -216,7 +201,7 @@ export interface GameState {
   /** K–P pairing of the latest label assignment (null before labels are assigned). */
   labelPairing: LabelPairing | null;
   paused: boolean;
-  pauseReason: "facilitator" | "disconnect" | null;
+  pauseReason: PayloadOf<"GamePaused">["reason"] | null;
   pausedSince: number | null;
   round: number;
   roundSpec: RoundSpec | null;
