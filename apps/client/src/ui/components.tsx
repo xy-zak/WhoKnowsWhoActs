@@ -194,8 +194,11 @@ export function AsciiProgress({
   );
 }
 
+/** CSS colour of a seat (--seat-1 …); no seat gets the faint colour. */
+export const seatColour = (seat: number | null) => (seat === null ? "var(--faint)" : `var(--seat-${seat})`);
+
 export function SeatDot({ seat }: { seat: number }) {
-  return <span className="seat-dot" style={{ background: `var(--seat-${seat})` }} />;
+  return <span className="seat-dot" style={{ background: seatColour(seat) }} />;
 }
 
 /* ─────────────────────────── Knowledge / power colours ─────────────────────────── */
@@ -204,7 +207,7 @@ export function SeatDot({ seat }: { seat: number }) {
  * CSS colour of a knowledge type (Ka–Kd) or power type (Pa–Pd): both use the
  * colour of their letter (--k-a … --k-d). Unknown labels get the text colour.
  */
-function labelColour(label: string | null | undefined): string {
+export function kColour(label: string | null | undefined): string {
   const letter = label?.[1];
   return letter && "abcd".includes(letter) ? `var(--k-${letter})` : "var(--text)";
 }
@@ -215,7 +218,7 @@ export function LabelTag({ label, tip, filled = false }: { label: string; tip?: 
     <span
       className="ktag"
       data-tip={tip}
-      style={{ "--k": labelColour(label) } as CSSProperties}
+      style={{ "--k": kColour(label) } as CSSProperties}
       aria-description={tip}
     >
       <span className={`ksw${filled ? " filled" : ""}`} aria-hidden="true" />
@@ -233,7 +236,7 @@ export function ActSwatch({ kind, k }: { kind: "propose" | "decide"; k?: string 
   return (
     <span
       className={`act-sw ${kind}`}
-      style={k ? ({ "--k": labelColour(k) } as CSSProperties) : undefined}
+      style={k ? ({ "--k": kColour(k) } as CSSProperties) : undefined}
       aria-hidden="true"
     />
   );
