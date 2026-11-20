@@ -1,11 +1,5 @@
 import type { Board, Scores } from "./board";
-import {
-  AUDIO_CONFIG_DEFAULTS,
-  type FakePlayerPace,
-  type RoundSpec,
-  type SessionConfig,
-  SessionConfigSchema,
-} from "./config";
+import { type FakePlayerPace, type RoundSpec, type SessionConfig, SessionConfigSchema } from "./config";
 import type { ActionKind, KLabel, LabelPairing, PLabel } from "./labels";
 
 export const PHASES = [
@@ -292,10 +286,10 @@ export function audioEnabled(config: Pick<SessionConfig, "players" | "audio">): 
 }
 
 /** Audio state of a new session (recording is never on for simulated sessions). */
-export function emptyAudioState(config?: SessionConfig): AudioState {
+export function emptyAudioState(config: SessionConfig): AudioState {
   return {
-    enabled: config ? audioEnabled(config) : AUDIO_CONFIG_DEFAULTS.enabled,
-    requireCalibration: config ? config.audio.requireCalibration : AUDIO_CONFIG_DEFAULTS.requireCalibration,
+    enabled: audioEnabled(config),
+    requireCalibration: config.audio.requireCalibration,
     recordingPaused: false,
     pausedTs: null,
     pauseReason: null,
@@ -307,10 +301,11 @@ export function emptyAudioState(config?: SessionConfig): AudioState {
 }
 
 export function initialState(): GameState {
+  const config = SessionConfigSchema.parse({});
   return {
     sessionId: null,
     createdTs: null,
-    config: SessionConfigSchema.parse({}),
+    config,
     scenario: null,
     regionIds: [],
     viewIds: [],
@@ -334,7 +329,7 @@ export function initialState(): GameState {
     broadcasts: [],
     notes: [],
     endReason: null,
-    audio: emptyAudioState(),
+    audio: emptyAudioState(config),
     lastSeq: 0,
     lastTs: null,
   };

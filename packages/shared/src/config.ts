@@ -24,7 +24,7 @@ export const RoundSpecSchema = z
         propose: QuotaValue.default(5).describe("Max proposals per player in this round (null = unlimited)"),
         decide: QuotaValue.default(5).describe("Max decisions per player in this round (null = unlimited)"),
       })
-      .default({ propose: 5, decide: 5 })
+      .prefault({})
       .describe("Per-player action quotas for the round"),
     timeLimitSec: z
       .number()
@@ -53,15 +53,6 @@ export const PolicyIdSchema = z
   .string()
   .regex(/^[a-z][a-z0-9-]*$/, "Policy ids are lowercase letters, digits and dashes")
   .max(40);
-
-export const SIMULATION_DEFAULTS = {
-  policy: "random",
-  seatPolicies: {},
-  params: {},
-  seed: null,
-  minDelayMs: 800,
-  maxDelayMs: 2500,
-};
 
 export const SimulationConfigSchema = z
   .object({
@@ -123,9 +114,6 @@ export const FakePaceSchema = z
 
 /* ─────────────────────────── Session config ─────────────────────────── */
 
-/** Audio recording is off unless a session switches it on (setup step 05). */
-export const AUDIO_CONFIG_DEFAULTS = { enabled: false, requireCalibration: true };
-
 export const MAX_TAGS = 20;
 export const MAX_TAG_LENGTH = 40;
 
@@ -137,7 +125,7 @@ export const SessionConfigSchema = z
       .describe(
         "Who plays: 'real' = participants on player PCs (consent, codes, client binding; participant database); 'simulated' = in-process agents (no consent, codes or clients; simulation database)",
       ),
-    simulation: SimulationConfigSchema.default(SIMULATION_DEFAULTS),
+    simulation: SimulationConfigSchema.prefault({}),
     rules: z
       .string()
       .regex(/^[a-z][a-z0-9-]*$/)
@@ -153,11 +141,9 @@ export const SessionConfigSchema = z
       .default(4)
       .describe("Number of player seats (4 for real sessions; fewer for pilots)"),
     roundCount: z.number().int().min(1).max(20).default(3).describe("Number of rounds in the game"),
-    defaultRound: RoundSpecSchema.default({
-      rule: "quota",
-      quota: { propose: 5, decide: 5 },
-      timeLimitSec: null,
-    }).describe("Round definition used for every round unless overridden"),
+    defaultRound: RoundSpecSchema.prefault({}).describe(
+      "Round definition used for every round unless overridden",
+    ),
     roundOverrides: z
       .record(z.string().regex(/^\d+$/), RoundSpecSchema)
       .default({})
@@ -195,7 +181,7 @@ export const SessionConfigSchema = z
         demographics: z.boolean().default(true).describe("Show the demographics questionnaire"),
         briefing: z.boolean().default(true).describe("Show the briefing / instructions screen"),
       })
-      .default({ consent: true, demographics: true, briefing: true })
+      .prefault({})
       .describe("Onboarding steps each player completes before round 1"),
     audio: z
       .object({
@@ -212,7 +198,7 @@ export const SessionConfigSchema = z
             "With audio on: round 1 can start only once the calibration (each seat reads a sentence aloud in turn while the others stay quiet) is done or skipped",
           ),
       })
-      .default(AUDIO_CONFIG_DEFAULTS)
+      .prefault({})
       .describe("Microphone recording (research data: see DATA-MANAGEMENT.md)"),
     visibility: z
       .object({
@@ -224,12 +210,7 @@ export const SessionConfigSchema = z
         showOtherLabelsToPlayers: z.boolean().default(false).describe("Players see other seats' K/P labels"),
         showOthersProgress: z.boolean().default(true).describe("Players see other seats' quota progress"),
       })
-      .default({
-        showActorToPlayers: true,
-        showOwnLabels: true,
-        showOtherLabelsToPlayers: false,
-        showOthersProgress: true,
-      })
+      .prefault({})
       .describe("What players can see about each other"),
     tags: z
       .array(
