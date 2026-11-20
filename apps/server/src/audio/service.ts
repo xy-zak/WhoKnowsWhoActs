@@ -583,7 +583,7 @@ export class AudioService {
   speechSegments(sessionId: string): SpeechSegmentsView {
     this.session(sessionId);
     const list = this.store.listAudioDerivatives(sessionId, { kind: "speech_segments" });
-    const { segments } = speechSegmentsOf(this.store, sessionId);
+    const segments = speechSegmentsOf(this.store, sessionId);
     return {
       sessionId,
       engineVersion: list[0]?.engineVersion ?? null,
