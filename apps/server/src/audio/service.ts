@@ -48,14 +48,7 @@ import type { Logger } from "pino";
 import { HttpError, orThrow } from "../api/http";
 import { sha256 } from "../content";
 import { type AudioDeletionResult, PersonalDataMap } from "../db/personalData";
-import type {
-  AudioChunkRow,
-  AudioDeletionRow,
-  AudioJobRow,
-  AudioTrackRow,
-  NewAudioDerivative,
-  Store,
-} from "../db/store";
+import type { AudioChunkRow, AudioDeletionRow, AudioJobRow, NewAudioDerivative, Store } from "../db/store";
 import { nowTs, wall } from "../runtime";
 import { SessionGuard } from "../session/sessionGuard";
 import {
@@ -75,7 +68,7 @@ import {
   type TrackSource,
   trackSampleEnd,
 } from "./attribution";
-import type { AudioReadIssue } from "./fileStore";
+import { type AudioReadIssue, writeAll } from "./fileStore";
 import { type AudioJobRunner, runInWorker, type TaskRunner } from "./jobs";
 import {
   type AttributionTaskInput,
@@ -209,17 +202,6 @@ export function sweepPartialExports(exportsDir: string, log?: Logger): void {
   }
 }
 
-/** A track's PCM as render chunks, streamed in startSample order; read problems go to `onIssue`. */
-function trackPcmChunks(
-  store: Store,
-  row: AudioTrackRow,
-  key: Buffer,
-  chunks: readonly AudioChunkRow[],
-  onIssue: (i: AudioReadIssue) => void,
-) {
-  return seqOrderedChunks(store.requireAudioFiles(), row.sessionId, row.fileName!, key, chunks, { onIssue });
-}
-
 /** Write header + samples to a new file, hashing as it goes. */
 async function writeWavFile(
   file: string,
@@ -231,11 +213,7 @@ async function writeWavFile(
   let bytes = 0;
   try {
     for await (const chunk of wavStream(blocks, { sampleRate: AUDIO_SAMPLE_RATE }, totalSamples)) {
-      let done = 0;
-      while (done < chunk.byteLength) {
-        const { bytesWritten } = await fh.write(chunk, done, chunk.byteLength - done, bytes + done);
-        done += bytesWritten;
-      }
+      await writeAll(fh, chunk, bytes);
       hash.update(chunk);
       bytes += chunk.byteLength;
     }
@@ -732,7 +710,9 @@ export class AudioService {
               return {
                 trackId: t.trackId,
                 samples: trackSampleEnd(chunks),
-                chunks: trackPcmChunks(store, t, key, chunks, (i) => issues.push(i)),
+                chunks: seqOrderedChunks(store.requireAudioFiles(), t.sessionId, t.fileName!, key, chunks, {
+                  onIssue: (i) => issues.push(i),
+                }),
               };
             });
           const total = renderedSampleCount(timing.timeline);

@@ -106,7 +106,7 @@ async function readExactly(fh: FileHandle, length: number, position: number): Pr
   return buf;
 }
 
-async function writeAll(fh: FileHandle, buf: Buffer, position: number) {
+export async function writeAll(fh: FileHandle, buf: Uint8Array, position: number) {
   let done = 0;
   while (done < buf.length) {
     const { bytesWritten } = await fh.write(buf, done, buf.length - done, position + done);
@@ -206,7 +206,7 @@ export class AudioFileStore {
     fileName: string,
     key: Buffer,
     seq: number,
-    data: Buffer,
+    data: Uint8Array,
   ): Promise<AppendResult> {
     let file: string;
     let record: Buffer;

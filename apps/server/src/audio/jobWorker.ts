@@ -234,14 +234,7 @@ export async function runAttributionTask(
       fadeMs: input.clean.fadeMs,
       blockSamples: CLEAN_RECORD_SAMPLES,
     })) {
-      const bytes = int16ToLeBytes(block);
-      await files.appendRecord(
-        input.sessionId,
-        fileName,
-        key,
-        seq++,
-        Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength),
-      );
+      await files.appendRecord(input.sessionId, fileName, key, seq++, int16ToLeBytes(block));
       samples += block.length;
     }
     cleanFiles.push({
