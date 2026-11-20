@@ -1,6 +1,6 @@
+import { mulberry32 } from "@wkwa/shared";
 import { describe, expect, it } from "vitest";
 import { SpeechDetector } from "../src/audio/speech";
-import { mulberry32 } from "./helpers";
 
 const RATE = 16000;
 

@@ -1,3 +1,4 @@
+import { mulberry32 } from "@wkwa/shared";
 import { describe, expect, it } from "vitest";
 import {
   analyse,
@@ -22,7 +23,7 @@ import {
   wavHeader,
   wavStream,
 } from "../src/audio/wav";
-import { mulberry32, synthesise, trackInputs } from "./attributionSynth";
+import { synthesise, trackInputs } from "./attributionSynth";
 
 /** Wall-clock limits are checked in the normal run only: coverage instrumentation slows the code down. */
 const TIMED = !process.env.WKWA_COVERAGE;
