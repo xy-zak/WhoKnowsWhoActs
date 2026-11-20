@@ -7,7 +7,6 @@ import {
   DELETE_SCOPES,
   deleteBlock,
   exportBlock,
-  initialJobState,
   isJobBusy,
   JOB_IDLE,
   JOB_POLL_MAX_ERRORS,
@@ -258,26 +257,6 @@ describe("attribution job state machine", () => {
     const failed = run({ type: "start" }, { type: "error", error: "x" });
     expect(jobReducer(failed, { type: "start" })).toEqual({ phase: "starting" });
     expect(jobReducer(failed, { type: "reset" })).toBe(JOB_IDLE);
-  });
-
-  it("resumes following the newest job when the view opens", () => {
-    const j = (status: "queued" | "running" | "done", progress: number) => ({
-      jobId: "J9",
-      kind: "attribution" as const,
-      status,
-      progress,
-      startedWall: null,
-      finishedWall: null,
-      error: null,
-      sessionId: "S-TEST",
-    });
-    expect(initialJobState({ jobs: [] })).toBe(JOB_IDLE);
-    expect(initialJobState({ jobs: [j("done", 1)] })).toBe(JOB_IDLE);
-    expect(initialJobState({ jobs: [j("running", 0.3)] })).toMatchObject({
-      phase: "active",
-      jobId: "J9",
-      progress: 0.3,
-    });
   });
 
   it("draws progress as cells", () => {

@@ -289,13 +289,6 @@ export function jobReducer(s: JobState, a: JobAction): JobState {
   }
 }
 
-/** The job to follow when the audio view opens: the newest one, if it is still queued or running. */
-export function initialJobState(view: Pick<AudioSessionView, "jobs">): JobState {
-  const j = view.jobs[0];
-  if (!j || (j.status !== "queued" && j.status !== "running")) return JOB_IDLE;
-  return jobReducer(JOB_IDLE, { type: "job", job: j });
-}
-
 /** "▰▰▰▱▱▱▱▱▱▱ 30 %" parts for a job's progress. */
 export function progressCells(progress: number, width = 10): { on: number; off: number; pct: number } {
   const p = clamp01(progress);

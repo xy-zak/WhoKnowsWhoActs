@@ -33,7 +33,6 @@ import {
   exportBlock,
   GRADE_TONE,
   hasCleanTrack,
-  initialJobState,
   JOB_IDLE,
   JOB_POLL_MS,
   type JobState,
@@ -108,10 +107,10 @@ export function AudioPopup({
         ifLatest((v) => {
           setView(v);
           setLoadError(null);
-          if (followJob) {
-            const j = initialJobState(v);
-            if (j.phase === "active" && v.jobs[0]) dispatch({ type: "job", job: v.jobs[0] });
-          }
+          // when the view opens, resume following the newest job if it is still queued or running
+          const j = v.jobs[0];
+          if (followJob && (j?.status === "queued" || j?.status === "running"))
+            dispatch({ type: "job", job: j });
           if (v.seats.length > 0 || v.deletions.length > 0) {
             conn.api<SpeechSegmentsView>(`${base}/segments`).then(
               ifLatest(setSegments),
