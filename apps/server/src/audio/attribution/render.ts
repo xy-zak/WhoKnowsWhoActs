@@ -22,8 +22,9 @@
  * output length up front for a WAV header / HTTP `Content-Length`.
  */
 
+import { AUDIO_SAMPLE_RATE } from "@wkwa/shared";
 import { maskToRuns, runsToMask } from "./smooth";
-import { SAMPLE_RATE, type SeatMask, type Timeline, type TrackAlignment } from "./types";
+import type { SeatMask, Timeline, TrackAlignment } from "./types";
 
 export interface PcmChunk {
   startSample: number;
@@ -53,8 +54,6 @@ export interface CleanOptions extends RenderOptions {
   attenuationDb?: number;
   fadeMs?: number;
 }
-
-const OUT_RATE = SAMPLE_RATE;
 
 /** Serves monotonic range reads from an ordered chunk stream, holding only what is still needed. */
 class SequentialPcmReader {
@@ -112,7 +111,7 @@ class SequentialPcmReader {
 
 /** Number of samples `renderAligned` / `renderClean` will produce. */
 export function renderedSampleCount(timeline: Timeline): number {
-  return timeline.frames * Math.round((timeline.hopMs * OUT_RATE) / 1000);
+  return timeline.frames * Math.round((timeline.hopMs * AUDIO_SAMPLE_RATE) / 1000);
 }
 
 interface TrackPlan {
@@ -134,8 +133,8 @@ export async function* renderAligned(
 ): AsyncGenerator<Int16Array> {
   const { timeline } = timing;
   const total = renderedSampleCount(timeline);
-  const block = Math.max(1, options.blockSamples ?? OUT_RATE);
-  const msPerOut = 1000 / OUT_RATE;
+  const block = Math.max(1, options.blockSamples ?? AUDIO_SAMPLE_RATE);
+  const msPerOut = 1000 / AUDIO_SAMPLE_RATE;
   const plans: TrackPlan[] = [];
   for (const a of timing.alignment) {
     if (a.seat !== seat) continue;
@@ -258,10 +257,10 @@ export async function* renderClean(
   options: CleanOptions = {},
 ): AsyncGenerator<Int16Array> {
   const { timeline } = timing;
-  const perFrame = Math.round((timeline.hopMs * OUT_RATE) / 1000);
+  const perFrame = Math.round((timeline.hopMs * AUDIO_SAMPLE_RATE) / 1000);
   const runs = maskToRuns(runsToMask(mask.runs, timeline.frames)).map((f) => f * perFrame);
   const floor = 10 ** ((options.attenuationDb ?? -30) / 20);
-  const fade = Math.max(0, Math.round(((options.fadeMs ?? 10) * OUT_RATE) / 1000));
+  const fade = Math.max(0, Math.round(((options.fadeMs ?? 10) * AUDIO_SAMPLE_RATE) / 1000));
   const runIndex = { i: 0 };
   let m0 = 0;
   let gain = new Float32Array(0);

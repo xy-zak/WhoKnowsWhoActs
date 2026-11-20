@@ -7,6 +7,7 @@
  * Synchronous and CPU-light (well under a second per session hour); it runs in the job worker.
  */
 
+import { AUDIO_SAMPLE_RATE } from "@wkwa/shared";
 import { alignTrack, fitClock, median, trackSampleEnd } from "./clock";
 import { maskToRuns, segmentsFromMasks, smoothSpeech } from "./smooth";
 import {
@@ -23,7 +24,6 @@ import {
   HOP_SAMPLES,
   type LeakageReport,
   resolveOptions,
-  SAMPLE_RATE,
   type SeatQuality,
   type Timeline,
   type TrackAlignment,
@@ -63,7 +63,7 @@ export function placeTracks(
       warnings.push(`Seat ${t.seat}: track ${t.trackId.slice(0, 8)} has no audio and was skipped.`);
       continue;
     }
-    const sampleRate = t.sampleRate ?? SAMPLE_RATE;
+    const sampleRate = t.sampleRate ?? AUDIO_SAMPLE_RATE;
     const fit = fitClock({ ...t, sampleRate }, opts.maxPlausibleDriftPpm);
     if (!fit) continue;
     if (fit.implausible)
