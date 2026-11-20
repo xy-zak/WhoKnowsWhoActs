@@ -176,11 +176,6 @@ export class Hub {
 
   /* ═════════════════════════ sessions ═════════════════════════ */
 
-  /** The database of the attached session (participant database when none is attached). */
-  private get store(): Store {
-    return this.session?.store ?? this.deps.stores.real;
-  }
-
   /**
    * What a SessionManager needs, for a new config or a stored one (`config_json`). Throws a
    * CommandError if that config or the onboarding content cannot be loaded (e.g. consent.json lost
@@ -208,16 +203,15 @@ export class Hub {
   createSession(scenarioId: string, config: SessionConfig, notes: string): SessionManager {
     const scenario = this.deps.scenarios.load(scenarioId);
     const deps = this.sessionDeps(scenario, this.deps.stores.of(config.players), config);
-    this.detach("A new session was created");
-    // this.session is null while creating, so the SessionCreated batch is delivered by afterAttach()
-    const created = this.orNoSession(() => SessionManager.create(deps, config, notes));
-    this.session = created;
-    this.deps.log.info(
-      { sessionId: created.sessionId, scenario: scenario.id, players: config.players },
+    return this.attach(
+      "A new session was created",
+      () => SessionManager.create(deps, config, notes),
       "session created",
+      {
+        scenario: scenario.id,
+        players: config.players,
+      },
     );
-    this.afterAttach(created);
-    return created;
   }
 
   resumeSession(sessionId: string): SessionManager {
@@ -225,12 +219,7 @@ export class Hub {
     if (!found) throw new CommandError(`Unknown session ${sessionId}`);
     const scenario = this.deps.scenarios.load(found.row.scenario_id);
     const deps = this.sessionDeps(scenario, found.store, found.row.config_json);
-    this.detach("Switching session");
-    const m = this.orNoSession(() => SessionManager.load(deps, sessionId));
-    this.session = m;
-    this.deps.log.info({ sessionId }, "session resumed");
-    this.afterAttach(m);
-    return m;
+    return this.attach("Switching session", () => SessionManager.load(deps, sessionId), "session resumed");
   }
 
   /** Resume the most recent session (of either database) that has not ended (used on server start). */
@@ -271,16 +260,32 @@ export class Hub {
   }
 
   /**
-   * Create or load the next session after the previous one was detached. When that fails, the
-   * facilitator pages show that no session is attached (not the one that left), then it throws.
+   * Detach the current session, then create or load the next one (`open`) and attach it. When that
+   * fails, the facilitator pages show that no session is attached (not the one that left), then it throws.
    */
-  private orNoSession(open: () => SessionManager): SessionManager {
+  private attach(reason: string, open: () => SessionManager, logMsg: string, logFields = {}): SessionManager {
+    this.detach(reason);
+    let m: SessionManager;
     try {
-      return open();
+      // this.session is null while opening, so the SessionCreated batch is delivered below
+      m = open();
     } catch (e) {
       this.showNoSession();
       throw e;
     }
+    this.session = m;
+    this.deps.log.info({ sessionId: m.sessionId, ...logFields }, logMsg);
+    // Connected browsers re-send hello with their stored seat token, so seats are re-claimed
+    // by token only (terminal numbers are not stable across server restarts).
+    this.player.emit("rehello");
+    this.sendSnapshot(this.facilitator);
+    this.pushAll();
+    if (m.simulated) {
+      this.runner = new SimulationRunner(m, this.deps.log);
+      this.runner.sync();
+    }
+    this.restoreFakes(m);
+    return m;
   }
 
   /** Tell the facilitator pages that no session is attached. */
@@ -293,21 +298,8 @@ export class Hub {
   private sendSnapshot(to: FacilitatorNamespace | FacilitatorSocket) {
     const m = this.session;
     to.emit("scenario", m?.scenario ?? null);
-    to.emit("events", { events: m ? this.store.listEvents(m.sessionId).map(redactEvent) : [], reset: true });
+    to.emit("events", { events: m ? m.store.listEvents(m.sessionId).map(redactEvent) : [], reset: true });
     to.emit("telemetry:live", { items: m ? [...m.monitor.liveTelemetry] : [], reset: true });
-  }
-
-  private afterAttach(m: SessionManager) {
-    // Connected browsers re-send hello with their stored seat token, so seats are re-claimed
-    // by token only (terminal numbers are not stable across server restarts).
-    this.player.emit("rehello");
-    this.sendSnapshot(this.facilitator);
-    this.pushAll();
-    if (m.simulated) {
-      this.runner = new SimulationRunner(m, this.deps.log);
-      this.runner.sync();
-    }
-    this.restoreFakes(m);
   }
 
   /* ═════════════════════════ fake players ═════════════════════════ */
@@ -551,7 +543,8 @@ export class Hub {
         m: SessionManager,
         seat: number,
         msg: PlayerMessage<K>,
-      ) => PlayerAcks[K] | undefined | Promise<PlayerAcks[K]>,
+        // biome-ignore lint/suspicious/noConfusingVoidType: a command method returning nothing acks { ok: true }
+      ) => PlayerAcks[K] | void | Promise<PlayerAcks[K]>,
     ) => {
       const schema = playerSchema(name);
       const refuse = (error: string, retry: boolean) => ({ ok: false, error, retry }) as PlayerAcks[K];
@@ -575,12 +568,8 @@ export class Hub {
       sock.on(name, handler as never);
     };
 
-    seatCmd("consent:submit", (m, seat, msg) => {
-      m.submitConsent(seat, msg);
-    });
-    seatCmd("mic:check", (m, seat, msg) => {
-      m.submitMicCheck(seat, msg);
-    });
+    seatCmd("consent:submit", (m, seat, msg) => m.submitConsent(seat, msg));
+    seatCmd("mic:check", (m, seat, msg) => m.submitMicCheck(seat, msg));
     seatCmd("audio:start", (m, seat, msg) => m.submitAudioStart(seat, msg));
     seatCmd("audio:chunk", async (m, seat, msg) => {
       const a = await m.submitAudioChunk(seat, msg);
@@ -589,15 +578,9 @@ export class Hub {
       return a;
     });
     seatCmd("audio:stop", (m, seat, msg) => m.submitAudioStop(seat, msg));
-    seatCmd("demographics:submit", (m, seat, msg) => {
-      m.submitDemographics(seat, msg);
-    });
-    seatCmd("briefing:ack", (m, seat, msg) => {
-      m.acknowledgeBriefing(seat, msg);
-    });
-    seatCmd("calibration:ready", (m, seat, msg) => {
-      m.sayCalibrationReady(seat, msg);
-    });
+    seatCmd("demographics:submit", (m, seat, msg) => m.submitDemographics(seat, msg));
+    seatCmd("briefing:ack", (m, seat, msg) => m.acknowledgeBriefing(seat, msg));
+    seatCmd("calibration:ready", (m, seat, msg) => m.sayCalibrationReady(seat, msg));
     seatCmd("intent", (m, seat, msg) => m.intent(seat, msg));
     seatCmd("telemetry", (m, seat, msg) => {
       const { stored, live } = m.submitTelemetry(seat, msg);
