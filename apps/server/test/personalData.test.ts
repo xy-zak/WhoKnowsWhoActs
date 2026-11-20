@@ -18,7 +18,7 @@ import {
   PersonalDataMap,
   type PersonalDataTable,
 } from "../src/db/personalData";
-import type { Store } from "../src/db/store";
+import type { SessionRow, Store } from "../src/db/store";
 import { nowTs, wall } from "../src/runtime";
 import { addTrack, insertBareSession, type TempStore, tempStore } from "./audioFixtures";
 
@@ -249,6 +249,19 @@ describe("personal-data map", () => {
     expect(map.erasures()).toMatchObject([
       { codeSha256: sha256(code), note: "invariant", rows: { ...r.rows, audioFiles: 4 } },
     ]);
+    // the register row as stored, byte for byte
+    expect(db.prepare("SELECT * FROM erasures").get()).toEqual({
+      id: 1,
+      code_sha256: sha256(code),
+      requested_wall: expect.stringMatching(/^\d{4}-/),
+      executed_wall: expect.stringMatching(/^\d{4}-/),
+      sessions_json: JSON.stringify([
+        { sessionId: a.sessionId, seat: 1 },
+        { sessionId: b.sessionId, seat: 2 },
+      ]),
+      rows_json: JSON.stringify({ ...r.rows, audioFiles: 4 }),
+      note: "invariant",
+    });
     // the other participants keep everything but the shared result computed from the erased track
     expect(rowsContaining(db, others[0]!)).toEqual(otherRows);
     expect(store.listAudioJobs(a.sessionId)[0]!.result).toBeNull();
@@ -306,6 +319,20 @@ describe("personal-data map", () => {
     for (const t of PERSONAL_DATA) expect(count(db, t, t.ofSession, a.sessionId), t.table).toBeGreaterThan(0);
     const keep = PERSONAL_DATA.map((t) => count(db, t, t.ofSession, b.sessionId));
     const codes = store.sessionCodes(a.sessionId).map(sha256).sort();
+    const session = db.prepare("SELECT * FROM sessions WHERE id = ?").get(a.sessionId) as SessionRow;
+    expect(session).toMatchObject({
+      scenario_id: "demo",
+      scenario_version: "1",
+      scenario_hash: "h",
+      status: "closed",
+      condition: "",
+      tags_json: "[]",
+      notes: "",
+      config_json: "{}",
+      harness_version: "0",
+      git_commit: "test",
+      updated_wall: session.created_wall,
+    });
     // a file in the session's audio folder that no row refers to goes with the folder (and is counted)
     writeFileSync(path.join(files.root, a.sessionId, `${"e".repeat(32)}.wka`), "orphan");
 
@@ -331,6 +358,17 @@ describe("personal-data map", () => {
         (db.prepare("SELECT code_hashes_json FROM session_deletions").pluck().get() as string) ?? "[]",
       ),
     ).toEqual(codes);
+    // the register row as stored, byte for byte
+    expect(db.prepare("SELECT * FROM session_deletions").get()).toEqual({
+      id: 1,
+      session_id: a.sessionId,
+      deleted_wall: expect.stringMatching(/^\d{4}-/),
+      created_wall: session.created_wall,
+      rows_json: JSON.stringify(r.rows),
+      code_hashes_json: JSON.stringify(codes),
+      exports_json: JSON.stringify([`/exports/${a.sessionId}/E-1`]),
+      note: "",
+    });
     expect(() => map.deleteSession(a.sessionId, { exportsDir: t.exportsDir })).toThrow(/Unknown session/);
   });
 
