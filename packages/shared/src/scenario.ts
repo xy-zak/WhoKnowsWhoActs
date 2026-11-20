@@ -40,7 +40,6 @@ export const ScenarioFileSchema = z.object({
     .union([z.string(), ScoreMatricesSchema])
     .describe("Starting scores: path (relative to scenario.json) of a JSON file, or the matrices inline"),
 });
-export type ScenarioFile = z.infer<typeof ScenarioFileSchema>;
 
 /** One sub-square of the map (the unit players act on). */
 export const RegionSchema = z.object({

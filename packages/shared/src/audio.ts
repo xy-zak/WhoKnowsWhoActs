@@ -282,7 +282,6 @@ const DurMs = (d: string) => z.number().min(0).describe(`${d} (ms)`);
 
 /** Lifecycle of a stored track. */
 export const AUDIO_TRACK_STATUSES = ["open", "closed", "interrupted", "deleted"] as const;
-export type AudioTrackStatus = (typeof AUDIO_TRACK_STATUSES)[number];
 
 export const AudioTrackSummarySchema = z
   .object({
@@ -401,9 +400,7 @@ export const AttributionSummarySchema = z
 export type AttributionSummary = z.infer<typeof AttributionSummarySchema>;
 
 export const AUDIO_JOB_KINDS = ["attribution"] as const;
-export type AudioJobKind = (typeof AUDIO_JOB_KINDS)[number];
 export const AUDIO_JOB_STATUSES = ["queued", "running", "done", "failed"] as const;
-export type AudioJobStatus = (typeof AUDIO_JOB_STATUSES)[number];
 
 export const AttributionJobSchema = z
   .object({

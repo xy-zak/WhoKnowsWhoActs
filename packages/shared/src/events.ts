@@ -994,6 +994,12 @@ export type StoredEvent = {
 
 export type EventOf<T extends EventType> = Extract<StoredEvent, { type: T }>;
 
+/** Type guard for one event type, e.g. `events.filter(isEvent("DecisionMade"))`. */
+export const isEvent =
+  <T extends EventType>(type: T) =>
+  (e: StoredEvent): e is EventOf<T> =>
+    e.type === type;
+
 /** What the server passes to the event store; seq/timestamps are filled in on append. */
 export type NewEvent = {
   [K in EventType]: {

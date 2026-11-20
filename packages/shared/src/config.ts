@@ -346,14 +346,12 @@ export const ConsentItemSchema = z.object({
       "The '## ' heading of the consent text this statement confirms: the consent screen shows each section with its one statement",
     ),
 });
-export type ConsentItem = z.infer<typeof ConsentItemSchema>;
 
 export const ConsentFormSchema = z.object({
   version: z.string().describe("Version of the consent form; bump whenever the text changes"),
   markdownFile: z.string().default("consent.md"),
   items: z.array(ConsentItemSchema).min(1),
 });
-export type ConsentForm = z.infer<typeof ConsentFormSchema>;
 
 export const DemographicQuestionSchema = z.object({
   id: z.string().regex(/^[a-z0-9_]+$/),
@@ -366,7 +364,6 @@ export const DemographicsFormSchema = z.object({
   intro: z.string().default(""),
   questions: z.array(DemographicQuestionSchema),
 });
-export type DemographicsForm = z.infer<typeof DemographicsFormSchema>;
 
 /**
  * Compose the consent text and items for one session. Markdown between
@@ -511,7 +508,6 @@ export const AudioContentSchema = z.object({
       "Facilitator-led calibration: each seat in turn reads a sentence while the others stay quiet (gives the leakage between microphones)",
     ),
 });
-export type AudioContent = z.infer<typeof AudioContentSchema>;
 
 /** Content shown to players during onboarding (sent inside their projection). */
 export const OnboardingContentSchema = z.object({
