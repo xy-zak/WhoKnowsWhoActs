@@ -38,8 +38,7 @@ import type { IconName } from "../ui/icons";
 /** No stored chunk for this long while a seat says it records: the mic column warns (ms). */
 export const STALE_CHUNK_MS = 15_000;
 /** Upload backlog (chunks of 5 s) at which the mic column warns, growing or not. */
-export const BACKLOG_WARN_CHUNKS = 3;
-/** The engine's minimum calibration margin (dB): below it a seat's voice is hard to tell apart. */
+const BACKLOG_WARN_CHUNKS = 3;
 
 /** Each seat's live mic figures from the dashboard's stats. */
 export function micStatsOf(stats: Record<number, SeatLiveStats> | undefined): Record<number, SeatMicStats> {
@@ -60,7 +59,7 @@ export interface MicCell {
 }
 
 /** Should this seat record if recording were not paused? (The denominator of "mics n/m".) */
-export function recordingExpected(st: ReadonlyGameState, seat: ReadonlySeatState): boolean {
+function recordingExpected(st: ReadonlyGameState, seat: ReadonlySeatState): boolean {
   const v = recordingVerdict(st, seat);
   return v.record || v.reason === "paused";
 }
