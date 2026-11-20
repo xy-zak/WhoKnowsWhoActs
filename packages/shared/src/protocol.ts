@@ -2,8 +2,10 @@ import { z } from "zod";
 import {
   AUDIO_BYTES_PER_SAMPLE,
   AUDIO_MAX_CHUNK_SAMPLES,
+  type AudioCaptureSettings,
   AudioCaptureSettingsSchema,
   AudioContextInfoSchema,
+  type AudioSettings,
   CaptureSampleRate,
   Dbfs,
   PcmSchema,
@@ -93,6 +95,20 @@ const NO_SAMPLE_RATE = {
   message: "settings.sampleRate (or the audio engine's sample rate) is needed",
   path: ["settings", "sampleRate"],
 };
+
+/** The message with its settings normalised to AudioSettings, or a NO_SAMPLE_RATE issue. */
+function withSettings<T extends { settings: AudioCaptureSettings }>(
+  m: T,
+  sampleRate: number | undefined,
+  ctx: z.RefinementCtx,
+): Omit<T, "settings"> & { settings: AudioSettings } {
+  const settings = toAudioSettings(m.settings, sampleRate);
+  if (settings === null) {
+    ctx.addIssue({ code: "custom", ...NO_SAMPLE_RATE });
+    return z.NEVER;
+  }
+  return { ...m, settings };
+}
 const ContextSampleRate = CaptureSampleRate.optional().describe(
   "Rate of the browser's audio engine (Hz): used as the sample rate when settings has none",
 );
@@ -108,14 +124,7 @@ export const MicCheckSubmit = EVENT_DEFS.MicCheckCompleted.payload
     durationMs: DurationMs,
     clientTs: ClientTs,
   })
-  .transform(({ contextSampleRate, ...m }, ctx) => {
-    const settings = toAudioSettings(m.settings, contextSampleRate);
-    if (settings === null) {
-      ctx.addIssue({ code: "custom", ...NO_SAMPLE_RATE });
-      return z.NEVER;
-    }
-    return { ...m, settings };
-  });
+  .transform(({ contextSampleRate, ...m }, ctx) => withSettings(m, contextSampleRate, ctx));
 
 /** A mic check result as the server takes it (settings normalised). */
 export type MicCheckResult = z.output<typeof MicCheckSubmit>;
@@ -148,14 +157,7 @@ export const AudioStart = EVENT_DEFS.AudioTrackStarted.payload
     settings: AudioCaptureSettingsSchema,
     context: AudioContextInfoSchema.optional(),
   })
-  .transform((m, ctx) => {
-    const settings = toAudioSettings(m.settings, m.context?.sampleRate);
-    if (settings === null) {
-      ctx.addIssue({ code: "custom", ...NO_SAMPLE_RATE });
-      return z.NEVER;
-    }
-    return { ...m, settings };
-  });
+  .transform((m, ctx) => withSettings(m, m.context?.sampleRate, ctx));
 
 export const AudioChunk = z
   .object({
