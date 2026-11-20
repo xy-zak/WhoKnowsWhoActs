@@ -93,7 +93,7 @@ export interface BotOptions {
   log?: (msg: string) => void;
   /** Take propose/decide actions automatically during rounds (default true). */
   autoPlay?: boolean;
-  /** Use this terminal key instead of a random one (the server registers fake players' keys before they connect). */
+  /** Use this terminal key instead of a random one (a client coming back as the same terminal). */
   terminalKey?: string;
   /** Re-claim a seat with this token on connect (fake players restored after a server restart). */
   seatToken?: string | null;
