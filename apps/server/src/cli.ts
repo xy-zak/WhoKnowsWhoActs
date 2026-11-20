@@ -226,8 +226,7 @@ async function main() {
       }
       case "delete-session": {
         const id = need(values.session, "session");
-        const row = store.getSession(id);
-        if (!row) throw new Error(`Unknown session ${id}`);
+        const row = store.requireSession(id);
         const counts = store.listSessions().find((x) => x.id === id)!;
         console.log(
           `Session ${id} (${row.status}, created ${row.created_wall.slice(0, 16)}): ${counts.eventCount} events, ${counts.telemetryCount} telemetry rows, ${counts.audioTracks} audio tracks (${duration(counts.audioMs)}).`,
@@ -285,8 +284,7 @@ async function main() {
         const scope = values.scope;
         if (scope !== "raw" && scope !== "all")
           throw new Error(`Missing or unknown --scope (raw or all)\n${USAGE}`);
-        const row = store.getSession(id);
-        if (!row) throw new Error(`Unknown session ${id}`);
+        const row = store.requireSession(id);
         const tracks = store.listAudioTracks(id);
         const stored = tracks.filter((t) => t.status !== "deleted");
         const derived = store.listAudioDerivatives(id);

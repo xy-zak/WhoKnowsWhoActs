@@ -229,6 +229,13 @@ export class Store {
     return this.db.prepare("SELECT * FROM sessions WHERE id = ?").get(id) as SessionRow | undefined;
   }
 
+  /** The session's row; throws `Unknown session <id>` if there is none. */
+  requireSession(id: string): SessionRow {
+    const row = this.getSession(id);
+    if (!row) throw new Error(`Unknown session ${id}`);
+    return row;
+  }
+
   listSessions(): SessionSummary[] {
     const fakes = this.fakeSeatsBySession();
     return this.db

@@ -89,8 +89,7 @@ function writeExport(
   dir: string,
 ): SessionExportResult {
   const { store } = deps;
-  const row = store.getSession(sessionId);
-  if (!row) throw new Error(`Unknown session ${sessionId}`);
+  const row = store.requireSession(sessionId);
   const events = store.listEvents(sessionId);
   const telemetry = store.listTelemetry(sessionId);
   const final = reduceEvents(events);

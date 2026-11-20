@@ -459,8 +459,7 @@ export class PersonalDataMap {
     opts: { exportsDir: string; deleteExports?: boolean; note?: string },
   ): SessionDeletionResult {
     const { store, db } = this;
-    const row = store.getSession(sessionId);
-    if (!row) throw new Error(`Unknown session ${sessionId}`);
+    const row = store.requireSession(sessionId);
     const codes = store.sessionCodes(sessionId).map(sha256);
     const exportRows = db.prepare("SELECT path FROM exports WHERE session_id = ?").all(sessionId) as Array<{
       path: string;
@@ -559,7 +558,7 @@ export class PersonalDataMap {
     const { store, db } = this;
     const { scope } = opts;
     if (scope !== "raw" && scope !== "all") throw new Error(`Unknown scope '${String(scope)}' (raw or all)`);
-    if (!store.getSession(sessionId)) throw new Error(`Unknown session ${sessionId}`);
+    store.requireSession(sessionId);
     const requestedWall = wall(nowTs());
     const counts: AudioDeletionCounts = {
       tracks: 0,
