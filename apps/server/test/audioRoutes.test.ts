@@ -1,4 +1,3 @@
-import { AttributionJobSchema, AudioDeletionRecordSchema } from "@wkwa/shared";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { type SeededSession, seedAudioSession } from "./audioSession";
 import { cleanup, setupSession, startTestServer, type TestServer } from "./harness";
@@ -63,11 +62,12 @@ describe("audio REST routes (DATABASE tab)", () => {
     expect((await api("POST", url, { unknown: 1 })).status).toBe(400);
     const start = await api("POST", url, {});
     expect(start.status).toBe(202);
-    expect(AttributionJobSchema.parse(start.json).status).toMatch(/queued|running/);
+    expect(start.json).toMatchObject({ jobId: expect.any(String), kind: "attribution" });
+    expect(start.json.status).toMatch(/queued|running/);
     expect((await api("POST", url, {})).status).toBe(409); // one job per session
     const job = await finished(start.json.jobId);
     expect(job.status).toBe("done");
-    expect(AttributionJobSchema.parse(job).summary?.segments).toBeGreaterThan(5);
+    expect(job.summary?.segments).toBeGreaterThan(5);
     expect(job.summary.grade).toMatch(/good|fair|poor/);
     expect((await api("GET", "/api/audio/jobs/not-a-job")).status).toBe(404);
   }, 60_000);
@@ -185,8 +185,15 @@ describe("audio REST routes (DATABASE tab)", () => {
     // the typed id may carry stray spaces
     const r = await api("POST", url, { confirm: ` ${id} `, scope: "raw", note: "retention" });
     expect(r.status).toBe(200);
-    expect(AudioDeletionRecordSchema.parse(r.json.record)).toBeTruthy();
-    expect(r.json.record).toMatchObject({ scope: "raw", seats: [1, 2, 3, 4], tracks: 4, note: "retention" });
+    expect(r.json.record).toMatchObject({
+      id: expect.any(Number),
+      sessionId: id,
+      executedWall: expect.any(String),
+      scope: "raw",
+      seats: [1, 2, 3, 4],
+      tracks: 4,
+      note: "retention",
+    });
     expect(r.json.record.bytes).toBeGreaterThan(0);
     expect(r.json.audioExportsOnDisk.length).toBeGreaterThan(0); // WAV exports are the researcher's to delete
     const sum = (await api("GET", `/api/sessions/${id}/audio`)).json;

@@ -42,27 +42,31 @@ export const ScenarioFileSchema = z.object({
 });
 
 /** One sub-square of the map (the unit players act on). */
-export const RegionSchema = z.object({
-  id: z.string().describe("Sub-square id, e.g. 'C7-Kb'"),
-  name: z.string().describe("Display name, e.g. 'C7 · Kb'"),
-  square: z.string().describe("Square the sub-square belongs to, e.g. 'C7'"),
-  k: KLabelSchema.describe("Knowledge type of the sub-square"),
-});
-export type Region = z.infer<typeof RegionSchema>;
+export interface Region {
+  /** Sub-square id, e.g. 'C7-Kb'. */
+  id: string;
+  /** Display name, e.g. 'C7 · Kb'. */
+  name: string;
+  /** Square the sub-square belongs to, e.g. 'C7'. */
+  square: string;
+  /** Knowledge type of the sub-square. */
+  k: KLabel;
+}
 
 /** A fully loaded scenario, as held by the server. */
-export const ScenarioSchema = z.object({
-  id: z.string(),
-  title: z.string(),
-  version: z.string(),
-  description: z.string(),
-  board: BoardSchema,
-  views: z.record(z.string(), ViewSchema),
-  regions: z.array(RegionSchema),
-  initialScores: z.record(z.string(), z.number()).describe("Starting score per sub-square id"),
-  hash: z.string().describe("SHA-256 of the loaded scenario (for reproducibility)"),
-});
-export type Scenario = z.infer<typeof ScenarioSchema>;
+export interface Scenario {
+  id: string;
+  title: string;
+  version: string;
+  description: string;
+  board: Board;
+  views: Record<string, View>;
+  regions: Region[];
+  /** Starting score per sub-square id. */
+  initialScores: Record<string, number>;
+  /** SHA-256 of the loaded scenario (for reproducibility). */
+  hash: string;
+}
 
 /** What a client needs to draw the map (identical for every player): board size and knowledge-type names. */
 export type MapGeometry = Pick<Scenario, "board" | "views">;

@@ -1,7 +1,6 @@
 import { z } from "zod";
-import { AudioStopReasonSchema } from "./audioReasons";
+import type { AudioStopReason } from "./audioReasons";
 import type { AudioExportKind, AudioExportRequestKind } from "./exportColumns";
-import { SeatSchema } from "./labels";
 import type { AudioChunk } from "./protocol";
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -274,35 +273,39 @@ export const TrackIdSchema = z
 export type AudioChunkInput = z.input<typeof AudioChunk>;
 
 /* ─────────────────────────── REST response types (DATABASE tab) ─────────────────────────── */
-
-const Ts = (d: string) => z.number().describe(`${d} (server clock, Unix epoch ms)`);
-const Wall = (d: string) => z.string().describe(`${d} (ISO-8601 UTC)`);
-const Count = (d: string) => z.number().int().min(0).describe(d);
-const DurMs = (d: string) => z.number().min(0).describe(`${d} (ms)`);
+// Plain types: the server writes them, the DATABASE tab reads them; nothing validates them at runtime.
+// Timestamps `…ServerTs` are server clock, Unix epoch ms; `…Wall` are ISO-8601 UTC.
 
 /** Lifecycle of a stored track. */
 export const AUDIO_TRACK_STATUSES = ["open", "closed", "interrupted", "deleted"] as const;
 
-export const AudioTrackSummarySchema = z
-  .object({
-    trackId: TrackIdSchema,
-    seat: SeatSchema,
-    startedServerTs: Ts("When the track started"),
-    closedServerTs: Ts("When the track was closed").nullable(),
-    stopReason: AudioStopReasonSchema.nullable().describe("Why the track stopped (null while open)"),
-    samples: Count("Samples stored (16 000 per second)"),
-    durationMs: DurMs("Audio stored: samples / 16 000"),
-    chunks: Count("Chunks stored"),
-    gaps: Count("Missing chunks: sequence numbers or sample ranges never received"),
-    bytes: Count("Size of the encrypted file on disk (bytes)"),
-    status: z
-      .enum(AUDIO_TRACK_STATUSES)
-      .describe(
-        "'open' = still recording, 'closed' = stopped normally, 'interrupted' = never stopped cleanly (e.g. server restart) and closed on recovery, 'deleted' = the raw audio was deleted (metadata kept)",
-      ),
-  })
-  .describe("One stored track of one seat");
-export type AudioTrackSummary = z.infer<typeof AudioTrackSummarySchema>;
+/** One stored track of one seat. */
+export interface AudioTrackSummary {
+  /** Random id of the audio track (one continuous capture run of one seat). */
+  trackId: string;
+  seat: number;
+  /** When the track started. */
+  startedServerTs: number;
+  /** When the track was closed. */
+  closedServerTs: number | null;
+  /** Why the track stopped (null while open). */
+  stopReason: AudioStopReason | null;
+  /** Samples stored (16 000 per second). */
+  samples: number;
+  /** Audio stored: samples / 16 000 (ms). */
+  durationMs: number;
+  /** Chunks stored. */
+  chunks: number;
+  /** Missing chunks: sequence numbers or sample ranges never received. */
+  gaps: number;
+  /** Size of the encrypted file on disk (bytes). */
+  bytes: number;
+  /**
+   * 'open' = still recording, 'closed' = stopped normally, 'interrupted' = never stopped cleanly (e.g.
+   * server restart) and closed on recovery, 'deleted' = the raw audio was deleted (metadata kept).
+   */
+  status: (typeof AUDIO_TRACK_STATUSES)[number];
+}
 
 /**
  * Kinds of derived results an attribution run stores (raw audio is never modified): per seat
@@ -318,140 +321,134 @@ export const AUDIO_DERIVATIVE_KINDS = [
 ] as const;
 export type AudioDerivativeKind = (typeof AUDIO_DERIVATIVE_KINDS)[number];
 
-export const AudioDerivativeSummarySchema = z
-  .object({
-    derivativeId: z.string().min(1).describe("Random id of the derived file"),
-    seat: SeatSchema,
-    kind: z
-      .literal("clean")
-      .describe(
-        "'clean' = the seat's aligned track with frames attributed to other seats attenuated by 30 dB",
-      ),
-    sourceTrackIds: z.array(TrackIdSchema).describe("Raw tracks it was made from"),
-    jobId: z.string().nullable().describe("Attribution job that produced it (null if unknown)"),
-    engineVersion: z.string().describe("Version of the attribution engine that produced it"),
-    params: z.record(z.string(), z.unknown()).describe("Engine parameters used"),
-    createdServerTs: Ts("When it was created"),
-    samples: Count("Samples (16 000 per second)"),
-    durationMs: DurMs("Length: samples / 16 000"),
-    bytes: Count("Size of the encrypted file on disk (bytes)"),
-  })
-  .describe("One derived audio file of one seat");
-export type AudioDerivativeSummary = z.infer<typeof AudioDerivativeSummarySchema>;
+/** One derived audio file of one seat. */
+export interface AudioDerivativeSummary {
+  /** Random id of the derived file. */
+  derivativeId: string;
+  seat: number;
+  /** 'clean' = the seat's aligned track with frames attributed to other seats attenuated by 30 dB. */
+  kind: "clean";
+  /** Raw tracks it was made from. */
+  sourceTrackIds: string[];
+  /** Attribution job that produced it (null if unknown). */
+  jobId: string | null;
+  /** Version of the attribution engine that produced it. */
+  engineVersion: string;
+  /** Engine parameters used. */
+  params: Record<string, unknown>;
+  /** When it was created. */
+  createdServerTs: number;
+  /** Samples (16 000 per second). */
+  samples: number;
+  /** Length: samples / 16 000 (ms). */
+  durationMs: number;
+  /** Size of the encrypted file on disk (bytes). */
+  bytes: number;
+}
 
-const SeatKeyed = <T extends z.ZodType>(v: T) => z.record(z.string().regex(/^\d+$/), v);
-
-export const AttributionSummarySchema = z
-  .object({
-    engineVersion: z.string().describe("Version of the attribution engine"),
-    talkTimeMs: SeatKeyed(z.number().min(0)).describe(
-      "Attributed speech per seat, keyed by seat number (ms; overlapping speech counts for each speaker)",
-    ),
-    segments: Count("Speech segments found (all seats)"),
-    overlapMs: DurMs("Time in which two or more seats spoke at once"),
-    quality: z
-      .object({
-        calibrated: z
-          .boolean()
-          .describe("True if the leakage between microphones was measured in the calibration"),
-        speechDetector: z
-          .enum(["silero", "energy"])
-          .describe(
-            "How speech was detected: 'silero' = the Silero VAD model, 'energy' = level above the noise floor (fallback when the model could not run)",
-          ),
-        perSeat: z
-          .array(
-            z.object({
-              seat: SeatSchema,
-              marginDb: z
-                .number()
-                .nullable()
-                .describe(
-                  "Calibration margin: how much louder this seat's voice is on its own mic than on the others, gain differences cancelled (dB; headsets ≈ 20–30)",
-                ),
-              driftPpm: z
-                .number()
-                .nullable()
-                .describe("Estimated sample-clock drift of this seat's device (parts per million)"),
-              coverage: z
-                .number()
-                .min(0)
-                .max(1)
-                .describe("Share of the recording window covered by this seat's audio (0–1)"),
-            }),
-          )
-          .describe("Quality figures per seat"),
-        ambiguousShare: z
-          .number()
-          .min(0)
-          .max(1)
-          .describe(
-            "Share of speech frames whose loudness comparison was within 3 dB of the decision threshold (0–1)",
-          ),
-        warnings: z
-          .array(z.string())
-          .describe("Human-readable warnings, e.g. 'seat 3: own voice only +4 dB over the others'"),
-      })
-      .describe("Quality report of the attribution"),
-  })
-  .describe(
-    "Result summary of a speaker-attribution run (speech detection and loudness comparison only, never voice identity)",
-  );
-export type AttributionSummary = z.infer<typeof AttributionSummarySchema>;
+/** Result summary of a speaker-attribution run (speech detection and loudness comparison only, never voice identity). */
+export interface AttributionSummary {
+  /** Version of the attribution engine. */
+  engineVersion: string;
+  /** Attributed speech per seat, keyed by seat number (ms; overlapping speech counts for each speaker). */
+  talkTimeMs: Record<string, number>;
+  /** Speech segments found (all seats). */
+  segments: number;
+  /** Time in which two or more seats spoke at once (ms). */
+  overlapMs: number;
+  /** Quality report of the attribution. */
+  quality: {
+    /** True if the leakage between microphones was measured in the calibration. */
+    calibrated: boolean;
+    /**
+     * How speech was detected: 'silero' = the Silero VAD model, 'energy' = level above the noise
+     * floor (fallback when the model could not run).
+     */
+    speechDetector: "silero" | "energy";
+    /** Quality figures per seat. */
+    perSeat: {
+      seat: number;
+      /**
+       * Calibration margin: how much louder this seat's voice is on its own mic than on the others,
+       * gain differences cancelled (dB; headsets ≈ 20–30).
+       */
+      marginDb: number | null;
+      /** Estimated sample-clock drift of this seat's device (parts per million). */
+      driftPpm: number | null;
+      /** Share of the recording window covered by this seat's audio (0–1). */
+      coverage: number;
+    }[];
+    /** Share of speech frames whose loudness comparison was within 3 dB of the decision threshold (0–1). */
+    ambiguousShare: number;
+    /** Human-readable warnings, e.g. 'seat 3: own voice only +4 dB over the others'. */
+    warnings: string[];
+  };
+}
 
 export const AUDIO_JOB_KINDS = ["attribution"] as const;
 export const AUDIO_JOB_STATUSES = ["queued", "running", "done", "failed"] as const;
 
-export const AttributionJobSchema = z
-  .object({
-    jobId: z.string().min(1).describe("Random id of the job"),
-    kind: z.enum(AUDIO_JOB_KINDS).describe("'attribution' = who spoke when, plus cleaned per-seat tracks"),
-    status: z.enum(AUDIO_JOB_STATUSES).describe("Job state"),
-    progress: z.number().min(0).max(1).describe("Progress (0–1)"),
-    startedWall: Wall("When the job started").nullable(),
-    finishedWall: Wall("When the job finished or failed").nullable(),
-    error: z.string().nullable().describe("Error message (status 'failed' only)"),
-    summary: AttributionSummarySchema.optional().describe("Result summary (status 'done' only)"),
-  })
-  .describe("An audio processing job, triggered from the DATABASE tab");
-export type AttributionJob = z.infer<typeof AttributionJobSchema>;
+/** An audio processing job, triggered from the DATABASE tab. */
+export interface AttributionJob {
+  /** Random id of the job. */
+  jobId: string;
+  /** 'attribution' = who spoke when, plus cleaned per-seat tracks. */
+  kind: (typeof AUDIO_JOB_KINDS)[number];
+  /** Job state. */
+  status: (typeof AUDIO_JOB_STATUSES)[number];
+  /** Progress (0–1). */
+  progress: number;
+  /** When the job started. */
+  startedWall: string | null;
+  /** When the job finished or failed. */
+  finishedWall: string | null;
+  /** Error message (status 'failed' only). */
+  error: string | null;
+  /** Result summary (status 'done' only). */
+  summary?: AttributionSummary;
+}
 
 /** What a deletion removed: the raw tracks and every derivative that holds sound, or all audio. */
 export const AUDIO_DELETION_SCOPES = ["raw", "all"] as const;
 export type AudioDeletionScope = (typeof AUDIO_DELETION_SCOPES)[number];
 
-export const AudioDeletionRecordSchema = z
-  .object({
-    id: z.number().int().min(1).describe("Register entry number"),
-    sessionId: z.string().describe("Session whose audio was deleted"),
-    scope: z
-      .enum(AUDIO_DELETION_SCOPES)
-      .describe(
-        "'raw' = raw tracks and cleaned tracks deleted, speech segments and metadata kept; 'all' = every audio row and file",
-      ),
-    seats: z.array(SeatSchema).describe("Seats whose audio was deleted"),
-    tracks: Count("Raw tracks deleted"),
-    derivatives: Count("Derived files deleted"),
-    bytes: Count("Encrypted bytes deleted from disk"),
-    executedWall: Wall("When the deletion ran"),
-    note: z
-      .string()
-      .max(500)
-      .describe("Researcher's note, e.g. the retention rule applied (no personal data)"),
-  })
-  .describe("One entry of the audio deletion register");
-export type AudioDeletionRecord = z.infer<typeof AudioDeletionRecordSchema>;
+/** One entry of the audio deletion register. */
+export interface AudioDeletionRecord {
+  /** Register entry number. */
+  id: number;
+  /** Session whose audio was deleted. */
+  sessionId: string;
+  /**
+   * 'raw' = raw tracks and cleaned tracks deleted, speech segments and metadata kept; 'all' = every
+   * audio row and file.
+   */
+  scope: AudioDeletionScope;
+  /** Seats whose audio was deleted. */
+  seats: number[];
+  /** Raw tracks deleted. */
+  tracks: number;
+  /** Derived files deleted. */
+  derivatives: number;
+  /** Encrypted bytes deleted from disk. */
+  bytes: number;
+  /** When the deletion ran. */
+  executedWall: string;
+  /** Researcher's note, e.g. the retention rule applied (no personal data). */
+  note: string;
+}
 
-export const AudioSessionSummarySchema = z
-  .object({
-    sessionId: z.string().describe("Session id"),
-    tracks: z.array(AudioTrackSummarySchema).describe("Every stored track, in start order"),
-    derivatives: z.array(AudioDerivativeSummarySchema).describe("Every derived file"),
-    jobs: z.array(AttributionJobSchema).describe("Processing jobs, newest first"),
-    deletions: z.array(AudioDeletionRecordSchema).describe("Audio deletion register of this session"),
-  })
-  .describe("Everything the DATABASE tab shows about one session's audio");
-export type AudioSessionSummary = z.infer<typeof AudioSessionSummarySchema>;
+/** Everything the DATABASE tab shows about one session's audio. */
+export interface AudioSessionSummary {
+  sessionId: string;
+  /** Every stored track, in start order. */
+  tracks: AudioTrackSummary[];
+  /** Every derived file. */
+  derivatives: AudioDerivativeSummary[];
+  /** Processing jobs, newest first. */
+  jobs: AttributionJob[];
+  /** Audio deletion register of this session. */
+  deletions: AudioDeletionRecord[];
+}
 
 /*
  * The views the server builds around the summaries above (plain types: the server writes them,
