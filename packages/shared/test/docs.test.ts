@@ -1,12 +1,12 @@
 /// <reference types="node" />
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { ALL_BLOCKS } from "../../../scripts/docBlocks";
+import { docFiles, generateAll } from "../../../scripts/generate-docs";
 import {
   AUDIO_START_REASONS,
   AUDIO_STOP_REASONS,
-  applyGeneratedBlocks,
   EVENT_DEFS,
   EVENT_TYPES,
   EXPORT_FILES,
@@ -20,26 +20,11 @@ import {
 const root = fileURLToPath(new URL("../../../", import.meta.url));
 const docsDir = `${root}docs/`;
 
-function docFiles(): string[] {
-  const files = readdirSync(docsDir)
-    .filter((f) => f.endsWith(".md"))
-    .map((f) => docsDir + f);
-  if (existsSync(`${root}README.md`)) files.push(`${root}README.md`);
-  return files;
-}
-
 const read = (name: string) => readFileSync(docsDir + name, "utf8");
 
 describe("generated documentation", () => {
   it("is up to date with the schemas (run `npm run docs:generate` if this fails)", () => {
-    const stale: string[] = [];
-    for (const file of docFiles()) {
-      const content = readFileSync(file, "utf8");
-      const result = applyGeneratedBlocks(content, ALL_BLOCKS);
-      expect(result.unknown, `unknown generated blocks in ${file}`).toEqual([]);
-      if (result.content !== content) stale.push(file);
-    }
-    expect(stale).toEqual([]);
+    expect(generateAll(true)).toMatchObject({ stale: [], unknown: [] });
   });
 
   it("uses every generated block somewhere", () => {

@@ -756,7 +756,7 @@ const BLOCK_RE = /<!-- BEGIN GENERATED: ([a-z0-9-]+) -->[\s\S]*?<!-- END GENERAT
  */
 export function applyGeneratedBlocks(
   markdown: string,
-  blocks: Record<string, () => string> = GENERATED_BLOCKS,
+  blocks: Record<string, () => string>,
 ): { content: string; used: string[]; unknown: string[] } {
   const used: string[] = [];
   const unknown: string[] = [];
