@@ -68,11 +68,9 @@ import type { Logger } from "pino";
 import { type AudioChunkMsg, type AudioStartMsg, type AudioStopMsg, LiveAudio } from "../audio/live";
 import type { Store } from "../db/store";
 import { harnessVersion, nowTs, wall } from "../runtime";
-import { CalibrationError, CalibrationRunner } from "./CalibrationRunner";
+import { CalibrationRunner } from "./CalibrationRunner";
+import { CommandError } from "./errors";
 import { type MicLevelReading, SeatMonitor } from "./SeatMonitor";
-
-/** Thrown for invalid facilitator commands / player submissions; the message is shown to the user. */
-export class CommandError extends Error {}
 
 export interface SessionDeps {
   store: Store;
@@ -1069,7 +1067,7 @@ export class SessionManager {
     this.run(() => {
       this.requireAudio();
       this.requirePhase("onboarding", "round_complete");
-      this.calibrationCommand(() => this.calibration.start("facilitator"));
+      this.calibration.start("facilitator");
     });
   }
 
@@ -1078,7 +1076,7 @@ export class SessionManager {
     this.run(() => {
       this.requireAudio();
       this.requirePhase("onboarding", "round_complete");
-      this.calibrationCommand(() => this.calibration.redo());
+      this.calibration.redo();
     });
   }
 
@@ -1092,7 +1090,7 @@ export class SessionManager {
     try {
       this.calibration.start("system");
     } catch (e) {
-      if (!(e instanceof CalibrationError)) throw e;
+      if (!(e instanceof CommandError)) throw e;
       this.deps.log.warn({ sessionId: this.sessionId, reason: e.message }, "calibration did not start");
     }
   }
@@ -1102,18 +1100,8 @@ export class SessionManager {
     this.run(() => {
       this.requireAudio();
       if (this.isFinal) throw new CommandError("Session has ended");
-      this.calibrationCommand(() => this.calibration.skip(reason));
+      this.calibration.skip(reason);
     });
-  }
-
-  /** A calibration refusal is a command refusal (shown to the facilitator). */
-  private calibrationCommand(fn: () => void) {
-    try {
-      fn();
-    } catch (e) {
-      if (e instanceof CalibrationError) throw new CommandError(e.message);
-      throw e;
-    }
   }
 
   /* ═════════════════════════ telemetry and presence ═════════════════════════ */

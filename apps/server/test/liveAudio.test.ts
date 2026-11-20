@@ -17,7 +17,8 @@ import { trackStatusOf } from "../src/audio/records";
 import { verifyAudio } from "../src/audio/verify";
 import { loadOnboardingContent, sha256 } from "../src/content";
 import { CALIBRATION_CHECK_WAIT_MS } from "../src/session/CalibrationRunner";
-import { CommandError, type SessionManager } from "../src/session/SessionManager";
+import { CommandError } from "../src/session/errors";
+import type { SessionManager } from "../src/session/SessionManager";
 import { Bot, FacilitatorClient } from "../src/tools/botClient";
 import { readTrackPcm } from "./audioFixtures";
 import {

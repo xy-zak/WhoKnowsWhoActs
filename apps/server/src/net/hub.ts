@@ -37,7 +37,8 @@ import type { Store } from "../db/store";
 import type { SessionStores } from "../db/stores";
 import { FakePlayers } from "../fake/FakePlayers";
 import { nowTs } from "../runtime";
-import { CommandError, SessionManager } from "../session/SessionManager";
+import { CommandError } from "../session/errors";
+import { SessionManager } from "../session/SessionManager";
 import { SimulationRunner } from "../simulation/SimulationRunner";
 
 interface TerminalEntry {
