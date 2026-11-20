@@ -1,8 +1,7 @@
 import { int16FromLeBytes, int16ToLeBytes } from "@wkwa/shared";
 import { describe, expect, it } from "vitest";
-import { Chunker } from "../src/audio/chunker";
-import { LevelMeter, MIN_DB, peakDb, rmsDb, roundDb, toDb } from "../src/audio/levels";
-import { floatToInt16, toInt16 } from "../src/audio/pcm";
+import { Chunker, isClippedInt16, toInt16 } from "../src/audio/chunker";
+import { LevelMeter, MIN_DB, roundDb, toDb } from "../src/audio/levels";
 import { TrackPipeline } from "../src/audio/pipeline";
 import { resampledLength } from "../src/audio/resampler";
 
@@ -20,9 +19,9 @@ describe("Int16 conversion", () => {
   });
 
   it("counts samples at or beyond full scale as clipped", () => {
-    const { samples, clipped } = floatToInt16([0, 0.25, 0.9999, 1, 1.5, -1, -0.99, -2]);
-    expect(Array.from(samples)).toEqual([0, 8192, 32765, 32767, 32767, -32768, -32440, -32768]);
-    expect(clipped).toBe(4);
+    const samples = [0, 0.25, 0.9999, 1, 1.5, -1, -0.99, -2].map(toInt16);
+    expect(samples).toEqual([0, 8192, 32765, 32767, 32767, -32768, -32440, -32768]);
+    expect(samples.filter(isClippedInt16)).toHaveLength(4);
   });
 
   it("writes and reads little-endian s16 bytes", () => {
@@ -45,13 +44,6 @@ describe("levels", () => {
     expect(toDb(0)).toBe(MIN_DB);
     expect(toDb(1e-9)).toBe(MIN_DB);
     expect(roundDb(-6.0206)).toBe(-6);
-    const square = new Float32Array(1000).map((_, i) => (i % 2 ? 0.5 : -0.5));
-    expect(rmsDb(square)).toBeCloseTo(-6.02, 2);
-    const sine = new Float32Array(16000).map((_, i) => Math.sin((2 * Math.PI * 1000 * i) / 16000));
-    expect(rmsDb(sine)).toBeCloseTo(-3.01, 2);
-    expect(peakDb(sine)).toBeCloseTo(0, 2);
-    expect(rmsDb(new Int16Array([16384, -16384]), 32768)).toBeCloseTo(-6.02, 2);
-    expect(rmsDb([])).toBe(MIN_DB);
   });
 
   it("reports a level every 250 ms of samples", () => {

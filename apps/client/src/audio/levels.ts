@@ -18,25 +18,6 @@ export function roundDb(db: number): number {
   return Math.round(db * 10) / 10;
 }
 
-export function rmsDb(samples: ArrayLike<number>, fullScale = 1): number {
-  if (samples.length === 0) return MIN_DB;
-  let sum = 0;
-  for (let i = 0; i < samples.length; i++) {
-    const v = samples[i]!;
-    sum += v * v;
-  }
-  return toDb(Math.sqrt(sum / samples.length) / fullScale);
-}
-
-export function peakDb(samples: ArrayLike<number>, fullScale = 1): number {
-  let peak = 0;
-  for (let i = 0; i < samples.length; i++) {
-    const v = Math.abs(samples[i]!);
-    if (v > peak) peak = v;
-  }
-  return toDb(peak / fullScale);
-}
-
 export interface LevelMeterOptions {
   sampleRate: number;
   /** window length; default AUDIO_LEVEL_INTERVAL_MS (≈ 4 updates per second) */
