@@ -1,4 +1,4 @@
-import { AUDIO_SAMPLE_RATE, clampDb, type PayloadOf, samplesToMs } from "@wkwa/shared";
+import { AUDIO_SAMPLE_RATE, clampDb, int16FromLeBytes, type PayloadOf, samplesToMs } from "@wkwa/shared";
 import {
   type CalibrationReport,
   type CalibrationTurn,
@@ -43,10 +43,8 @@ export class CalibrationCollector {
       this.tracks.set(trackId, entry);
     }
     if (entry.chunks.some((c) => c.meta.seq === meta.seq)) return;
-    const view = new DataView(pcm.buffer, pcm.byteOffset, pcm.byteLength);
-    const samples = new Int16Array(meta.sampleCount);
-    for (let i = 0; i < samples.length; i++) samples[i] = view.getInt16(i * 2, true);
-    entry.chunks.push({ meta, samples });
+    // a copy: the chunk's buffer is not ours to keep
+    entry.chunks.push({ meta, samples: int16FromLeBytes(pcm).slice(0, meta.sampleCount) });
   }
 
   /** Latest capture time (server clock) up to which a seat's audio has arrived; -Infinity = none. */

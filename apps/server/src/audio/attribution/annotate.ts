@@ -3,8 +3,7 @@
  *
  * The caller derives change points from the event log, e.g. one entry at every `RoundStarted`,
  * phase change, `SessionPaused`/`Resumed` and `RecordingPaused`/`Resumed`, each carrying the full
- * state from that moment on. Each segment gets the state in effect at its start, plus the number of
- * change points that fall inside it (a segment can straddle a round end).
+ * state from that moment on. Each segment gets the state in effect at its start.
  */
 
 import type { SpeechSegment } from "./types";
@@ -23,8 +22,6 @@ export interface AnnotatedSegment extends SpeechSegment {
   phase: string | null;
   paused: boolean;
   recordingPaused: boolean;
-  /** Change points strictly inside the segment. */
-  phaseChangesInside: number;
 }
 
 export function annotate(
@@ -49,14 +46,12 @@ export function annotate(
   return segments.map((seg) => {
     const i = at(seg.startTs);
     const state = i >= 0 ? changes[i]! : null;
-    const j = at(seg.endTs - 1e-6);
     return {
       ...seg,
       round: state?.round ?? null,
       phase: state?.phase ?? null,
       paused: state?.paused ?? false,
       recordingPaused: state?.recordingPaused ?? false,
-      phaseChangesInside: Math.max(0, j - Math.max(i, -1)),
     };
   });
 }

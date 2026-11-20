@@ -83,7 +83,7 @@ function checkSeq(seq: number) {
 }
 
 /** Encrypt one record and return its complete on-disk bytes. */
-export function encodeRecord(key: Buffer, fileId: Buffer, seq: number, plaintext: Buffer): Buffer {
+export function encodeRecord(key: Buffer, fileId: Buffer, seq: number, plaintext: Uint8Array): Buffer {
   checkKey(key);
   checkSeq(seq);
   if (plaintext.length > MAX_RECORD_PAYLOAD_BYTES)

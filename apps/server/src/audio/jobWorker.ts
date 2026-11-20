@@ -16,9 +16,9 @@
  * `onFile` before anything is written to it, so a failed or interrupted job's
  * files can be removed.
  *
- * Imported in-process (tests, `inline` runner) this module only exports the
- * task; started as a worker with `workerData.task === WORKER_TASK` it runs it
- * and reports over `parentPort` (see `runInWorker` in ./jobs.ts).
+ * Imported in-process this module only exports the task; started as a worker
+ * with `workerData.task === WORKER_TASK` it runs it and reports over
+ * `parentPort` (see `runInWorker` in ./jobs.ts).
  */
 import { isMainThread, parentPort, workerData } from "node:worker_threads";
 import { AUDIO_CHUNK_SAMPLES, int16FromLeBytes, int16ToLeBytes } from "@wkwa/shared";
@@ -234,14 +234,7 @@ export async function runAttributionTask(
       fadeMs: input.clean.fadeMs,
       blockSamples: CLEAN_RECORD_SAMPLES,
     })) {
-      const bytes = int16ToLeBytes(block);
-      await files.appendRecord(
-        input.sessionId,
-        fileName,
-        key,
-        seq++,
-        Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength),
-      );
+      await files.appendRecord(input.sessionId, fileName, key, seq++, int16ToLeBytes(block));
       samples += block.length;
     }
     cleanFiles.push({

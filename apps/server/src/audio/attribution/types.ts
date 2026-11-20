@@ -14,22 +14,13 @@
  *   mic `s` (negative: quieter). It includes the gain difference between the two mics.
  */
 
-import {
-  type AttributionGrade,
-  AUDIO_SAMPLE_RATE,
-  AUDIO_SILENCE_DB,
-  CALIBRATION_MIN_MARGIN_DB,
-} from "@wkwa/shared";
+import { type AttributionGrade, AUDIO_SAMPLE_RATE, CALIBRATION_MIN_MARGIN_DB } from "@wkwa/shared";
 
 /** Version of the algorithm; stored with every derivative so results can be traced to the code. */
 export const ENGINE_VERSION = "wkwa-gate-attribution/2.0.0";
-/** The capture format: 16 kHz mono signed 16-bit PCM. */
-export const SAMPLE_RATE = AUDIO_SAMPLE_RATE;
 /** Frame length of the features and of the session timeline. */
 export const HOP_MS = 10;
-export const HOP_SAMPLES = (SAMPLE_RATE * HOP_MS) / 1000;
-/** Level reported for digital silence (and the floor of every level). */
-export const SILENCE_DB = AUDIO_SILENCE_DB;
+export const HOP_SAMPLES = (AUDIO_SAMPLE_RATE * HOP_MS) / 1000;
 /** At or below this level a frame is a dead signal (digital silence), not quiet room noise. */
 export const DEAD_DB = -110;
 

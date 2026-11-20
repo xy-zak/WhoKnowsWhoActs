@@ -63,7 +63,7 @@ function stopReasonOf(reason: string | null): AudioStopReason | null {
  * Chunks the browser reported as dropped count when they exceed that (they may
  * have been the last ones).
  */
-export function trackGaps(chunks: readonly AudioChunkRow[], droppedChunks: number): number {
+function trackGaps(chunks: readonly AudioChunkRow[], droppedChunks: number): number {
   if (chunks.length === 0) return droppedChunks;
   let missing = 0;
   let breaks = 0;
@@ -208,7 +208,7 @@ export async function derivativeSummary(
 export function speechSegmentsOf(
   store: Store,
   sessionId: string,
-): { segments: Array<SpeechSegmentRow & { participantCode: string | null; engineVersion: string }> } {
+): Array<SpeechSegmentRow & { participantCode: string | null; engineVersion: string }> {
   const out: Array<SpeechSegmentRow & { participantCode: string | null; engineVersion: string }> = [];
   const list = store.listAudioDerivatives(sessionId, { kind: "speech_segments" });
   // a seat whose segments were erased is not named in the others' overlaps either (it would show when they spoke)
@@ -225,5 +225,5 @@ export function speechSegmentsOf(
       });
   }
   out.sort((a, b) => a.startTs - b.startTs || a.seat - b.seat);
-  return { segments: out };
+  return out;
 }

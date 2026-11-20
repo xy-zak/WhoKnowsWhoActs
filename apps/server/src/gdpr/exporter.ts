@@ -109,7 +109,7 @@ function writeExport(
   const tracks = trackViews(store, sessionId).sort(
     (a, b) => a.row.seat - b.row.seat || a.row.startedServerTs - b.row.startedServerTs,
   );
-  const speech = speechSegmentsOf(store, sessionId).segments;
+  const speech = speechSegmentsOf(store, sessionId);
   for (const t of tracks) codes.add(t.row.participantCode);
   for (const s of speech) if (s.participantCode) codes.add(s.participantCode);
   const anon = new Map<string, string>();

@@ -46,21 +46,18 @@
  *   do, so a neighbour's detector may pick up its leak; the coverage warning flags such stretches.
  */
 
-export { analyse, measureCalibration, quickCalibrationCheck } from "./analyse";
+export { analyse, quickCalibrationCheck } from "./analyse";
 export { type AnnotatedSegment, annotate, type PhaseChange } from "./annotate";
-export { type ClockFit, fitClock, trackSampleEnd } from "./clock";
+export { alignTrack, fitClock, trackSampleEnd } from "./clock";
 export { FeatureBuilder, type Vad } from "./features";
 export {
-  type CleanOptions,
   type PcmChunk,
-  type RenderOptions,
   type RenderTiming,
   renderAligned,
   renderClean,
   renderedSampleCount,
-  SequentialPcmReader,
   type TrackSource,
 } from "./render";
 export { maskToRuns, runsToMask } from "./smooth";
 export * from "./types";
-export { loadSilero, SILERO_NAME } from "./vad";
+export { loadSilero } from "./vad";

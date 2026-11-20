@@ -329,7 +329,7 @@ export class SessionManager {
   /** Close every open audio track (e.g. `interrupted` when the hub switches to another session). */
   closeAudioTracks(reason: "interrupted") {
     this.run(() => {
-      if (!this.isFinal) this.audio.closeAll(reason);
+      if (!this.isFinal) this.audio.closeOpen(reason);
     });
   }
 
@@ -801,7 +801,8 @@ export class SessionManager {
   close() {
     this.run(() => {
       this.requirePhase("game_complete");
-      this.audio.beforeFinal("closed");
+      // close the open tracks first: each AudioTrackStopped must be logged before the final event
+      this.audio.closeOpen("closed");
       this.append({ type: "SessionClosed", actorKind: "facilitator", payload: {} });
       this.dispose();
     });
@@ -810,7 +811,8 @@ export class SessionManager {
   abort(reason: string) {
     this.run(() => {
       if (this.isFinal) throw new CommandError("Session has already ended");
-      this.audio.beforeFinal("aborted");
+      // close the open tracks first: each AudioTrackStopped must be logged before the final event
+      this.audio.closeOpen("aborted");
       this.append({ type: "SessionAborted", actorKind: "facilitator", payload: { reason } });
       this.dispose();
     });
