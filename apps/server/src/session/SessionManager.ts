@@ -38,6 +38,7 @@ import {
   type OnboardingStep,
   onboardingStepsFor,
   type PayloadOf,
+  type PlayerMessage,
   pairedP,
   parseSessionConfig,
   parseTelemetryItem,
@@ -861,16 +862,7 @@ export class SessionManager {
     return s;
   }
 
-  submitConsent(
-    seat: number,
-    msg: {
-      formVersion: string;
-      textSha256: string;
-      answers: Record<string, boolean>;
-      durationMs: number;
-      clientTs: number;
-    },
-  ) {
+  submitConsent(seat: number, msg: PlayerMessage<"consent:submit">) {
     this.run(() => {
       const s = this.requireStep(seat, "consent");
       if (s.consent === "declined") throw new CommandError("Consent was declined; ask the facilitator");
@@ -900,10 +892,7 @@ export class SessionManager {
     });
   }
 
-  submitDemographics(
-    seat: number,
-    msg: { formVersion: string; answers: Record<string, string>; durationMs: number; clientTs: number },
-  ) {
+  submitDemographics(seat: number, msg: PlayerMessage<"demographics:submit">) {
     this.run(() => {
       this.requireStep(seat, "demographics");
       const form = this.onboarding.demographics;
@@ -928,7 +917,7 @@ export class SessionManager {
     });
   }
 
-  acknowledgeBriefing(seat: number, msg: { textSha256: string; durationMs: number; clientTs: number }) {
+  acknowledgeBriefing(seat: number, msg: PlayerMessage<"briefing:ack">) {
     this.run(() => {
       this.requireStep(seat, "briefing");
       if (msg.textSha256 !== this.onboarding.briefing.sha256) {
@@ -1059,7 +1048,7 @@ export class SessionManager {
    * Player: ready for the calibration (part 2 of "Mic check & calibration"), so its turns never start
    * by surprise. When this was the last recorded seat, the calibration starts (see run).
    */
-  sayCalibrationReady(seat: number, msg: { clientTs: number }) {
+  sayCalibrationReady(seat: number, msg: PlayerMessage<"calibration:ready">) {
     this.run(() => {
       this.requireAudio();
       const s = this.requireSeat(seat);
@@ -1187,10 +1176,7 @@ export class SessionManager {
     return (this.lastClientSeq.get(seat) ?? 0) + 1;
   }
 
-  intent(
-    seat: number,
-    msg: { clientSeq: number; kind: ActionKind; regionId: string; clientTs: number },
-  ): IntentAck {
+  intent(seat: number, msg: PlayerMessage<"intent">): IntentAck {
     return this.run(() => {
       const last = this.lastClientSeq.get(seat) ?? 0;
       if (msg.clientSeq <= last) {
@@ -1225,10 +1211,7 @@ export class SessionManager {
     if (cache.size > ACK_CACHE_SIZE) cache.delete(cache.keys().next().value!);
   }
 
-  private processIntent(
-    seat: number,
-    msg: { clientSeq: number; kind: ActionKind; regionId: string; clientTs: number },
-  ): IntentAck {
+  private processIntent(seat: number, msg: PlayerMessage<"intent">): IntentAck {
     const st = this.state;
     const v = validateIntent(st, seat, { kind: msg.kind, regionId: msg.regionId });
     if (!v.ok) {
