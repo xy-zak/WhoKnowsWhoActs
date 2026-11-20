@@ -211,15 +211,12 @@ export class Store {
   /* ─────────── sessions ─────────── */
 
   insertSession(row: Omit<SessionRow, "updated_wall" | "condition">) {
-    this.db
-      .prepare(
-        `INSERT INTO sessions (id, created_wall, scenario_id, scenario_version, scenario_hash, status, condition, tags_json,
-          notes, config_json, harness_version, git_commit, updated_wall)
-         VALUES (@id, @created_wall, @scenario_id, @scenario_version, @scenario_hash, @status, @condition, @tags_json,
-          @notes, @config_json, @harness_version, @git_commit, @created_wall)`,
-      )
+    insert(this.db, "sessions", {
+      ...row,
       // `condition` is the pre-v3 column; it keeps a readable copy of the tags
-      .run({ ...row, condition: (JSON.parse(row.tags_json) as string[]).join(", ") });
+      condition: (JSON.parse(row.tags_json) as string[]).join(", "),
+      updated_wall: row.created_wall,
+    });
   }
 
   setSessionStatus(id: string, status: string) {

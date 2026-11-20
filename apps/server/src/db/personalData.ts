@@ -32,7 +32,7 @@ import {
 import { fileBytes, isAudioDerivativeKind } from "../audio/records";
 import { sha256 } from "../content";
 import { nowTs, wall } from "../runtime";
-import { compactAfterDelete, fromRow } from "./database";
+import { compactAfterDelete, fromRow, insert } from "./database";
 import type { AudioDeletionRow, AudioTrackRowStatus, Store } from "./store";
 
 /* ─────────────────────────── the registry ─────────────────────────── */
@@ -353,15 +353,18 @@ export class PersonalDataMap {
           );
         }
       }
-      db.prepare(
-        "INSERT INTO erasures (code_sha256, requested_wall, executed_wall, sessions_json, rows_json, note) VALUES (?, ?, ?, ?, ?, ?)",
-      ).run(
-        sha256(code),
-        requested,
-        wall(nowTs()),
-        JSON.stringify(found.occurrences.map((o) => ({ sessionId: o.sessionId, seat: o.seat }))),
-        JSON.stringify({ ...rows, audioFiles: files.length }),
-        note,
+      insert(
+        db,
+        "erasures",
+        {
+          codeSha256: sha256(code),
+          requestedWall: requested,
+          executedWall: wall(nowTs()),
+          sessions: found.occurrences.map((o) => ({ sessionId: o.sessionId, seat: o.seat })),
+          rows: { ...rows, audioFiles: files.length },
+          note,
+        },
+        ["sessions", "rows"],
       );
       return files;
     });
@@ -473,17 +476,19 @@ export class PersonalDataMap {
         const n = db.prepare(`DELETE FROM ${t.table} WHERE ${t.ofSession}`).run(sessionId).changes;
         if (t.counts.session) rows[t.counts.session] = n;
       }
-      db.prepare(
-        `INSERT INTO session_deletions (session_id, deleted_wall, created_wall, rows_json, code_hashes_json, exports_json, note)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      ).run(
-        sessionId,
-        wall(nowTs()),
-        row.created_wall,
-        JSON.stringify(rows),
-        JSON.stringify(codes.sort()),
-        JSON.stringify(exportPaths),
-        opts.note ?? "",
+      insert(
+        db,
+        "session_deletions",
+        {
+          sessionId,
+          deletedWall: wall(nowTs()),
+          createdWall: row.created_wall,
+          rows,
+          codeHashes: codes.sort(),
+          exports: exportPaths,
+          note: opts.note ?? "",
+        },
+        ["rows", "codeHashes", "exports"],
       );
       return [];
     });
