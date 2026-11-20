@@ -1,7 +1,6 @@
 import { type PlayerView, STEP_LABEL } from "@wkwa/shared";
-import { type ReactNode, useState } from "react";
+import type { ReactNode } from "react";
 import { type IconName, Panel, type StepDef, Stepper } from "../ui";
-import type { PlayerConnection } from "./connection";
 
 /** Onboarding wayfinding: the steps this session uses, plus READY. */
 export function onboardingSteps(v: PlayerView): StepDef[] {
@@ -69,20 +68,4 @@ export function Centered({
       </Panel>
     </div>
   );
-}
-
-/** `[busy, submit]`: `submit(fn)` runs `fn` with `busy` set and shows a thrown error as a toast. */
-export function useSubmit(conn: PlayerConnection) {
-  const [busy, setBusy] = useState(false);
-  const submit = async (fn: () => Promise<unknown>) => {
-    setBusy(true);
-    try {
-      await fn();
-    } catch (e) {
-      conn.showToast((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  };
-  return [busy, submit] as const;
 }

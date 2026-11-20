@@ -32,6 +32,7 @@ import {
   type StepDef,
   stepGlyph,
   stepNum,
+  useBusy,
   useConfirm,
   useShortcuts,
 } from "../../ui";
@@ -184,7 +185,7 @@ export function SetupStage({ conn }: { conn: FacilitatorConnection }) {
   const [scenarios, setScenarios] = useState<ScenarioInfo[]>([]);
   const [draft, setDraftState] = useState<Draft | null>(loadDraft);
   const [step, setStep] = useState<number>(() => (lobby ? CONNECT : (loadDraft()?.reached ?? 0)));
-  const [busy, setBusy] = useState(false);
+  const [busy, run] = useBusy();
   const [keySheet, setKeySheet] = useState(false);
   const [info, setInfo] = useState<ServerInfo | null>(null);
   const urls = info?.playerUrls ?? [];
@@ -318,10 +319,9 @@ export function SetupStage({ conn }: { conn: FacilitatorConnection }) {
     )?.focus({ preventScroll: true });
   }, [step]);
 
-  const create = async () => {
+  const create = () => {
     if (!draft || !("config" in final)) return;
-    setBusy(true);
-    try {
+    return run(async () => {
       await conn.cmd(
         "session:create",
         { scenarioId: draft.scenarioId, config: final.config, notes: draft.notes },
@@ -330,22 +330,15 @@ export function SetupStage({ conn }: { conn: FacilitatorConnection }) {
       clearDraft();
       setDraftState(emptyDraft(final.config));
       setStep(CONNECT);
-    } catch {
-    } finally {
-      setBusy(false);
-    }
+    });
   };
 
-  const startOnboarding = async () => {
-    setBusy(true);
-    try {
-      if (simulated) await conn.cmd("simulation:start", {}, "Simulation started — now LIVE");
-      else await conn.cmd("onboarding:start", {}, "Onboarding started — now LIVE");
-    } catch {
-    } finally {
-      setBusy(false);
-    }
-  };
+  const startOnboarding = () =>
+    run(() =>
+      simulated
+        ? conn.cmd("simulation:start", {}, "Simulation started — now LIVE")
+        : conn.cmd("onboarding:start", {}, "Onboarding started — now LIVE"),
+    );
 
   const next = () => {
     if (!canNext(step) || busy) return;

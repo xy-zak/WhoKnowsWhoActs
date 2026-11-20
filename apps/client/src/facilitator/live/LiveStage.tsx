@@ -30,6 +30,7 @@ import {
   type StepDef,
   Stepper,
   TextSubmit,
+  useBusy,
   useConfirm,
   useShortcuts,
 } from "../../ui";
@@ -416,23 +417,18 @@ function WrapUp({
   const [step, setStep] = useState(0);
   const [cardsDone, setCardsDone] = useState(false);
   const [exported, setExported] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [busy, run] = useBusy();
   const id = st.sessionId!;
   const key = steps[step]!.key;
   const last = steps.length - 1;
   const audio = useAudioCheck(conn, st);
   const uploading = audio?.lines.some((l) => l.kind === "upload") ?? false;
-  const doExport = async () => {
-    setBusy(true);
-    const r = await conn
-      .api<{ dir: string }>(`/api/sessions/${id}/export`, { method: "POST" })
-      .catch(() => null);
-    setBusy(false);
-    if (r) {
+  const doExport = () =>
+    run(async () => {
+      const r = await conn.api<{ dir: string }>(`/api/sessions/${id}/export`, { method: "POST" });
       setExported(r.dir);
       conn.toast(simulated ? "Simulation export written" : "Standard export written");
-    }
-  };
+    });
   const canNext = key === "cards" ? cardsDone : key === "export" ? Boolean(exported) : true;
   const next = () => {
     if (!canNext) return;

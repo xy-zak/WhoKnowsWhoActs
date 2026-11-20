@@ -23,9 +23,9 @@ import {
   Popup,
   SeatDot,
   StatusTag,
+  useBusy,
   useNow,
 } from "../ui";
-import { useSubmit } from "./chrome";
 import type { PlayerConnection } from "./connection";
 import { RecordingProblem, RecordingTag } from "./RecordingIndicator";
 
@@ -45,7 +45,7 @@ export function Game({ conn, view }: { conn: PlayerConnection; view: PlayerView 
   const [tool, setToolState] = useState<ActionKind | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [draft, setDraft] = useState<{ kind: ActionKind; regionId: string } | null>(null);
-  const [busy, run] = useSubmit(conn);
+  const [busy, run] = useBusy((e) => conn.showToast(e.message));
   const inspectOpenedAt = useRef<number | null>(null);
   const hoverStart = useRef<{ id: string; t: number } | null>(null);
 

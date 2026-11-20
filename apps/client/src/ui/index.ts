@@ -25,6 +25,7 @@ export {
   type RecStateMeta,
   recStateMeta,
 } from "./audioMeta";
+export { useBusy } from "./busy";
 export * from "./components";
 export { DisplaySettings, FONT_STACK } from "./DisplaySettings";
 export { ICONS, Icon } from "./Icon";

@@ -41,6 +41,7 @@ import {
   RecTag,
   SeatDot,
   StatusTag,
+  useBusy,
   useConfirm,
 } from "../ui";
 import {
@@ -86,18 +87,13 @@ export function BindEditor({ conn, dash }: { conn: FacilitatorConnection; dash: 
   const free = dash.terminals.filter((t) => t.connected && t.seat === null);
   const bound = seats.filter((s) => s.bound).length;
   const fakes = fakeSeats(st).length;
-  const [busy, setBusy] = useState(false);
+  const [busy, run] = useBusy();
   /** A fake player (test client) for one seat, at the normal pace. */
-  const addFake = (seat: number) => {
-    setBusy(true);
-    void conn
-      .cmd("fake:add", { seats: [seat], pace: "normal" })
-      .then(
-        (r) => conn.toast(`Fake player in seat ${r.seats.join(", ")}`),
-        () => {},
-      )
-      .finally(() => setBusy(false));
-  };
+  const addFake = (seat: number) =>
+    run(async () => {
+      const r = await conn.cmd("fake:add", { seats: [seat], pace: "normal" });
+      conn.toast(`Fake player in seat ${r.seats.join(", ")}`);
+    });
   return (
     <div className="col">
       <div className="row">
