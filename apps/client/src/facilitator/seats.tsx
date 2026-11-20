@@ -359,7 +359,6 @@ export function LabelsEditor({
   const inForce = st.labelPairing ? pairingName(st.labelPairing) : "";
   // biome-ignore lint/correctness/useExhaustiveDependencies: re-sync when the pairing changes on the server
   useEffect(() => setChosen(st.labelPairing), [inForce]);
-  const pairing = chosen;
   // the matrix shows the pairing in force, or the aligned one just chosen (a drawn D-number is known once saved)
   const shown: LabelPairing | null =
     st.labelPairing && (!chosen || chosen.mode === st.labelPairing.mode)
@@ -388,7 +387,7 @@ export function LabelsEditor({
   const setView = (seat: number, view: string) => {
     const next = { ...views, [seat]: view };
     setViews(next);
-    if (pairing) save(pairing, next);
+    if (chosen) save(chosen, next);
   };
 
   return (
@@ -399,7 +398,7 @@ export function LabelsEditor({
           <input
             type="radio"
             name="pairing-mode"
-            checked={pairing?.mode === "aligned"}
+            checked={chosen?.mode === "aligned"}
             onChange={() => save({ mode: "aligned", id: null })}
           />
           <span>
@@ -410,7 +409,7 @@ export function LabelsEditor({
           <input
             type="radio"
             name="pairing-mode"
-            checked={pairing?.mode === "dissociated"}
+            checked={chosen?.mode === "dissociated"}
             onChange={() => save({ mode: "dissociated", id: null })}
           />
           <span>
@@ -418,14 +417,14 @@ export function LabelsEditor({
             <span className="muted">— no seat holds the same letter, no two seats mirror each other</span>
           </span>
         </label>
-        {pairing?.mode === "dissociated" && st.labelPairing?.mode === "dissociated" && (
+        {chosen?.mode === "dissociated" && st.labelPairing?.mode === "dissociated" && (
           <Field
             label="Which dissociative pairing (D1–D6)"
             hint="Choosing Dissociated draws one at random (seed logged). The number is stored with the labels and in the exports."
           >
             <select
               aria-label="Dissociative pairing"
-              value={pairing.id ?? ""}
+              value={chosen.id ?? ""}
               onChange={(e) =>
                 save({ mode: "dissociated", id: e.target.value ? Number(e.target.value) : null })
               }

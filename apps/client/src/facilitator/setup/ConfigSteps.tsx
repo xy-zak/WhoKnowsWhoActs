@@ -656,12 +656,12 @@ export function PlayersStep({ d, upd }: { d: Draft; upd: Upd }) {
 export function OnboardingStep({
   d,
   upd,
-  httpsEnabled = null,
+  httpsEnabled,
 }: {
   d: Draft;
   upd: Upd;
   /** The server serves HTTPS (GET /api/server-info `tls.enabled`); null while unknown. */
-  httpsEnabled?: boolean | null;
+  httpsEnabled: boolean | null;
 }) {
   const confirm = useConfirm();
   const o = d.config.onboarding;
