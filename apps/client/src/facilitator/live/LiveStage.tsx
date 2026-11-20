@@ -51,25 +51,25 @@ function lifecycle(st: ReadonlyGameState): {
   current: number;
   done: (i: number) => boolean;
 } {
-  const simulated = isSimulated(st);
-  const steps: StepDef[] = [
-    simulated ? { key: "onboarding", label: "Agents" } : { key: "onboarding", label: "Onboarding" },
-  ];
+  const steps: StepDef[] = [{ key: "onboarding", label: isSimulated(st) ? "Agents" : "Onboarding" }];
   for (let r = 1; r <= st.config.roundCount; r++) steps.push({ key: `r${r}`, label: `Round ${r}` });
   steps.push({ key: "wrapup", label: "Wrap-up" });
   const last = steps.length - 1;
-  let current = 0;
-  if (st.phase === "round_active") current = st.round;
-  else if (st.phase === "round_complete")
-    current = st.round; // round shown ✓, next is upcoming
-  else if (st.phase === "game_complete") current = last;
+  const current =
+    st.phase === "round_active"
+      ? st.round
+      : st.phase === "round_complete"
+        ? Math.min(st.round + 1, last) // round shown ✓, next is upcoming
+        : st.phase === "game_complete"
+          ? last
+          : 0;
   const done = (i: number) => {
     if (i === 0) return st.round > 0 || st.phase === "game_complete";
     if (i === last) return false;
     const rec = st.rounds.find((x) => x.round === i);
     return Boolean(rec?.endedTs);
   };
-  return { steps, current: st.phase === "round_complete" ? Math.min(st.round + 1, last) : current, done };
+  return { steps, current, done };
 }
 
 /* ─────────────────────────── NEXT panel ─────────────────────────── */
