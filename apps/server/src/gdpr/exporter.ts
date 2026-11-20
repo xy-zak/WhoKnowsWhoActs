@@ -10,6 +10,7 @@ import {
   fakeSeats,
   generateAnonymousId,
   initialState,
+  isEvent,
   mapScoreOf,
   type PayloadOf,
   pairingName,
@@ -20,7 +21,6 @@ import {
   reduceEvents,
   renderCodebook,
   type SessionExportResult,
-  type StoredEvent,
   type StoredTelemetry,
 } from "@wkwa/shared";
 import { speechSegmentsOf, trackViews } from "../audio/records";
@@ -168,21 +168,8 @@ function writeExport(
     acks.set(t.seat, list);
   }
   for (const list of acks.values()) list.sort((a, b) => a.clientTs - b.clientTs);
-  const lastAckBefore = (seat: number, ts: number): number | null => {
-    const list = acks.get(seat);
-    if (!list) return null;
-    let lo = 0;
-    let hi = list.length - 1;
-    let found: number | null = null;
-    while (lo <= hi) {
-      const mid = (lo + hi) >> 1;
-      if (list[mid]!.clientTs <= ts) {
-        found = list[mid]!.clientTs;
-        lo = mid + 1;
-      } else hi = mid - 1;
-    }
-    return found;
-  };
+  const lastAckBefore = (seat: number, ts: number): number | null =>
+    acks.get(seat)?.findLast((t) => t.clientTs <= ts)?.clientTs ?? null;
   const revokedBy = new Map<number, number>();
   for (const e of events) if (e.type === "ActionRevoked") revokedBy.set(e.payload.targetSeq, e.seq);
   const actions: Array<Record<string, unknown>> = [];
@@ -276,10 +263,8 @@ function writeExport(
   );
 
   /* consent.csv / demographics.csv — dynamic columns from the answers actually given */
-  const consentEvents = events.filter(
-    (e): e is Extract<StoredEvent, { type: "ConsentRecorded" }> => e.type === "ConsentRecorded",
-  );
-  const consentItems = unique(consentEvents.flatMap((e) => Object.keys(e.payload.answers)));
+  const consentEvents = events.filter(isEvent("ConsentRecorded"));
+  const consentItems = [...new Set(consentEvents.flatMap((e) => Object.keys(e.payload.answers)))];
   csv(
     "consent.csv",
     consentEvents.map((e) => ({
@@ -296,10 +281,8 @@ function writeExport(
     })),
     { consentItems },
   );
-  const demoEvents = events.filter(
-    (e): e is Extract<StoredEvent, { type: "DemographicsSubmitted" }> => e.type === "DemographicsSubmitted",
-  );
-  const demographicQuestions = unique(demoEvents.flatMap((e) => Object.keys(e.payload.answers)));
+  const demoEvents = events.filter(isEvent("DemographicsSubmitted"));
+  const demographicQuestions = [...new Set(demoEvents.flatMap((e) => Object.keys(e.payload.answers)))];
   csv(
     "demographics.csv",
     demoEvents.map((e) => ({
@@ -368,9 +351,7 @@ function writeExport(
   );
 
   /* session.json */
-  const created = events.find(
-    (e): e is Extract<StoredEvent, { type: "SessionCreated" }> => e.type === "SessionCreated",
-  );
+  const created = events.find(isEvent("SessionCreated"));
   const session = {
     exportId: id,
     kind,
@@ -384,10 +365,7 @@ function writeExport(
     notes: row.notes,
     harness: created?.payload.harness ?? { version: row.harness_version, gitCommit: row.git_commit },
     rounds: final.rounds.map((r) => {
-      const done = events.find(
-        (e): e is Extract<StoredEvent, { type: "RoundCompleted" }> =>
-          e.type === "RoundCompleted" && e.payload.round === r.round,
-      );
+      const done = events.filter(isEvent("RoundCompleted")).find((e) => e.payload.round === r.round);
       return {
         round: r.round,
         startedWall: wall(r.startedTs),
@@ -457,10 +435,6 @@ function writeExport(
   });
 
   return { exportId: id, kind, sessionId, dir, files: written, participants: codes.size };
-}
-
-function unique(xs: string[]): string[] {
-  return [...new Set(xs)];
 }
 
 /** Read back a manifest (used by tests and the CLI). */
