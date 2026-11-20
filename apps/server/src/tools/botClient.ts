@@ -22,7 +22,8 @@ import {
   type PlayerView,
   randomPolicy,
   STOP_REASON_FOR,
-  type StoredEvent,
+  samplesToMs,
+  seededRandom,
   type TelemetryItem,
 } from "@wkwa/shared";
 import { io, type Socket } from "socket.io-client";
@@ -40,6 +41,42 @@ function emitUntyped(emitter: { emit: unknown }, name: string, payload: unknown,
   (emitter.emit as UntypedEmit).call(emitter, name, payload, ack);
 }
 
+/** Socket.IO's on/off for a message name passed as a string (see UntypedEmit). */
+type UntypedListeners<T> = {
+  on(name: string, h: (m: T) => void): unknown;
+  off(name: string, h: (m: T) => void): unknown;
+};
+
+/**
+ * Resolves with `current` or the next `name` message that matches `pred`; rejects with
+ * `timeoutMessage()` after `timeoutMs`.
+ */
+function waitForMsg<T>(
+  socket: unknown,
+  name: string,
+  current: T | null,
+  pred: (m: T) => boolean,
+  timeoutMs: number,
+  timeoutMessage: () => string,
+): Promise<T> {
+  const s = socket as UntypedListeners<T>;
+  return new Promise((resolve, reject) => {
+    if (current && pred(current)) return resolve(current);
+    const t = setTimeout(() => {
+      s.off(name, h);
+      reject(new Error(timeoutMessage()));
+    }, timeoutMs);
+    const h = (m: T) => {
+      if (pred(m)) {
+        clearTimeout(t);
+        s.off(name, h);
+        resolve(m);
+      }
+    };
+    s.on(name, h);
+  });
+}
+
 /**
  * Simulated player. Used by `npm run bots` (to fill empty seats during
  * development or a pilot) and by the integration tests.
@@ -53,15 +90,9 @@ export interface BotOptions {
   maxDelayMs?: number;
   /** Emit synthetic UI telemetry (hover/inspect/state acks). */
   telemetry?: boolean;
-  /** Called for every received state. */
-  onState?: (v: PlayerView) => void;
   log?: (msg: string) => void;
-  /** Probability per turn of proposing (vs deciding) when both are available. */
-  proposeBias?: number;
   /** Take propose/decide actions automatically during rounds (default true). */
   autoPlay?: boolean;
-  /** Go through onboarding automatically (default true; tests that drive each step themselves turn it off). */
-  autoOnboard?: boolean;
   /** Use this terminal key instead of a random one (the server registers fake players' keys before they connect). */
   terminalKey?: string;
   /** Re-claim a seat with this token on connect (fake players restored after a server restart). */
@@ -79,8 +110,6 @@ export interface BotOptions {
    * session with audio declines the (required) audio item and waits, so it never takes part.
    */
   audio?: boolean;
-  /** Level of the bot's synthetic speech (dBFS; default −18 dB minus 3 dB per seat after the first). */
-  voiceDb?: number;
   /** Length of one uploaded chunk (ms; default 5000, at most 6000). Tests use shorter chunks. */
   audioChunkMs?: number;
 }
@@ -151,7 +180,8 @@ export class Bot {
   private declinedLogged = false;
   /** Calibration turns seen in the state pushes (server time). */
   private turns: Array<{ seat: number; from: number; to: number }> = [];
-  private rng = 0x9e3779b9;
+  /** Synthetic noise: test-only, any decent generator will do. */
+  private readonly random = seededRandom("bot-noise");
   readonly audioStats: BotAudioStats = { tracks: 0, chunksAcked: 0, rejected: 0, stopReasons: [] };
 
   constructor(private readonly opts: BotOptions) {
@@ -189,7 +219,6 @@ export class Bot {
     this.socket.on("state", (v) => {
       this.view = v;
       if (opts.record !== false) this.states.push(v);
-      opts.onState?.(v);
       if (opts.telemetry !== false) this.track("state_received", { seq: v.seq });
       this.syncAudio(v);
       this.schedule();
@@ -209,21 +238,14 @@ export class Bot {
   }
 
   waitFor(pred: (v: PlayerView) => boolean, timeoutMs = 10_000): Promise<PlayerView> {
-    return new Promise((resolve, reject) => {
-      if (this.view && pred(this.view)) return resolve(this.view);
-      const t = setTimeout(() => {
-        this.socket.off("state", h);
-        reject(new Error(`timeout waiting (seat ${this.seat}, phase ${this.view?.phase})`));
-      }, timeoutMs);
-      const h = (v: PlayerView) => {
-        if (pred(v)) {
-          clearTimeout(t);
-          this.socket.off("state", h);
-          resolve(v);
-        }
-      };
-      this.socket.on("state", h);
-    });
+    return waitForMsg(
+      this.socket,
+      "state",
+      this.view,
+      pred,
+      timeoutMs,
+      () => `timeout waiting (seat ${this.seat}, phase ${this.view?.phase})`,
+    );
   }
 
   async waitForTerminal(timeoutMs = 5000): Promise<number> {
@@ -297,9 +319,8 @@ export class Bot {
   }
 
   private async decide(v: PlayerView): Promise<boolean> {
-    if (v.phase === "onboarding" && this.opts.autoOnboard === false) return false;
     // part 2 of "Mic check & calibration" (also after a redo between rounds): say it is ready
-    if (v.audio.calibration.canSayReady && this.opts.autoOnboard !== false) {
+    if (v.audio.calibration.canSayReady) {
       const ack = await this.emit("calibration:ready", { clientTs: Date.now() });
       this.recordAck(ack);
       return (ack as { ok?: boolean }).ok === true;
@@ -368,7 +389,7 @@ export class Bot {
       // the same random play as the `random` agent policy of simulated sessions
       const action = randomPolicy.act(v, {
         seat: v.me.seat,
-        params: { proposeBias: this.opts.proposeBias ?? 0.5 },
+        params: { proposeBias: 0.5 },
         random: Math.random,
         memory: {},
         now: Date.now(),
@@ -396,8 +417,9 @@ export class Bot {
 
   /* ─────────── synthetic audio (opts.audio) ─────────── */
 
+  /** Level of the bot's synthetic speech (dBFS): −18 dB minus 3 dB per seat after the first. */
   private voiceDb(): number {
-    return this.opts.voiceDb ?? -18 - 3 * ((this.seat ?? 1) - 1);
+    return -18 - 3 * ((this.seat ?? 1) - 1);
   }
 
   /** Start or stop the synthetic recording as the server's `audio.record` says. */
@@ -470,7 +492,7 @@ export class Bot {
       chunks: track.nextSeq,
       samples: track.nextSample,
       droppedChunks: 0,
-      clientTs: track.t0 + (track.nextSample * 1000) / AUDIO_SAMPLE_RATE,
+      clientTs: track.t0 + samplesToMs(track.nextSample),
       clockOffsetMs: 0,
     });
   }
@@ -491,7 +513,7 @@ export class Bot {
       seq: track.nextSeq++,
       startSample,
       sampleCount: n,
-      clientTs: track.t0 + (startSample * 1000) / AUDIO_SAMPLE_RATE,
+      clientTs: track.t0 + samplesToMs(startSample),
       clockOffsetMs: 0,
       rmsDb,
       peakDb,
@@ -508,16 +530,6 @@ export class Bot {
         pendingBytes: 0,
       });
     }
-  }
-
-  private random(): number {
-    // xorshift32: cheap and good enough for noise
-    let x = this.rng;
-    x ^= x << 13;
-    x ^= x >>> 17;
-    x ^= x << 5;
-    this.rng = x >>> 0;
-    return this.rng / 4294967296;
   }
 
   /**
@@ -542,11 +554,11 @@ export class Bot {
     let sumSquares = 0;
     let peak = 0;
     // only the calibration turns that overlap this chunk
-    const from = t0 + (startSample * 1000) / AUDIO_SAMPLE_RATE;
-    const to = t0 + ((startSample + n) * 1000) / AUDIO_SAMPLE_RATE;
+    const from = t0 + samplesToMs(startSample);
+    const to = t0 + samplesToMs(startSample + n);
     const turns = this.turns.filter((x) => x.from < to && x.to > from);
     for (let i = 0; i < n; i++) {
-      const t = t0 + ((startSample + i) * 1000) / AUDIO_SAMPLE_RATE;
+      const t = t0 + samplesToMs(startSample + i);
       let amp = 0;
       const turn = turns.length > 0 ? turns.find((x) => t >= x.from && t < x.to) : undefined;
       if (turn) amp = turn.seat === me ? voice : leak;
@@ -596,11 +608,6 @@ export class Bot {
     return this.audioChain;
   }
 
-  /** Stop recording now (uploads the rest of the track and its stop). */
-  stopAudio(reason: AudioStopReason = "client_stop") {
-    this.stopTrack(reason);
-  }
-
   stop() {
     this.stopped = true;
     if (this.timer) clearTimeout(this.timer);
@@ -614,7 +621,6 @@ export class Bot {
 export class FacilitatorClient {
   readonly socket: FacilitatorSocket;
   dashboard: DashboardMsg | null = null;
-  events: StoredEvent[] = [];
 
   constructor(url: string, token?: string, opts: { insecureTls?: boolean } = {}) {
     this.socket = io(`${url}/facilitator`, {
@@ -625,10 +631,6 @@ export class FacilitatorClient {
     });
     this.socket.on("dashboard", (d) => {
       this.dashboard = d;
-    });
-    this.socket.on("events", (m) => {
-      if (m.reset) this.events = [];
-      this.events.push(...m.events);
     });
   }
 
@@ -654,21 +656,14 @@ export class FacilitatorClient {
   }
 
   waitForDashboard(pred: (d: DashboardMsg) => boolean, timeoutMs = 10_000): Promise<DashboardMsg> {
-    return new Promise((resolve, reject) => {
-      if (this.dashboard && pred(this.dashboard)) return resolve(this.dashboard);
-      const t = setTimeout(() => {
-        this.socket.off("dashboard", h);
-        reject(new Error(`timeout waiting for dashboard (phase ${this.dashboard?.state?.phase})`));
-      }, timeoutMs);
-      const h = (d: DashboardMsg) => {
-        if (pred(d)) {
-          clearTimeout(t);
-          this.socket.off("dashboard", h);
-          resolve(d);
-        }
-      };
-      this.socket.on("dashboard", h);
-    });
+    return waitForMsg(
+      this.socket,
+      "dashboard",
+      this.dashboard,
+      pred,
+      timeoutMs,
+      () => `timeout waiting for dashboard (phase ${this.dashboard?.state?.phase})`,
+    );
   }
 
   close() {
