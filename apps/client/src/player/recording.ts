@@ -1,5 +1,4 @@
 import {
-  type AudioLevel,
   type AudioStartReason,
   audioSendResult,
   clampDb,
@@ -11,9 +10,7 @@ import {
   type TelemetryPayloadOf,
 } from "@wkwa/shared";
 import type {
-  AudioChunk,
   AudioStartInfo,
-  AudioStopInfo,
   EngineCaptureSettings,
   MicLevel,
   MicRecorder,
@@ -21,6 +18,7 @@ import type {
   RecorderStatus,
   SendResult,
 } from "../audio";
+import { safeStorage } from "../net/storage";
 import { Store } from "../net/store";
 import type { RecState } from "../ui/audioMeta";
 import {
@@ -75,9 +73,6 @@ export type RecorderLike = Pick<
   | "whenSent"
 >;
 
-/** The `audio:level` message (the shared AudioLevel schema; it has no defaults or transforms). */
-export type AudioLevelPayload = ReturnType<(typeof AudioLevel)["parse"]>;
-
 export type AudioUploadEvent = "audio:start" | "audio:chunk" | "audio:stop";
 
 export interface RecordingDeps {
@@ -92,7 +87,7 @@ export interface RecordingDeps {
     signal?: AbortSignal,
   ): Promise<PlayerAcks[K] | undefined>;
   /** Volatile `audio:level` (dropped when the network is busy). */
-  level(payload: AudioLevelPayload): void;
+  level(payload: PlayerPayload<"audio:level">): void;
   /** Server-epoch time (ClockSync.now()). */
   now(): number;
   clockOffsetMs(): number;
@@ -149,22 +144,17 @@ export function needsClick(v: PlayerView | null, s: Pick<RecordingSnapshot, "sta
 
 /** A track was recorded for the seat in this tab (survives a reload: sessionStorage, a flag only). */
 const TRACKED_KEY = "wkwa.audio.tracked";
+const tabStore = safeStorage(() => sessionStorage);
 function trackedBefore(): boolean {
-  try {
-    return sessionStorage.getItem(TRACKED_KEY) === "1";
-  } catch {
-    return false;
-  }
+  return tabStore.getItem(TRACKED_KEY) === "1";
 }
 /** A new session on this seat: its first capture is the mic check again. */
 export function forgetTracked() {
   setTrackedBefore(false);
 }
 function setTrackedBefore(v: boolean) {
-  try {
-    if (v) sessionStorage.setItem(TRACKED_KEY, "1");
-    else sessionStorage.removeItem(TRACKED_KEY);
-  } catch {}
+  if (v) tabStore.setItem(TRACKED_KEY, "1");
+  else tabStore.removeItem(TRACKED_KEY);
 }
 
 const round1 = (db: number) => Math.round(clampDb(db) * 10) / 10;
@@ -281,8 +271,9 @@ export class RecordingController {
       now: () => this.deps.now(),
       clockOffsetMs: () => this.deps.clockOffsetMs(),
       sendStart: (info, signal) => this.sendStart(info, signal),
-      sendChunk: (chunk, signal) => this.sendChunk(chunk, signal),
-      sendStop: (info, signal) => this.sendStop(info, signal),
+      sendChunk: (chunk, signal) => this.upload("audio:chunk", chunk, signal),
+      // the engine counts the track's dropped chunks itself (AudioStopInfo.droppedChunks)
+      sendStop: (info, signal) => this.upload("audio:stop", info, signal),
       onLevel: (l) => this.onLevel(l),
       onState: (_s, status) => this.onState(status),
     });
@@ -431,15 +422,14 @@ export class RecordingController {
 
   private async sendStart(info: AudioStartInfo, signal?: AbortSignal): Promise<SendResult> {
     this.store.set((s) => ({ ...s, contextSampleRate: info.context.sampleRate }));
-    return audioSendResult(await this.deps.send("audio:start", info, signal));
+    return this.upload("audio:start", info, signal);
   }
 
-  private async sendChunk(chunk: AudioChunk, signal?: AbortSignal): Promise<SendResult> {
-    return audioSendResult(await this.deps.send("audio:chunk", chunk, signal));
-  }
-
-  /** The engine counts the track's dropped chunks itself (AudioStopInfo.droppedChunks). */
-  private async sendStop(info: AudioStopInfo, signal?: AbortSignal): Promise<SendResult> {
-    return audioSendResult(await this.deps.send("audio:stop", info, signal));
+  private async upload<K extends AudioUploadEvent>(
+    event: K,
+    payload: PlayerPayload<K>,
+    signal?: AbortSignal,
+  ): Promise<SendResult> {
+    return audioSendResult(await this.deps.send(event, payload, signal));
   }
 }
