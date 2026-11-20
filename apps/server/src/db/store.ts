@@ -95,11 +95,9 @@ export interface NewAudioChunk {
   peakDb: number | null;
   /** Number of clipped samples. */
   clipped: number;
-  /** Payload bytes written to the file; defaults to sampleCount × 2 (s16 mono). Not stored per chunk. */
-  bytes?: number;
 }
 
-export interface AudioChunkRow extends Omit<NewAudioChunk, "bytes"> {
+export interface AudioChunkRow extends NewAudioChunk {
   serverWall: string;
 }
 
@@ -120,11 +118,10 @@ export interface NewAudioDerivative {
   data: unknown;
   params: Record<string, unknown>;
   engineVersion: string;
-  createdServerTs?: number;
 }
 
 /** A derivative as listed: no key, no data. */
-export interface AudioDerivativeRow extends Omit<NewAudioDerivative, "fileKey" | "data" | "createdServerTs"> {
+export interface AudioDerivativeRow extends Omit<NewAudioDerivative, "fileKey" | "data"> {
   hasKey: boolean;
   hasData: boolean;
   createdServerTs: number;
@@ -236,33 +233,21 @@ export class Store {
   }
 
   listSessions(): SessionSummary[] {
-    const rows = this.db
+    const fakes = this.fakeSeatsBySession();
+    return this.db
       .prepare(
-        `SELECT s.*, (SELECT count(*) FROM events e WHERE e.session_id = s.id) AS event_count,
+        `SELECT s.id, s.created_wall, s.updated_wall, s.scenario_id, s.scenario_version, s.status, s.tags_json, s.notes,
+                (SELECT count(*) FROM events e WHERE e.session_id = s.id) AS event_count,
                 (SELECT count(*) FROM telemetry t WHERE t.session_id = s.id) AS telemetry_count,
                 (SELECT count(*) FROM audio_tracks a WHERE a.session_id = s.id AND a.status != 'deleted') AS audio_tracks,
-                (SELECT ${AUDIO_MS_SQL} FROM audio_tracks a WHERE a.session_id = s.id AND a.status != 'deleted') AS audio_ms
+                (SELECT round(${AUDIO_MS_SQL}) FROM audio_tracks a WHERE a.session_id = s.id AND a.status != 'deleted') AS audio_ms
          FROM sessions s ORDER BY s.created_wall DESC`,
       )
-      .all() as Array<
-      SessionRow & { event_count: number; telemetry_count: number; audio_tracks: number; audio_ms: number }
-    >;
-    const fakes = this.fakeSeatsBySession();
-    return rows.map((r) => ({
-      id: r.id,
-      createdWall: r.created_wall,
-      updatedWall: r.updated_wall,
-      scenarioId: r.scenario_id,
-      scenarioVersion: r.scenario_version,
-      status: r.status,
-      tags: JSON.parse(r.tags_json ?? "[]") as string[],
-      notes: r.notes,
-      eventCount: r.event_count,
-      telemetryCount: r.telemetry_count,
-      fakeSeats: fakes.get(r.id) ?? [],
-      audioTracks: r.audio_tracks,
-      audioMs: Math.round(r.audio_ms),
-    }));
+      .all()
+      .map((r) => {
+        const s = fromRow<Omit<SessionSummary, "fakeSeats">>(r);
+        return { ...s, fakeSeats: fakes.get(s.id) ?? [] };
+      });
   }
 
   /** Which seats of each session are bound to a fake player, from its SeatBound / SeatUnbound events. */
@@ -382,9 +367,9 @@ export class Store {
     round: number,
     clockOffsetMs: number,
     items: TelemetryItem[],
-    ts = nowTs(),
   ): StoredTelemetry[] {
     const out: StoredTelemetry[] = [];
+    const ts = nowTs();
     const serverWall = wall(ts);
     this.db.transaction(() => {
       for (const it of items) {
@@ -486,15 +471,14 @@ export class Store {
         | undefined;
       if (!track) throw new Error(`Unknown audio track ${c.trackId}`);
       if (track.status === "deleted") throw new Error(`The audio of track ${c.trackId} was deleted`);
-      const { bytes: _bytes, ...chunk } = c;
-      const row: AudioChunkRow = { ...chunk, serverWall: wall(c.serverTs) };
+      const row: AudioChunkRow = { ...c, serverWall: wall(c.serverTs) };
       if (insert(this.db, "audio_chunks", row, [], "ON CONFLICT (track_id, seq) DO NOTHING").changes !== 1)
         return false;
       this.db
         .prepare(
           "UPDATE audio_tracks SET samples = samples + ?, chunks = chunks + 1, bytes = bytes + ? WHERE track_id = ?",
         )
-        .run(c.sampleCount, c.bytes ?? c.sampleCount * 2, c.trackId);
+        .run(c.sampleCount, c.sampleCount * 2, c.trackId); // s16 mono
       return true;
     })();
   }
@@ -516,7 +500,7 @@ export class Store {
   /* ─────────── audio derivatives ─────────── */
 
   insertAudioDerivative(d: NewAudioDerivative): AudioDerivativeRow {
-    const ts = d.createdServerTs ?? nowTs();
+    const ts = nowTs();
     const created = { ...d, createdServerTs: ts, createdWall: wall(ts) };
     insert(this.db, "audio_derivatives", created, ["sourceTracks", "data", "params"]);
     const { data: _data, ...row } = this.getAudioDerivative(d.derivativeId)!;
