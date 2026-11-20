@@ -151,7 +151,8 @@ export function tlsClientOpts(
   return opts.insecure || LOOPBACK_HOSTS.has(u.hostname) ? { rejectUnauthorized: false } : {};
 }
 
-const BOT_SETTINGS = {
+/** The processing flags a bot reports for its (synthetic) mic. */
+export const BOT_SETTINGS = {
   sampleRate: 48_000,
   echoCancellation: false,
   noiseSuppression: false,

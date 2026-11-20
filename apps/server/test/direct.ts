@@ -10,17 +10,12 @@ import { loadOnboardingContent, ScenarioLibrary } from "../src/content";
 import type { Store } from "../src/db/store";
 import { REPO_ROOT } from "../src/runtime";
 import { SessionManager } from "../src/session/SessionManager";
+import { BOT_SETTINGS } from "../src/tools/botClient";
 import { tempStore } from "./audioFixtures";
 
 export const CONFIG_DIR = path.join(REPO_ROOT, "config");
 export const SCENARIOS = new ScenarioLibrary(path.join(REPO_ROOT, "scenarios"));
-export const SETTINGS = {
-  sampleRate: 48_000,
-  echoCancellation: false,
-  noiseSuppression: false,
-  autoGainControl: false,
-  channelCount: 1,
-};
+export const SETTINGS = BOT_SETTINGS;
 export const ROUND = { rule: "quota" as const, quota: { propose: 1, decide: 1 }, timeLimitSec: null };
 
 export interface Direct {
@@ -121,9 +116,4 @@ export function finishOnboarding(m: SessionManager, seat: number) {
 export function toMicCheck(m: SessionManager, seat: number, audio = true, consentFirst = true) {
   if (consentFirst) consent(m, seat, audio);
   finishOnboarding(m, seat);
-}
-
-/** Every recorded seat says it is ready for the calibration; the last one starts it. */
-export function sayAllReady(m: SessionManager, seats: number[]) {
-  for (const s of seats) m.sayCalibrationReady(s, { clientTs: 0 });
 }
