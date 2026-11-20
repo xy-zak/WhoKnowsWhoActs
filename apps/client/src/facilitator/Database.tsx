@@ -1,4 +1,5 @@
 import {
+  type AudioSessionView,
   type ErasureEntry,
   type ErasureResult,
   type ExportRow,
@@ -34,7 +35,7 @@ import {
 } from "../ui";
 import type { FacilitatorConnection } from "./connection";
 import { AudioPopup } from "./database/AudioPopup";
-import { type AudioSessionView, audioCell, whenWall as when } from "./database/audioModel";
+import { audioCell, whenWall as when } from "./database/audioModel";
 
 /* REST responses (shared with the server); `InDb` rows carry the database they are in. */
 type SessionSummary = InDb<StoredSessionSummary>;

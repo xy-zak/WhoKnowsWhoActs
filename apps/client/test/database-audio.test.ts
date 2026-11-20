@@ -1,8 +1,7 @@
+import type { AttributionSummaryView, AudioSessionView, SeatAudioSummary } from "@wkwa/shared";
 import { describe, expect, it } from "vitest";
 import { PLACEHOLDER } from "../src/common/format";
 import {
-  type AttributionSummaryView,
-  type AudioSessionView,
   attributionBlock,
   audioCell,
   DELETE_SCOPES,
@@ -16,7 +15,6 @@ import {
   type JobState,
   jobReducer,
   progressCells,
-  type SeatAudio,
   scopeSentence,
   shortSha,
   talkBars,
@@ -24,7 +22,7 @@ import {
   timelineSpan,
 } from "../src/facilitator/database/audioModel";
 
-const seat = (n: number, over: Partial<SeatAudio> = {}): SeatAudio => ({
+const seat = (n: number, over: Partial<SeatAudioSummary> = {}): SeatAudioSummary => ({
   seat: n,
   tracks: 2,
   durationMs: 60_000,

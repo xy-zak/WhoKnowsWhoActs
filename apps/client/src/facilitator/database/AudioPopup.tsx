@@ -1,3 +1,12 @@
+import type {
+  AttributionJobView,
+  AudioDeleteResult,
+  AudioDeletionScope,
+  AudioExportRequestKind,
+  AudioExportResult,
+  AudioSessionView,
+  SpeechSegmentsView,
+} from "@wkwa/shared";
 import { memo, useCallback, useEffect, useId, useMemo, useReducer, useState } from "react";
 import { fmtBytes, fmtDuration, fmtShare, fmtSigned, PLACEHOLDER } from "../../common/format";
 import { useLatest } from "../../net/latest";
@@ -17,12 +26,6 @@ import {
 } from "../../ui";
 import type { FacilitatorConnection } from "../connection";
 import {
-  type AttributionJobView,
-  type AudioDeleteResult,
-  type AudioDeleteScope,
-  type AudioExportKind,
-  type AudioExportResult,
-  type AudioSessionView,
   attributionBlock,
   DELETE_SCOPES,
   deleteBlock,
@@ -36,7 +39,6 @@ import {
   type JobState,
   jobReducer,
   progressCells,
-  type SegmentsView,
   scopeSentence,
   shortSha,
   talkBars,
@@ -48,7 +50,7 @@ import {
 const whenTs = (ts: number) => when(new Date(ts).toISOString());
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
-const EXPORT_KINDS: Array<{ id: AudioExportKind; label: string; tip: string }> = [
+const EXPORT_KINDS: Array<{ id: AudioExportRequestKind; label: string; tip: string }> = [
   { id: "raw", label: "Raw", tip: "Each seat's microphone as recorded" },
   {
     id: "clean",
@@ -85,9 +87,9 @@ export function AudioPopup({
   const confirm = useConfirm();
   const [view, setView] = useState<AudioSessionView | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [segments, setSegments] = useState<SegmentsView | null>(null);
+  const [segments, setSegments] = useState<SpeechSegmentsView | null>(null);
   const [job, dispatch] = useReducer(jobReducer, JOB_IDLE);
-  const [kind, setKind] = useState<AudioExportKind>("raw");
+  const [kind, setKind] = useState<AudioExportRequestKind>("raw");
   const [seat, setSeat] = useState<number | "all">("all");
   const [note, setNote] = useState("");
   const [exporting, setExporting] = useState<number | "all" | null>(null);
@@ -111,7 +113,7 @@ export function AudioPopup({
             if (j.phase === "active" && v.jobs[0]) dispatch({ type: "job", job: v.jobs[0] });
           }
           if (v.seats.length > 0 || v.deletions.length > 0) {
-            conn.api<SegmentsView>(`${base}/segments`).then(
+            conn.api<SpeechSegmentsView>(`${base}/segments`).then(
               ifLatest(setSegments),
               ifLatest(() => setSegments(null)),
             );
@@ -184,7 +186,7 @@ export function AudioPopup({
     }
   };
 
-  const doExport = async (seats: number | "all", k: AudioExportKind = kind) => {
+  const doExport = async (seats: number | "all", k: AudioExportRequestKind = kind) => {
     setExporting(seats);
     setExportError(null);
     try {
@@ -210,7 +212,7 @@ export function AudioPopup({
 
   const deleteAudio = async () => {
     if (!view) return;
-    const choice = { scope: "raw" as AudioDeleteScope, note: "" };
+    const choice = { scope: "raw" as AudioDeletionScope, note: "" };
     const ok = await confirm({
       title: `Delete audio of ${sessionId}`,
       icon: "erase",
@@ -394,7 +396,7 @@ function SeatsPanel({
   onExport,
 }: {
   view: AudioSessionView;
-  kind: AudioExportKind;
+  kind: AudioExportRequestKind;
   job: JobState;
   exporting: number | "all" | null;
   onExport: (seat: number) => void;
@@ -647,7 +649,7 @@ const TimelinePanel = memo(function TimelinePanel({
   segments,
 }: {
   view: AudioSessionView;
-  segments: SegmentsView;
+  segments: SpeechSegmentsView;
 }) {
   const layout = useMemo(() => {
     const span = timelineSpan(view.seats, segments.segments);
@@ -901,10 +903,10 @@ function DeleteAudioForm({
   onNote,
 }: {
   view: AudioSessionView;
-  onScope: (s: AudioDeleteScope) => void;
+  onScope: (s: AudioDeletionScope) => void;
   onNote: (n: string) => void;
 }) {
-  const [scope, setScope] = useState<AudioDeleteScope>("raw");
+  const [scope, setScope] = useState<AudioDeletionScope>("raw");
   const [note, setNote] = useState("");
   const name = useId();
   const stored = view.seats.filter((s) => !s.rawDeleted);
