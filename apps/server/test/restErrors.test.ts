@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { insertBareSession } from "./audioFixtures";
 import { cleanup, startTestServer, type TestServer } from "./harness";
 
 /** Every REST refusal answers with its status code and an `{error}` body. */
@@ -14,19 +15,7 @@ describe("REST error replies", () => {
 
   beforeAll(async () => {
     srv = await startTestServer();
-    srv.ctx.stores.simulated.insertSession({
-      id: SIM,
-      created_wall: new Date().toISOString(),
-      scenario_id: "no-such-scenario",
-      scenario_version: "1",
-      scenario_hash: "h",
-      status: "closed",
-      tags_json: "[]",
-      notes: "",
-      config_json: "{}",
-      harness_version: "0",
-      git_commit: "test",
-    });
+    insertBareSession(srv.ctx.stores.simulated, SIM, undefined, { scenario_id: "no-such-scenario" });
   });
 
   afterAll(async () => {

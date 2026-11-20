@@ -64,8 +64,7 @@ const KEYSHEET_CSS = `
  * name is written by hand on paper. Keep it physically separate from the data.
  */
 export function keySheetHtml(store: Store, sessionId: string, study: StudyConfig): string {
-  const row = store.getSession(sessionId);
-  if (!row) throw new Error("Unknown session");
+  const row = store.requireSession(sessionId);
   const state = reduceEvents(store.listEvents(sessionId));
   // fake players (test clients the server created) are listed so the sheet covers every seat, but get no name
   const shown = Object.values(state.seats)
@@ -95,7 +94,7 @@ export function keySheetHtml(store: Store, sessionId: string, study: StudyConfig
 
 /** Seats of a session that have a participant code (cards can be made for them). */
 export function cardSeats(store: Store, sessionId: string): number[] {
-  if (!store.getSession(sessionId)) throw new Error("Unknown session");
+  store.requireSession(sessionId);
   return seats(reduceEvents(store.listEvents(sessionId))).map((s) => s.seat);
 }
 
@@ -109,8 +108,7 @@ export function takedownCardPdf(
   seat: number,
   study: StudyConfig,
 ): Promise<Buffer> {
-  const row = store.getSession(sessionId);
-  if (!row) throw new Error("Unknown session");
+  const row = store.requireSession(sessionId);
   const s = seats(reduceEvents(store.listEvents(sessionId))).find((x) => x.seat === seat);
   if (!s?.participantCode) throw new Error(`Seat ${seat} has no participant code`);
 

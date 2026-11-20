@@ -46,6 +46,7 @@ export function insertBareSession(
   store: Store,
   id = `S-20261118-${randomUUID().slice(0, 4).toUpperCase()}`,
   createdTs = nowTs(),
+  overrides: Partial<Parameters<Store["insertSession"]>[0]> = {},
 ): string {
   store.insertSession({
     id,
@@ -59,6 +60,7 @@ export function insertBareSession(
     config_json: "{}",
     harness_version: "0",
     git_commit: "test",
+    ...overrides,
   });
   return id;
 }

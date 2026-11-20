@@ -95,6 +95,14 @@ describe("GDPR tooling", () => {
     expect(actions).toHaveLength(32); // 2 rounds × 4 seats × (2 + 2)
     expect(actions.every((a) => /^K[a-d]$/.test(a.k_label!) && /^P[a-d]$/.test(a.p_label!))).toBe(true);
     expect(actions.filter((a) => a.reaction_ms !== "").length).toBeGreaterThan(20);
+    // reaction_ms: the action's server time minus the seat's last state ack (client time) at or before it
+    const bySeq = new Map(srv.ctx.store.listEvents(sessionId).map((e) => [e.seq, e]));
+    const acks = srv.ctx.store.listTelemetry(sessionId).filter((t) => t.type === "state_received");
+    for (const a of actions) {
+      const e = bySeq.get(Number(a.seq))!;
+      const before = acks.filter((t) => t.seat === e.seat && t.clientTs <= e.serverTs).map((t) => t.clientTs);
+      expect(a.reaction_ms).toBe(before.length ? String(Math.round(e.serverTs - Math.max(...before))) : "");
+    }
     expect(actions.filter((a) => a.ms_since_prev_own_action === "").length).toBe(8); // first action per seat per round
 
     const events = readCsv(r.dir, "events.csv");

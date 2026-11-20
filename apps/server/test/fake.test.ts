@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import type { StoredEvent } from "@wkwa/shared";
+import { isEvent } from "@wkwa/shared";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { createApp } from "../src/app";
 import { Bot, FacilitatorClient } from "../src/tools/botClient";
@@ -46,8 +46,7 @@ describe("fake players (real sessions)", () => {
   });
 
   const events = () => srv.ctx.store.listEvents(sessionId);
-  const bound = () =>
-    events().filter((e): e is Extract<StoredEvent, { type: "SeatBound" }> => e.type === "SeatBound");
+  const bound = () => events().filter(isEvent("SeatBound"));
 
   it("stores the session in the participant database", () => {
     expect(srv.ctx.store.getSession(sessionId)).toBeDefined();
