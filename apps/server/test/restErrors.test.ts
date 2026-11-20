@@ -60,6 +60,33 @@ describe("REST error replies", () => {
     }
   });
 
+  it("answers 403 to other computers on every API route but health and the welcome status", async () => {
+    // every registered route, read from Fastify's route tree (one segment per line, indented by 4)
+    const routes: [string, string][] = [];
+    const stack: string[] = [];
+    for (const line of srv.ctx.app.printRoutes({ commonPrefix: false }).split("\n")) {
+      const m = /^(.*?)[├└]── (\S+)(?: \((.+)\))?$/.exec(line);
+      if (!m) continue;
+      const depth = (m[1] ?? "").length / 4;
+      stack.length = depth;
+      stack.push(m[2] ?? "");
+      const url = stack.join("").replace(/:\w+/g, "x");
+      for (const method of m[3]?.split(", ") ?? []) if (method !== "HEAD") routes.push([method, url]);
+    }
+    const api = routes.filter(([, url]) => url.startsWith("/api/"));
+    expect(api.length).toBeGreaterThan(25);
+    for (const [method, url] of api) {
+      const r = await srv.ctx.app.inject({
+        method: method as "GET" | "POST",
+        url,
+        remoteAddress: "192.168.1.23",
+        payload: method === "POST" ? {} : undefined,
+      });
+      const open = url === "/api/health" || url === "/api/landing";
+      expect(r.statusCode === 403, `${method} ${url}`).toBe(!open);
+    }
+  });
+
   it("answers 400 for simulated sessions on participant and audio routes", async () => {
     const noParticipants = {
       status: 400,

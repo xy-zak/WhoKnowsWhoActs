@@ -4,7 +4,7 @@ import fastifyStatic from "@fastify/static";
 import { JOINABLE_PHASES, type LandingStatus, type TlsInfo } from "@wkwa/shared";
 import Fastify, { type FastifyInstance } from "fastify";
 import type { Hub } from "./net/hub";
-import { redirectLocation, schemeOf } from "./tls";
+import { baseUrl } from "./tls";
 
 /**
  * The welcome page (LANDING_PORT, plain HTTP): the address participants open first, before any
@@ -18,6 +18,16 @@ import { redirectLocation, schemeOf } from "./tls";
  * players: no session id, no names, nothing a participant typed. Every other path goes to `/`.
  */
 
+/** The headers every response of the game server and the welcome page carries. */
+export function secureHeaders(app: FastifyInstance) {
+  app.addHook("onSend", async (_req, reply, payload) => {
+    reply.header("X-Content-Type-Options", "nosniff");
+    reply.header("Referrer-Policy", "no-referrer");
+    reply.header("Cache-Control", "no-store");
+    return payload;
+  });
+}
+
 /** What the welcome page shows, for a browser that will join at `joinUrl`. */
 export function landingStatus(hub: Hub, tls: TlsInfo, joinUrl: string): LandingStatus {
   const s = hub.session;
@@ -27,6 +37,17 @@ export function landingStatus(hub: Hub, tls: TlsInfo, joinUrl: string): LandingS
     certificate: !tls.enabled ? "none" : tls.mode === "auto" ? "self-signed" : "own",
     fingerprintSha256: tls.fingerprintSha256,
   };
+}
+
+const HOST_NAME = /^[A-Za-z0-9.-]+$/;
+const IPV6_HOST = /^\[[0-9A-Fa-f:.]+\]$/;
+
+/** The host of a Host header (port dropped); null if missing or not a plain host name or address. */
+function hostOf(hostHeader: string | undefined): string | null {
+  if (!hostHeader) return null;
+  const h = hostHeader.trim();
+  const host = h.startsWith("[") ? h.slice(0, h.indexOf("]") + 1) : h.split(":")[0]!;
+  return host && (HOST_NAME.test(host) || IPV6_HOST.test(host)) ? host : null;
 }
 
 /**
@@ -40,9 +61,8 @@ export function joinUrlFor(
   tlsEnabled: boolean,
   fallback: string,
 ): string {
-  const https = redirectLocation(hostHeader, "/", gamePort);
-  if (!https) return fallback;
-  return tlsEnabled ? https : https.replace(/^https:/, `${schemeOf(false)}:`);
+  const host = hostOf(hostHeader);
+  return host ? `${baseUrl(host, gamePort, tlsEnabled)}/` : fallback;
 }
 
 export async function startLandingServer(opts: {
@@ -58,12 +78,7 @@ export async function startLandingServer(opts: {
   fallbackJoinUrl: string;
 }): Promise<FastifyInstance> {
   const app = Fastify({ logger: false, trustProxy: false });
-  app.addHook("onSend", async (_req, reply, payload) => {
-    reply.header("X-Content-Type-Options", "nosniff");
-    reply.header("Referrer-Policy", "no-referrer");
-    reply.header("Cache-Control", "no-store");
-    return payload;
-  });
+  secureHeaders(app);
   const built = existsSync(path.join(opts.clientDist, "landing.html"));
   if (built) {
     await app.register(fastifyStatic, {

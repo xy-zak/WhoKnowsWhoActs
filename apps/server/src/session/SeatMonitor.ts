@@ -123,12 +123,9 @@ export class SeatMonitor {
         this.micLevels.delete(ev.payload.seat);
         break;
       // a withdrawn participant's hover is no longer collected, and no seat recorded any more has a meter
-      case "ParticipantWithdrawn": {
-        const st = this.stats.get(ev.payload.seat);
-        if (st) st.hoverRegionId = null;
-        this.micLevels.delete(ev.payload.seat);
+      case "ParticipantWithdrawn":
+        this.disconnected(ev.payload.seat);
         break;
-      }
       case "MicCheckSkipped":
         this.micLevels.delete(ev.payload.seat);
         break;
